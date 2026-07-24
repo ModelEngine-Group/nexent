@@ -14,7 +14,12 @@
 
 ## 🚀 快速开始
 
-### 1. 准备 Kubernetes 集群
+- [在线部署](#在线部署)
+- [离线部署](#离线部署)
+
+### 在线部署
+
+#### 1. 准备 Kubernetes 集群
 
 确保 Kubernetes 集群正常运行，且 kubectl 已配置好集群访问权限：
 
@@ -23,14 +28,14 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-### 2. 克隆并进入目录
+#### 2. 克隆并进入目录
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-### 3. 部署
+#### 3. 部署
 
 运行部署脚本：
 
@@ -57,17 +62,17 @@ bash deploy.sh k8s
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。
 
 使用 `bash deploy.sh k8s --defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。
 
 部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
-### ⚠️ 重要提示
+#### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，部署过程中系统会提示您设置 `suadmin` 超级管理员账号的密码。该账号为系统最高权限账户，请输入您想要的密码并**妥善保存**——密码创建后无法再次找回。
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时，部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 
-2️⃣ 忘记记录 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 
 ```bash
 # Step 1: 在 Supabase 数据库中删除 su 账号记录
@@ -83,13 +88,58 @@ kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
 kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 bash deploy.sh k8s
 ```
 
-### 4. 访问您的安装
+### 离线部署
+
+目标集群无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
+
+1. 登录 GitHub，打开 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)。
+2. 选择目标版本对应的成功运行记录，在 **Artifacts** 中下载与集群节点架构匹配的 `nexent-<version>-<platform>.zip`。
+3. 将压缩包复制到可以访问目标集群的管理节点并解压。工作流产物默认保留 30 天；产物过期时，可联系维护者重新运行工作流。
+
+解压离线部署包：
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+```
+
+单节点且以 Docker 作为容器运行时的集群可直接加载并部署：
+
+```bash
+bash deploy.sh --load-images k8s
+```
+
+如果管理节点上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和 Kubernetes 部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  k8s
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Kubernetes `deploy.options` 时也会复用；Helm generated values 由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
+
+其他单节点集群和多节点集群应将镜像推送到集群可访问的内部仓库，或使用对应容器运行时的工具，将镜像导入所有可能运行 Nexent Pod 的节点：
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  k8s
+```
+
+离线包默认安装 Nexent 全部组件。添加 `--config` 可重新选择部署配置；首次创建超级管理员时，该模式会要求手动输入并确认密码，且不会显示或保存输入值。非交互部署使用 `NEXENT_SUPER_ADMIN_PASSWORD`，默认值为 `Nexent@123`，创建成功后会在终端显示实际密码。
+
+### 访问您的安装
 
 部署成功完成后：
+
+> **获取管理员密码**：超级管理员账号为 `suadmin@nexent.com`。首次非交互创建成功时，终端会显示实际使用的密码；未额外配置时，默认密码为 `Nexent@123`。离线部署使用 `--config` 时，手动输入的密码不会保存或显示。如果密码已忘记，请按本文前面的“重建 `suadmin` 账号”步骤重建账号。
 
 | 服务 | 默认地址 |
 |---------|-----------------|
@@ -186,38 +236,6 @@ bash uninstall.sh k8s delete-all
 ```
 
 `--delete-data` 和 `--delete-volumes` 是兼容 Helm 管理资源的参数；本地盘数据请使用 `--delete-local-data` 或 `--keep-local-data` 控制。`delete-all --keep-local-data` 会删除 namespace，但保留本地卷内容。
-
-### 离线镜像包
-
-可在仓库根目录构建 Kubernetes 离线包：
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target k8s \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-包内包含镜像 tar、`load-images.sh`、`push-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
-
-在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
-
-```bash
-cd offline-package
-bash deploy.sh --load-images k8s
-```
-
-多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署：
-
-```bash
-bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent k8s
-```
-
-启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔧 部署命令
 

@@ -14,16 +14,21 @@
 
 ## 🚀 快速开始
 
-### 1. 下载和设置
+- [在线部署](#在线部署)
+- [离线部署](#离线部署)
+
+### 在线部署
+
+#### 1. 下载和设置
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
+> **💡 提示**: Docker 和 Kubernetes 共用 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
 
-### 2. 部署选项
+#### 2. 部署选项
 
 运行以下命令开始部署：
 
@@ -74,10 +79,10 @@ bash deploy.sh docker --image-source local-latest
 
 #### ⚠️ 重要提示
 
-1️⃣ **首次部署 v1.8.0 及以上版本时**，需特别留意 Docker 日志中输出的 `suadmin` 超级管理员账号信息。该账号为系统最高权限账户，密码仅在首次生成时显示，后续无法再次查看，请务必妥善保存。
+1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 > 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
 
-2️⃣ 忘记留意 `suadmin` 账号密码？请按照以下步骤操作：
+2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 ```bash
 # Step1: 在supabase容器中删除su账号记录
 docker exec -it supabase-db-mini bash
@@ -92,11 +97,62 @@ docker exec -it nexent-postgresql bash
 psql -U root -d nexent
 delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
-# Step 3: 重新部署并记录 su 账号密码
+# Step 3: 重新部署；非交互模式将使用配置值或默认密码
 ```
-### 3. 访问您的安装
+### 离线部署
+
+目标服务器无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
+
+1. 登录 GitHub，打开 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)。
+2. 选择目标版本对应的成功运行记录，在页面底部的 **Artifacts** 中下载与服务器架构匹配的压缩包。
+3. `amd64` 服务器下载 `nexent-<version>-amd64.zip`，ARM64 服务器下载 `nexent-<version>-arm64.zip`。
+
+GitHub Actions 构建产物默认保留 30 天。如果目标版本的产物已过期，请联系维护者重新运行工作流。
+
+下载后，将压缩包复制到离线服务器并解压。压缩包内直接包含离线包文件，无需再次解压内层归档：
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+bash deploy.sh --load-images docker
+```
+
+离线包默认安装Nexent全部组件，若需要重新选择组件、端口策略、镜像源或监控 provider 时，添加 `--config`：
+
+```bash
+bash deploy.sh --load-images --config docker
+```
+
+如果服务器上保留了此前已部署的离线包，可通过 `--reuse-from` 复用其中的环境配置和部署选项：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  docker
+```
+
+指定目录必须是已解压的旧部署包根目录，并包含 `deploy/env/.env`。该参数会导入旧 `.env`、保留其已有值，并立即追加当前包 `.env.example` 新增的变量。存在 `monitoring.env` 和 Docker `deploy.options` 时也会复用；Docker 派生配置由新版本脚本重新生成。`--reuse-from` 可与 `--config`、`--defaults` 或 `--push-images` 组合使用。
+
+首次创建 `suadmin@nexent.com` 时，非交互部署使用 `NEXENT_SUPER_ADMIN_PASSWORD`，默认值为 `Nexent@123`，创建成功后会在终端显示实际密码。离线部署使用 `--config` 时会要求手动输入并确认密码，输入值不会写入配置文件，也不会在终端显示。
+
+如果需要先将镜像推送到目标环境可访问的内部仓库：
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  docker
+```
+
+未传入仓库前缀时，脚本会先询问前缀；随后 `push-images.sh` 会在推送前询问仓库用户名和密码。
+
+### 访问您的安装
 
 部署成功完成后：
+
+> **获取管理员密码**：超级管理员账号为 `suadmin@nexent.com`。首次非交互创建成功时，终端会显示实际使用的密码；未额外配置时，默认密码为 `Nexent@123`。离线部署使用 `--config` 时，手动输入的密码不会保存或显示。如果密码已忘记，请按本文前面的“重建 `suadmin` 账号”步骤重建账号。
+
 1. 在浏览器中打开 **http://localhost:3000**
 2. 登录超级管理员账号
 3. 访问租户资源 → 创建租户及租户管理员
@@ -170,38 +226,6 @@ bash uninstall.sh docker delete-all
 ```
 
 Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compose 资源。删除数据时会移除 `postgresql`、`elasticsearch`、`redis`、`minio`、`volumes`、`openssh-server`、`scripts`、`skills` 等服务目录；如果后续要复用已有数据，请选择保留 volumes。
-
-### 离线镜像包
-
-需要把镜像和部署脚本搬到离线机器时，可使用 `deploy/offline/build_offline_package.sh`：
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target docker \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-包目录会包含 `images/*.tar`、`load-images.sh`、`push-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
-
-在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择：
-
-```bash
-cd offline-package
-bash deploy.sh --load-images docker
-```
-
-如果需要先推送到内部镜像仓库并使用该前缀部署：
-
-```bash
-bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker
-```
-
-启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀；随后 `push-images.sh` 在推送前询问仓库账号和密码。
 
 ## 🔌 端口映射
 

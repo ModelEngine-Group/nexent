@@ -10,6 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
+DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+else
+  echo "Error: shared deployment helper not found: $DEPLOYMENT_COMMON"
+  exit 1
+fi
 
 # Source environment variables if deploy/env/.env file exists
 if [ -f "$ROOT_ENV_FILE" ]; then
@@ -17,21 +26,6 @@ if [ -f "$ROOT_ENV_FILE" ]; then
   source "$ROOT_ENV_FILE"
   set +a
 fi
-
-generate_random_password() {
-  # Generate a URL/JSON safe random password (alphanumeric only)
-  local pwd=""
-  if command -v openssl >/dev/null 2>&1; then
-    pwd=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
-  else
-    pwd=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
-  fi
-  if [ -z "$pwd" ]; then
-    # Fallback (should be extremely rare)
-    pwd=$(date +%s%N | tr -dc '0-9' | head -c 20)
-  fi
-  echo "$pwd"
-}
 
 wait_for_postgresql_ready() {
   # Function to wait for PostgreSQL to become ready
@@ -57,14 +51,13 @@ wait_for_postgresql_ready() {
 create_default_super_admin_user() {
   local email="suadmin@nexent.com"
   local password
+  local display_password="${2:-true}"
   
-  # Get password from command line argument, or generate random one if not provided
+  # Get password from the deploy script, or use the non-interactive default.
   if [ -n "$1" ]; then
     password="$1"
   else
-    # Fallback to random password if no argument provided (for backward compatibility)
-    password="$(generate_random_password)"
-    echo "   ⚠️  Warning: No password provided, using random password"
+    password="$(deployment_super_admin_password)"
   fi
 
   echo "🔧 Creating super admin user..."
@@ -92,10 +85,10 @@ create_default_super_admin_user() {
     echo ""
     echo "      Please save the following credentials carefully."
     echo "   📧 Email:    ${email}"
-    if [ -n "$1" ]; then
-      echo "   🔏 Password: [User provided password]"
-    else
+    if [ "$display_password" = "true" ]; then
       echo "   🔏 Password: ${password}"
+    else
+      echo "   🔏 Password: [hidden]"
     fi
 
     # Extract user.id from RESPONSE JSON
@@ -178,7 +171,7 @@ create_default_super_admin_user() {
 }
 
 # Main execution
-# Pass password as first argument if provided
+# Pass password as the first argument and whether to display it as the second.
 if create_default_super_admin_user "$1"; then
   exit 0
 else

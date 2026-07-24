@@ -239,9 +239,35 @@ bash deploy.sh docker --image-source local-latest
 
 > `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `deploy/docker/deploy.sh`.
 
-### Package Local Images for Offline Deployment
+### Build Offline Deployment Packages
 
-After building local `latest` images, package them with the offline builder:
+On an internet-connected machine, build an offline package containing both Docker and Kubernetes deployment resources from the repository root:
+
+```bash
+bash build.sh --package \
+  --target all \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package
+```
+
+Common options:
+
+| Option | Description |
+| --- | --- |
+| `--target` | Include `docker`, `k8s`, or `all` deployment resources |
+| `--version` | Nexent image version to pull and package |
+| `--platform` | Target host architecture: `amd64` or `arm64` |
+| `--components` | Deployment components; also controls which images are packaged |
+| `--image-source` | `general`, `mainland`, or `local-latest` |
+| `--include-source` | Include project source code; defaults to `false` |
+| `--compress` | Create a zip archive; defaults to `false` |
+| `--output-dir` | Output directory for the unpacked package |
+
+To package locally built `latest` application images:
 
 ```bash
 bash build.sh --package \
@@ -254,14 +280,11 @@ bash build.sh --package \
   --output-dir offline-package/docker-local
 ```
 
-When `--version latest` or `--image-source local-latest` is used, the builder expects local Nexent application images and skips pulling those `latest` tags. The package can then be moved to another host and deployed with:
+`local-latest` reuses local Nexent application images instead of pulling those `latest` images again. The builder produces image tar files, deployment resources, `manifest.yaml`, and `checksums.txt`. It does not copy the packaging host's `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`.
 
-```bash
-cd offline-package/docker-local
-bash deploy.sh --load-images docker \
-  --version latest \
-  --components infrastructure,application,data-process,supabase \
-  --image-source local-latest
-```
+With `--compress true`, the builder creates `nexent-offline-<target>-<platform>-<version>.zip` next to the output directory. You can also manually run [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml) in GitHub Actions. The workflow publishes separate `nexent-<version>-<platform>.zip` artifacts for AMD64 and ARM64 with a default retention period of 30 days.
 
-To push the packaged images to an internal registry during offline deployment, replace `--load-images` with `--push-images --image-registry-prefix registry.example.com/nexent`. If the prefix is omitted, the wrapper prompts for it before `push-images.sh` asks for the registry username and password. The deployment config will use the same registry prefix for Docker Compose image references.
+For package download and installation instructions, see:
+
+- [Offline Deployment in Docker Installation](../quick-start/installation#offline-deployment)
+- [Offline Deployment in Kubernetes Installation](../quick-start/kubernetes-installation#offline-deployment)
