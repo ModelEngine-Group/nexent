@@ -426,6 +426,21 @@ class A2AClientService:
             is_available=is_available
         )
 
+    def update_agent_call_settings(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        user_id: str,
+        timeout_seconds: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update custom call settings for an external agent."""
+        return a2a_agent_db.update_external_agent_call_settings(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            timeout_seconds=timeout_seconds,
+        )
+
     def update_agent_protocol(
         self,
         external_agent_id: int,
@@ -681,6 +696,7 @@ class A2AClientService:
 
         agent_url = agent["agent_url"]
         protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
+        timeout_seconds = float(agent.get("timeout_seconds") or 300)
 
         # Build complete endpoint URL with protocol path
         endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=False)
@@ -708,7 +724,7 @@ class A2AClientService:
             logger.info(f"Calling external A2A agent {external_agent_id}: url={endpoint_url}, protocol={protocol_type}, payload={payload}")
 
             headers = build_a2a_headers()
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(timeout=timeout_seconds) as client:
                 response = await client.post_json(endpoint_url, payload, headers)
 
             # Parse response
@@ -753,6 +769,7 @@ class A2AClientService:
 
         agent_url = agent["agent_url"]
         protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
+        timeout_seconds = float(agent.get("timeout_seconds") or 300)
 
         # Build complete endpoint URL with protocol path
         endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=True)
@@ -779,7 +796,7 @@ class A2AClientService:
         headers = build_a2a_headers(api_key)
 
         try:
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(timeout=timeout_seconds) as client:
                 async for event in client.post_stream(endpoint_url, payload, headers):
                     yield event
         except aiohttp.ClientError as e:

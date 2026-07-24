@@ -1,4 +1,4 @@
-﻿import json
+import json
 import threading
 import logging
 from typing import Any, Dict, List, Optional
@@ -476,7 +476,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         transport_type=agent.get("transport_type", "http-streaming"),
         protocol_version=agent.get("protocol_version", "1.0"),
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
-        timeout=300.0,
+        timeout=float(agent.get("timeout_seconds") or 300),
         raw_card=agent.get("raw_card"),
     )
 
