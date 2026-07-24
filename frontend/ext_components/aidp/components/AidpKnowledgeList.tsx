@@ -9,6 +9,9 @@ import {
 import { SquarePen, Trash2 } from "lucide-react";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
 
 interface AidpKnowledgeListProps {
   kbs: AidpKnowledgeBaseItem[];
@@ -46,6 +49,30 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onDelete,
 }) => {
   const { t } = useTranslation();
+
+  // Load groups for the current tenant so we can render group_ids as names.
+  // ``useAuthorizationContext`` is the right hook here (the similarly-named
+  // ``useAuthenticationContext`` carries only ``session`` — no ``user`` object).
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId ?? null;
+  const { data: groupListData } = useGroupList(tenantId);
+  const groupById = useMemo(() => {
+    const map = new Map<number, string>();
+    (groupListData?.groups ?? []).forEach((g) => {
+      map.set(g.group_id, g.group_name);
+    });
+    return map;
+  }, [groupListData]);
+
+  // Convert group ids to names, skipping any ids that don't resolve
+  // (e.g. the group was deleted or the list is not yet loaded). Aligned
+  // with the local-knowledge-base list renderer.
+  const getGroupNames = (groupIds: number[] | undefined): string[] => {
+    if (!Array.isArray(groupIds) || groupIds.length === 0) return [];
+    return groupIds
+      .map((id) => groupById.get(id))
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
+  };
 
   // Sort alphabetically by name
   const displayedKbs = useMemo(() => {
@@ -134,12 +161,30 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                         </p>
                       )}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        {kb.chunk_count !== undefined && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 border border-gray-200">
-                            {t("aidpKnowledge.tagChunks", {
-                              count: kb.chunk_count,
+                        {/* Authorized user-group tags. Aligned with the local
+                            knowledge base list: only render group names when
+                            ``ingroup_permission !== "PRIVATE"``, each group
+                            gets its own blue tag, and when there are no
+                            groups to show we render nothing (no "not
+                            authorized" fallback). Gated by the ``group:read``
+                            permission so users without group visibility see
+                            the KB card cleanly without the tag area. */}
+                        <Can permission="group:read">
+                          {kb.ingroup_permission !== "PRIVATE" &&
+                            getGroupNames(kb.group_ids).map((groupName, idx) => (
+                              <Tag key={idx} color="blue">
+                                {groupName}
+                              </Tag>
+                            ))}
+                        </Can>
+                        {kb.created_at ? (
+                          <Tag>
+                            {t("aidpKnowledge.createdAt", {
+                              date: new Date(kb.created_at).toLocaleDateString(),
                             })}
-                          </span>
+                          </Tag>
+                        ) : (
+                          <Tag>{t("aidpKnowledge.createdAtUnknown")}</Tag>
                         )}
                       </div>
                     </div>

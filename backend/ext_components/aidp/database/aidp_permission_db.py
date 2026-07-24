@@ -81,6 +81,30 @@ def list_permissions_by_tenant(
         return [as_dict(row) for row in rows]
 
 
+def list_all_permissions_by_tenant(
+    tenant_id: str,
+    db_session: Optional[Session] = None,
+) -> List[dict]:
+    """Return ALL active permission records for ``tenant_id`` (no pagination).
+
+    Used by the permission service layer to do application-side permission
+    filtering (group intersection / ownership / PRIVATE) before slicing into
+    the user-visible page. Without this we would lose items that happen to
+    sit in the middle of a DB page that the user cannot see.
+    """
+    if not tenant_id:
+        raise ValueError("tenant_id is required")
+
+    stmt = (
+        select(AidpKbPermission)
+        .where(and_(_active_clause(), AidpKbPermission.tenant_id == tenant_id))
+        .order_by(AidpKbPermission.create_time.desc(), AidpKbPermission.id.desc())
+    )
+    with get_db_session(db_session) as session:
+        rows = session.execute(stmt).scalars().all()
+        return [as_dict(row) for row in rows]
+
+
 def count_permissions_by_tenant(
     tenant_id: str,
     db_session: Optional[Session] = None,

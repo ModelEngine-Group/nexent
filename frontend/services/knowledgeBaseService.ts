@@ -504,28 +504,69 @@ class KnowledgeBaseService {
   }
 
   async getAidpKnowledgeBasesAll(): Promise<AidpKnowledgeBaseListResponse> {
+    // Loop through pages until has_more is false, accumulating all items.
+    // The mgmt endpoint caps page_size at 100 (backend performance guard),
+    // so we paginate at the maximum allowed size to minimize requests.
+    // Safety cap: we never fetch more than 2000 KBs to prevent runaway
+    // loop in case of a bug (e.g. has_more not being cleared).
+    const AIDP_LIST_PAGE_MAX = 100;
+    const AIDP_LIST_ITEM_CAP = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let totalFromServer = 0;
+    let totalReliableFromServer = true;
+    let hasMore = true;
+
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
+      while (hasMore && allItems.length < AIDP_LIST_ITEM_CAP) {
+        const url = new URL(
+          API_ENDPOINTS.aidpMgmt.knowledgeBases,
+          globalThis.location.origin,
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("page_size", String(AIDP_LIST_PAGE_MAX));
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+        const pageResult = await response.json();
 
-      if (result.code !== undefined && result.code !== 0) {
-        const errorCode = result.code || response.status;
-        const errorMessage =
-          result.message || "Failed to fetch all AIDP knowledge bases";
-        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
-        throw new ApiError(errorCode, errorMessage);
+        if (pageResult.code !== undefined && pageResult.code !== 0) {
+          const errorCode = pageResult.code || response.status;
+          const errorMessage =
+            pageResult.message || "Failed to fetch all AIDP knowledge bases";
+          log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+          throw new ApiError(errorCode, errorMessage);
+        }
+
+        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(pageResult.value)
+          ? pageResult.value
+          : [];
+        allItems.push(...pageItems);
+
+        // total_count from the server represents ALL KBs the user can access
+        // (not just the current page), so use it from the first response.
+        if (page === 1 && typeof pageResult.total_count === "number") {
+          totalFromServer = pageResult.total_count;
+        }
+        if (
+          page === 1 &&
+          typeof pageResult.total_reliable === "boolean"
+        ) {
+          totalReliableFromServer = pageResult.total_reliable;
+        }
+
+        hasMore = !!pageResult.has_more && pageItems.length > 0;
+        page += 1;
       }
 
       return {
-        value: Array.isArray(result.value) ? result.value : [],
-        total_count:
-          typeof result.total_count === "number" ? result.total_count : undefined,
-        next_link: typeof result.next_link === "string" ? result.next_link : null,
+        value: allItems,
+        total_count: totalFromServer || allItems.length,
+        next_link: null,
+        has_more: allItems.length >= AIDP_LIST_ITEM_CAP,
+        total_reliable: totalReliableFromServer,
       };
     } catch (error) {
       log.error("Failed to fetch all AIDP knowledge bases:", error);
@@ -538,7 +579,14 @@ class KnowledgeBaseService {
     pageSize: number = 20
   ): Promise<AidpKnowledgeBaseListResponse> {
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
+      // Use the permission-filtered mgmt endpoint instead of the legacy
+      // `/aidp/knowledge-bases` proxy. The mgmt endpoint applies the current
+      // user's role / group intersection, ensuring the agent config KB picker
+      // only shows KBs the user has access to.
+      const url = new URL(
+        API_ENDPOINTS.aidpMgmt.knowledgeBases,
+        globalThis.location.origin,
+      );
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
 
@@ -561,6 +609,12 @@ class KnowledgeBaseService {
         total_count:
           typeof result.total_count === "number" ? result.total_count : undefined,
         next_link: typeof result.next_link === "string" ? result.next_link : null,
+        has_more:
+          typeof result.has_more === "boolean" ? result.has_more : undefined,
+        total_reliable:
+          typeof result.total_reliable === "boolean"
+            ? result.total_reliable
+            : undefined,
       };
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
@@ -571,6 +625,10 @@ class KnowledgeBaseService {
   mapAidpKnowledgeBasesToKnowledgeBases(
     items: AidpKnowledgeBaseItem[]
   ): KnowledgeBase[] {
+    // Map the mgmt-endpoint item shape (which already carries
+    // ``permission``, ``ingroup_permission``, ``group_ids`` and the
+    // AIDP-normalized ``created_at`` / ``updated_at`` / ``embedding_model``
+    // fields) onto the ``KnowledgeBase`` shape shared across all tool types.
     return items.map((item) => ({
       id: String(item.kds_id),
       name: item.kds_name || String(item.kds_id),
@@ -578,12 +636,12 @@ class KnowledgeBaseService {
       description: item.description || "AIDP knowledge base",
       documentCount: item.document_count || 0,
       chunkCount: item.chunk_count || 0,
-      createdAt: null,
-      updatedAt: null,
-      embeddingModel: "unknown",
+      createdAt: item.created_at || null,
+      updatedAt: item.updated_at || null,
+      embeddingModel: item.embedding_model || "unknown",
       knowledge_sources: "aidp",
-      ingroup_permission: "",
-      group_ids: [],
+      ingroup_permission: item.ingroup_permission || "",
+      group_ids: item.group_ids || [],
       store_size: "",
       process_source: "AIDP",
       avatar: "",
@@ -591,7 +649,7 @@ class KnowledgeBaseService {
       language: "",
       nickname: "",
       parserId: "",
-      permission: "",
+      permission: item.permission || "",
       tokenNum: 0,
       source: "aidp",
       tenant_id: "",

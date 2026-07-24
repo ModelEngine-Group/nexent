@@ -421,7 +421,7 @@ export function useSyncKnowledgeBases() {
             }
             break;
           case "aidp_search":
-            await knowledgeBaseService.getAidpKnowledgeBases(1, 100);
+            await knowledgeBaseService.getAidpKnowledgeBasesAll();
             break;
           default:
             // Default sync behavior - sync Nexent only

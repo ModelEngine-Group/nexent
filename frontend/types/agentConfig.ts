@@ -229,6 +229,10 @@ export interface AidpKnowledgeBaseItem {
   created_by?: string;
   /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
   resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
+  created_at?: string;
+  /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
+  updated_at?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {

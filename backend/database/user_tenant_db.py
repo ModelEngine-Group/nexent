@@ -26,7 +26,10 @@ def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:
             UserTenant.tenant_id == tenant_id,
             UserTenant.delete_flag == "N",
         ).first()
-    return (result.user_role or "") if result is not None else ""
+        # Access ORM attributes INSIDE the session context — the session
+        # closes on context-manager exit and lazy-loaded attributes are not
+        # reachable after that (would raise DetachedInstanceError).
+        return (result.user_role or "") if result is not None else ""
 
 
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:

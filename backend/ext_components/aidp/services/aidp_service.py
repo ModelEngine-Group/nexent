@@ -599,6 +599,16 @@ def get_aidp_kb_impl(
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP knowledge base response format",
             )
+        # Normalize timestamps to ISO-8601 strings so the frontend receives
+        # ``created_at`` / ``updated_at`` uniformly (mirrors the doc-level
+        # normalizer in ``_normalize_aidp_doc``). AIDP returns raw numeric
+        # ``create_time`` / ``update_time`` fields.
+        created_raw = result.get("create_time")
+        updated_raw = result.get("update_time")
+        if created_raw is not None and "created_at" not in result:
+            result["created_at"] = _timestamp_to_iso(created_raw)
+        if updated_raw is not None and "updated_at" not in result:
+            result["updated_at"] = _timestamp_to_iso(updated_raw)
         return result
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)

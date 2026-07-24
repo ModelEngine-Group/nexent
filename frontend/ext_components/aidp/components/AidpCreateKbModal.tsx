@@ -116,6 +116,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   // useWatch gives us a re-render whenever caption_enable toggles, without
   // forcing the user to manually sync the form value to local state.
   const captionEnabled = Form.useWatch("caption_enable", form);
+  // Track in-group permission live so the group_ids picker can be disabled
+  // at PRIVATE without calling Form.useWatch inside a conditional sub-render
+  // (which would violate the Rules of Hooks).
+  const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
   // Fetch applicable VLM models from AIDP. Only run when modal is open to
   // avoid hitting the (relatively slow) admin endpoint unnecessarily.
@@ -365,6 +369,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         <Form.Item
           name="group_ids"
           label={t("aidpKnowledge.createAccessGroups")}
+          required={ingroupPermission !== "PRIVATE"}
           dependencies={["ingroup_permission"]}
           rules={[
             ({ getFieldValue }) => ({
@@ -384,7 +389,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           <Select
             mode="multiple"
             placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
-            disabled={Form.useWatch("ingroup_permission", form) === "PRIVATE"}
+            disabled={ingroupPermission === "PRIVATE"}
             options={groupOptions}
           />
         </Form.Item>

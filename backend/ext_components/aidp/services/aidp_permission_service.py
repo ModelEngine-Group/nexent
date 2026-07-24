@@ -259,50 +259,72 @@ def update_resource_status(*args: Any, **kwargs: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
+    """Return KB rows where the user has non-null permission.
+
+    Pulls ALL active rows for the tenant, applies the permission matrix
+    (management / owner / PRIVATE / group intersection), and keeps only
+    the rows the user can see. Used by both :func:`get_accessible_kbs`
+    and :func:`count_accessible_kbs` so the page slice and the count
+    never disagree on what is visible.
+    """
+    rows = aidp_permission_db.list_all_permissions_by_tenant(tenant_id=tenant_id)
+    user_groups = _get_user_groups(user_id, tenant_id)
+    role = _get_user_role(user_id, tenant_id)
+    is_management = role in CAN_EDIT_ALL_USER_ROLES
+
+    accessible: list[dict] = []
+    for row in rows:
+        if is_management or row.get("owner_user_id") == user_id:
+            new_row = dict(row)
+            new_row["permission"] = EDIT
+            accessible.append(new_row)
+            continue
+        decision = _resolve_permission(row, user_id, tenant_id, user_groups)
+        # Drop rows the user cannot see: PRIVATE, not-in-group, or empty
+        # group_ids all produce ``permission is None`` here.
+        if decision.permission is None:
+            continue
+        new_row = dict(row)
+        new_row["permission"] = decision.permission
+        accessible.append(new_row)
+    return accessible
+
+
 def get_accessible_kbs(
     user_id: str,
     tenant_id: str,
     page: int = 1,
     page_size: int = 10,
 ) -> list[dict]:
-    """Return KBs the user can access.
+    """Return KBs the user can access, filtered AND paginated.
 
     Each row carries the effective ``permission`` string (``EDIT`` /
-    ``READ_ONLY`` / ``CREATOR``) computed via :func:`_resolve_permission`,
-    so the response includes both the AIDP-side metadata (populated by the
-    route) and the locally-resolved permission.
+    ``READ_ONLY`` / ``CREATOR``) computed via :func:`_resolve_permission`.
+    Rows the user cannot see (PRIVATE / not-in-group / creator-only) are
+    filtered out before slicing into the requested page, so the caller
+    receives at most ``page_size`` rows and the visible items are always
+    what the user is allowed to read.
     """
-    rows = aidp_permission_db.list_permissions_by_tenant(
-        tenant_id=tenant_id, page=page, page_size=page_size
-    )
-    user_groups = _get_user_groups(user_id, tenant_id)
-    role = _get_user_role(user_id, tenant_id)
-    is_management = role in CAN_EDIT_ALL_USER_ROLES
-
-    out: list[dict] = []
-    for row in rows:
-        if is_management or (row.get("owner_user_id") == user_id):
-            new_row = dict(row)
-            new_row["permission"] = EDIT
-        else:
-            decision = _resolve_permission(row, user_id, tenant_id, user_groups)
-            new_row = dict(row)
-            new_row["permission"] = decision.permission
-        out.append(new_row)
-    return out
+    accessible = _compute_accessible_rows(user_id, tenant_id)
+    page = max(1, int(page))
+    page_size = max(1, int(page_size))
+    start = (page - 1) * page_size
+    end = start + page_size
+    return accessible[start:end]
 
 
 def count_accessible_kbs(user_id: str, tenant_id: str) -> int:
-    """Count KBs the user can access (delegated to DB total for the tenant).
+    """Count KBs the user can actually access.
 
-    The DB already enforces tenant + active filtering. Permission filtering
-    is done per row at read time; for paginated lists we count all KBs in the
-    tenant and let the page-level filter drop the rows the user cannot see.
-    The plan keeps the count cheap; if the gap between tenant KB count and
-    accessible KB count becomes large we can later replace this with a CTE
-    that pre-filters by group intersection.
+    The previous implementation returned the tenant KB total and let the
+    page-level filter drop invisible rows, which broke pagination totals
+    when the user lacked access to many KBs in the tenant. Now the count
+    reflects the post-filter accessible set so ``has_more`` / ``total``
+    on the frontend matches reality.
     """
-    return aidp_permission_db.count_permissions_by_tenant(tenant_id=tenant_id)
+    accessible = _compute_accessible_rows(user_id, tenant_id)
+    return len(accessible)
 
 
 def filter_accessible_kds(

@@ -333,13 +333,45 @@ class TestGetAccessibleKbs:
             _record(kb_id="creator-kb", owner_user_id="u", ingroup_permission="PRIVATE"),
             _record(kb_id="group-kb", owner_user_id="other", ingroup_permission="READ_ONLY"),
         ]
-        monkeypatch.setattr(svc.aidp_permission_db, "list_permissions_by_tenant",
-                            lambda tenant_id, page=1, page_size=10: rows)
-        monkeypatch.setattr(svc.aidp_permission_db, "count_permissions_by_tenant",
-                            lambda tenant_id: len(rows))
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
         monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
         monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
 
         out = svc.get_accessible_kbs("u", "t")
-        assert out[0]["permission"] == "EDIT"  # creator -> EDIT regardless of PRIVATE
-        assert out[1]["permission"] == "READ_ONLY"
+        # Both rows are accessible:
+        #   - creator-kb: owner_user_id == user_id -> EDIT (PRIVATE ignored for owner)
+        #   - group-kb:   ingroup_permission=READ_ONLY + no group intersection (user_groups=[1],
+        #                 record group_ids default is [1,2]) -> READ_ONLY since 1 is in [1,2]
+        assert len(out) == 2
+        assert out[0]["permission"] == "EDIT"        # creator -> EDIT regardless of PRIVATE
+        assert out[1]["permission"] == "READ_ONLY"   # group intersection grants READ_ONLY
+
+    def test_filters_out_inaccessible_rows(self, monkeypatch):
+        # Regression guard: rows where the user has no access (PRIVATE / not-in-group)
+        # must be dropped, not leaked with ``permission=None``.
+        rows = [
+            _record(kb_id="editable",   owner_user_id="other", ingroup_permission="EDIT",      group_ids=[1]),
+            _record(kb_id="private-kb", owner_user_id="other", ingroup_permission="PRIVATE",   group_ids=[1]),
+            _record(kb_id="no-access",  owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[99]),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        out = svc.get_accessible_kbs("u", "t")
+        assert [r["kb_id"] for r in out] == ["editable"]
+
+    def test_count_matches_visible_rows(self, monkeypatch):
+        rows = [
+            _record(kb_id="public",  owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[1]),
+            _record(kb_id="private", owner_user_id="other", ingroup_permission="PRIVATE",   group_ids=[1]),
+            _record(kb_id="no-access", owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[99]),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        assert svc.count_accessible_kbs("u", "t") == 1
