@@ -1603,7 +1603,6 @@ class TestGetLlmModel:
         assert mock_tenant_config.get_model_config.call_args_list[0][1]["tenant_id"] == "tenant1"
         assert mock_tenant_config.get_model_config.call_args_list[1][1]["tenant_id"] == "tenant2"
 
-
 class TestResolvePreviewFile:
     """Test cases for resolve_preview_file function"""
 

@@ -749,6 +749,7 @@ async def create_agent_config(
         user_id,
         version_no=version_no,
         tool_params=normalized_tool_params,
+        override_model_id=override_model_id,
     )
 
     # Append parallel_executor as a system-managed tool (always available,
@@ -1084,6 +1085,7 @@ async def create_tool_config_list(
     user_id,
     version_no: int = 0,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    override_model_id: int | None = None,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -1097,6 +1099,14 @@ async def create_tool_config_list(
     # but we include it in error messages so callers can identify which agent/tool caused a failure.
     agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     agent_name = agent_info.get("name") if agent_info else None
+
+    # Resolve the model the agent itself runs with, so tools that rely on an LLM
+    # (e.g. AnalyzeTextFileTool) use the agent-configured model rather than the
+    # tenant-wide default from the model management page. Mirrors the main model
+    # resolution in create_agent_config (override takes precedence over the
+    # persisted agent model_id).
+    agent_model_id = override_model_id if override_model_id else (
+        agent_info.get("model_id") if agent_info else None)
     agent_tool_overrides = _get_agent_tool_overrides(normalized_tool_params, agent_name)
 
     tool_keys_seen = set()
@@ -1240,8 +1250,9 @@ async def create_tool_config_list(
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
             selected_model_id = param_dict.get("selected_model_id")
+            llm_model_id = selected_model_id if selected_model_id is not None else agent_model_id
             tool_config.metadata = {
-                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=llm_model_id),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)

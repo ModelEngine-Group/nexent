@@ -520,7 +520,7 @@ def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
             key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     timeout_seconds = main_model_config.get(
         "timeout_seconds") if main_model_config else None
-    
+
     resolved_model_name = get_model_name_from_config(main_model_config)
 
     logger.info(
