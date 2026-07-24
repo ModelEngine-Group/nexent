@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import Link from "next/link";
 import { APP_VERSION } from "@/const/constants";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useGlobalConfigStore } from "@/stores/global";
 
 /**
  * Footer component with copyright, version, and links
@@ -12,6 +13,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 export function FooterLayout() {
   const { t } = useTranslation("common");
   const { appVersion } = useDeployment();
+  const { config } = useGlobalConfigStore();
 
   return (
     <div className="py-[9px] px-4 w-full flex items-center justify-between border-t border-b">
@@ -21,26 +23,28 @@ export function FooterLayout() {
           <span className="ml-1">· {appVersion || APP_VERSION}</span>
         </span>
       </div>
-      <div className="flex items-center gap-6">
-        <Link
-          href="https://github.com/nexent-hub/nexent?tab=License-1-ov-file#readme"
-          className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-        >
-          {t("page.termsOfUse")}
-        </Link>
-        <Link
-          href="http://nexent.tech/contact"
-          className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
-        >
-          {t("page.contactUs")}
-        </Link>
-        <Link
-          href="http://nexent.tech/about"
-          className="text-sm text-slate-600 dark:text-slate-300 dark:hover:text-white transition-colors"
-        >
-          {t("page.aboutUs")}
-        </Link>
-      </div>
+      { config.aboutConfig === 'open' && (
+        <div className="flex items-center gap-6">
+          <Link
+            href="https://github.com/nexent-hub/nexent?tab=License-1-ov-file#readme"
+            className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+          >
+            {t("page.termsOfUse")}
+          </Link>
+          <Link
+            href="http://nexent.tech/contact"
+            className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
+          >
+            {t("page.contactUs")}
+          </Link>
+          <Link
+            href="http://nexent.tech/about"
+            className="text-sm text-slate-600 dark:text-slate-300 dark:hover:text-white transition-colors"
+          >
+            {t("page.aboutUs")}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

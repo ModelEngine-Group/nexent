@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGlobalConfigStore } from "@/stores/global";
 
 /**
  * Homepage main content component
@@ -26,7 +27,7 @@ export default function Homepage() {
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
-
+  const { config } = useGlobalConfigStore();
   /**
  * Navigate to a route with permission pre-check
  * Returns true if navigation is allowed, false if permission is denied
@@ -117,7 +118,7 @@ export default function Homepage() {
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
-        {!isSpeedMode && (
+        {!isSpeedMode && config.aboutConfig === 'open' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

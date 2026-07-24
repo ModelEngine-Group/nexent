@@ -6,6 +6,8 @@ const next = require("next");
 const { createProxyServer } = require("http-proxy");
 const cookie = require("cookie");
 const path = require("path");
+const fs = require("fs");
+const multiparty = require("multiparty");
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
@@ -31,6 +33,9 @@ const MARKET_BACKEND =
   process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
 const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
+
+const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
+const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
 const PORT = 3000;
 
 function parseTimeout(value, fallback) {
@@ -164,6 +169,76 @@ function getPreferredLocale(cookies) {
 
 function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !==3 ) return null;
+      const payload = parts[1];
+      const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+      const decoded = Buffer.from(padded, "base64").toString("utf-8");
+      return JSON.parse(decoded)
+  } catch (error) {
+    console.error("decodeJwtPayload error:", err.message);
+    return null;
+  }
+}
+
+function isSuperAdminRequest(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+  if (!token) {
+    return false;
+  }
+  const payload = decodeJwtPayload(token);
+  if (!payload) {
+    return false;
+  }
+  return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
+}
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function renameFile(oldPath, newFileName) {
+  ensureDir(ICON_UPLOAD_DIR);
+  fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
+}
+
+function readLocaleConfig(lang) {
+  try {
+    const fileName = 'custom.json';
+    const filepath = path.join(LOCALES_CONFIG_DIR, lang === 'zh' ? 'zh' : 'en', fileName);
+    if (!fs.existsSync(filepath)) {
+      return {};
+    }
+    const data = JSON.parse(fs.readFileSync(filepath, "utf-8"))
+    return data;
+  } catch (error) {
+    console.log(error.message)
+  }
+}
+
+function saveLocaleConfig(fileData, lang) {
+  ensureDir(LOCALES_CONFIG_DIR);
+  const fileName = 'custom.json';
+  const filepath = path.join(LOCALES_CONFIG_DIR, lang, fileName);
+  fs.writeFileSync(filepath, fileData, "utf-8");
+  return fileName;
+}
+
+function updateLocalConfig(oldData, newData) {
+  if (!oldData || !newData) {
+    return oldData;
+  }
+  return Object.keys(oldData).reduce((acc, key) => {
+    acc[key] = newData[key] ? newData[key] : oldData[key]
+    return acc;
+  }, {});
 }
 
 // ============================================================================
@@ -448,7 +523,7 @@ proxy.on("proxyReq", (proxyReq, req) => {
 // Server setup
 // ============================================================================
 app.prepare().then(() => {
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
     req.parsedPathname = pathname;
@@ -457,6 +532,50 @@ app.prepare().then(() => {
     if (pathname === "/api/frontend-config") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+      return;
+    }
+
+    if (pathname === "/api/config/project-config") {
+      if (!isSuperAdminRequest(req)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Super admin access required" }));
+        return;
+      }
+
+      const form = new multiparty.Form({
+        uploadDir: ICON_UPLOAD_DIR,
+      });
+      try {
+         const {fields, files} = await new Promise((res, rej) => {
+            form.parse(req, (err, fields, files) => {
+              if (err) rej(err);
+              else res({ fields, files })
+            })
+          });
+        if (files.logo) {
+          renameFile(files.logo[0].path, 'modelengine-logo2.png');
+        }
+        if (files.logo2) {
+          renameFile(files.logo2[0].path, 'modelengine-logo.png');
+        }
+        const configZh = readLocaleConfig("zh");
+        const configEn = readLocaleConfig("en");
+        const fieldsZh = JSON.parse(fields.configZh[0]);
+        const fieldsEn = JSON.parse(fields.configEn[0]);
+        const newConfigZh = updateLocalConfig(configZh, fieldsZh);
+        const newConfigEn = updateLocalConfig(configEn, fieldsEn);
+        saveLocaleConfig(JSON.stringify(newConfigZh, null, 2), "zh");
+        saveLocaleConfig(JSON.stringify(newConfigEn, null, 2), "en");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "success update" }));
+      } catch (err) {
+          // example to check for a very specific error
+          console.error(err);
+          res.writeHead(err.httpCode || 400, { 'Content-Type': 'text/plain' });
+          res.end(String(err));
+          return;
+      }
+
       return;
     }
 
