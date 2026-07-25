@@ -272,6 +272,21 @@ class TestMessageObserver:
         assert message_data["type"] == ProcessType.STEP_COUNT.value
         assert "Step 3" in message_data["content"]
 
+    def test_add_message_uses_context_tool_call_id_when_explicit_value_is_none(self):
+        """Preserve the active tool ID when a caller passes an empty override."""
+        observer = MessageObserver(lang="en")
+
+        with observer.tool_call_context("call-123"):
+            observer.add_message(
+                "test_agent",
+                ProcessType.SEARCH_CONTENT,
+                "results",
+                tool_call_id=None,
+            )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+        assert message_data["tool_call_id"] == "call-123"
+
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
         observer = MessageObserver()

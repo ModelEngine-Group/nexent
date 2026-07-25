@@ -48,6 +48,12 @@ class ConversationRecord(TableBase):
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
+    chat_mode = Column(
+        String(16),
+        nullable=False,
+        server_default="execution",
+        doc="UI chat mode for the conversation: 'planning' or 'execution'",
+    )
 
 
 class ConversationMessage(TableBase):
@@ -96,6 +102,8 @@ class ConversationMessageUnit(TableBase):
     unit_status = Column(
         String(30), default='completed',
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
+    tool_call_id = Column(
+        String(36), doc="Unique ID of the originating tool invocation. Used to attribute side-channel units to the correct tool call when multiple calls run in parallel.")
 
 
 class AgentAutomationTask(TableBase):

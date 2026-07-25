@@ -342,59 +342,39 @@ def _scan_code_for_tool_calls(
     return results
 
 
-def _emit_real_tool_chunks_from_code(
+def _wrap_tool_for_observer(
+    tool: Any,
     observer: "MessageObserver",
     agent_name: str,
-    code_action: str,
-    known_tool_names,
 ) -> None:
-    """Translate real tool calls in ``code_action`` into observer TOOL chunks.
-
-    CodeAgent wraps every step in a synthetic ``python_interpreter`` ToolCall,
-    so without this bridge the SSE stream never sees the actual MCP /
-    managed-agent names the LLM invoked. We emit one `type=tool` chunk per
-    unique tool call AFTER the PARSE chunk has been published and BEFORE
-    ``python_executor(code_action)`` runs, so the downstream stream order is:
-
-        parse -> tool -> execution_logs
-
-    matching what the user sees during a real builtin-tool invocation.
-    """
-    if observer is None or not code_action:
+    """Emit one tool event and correlation context for every actual call."""
+    if tool is None or getattr(tool, "_tool_call_observer_wrapped", False):
         return
 
-    normalized_names = {str(name) for name in (known_tool_names or set())}
-
-    calls = _scan_code_for_tool_calls(code_action, normalized_names)
-    fallback_logger = logging.getLogger(__name__)
-    if not calls:
-        # Visibility aid: when we expected real tools but found none, log at
-        # DEBUG so operators can confirm the bridge ran instead of silently
-        # skipping. Disabled by default to avoid noisy logs in production.
-        if normalized_names:
-            fallback_logger.debug(
-                "Tool bridge: no tool calls matched known tool names "
-                "(known=%d) in code_action of %d chars",
-                len(normalized_names),
-                len(code_action or ""),
-            )
+    original_forward = getattr(tool, "forward", None)
+    if not callable(original_forward):
         return
 
-    for call in calls:
-        try:
-            observer.add_message(
-                agent_name or "",
-                ProcessType.TOOL,
-                "",
-                tool_name=call["name"],
-                tool_arguments=_coerce_observer_arguments(call["arguments"]),
-            )
-        except Exception:
-            fallback_logger.debug(
-                "Failed to bridge real tool call into observer: %s",
-                call["name"],
-                exc_info=True,
-            )
+    tool_name = str(getattr(tool, "name", "") or "")
+
+    def observed_forward(*args, **kwargs):
+        tool_call_id = str(uuid.uuid4())
+        observer.add_message(
+            agent_name or "",
+            ProcessType.TOOL,
+            "",
+            tool_name=tool_name,
+            tool_arguments=_coerce_observer_arguments(kwargs),
+            tool_call_id=tool_call_id,
+        )
+        with observer.tool_call_context(tool_call_id):
+            return original_forward(*args, **kwargs)
+
+    tool.forward = observed_forward
+    try:
+        tool._tool_call_observer_wrapped = True
+    except Exception:
+        pass
 
 
 class CoreAgent(CodeAgent):
@@ -409,6 +389,8 @@ class CoreAgent(CodeAgent):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
         redis_client = kwargs.pop("redis_client", None)
+        self.conversation_id = kwargs.pop("conversation_id", None)
+        self.user_id = kwargs.pop("user_id", None)
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -464,6 +446,54 @@ class CoreAgent(CodeAgent):
             except AttributeError:
                 continue
         return names
+
+    def _managed_agent_names(self) -> set:
+        """Return the set of names belonging to managed sub-agents.
+
+        Used to suppress ``type=tool`` chunks for sub-agent invocations: those
+        are surfaced exclusively through ``subagent_start``/``subagent_end``
+        so the frontend can render the nested execution without duplicate
+        tool entries on the outer message.
+        """
+        managed_agents = getattr(self, "managed_agents", {}) or {}
+        try:
+            return {str(name) for name in managed_agents.keys()}
+        except AttributeError:
+            return {
+                str(name)
+                for agent in managed_agents
+                if (name := getattr(agent, "name", None))
+            }
+
+    def _non_emitting_tool_names(self) -> set:
+        """Return tool names that should stay out of generic TOOL events."""
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.items()
+            except AttributeError:
+                iterable = (
+                    (getattr(tool, "name", None), tool)
+                    for tool in container
+                )
+            for name, tool in iterable:
+                if name is None or getattr(tool, "emit_tool_event", True) is not False:
+                    continue
+                names.add(str(name))
+        return names
+
+    def _wrap_visible_tool_events(self) -> None:
+        """Instrument visible tools at their actual execution boundary."""
+        hidden_names = self._non_emitting_tool_names()
+        for container in (getattr(self, "tools", {}) or {},):
+            try:
+                iterable = container.items()
+            except AttributeError:
+                iterable = ((getattr(tool, "name", None), tool) for tool in container)
+            for name, tool in iterable:
+                if name is None or str(name) in hidden_names:
+                    continue
+                _wrap_tool_for_observer(tool, self.observer, self.agent_name)
 
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
@@ -777,19 +807,6 @@ Additional Args:
         )
         memory_step.tool_calls = [tool_call]
 
-        # Bridge the real tools invoked by `code_action` into the observer so the
-        # SSE stream carries `type=tool` chunks with the actual MCP/managed-agent
-        # name and arguments, instead of the synthetic `python_interpreter`
-        # placeholder below. We deliberately emit AFTER the PARSE chunk and BEFORE
-        # `python_executor(code_action)` runs so the chunk order matches the
-        # user-visible flow: parse -> tool call -> execution result.
-        _emit_real_tool_chunks_from_code(
-            self.observer,
-            self.agent_name,
-            code_action,
-            known_tool_names=self._known_tool_names(),
-        )
-
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
@@ -972,6 +989,7 @@ You have been provided with these additional arguments, that you can access usin
 
         if getattr(self, "python_executor", None):
             self._guardrail_wrap_tools()
+            self._wrap_visible_tool_events()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
@@ -1380,9 +1398,10 @@ You have been provided with these additional arguments, that you can access usin
 
     def _get_context_summary(self) -> Optional[str]:
         """Extract a compressed context summary from ContextManager if available."""
-        if self.context_manager and hasattr(self.context_manager, "get_summary"):
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "get_summary"):
             try:
-                return self.context_manager.get_summary()
+                return context_manager.get_summary()
             except Exception:
                 return None
         return None
@@ -1465,19 +1484,25 @@ You have been provided with these additional arguments, that you can access usin
                     user_id=self._get_user_id(),
                 )
             except Exception as e:
-                self.logger.log(f"Implicit plan save failed: {e}", level=LogLevel.WARN)
+                self.logger.log(f"Implicit plan save failed: {e}", level=LogLevel.ERROR)
         self._advance_current_index()
 
     def _get_conversation_id(self) -> int:
-        """Extract conversation_id from context_manager."""
-        if self.context_manager and hasattr(self.context_manager, "conversation_id"):
-            return self.context_manager.conversation_id
+        """Return the run-scoped conversation id used for plan persistence."""
+        if self.conversation_id is not None:
+            return self.conversation_id
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "conversation_id"):
+            return context_manager.conversation_id
         return 0
 
     def _get_user_id(self) -> str:
-        """Extract user_id from context_manager."""
-        if self.context_manager and hasattr(self.context_manager, "user_id"):
-            return str(self.context_manager.user_id)
+        """Return the run-scoped user id used for plan persistence."""
+        if self.user_id is not None:
+            return str(self.user_id)
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "user_id"):
+            return str(context_manager.user_id)
         return "anonymous"
 
     def _cleanup_plan(self) -> None:
@@ -1501,4 +1526,4 @@ You have been provided with these additional arguments, that you can access usin
                 user_id=user_id,
             )
         except Exception as e:
-            self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.WARN)
+            self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.ERROR)

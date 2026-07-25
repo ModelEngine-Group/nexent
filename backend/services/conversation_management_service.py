@@ -10,6 +10,7 @@ from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_E
 from consts.model import AgentRequest, MessageRequest, MessageUnit
 from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
+    CHAT_MODE_VALUES,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -32,6 +33,7 @@ from database.conversation_db import (
     rename_conversation,
     save_history_summary,
     update_conversation_agent_id,
+    update_conversation_chat_mode,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -106,7 +108,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
                       unit_type: str, unit_content: Any,
                       user_id: Optional[str] = None,
-                      unit_status: str = 'completed') -> int:
+                      unit_status: str = 'completed',
+                      tool_call_id: Optional[str] = None) -> int:
     """
     Insert exactly one ConversationMessageUnit row.
 
@@ -118,6 +121,8 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Identifier of the user creating the unit
         unit_status: Lifecycle status (streaming / completed)
+        tool_call_id: Unique ID of the originating tool invocation. None for
+            units that are not tied to a specific tool call.
 
     Returns:
         int: Newly created unit_id
@@ -130,6 +135,7 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content=unit_content,
         user_id=user_id,
         unit_status=unit_status,
+        tool_call_id=tool_call_id,
     )
 
 
@@ -329,7 +335,12 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     return success
 
 
-def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = None) -> Dict[str, Any]:
+def create_new_conversation(
+    title: str,
+    user_id: str,
+    agent_id: Optional[int] = None,
+    chat_mode: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Create a new conversation
 
@@ -337,12 +348,18 @@ def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = 
         title: Conversation title
         user_id: User ID
         agent_id: Agent used by the latest run in this conversation
+        chat_mode: Initial UI chat mode
 
     Returns:
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(title, user_id, agent_id=agent_id)
+        conversation_data = create_conversation(
+            title,
+            user_id,
+            agent_id=agent_id,
+            chat_mode=chat_mode,
+        )
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -388,6 +405,40 @@ def update_conversation_agent_id_service(conversation_id: int, agent_id: int, us
         return True
     except Exception as e:
         logging.error(f"Failed to update conversation agent: {str(e)}")
+        raise Exception(str(e))
+
+
+def update_conversation_chat_mode_service(
+    conversation_id: int,
+    chat_mode: str,
+    user_id: str,
+) -> bool:
+    """
+    Persist the UI chat mode (planning / execution) for a conversation.
+
+    The frontend calls this whenever the user toggles the mode so that
+    switching back to the conversation later can restore the same toggle
+    without re-inferring it from stored message units.
+    """
+    if chat_mode not in CHAT_MODE_VALUES:
+        raise ValueError(
+            f"Invalid chat_mode '{chat_mode}'. Allowed values: {sorted(CHAT_MODE_VALUES)}"
+        )
+    try:
+        success = update_conversation_chat_mode(
+            conversation_id=conversation_id,
+            chat_mode=chat_mode,
+            user_id=user_id,
+        )
+        if not success:
+            raise Exception(
+                f"Conversation {conversation_id} does not exist or has been deleted"
+            )
+        return True
+    except ValueError:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to update conversation chat mode: {str(e)}")
         raise Exception(str(e))
 
 
@@ -601,7 +652,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                         }
                         processed_units.append({
                             'type': 'search_content_placeholder',
-                            'content': json.dumps(placeholder_content, ensure_ascii=False)
+                            'content': json.dumps(placeholder_content, ensure_ascii=False),
+                            'unit_index': unit.get('unit_index'),
+                            'unit_status': unit.get('unit_status'),
+                            'tool_call_id': unit.get('tool_call_id'),
                         })
                     else:
                         processed_unit = {
@@ -609,6 +663,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'content': unit_content,
                             'unit_index': unit.get('unit_index'),
                             'unit_status': unit.get('unit_status'),
+                            'tool_call_id': unit.get('tool_call_id'),
                         }
                         if unit_type in ('tool', 'tool-call') and isinstance(unit_content, str):
                             try:
@@ -669,6 +724,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
             'agent_id': history_data.get('agent_id'),
+            'chat_mode': history_data.get('chat_mode') or 'execution',
             'create_time': history_data['create_time'],
             'message': messages
         }

@@ -2807,57 +2807,55 @@ def test_scan_code_for_tool_calls_returns_empty_for_invalid_or_unconfigured_code
     assert core_agent_module._scan_code_for_tool_calls("", {"search"}) == []
 
 
-def test_emit_real_tool_chunks_from_code_emits_tool_payloads():
-    """Bridge each matching tool call to the observer with its extracted arguments."""
+def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch):
+    """Associate every actual tool invocation with a distinct observer ID."""
     observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+    tool = type("SearchTool", (), {"name": "search"})()
+    calls = []
 
-    core_agent_module._emit_real_tool_chunks_from_code(
-        observer,
-        "research-agent",
-        "search(query='nexent')\nworker(task='summarize')",
-        {"search", "worker"},
-    )
+    def forward(**kwargs):
+        calls.append(kwargs)
+        return kwargs["query"]
 
-    assert observer.add_message.call_args_list == [
-        call(
-            "research-agent",
-            core_agent_module.ProcessType.TOOL,
-            "",
-            tool_name="search",
-            tool_arguments={"query": "nexent"},
-        ),
-        call(
-            "research-agent",
-            core_agent_module.ProcessType.TOOL,
-            "",
-            tool_name="worker",
-            tool_arguments={"task": "summarize"},
-        ),
+    tool.forward = forward
+    ids = iter(["call-1", "call-2", "call-3"])
+    monkeypatch.setattr(core_agent_module.uuid, "uuid4", lambda: next(ids))
+
+    core_agent_module._wrap_tool_for_observer(tool, observer, "research-agent")
+
+    assert tool.forward(query="first") == "first"
+    assert tool.forward(query="second") == "second"
+    assert tool.forward(query="third") == "third"
+    assert calls == [{"query": "first"}, {"query": "second"}, {"query": "third"}]
+    assert [call.kwargs["tool_call_id"] for call in observer.add_message.call_args_list] == [
+        "call-1", "call-2", "call-3"
     ]
-
-
-def test_emit_real_tool_chunks_from_code_skips_empty_input_and_observer_errors():
-    """Do not propagate missing input or observer failures into agent execution."""
-    observer = MagicMock()
-    observer.add_message.side_effect = RuntimeError("observer unavailable")
-
-    core_agent_module._emit_real_tool_chunks_from_code(None, "agent", "search()", {"search"})
-    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "", {"search"})
-    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "search()", {"search"})
-
-    observer.add_message.assert_called_once()
+    assert [call.args[0] for call in observer.tool_call_context.call_args_list] == [
+        "call-1", "call-2", "call-3"
+    ]
 
 
 def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
     """Collect stringified keys from tools and managed agents only."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = type("Agent", (), {})()
-    agent.tools = {"search": MagicMock(), 7: MagicMock()}
-    agent.managed_agents = {"planner": MagicMock()}
+    search_tool = MagicMock()
+    search_tool.emit_tool_event = True
+    hidden_tool = MagicMock()
+    hidden_tool.emit_tool_event = False
+    planner = MagicMock()
+    planner.emit_tool_event = True
+    agent.tools = {"search": search_tool, 7: hidden_tool}
+    agent.managed_agents = {"planner": planner}
 
     assert module.CoreAgent._known_tool_names(agent) == {"search", "7", "planner"}
+    assert module.CoreAgent._managed_agent_names(agent) == {"planner"}
+    assert module.CoreAgent._non_emitting_tool_names(agent) == {"7"}
 
     agent.tools = ["not-a-mapping"]
     agent.managed_agents = None
 
     assert module.CoreAgent._known_tool_names(agent) == set()
+    assert module.CoreAgent._managed_agent_names(agent) == set()
+    assert module.CoreAgent._non_emitting_tool_names(agent) == set()

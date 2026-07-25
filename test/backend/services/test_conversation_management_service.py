@@ -447,7 +447,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["title"], "New Chat")
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id, agent_id=None)
+            "New Chat", self.user_id, agent_id=None, chat_mode=None)
 
     @patch('backend.services.conversation_management_service.create_conversation')
     def test_create_new_conversation_with_agent_id(self, mock_create_conversation):
@@ -466,7 +466,24 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["agent_id"], 7)
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id, agent_id=7)
+            "New Chat", self.user_id, agent_id=7, chat_mode=None)
+
+    @patch('backend.services.conversation_management_service.create_conversation')
+    def test_create_new_conversation_with_chat_mode(self, mock_create_conversation):
+        mock_create_conversation.return_value = {
+            "conversation_id": 123,
+            "title": "New Chat",
+            "chat_mode": "planning",
+        }
+
+        result = create_new_conversation(
+            "New Chat", self.user_id, agent_id=7, chat_mode="planning"
+        )
+
+        self.assertEqual(result["chat_mode"], "planning")
+        mock_create_conversation.assert_called_once_with(
+            "New Chat", self.user_id, agent_id=7, chat_mode="planning"
+        )
 
     @patch('backend.services.conversation_management_service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_success(self, mock_update_conversation_agent_id):

@@ -344,6 +344,7 @@ class AgentRequest(BaseModel):
 class MessageUnit(BaseModel):
     type: str
     content: str
+    tool_call_id: Optional[str] = None
 
 
 class MessageRequest(BaseModel):
@@ -368,7 +369,6 @@ class ConversationResponse(BaseModel):
 class RenameRequest(BaseModel):
     conversation_id: int
     name: str
-
 
 # Pydantic models for API
 class TaskRequest(BaseModel):

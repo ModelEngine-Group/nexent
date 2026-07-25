@@ -211,6 +211,12 @@ UpdatePlanStepTool = plan_tools_module.UpdatePlanStepTool
 PlanStatus = plan_tools_module.PlanStatus
 
 
+def test_plan_tools_are_hidden_from_generic_tool_events():
+    """Plan state tools use dedicated plan SSE events instead of tool cards."""
+    assert CreatePlanTool.emit_tool_event is False
+    assert UpdatePlanStepTool.emit_tool_event is False
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
