@@ -562,7 +562,7 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             tenant_id="tid", user_id="uid", mcp_id=1,
         )
         self.assertEqual(market_id, 42)
-        mock_check.assert_called_once_with("svc")
+        mock_check.assert_called_once_with("svc", "tid")
 
     @patch('backend.services.mcp_management_service.create_mcp_market_record')
     @patch('backend.services.mcp_management_service._resolve_user_email')
