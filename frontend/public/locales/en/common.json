@@ -3820,7 +3820,7 @@
   "toolConfig.validation.object.invalid": "Please enter valid object JSON",
 
   "project.config": "System config",
-  "project.config.title": "System Title",
+  "project.config.title": "System name",
   "project.config.language.en": "Please enter the English configuration.",
   "project.config.language.zh": "Please enter the Chinese configuration.",
   "project.config.about.us": "External Link",
@@ -3834,5 +3834,5 @@
   "project.config.page.subtitle": "Subtitle",
   "project.config.page.description": "Page description",
   "project.config.page.complete.logo": "Full logo",
-  "project.config.page.simple.log": "Simplified logo"
+  "project.config.page.simple.log": "System logo"
 }

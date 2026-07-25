@@ -3819,8 +3819,8 @@
   "toolConfig.validation.array.invalid": "请输入有效的数组 JSON",
   "toolConfig.validation.object.invalid": "请输入有效的对象 JSON",
 
-  "project.config": "项目配置",
-  "project.config.title": "项目标题",
+  "project.config": "系统配置",
+  "project.config.title": "系统名",
   "project.config.language.en": "请输入英文配置",
   "project.config.language.zh": "请输入中文配置",
   "project.config.about.us": "外部链接",
@@ -3834,5 +3834,5 @@
   "project.config.page.subtitle": "子标题",
   "project.config.page.description": "页面描述",
   "project.config.page.complete.logo": "完整logo",
-  "project.config.page.simple.log": "精简logo"
+  "project.config.page.simple.log": "系统logo"
 }

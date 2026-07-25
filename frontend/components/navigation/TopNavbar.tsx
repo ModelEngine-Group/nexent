@@ -87,7 +87,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
         style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
       >
         <Flex align="center" gap={8}>
-          <img src="/modelengine-logo2.png" alt="ModelEngine" className="h-7" />
+          <img src="/modelengine-logo.png" alt="logo" className="h-7" />
           <span
             className="text-blue-600 dark:text-blue-500 font-bold"
             style={{

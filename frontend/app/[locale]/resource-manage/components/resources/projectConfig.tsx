@@ -185,22 +185,6 @@ export default function ProjectConfigTab() {
             ]}/>
           </Form.Item>
           <Form.Item
-            name="icon"
-          >
-            <div className="flex items-center gap-4 mt-2 mb-4">
-              <span>{t('project.config.page.complete.logo')}</span>
-              <img className="h-7" src="/modelengine-logo2.png" alt={"old logo1"}></img>
-              { previewUrl && <img className="h-7" src={previewUrl} alt={"new logo1"}></img>}
-            </div>
-            <Upload
-                beforeUpload={(fileRaw) => beforeUpload(fileRaw, false)}
-                showUploadList={false}
-                accept="image/png"
-              >
-                <Button size="small">{ t('project.config.logo.upload.new') }</Button>
-              </Upload>
-          </Form.Item>
-          <Form.Item
             name="icon2"
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
