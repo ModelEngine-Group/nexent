@@ -533,7 +533,7 @@ app.prepare().then(() => {
     req.parsedPathname = pathname;
 
     // 路由分发入口，扁平化逻辑，无深层嵌套
-    if (await handleFrontendConfigApi(pathname, req, res)) return;
+    if (handleFrontendConfigApi(pathname, req, res)) return;
     if (await handleProjectConfigApi(pathname, req, res)) return;
     if (handleAttachmentProxy(pathname, req, res)) return;
     if (handleAllApiProxy(pathname, req, res)) return;

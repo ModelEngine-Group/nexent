@@ -42,9 +42,8 @@ export const loadLocaleMessages = async (locale: string) => {
     return { resourcesCustom, resources };
   } catch (error) {
     console.log(`Failed to load locale ${locale}:`, error)
-  } finally {
-    return { resourcesCustom, resources };
   }
+  return { resourcesCustom, resources };
 }
 
 const parseI18NStrFunc = (str: string, lang: string): any => {
