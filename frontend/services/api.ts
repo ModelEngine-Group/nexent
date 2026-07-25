@@ -457,6 +457,16 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
     },
 
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+    },
+
     // ---------------- Memory CRUD ----------------
     entry: {
       add: `${API_BASE_URL}/memory/add`,

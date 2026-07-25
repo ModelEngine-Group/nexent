@@ -482,7 +482,6 @@ app.prepare().then(() => {
           pathname.startsWith("/api/agent/automations") ||
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/share/") ||
-          pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess");
         if (isRuntime) {
