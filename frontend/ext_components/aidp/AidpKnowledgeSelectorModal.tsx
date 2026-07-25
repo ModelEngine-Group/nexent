@@ -7,13 +7,13 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Space,
   Spin,
   Tag,
   Typography,
   message,
 } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
@@ -45,7 +45,7 @@ export default function AidpKnowledgeSelectorModal({
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageItems, setPageItems] = useState<AidpKnowledgeBaseItem[]>([]);
-  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
@@ -67,7 +67,7 @@ export default function AidpKnowledgeSelectorModal({
     }
     setCurrentPage(1);
     setPageItems([]);
-    setNextLink(null);
+    setTotalCount(0);
     setKeyword("");
     setTempSelectedIds(selectedDatasetIds);
     initialSelectedIdsRef.current = selectedDatasetIds;
@@ -100,10 +100,10 @@ export default function AidpKnowledgeSelectorModal({
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------
-  // Fetch a single page (page 1 on open; next/prev on nav)
+  // Fetch a single page (page 1 on open; arbitrary page via antd Pagination)
   // ------------------------------------------------------------------
   const loadPage = useCallback(
-    async (pageNum: number, nextUrl: string | null = null) => {
+    async (pageNum: number) => {
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
@@ -113,11 +113,13 @@ export default function AidpKnowledgeSelectorModal({
 
         const items: AidpKnowledgeBaseItem[] = result.value || [];
 
-        if (nextUrl) {
-          setNextLink(result.next_link ?? null);
-        } else {
-          setNextLink(result.next_link ?? null);
-        }
+        // Total count reflects only KBs the caller can actually see
+        // (the mgmt endpoint applies permission filtering server-side).
+        setTotalCount(
+          typeof result.total_count === "number"
+            ? result.total_count
+            : items.length
+        );
 
         for (const item of items) {
           const id = String(item.kds_id);
@@ -132,7 +134,7 @@ export default function AidpKnowledgeSelectorModal({
         log.error("Failed to load AIDP knowledge bases:", error);
         message.error(t("toolConfig.aidp.selector.loadFailed"));
         setPageItems([]);
-        setNextLink(null);
+        setTotalCount(0);
       } finally {
         setLoading(false);
       }
@@ -313,22 +315,19 @@ export default function AidpKnowledgeSelectorModal({
           {renderListContent()}
         </div>
 
-        <div className="flex items-center justify-center gap-4">
-          <Button
-            icon={<LeftOutlined />}
-            disabled={currentPage === 1 || loading}
-            onClick={() => loadPage(currentPage - 1)}
-          >
-            {t("filePreview.pdf.previousPage")}
-          </Button>
-          <Text type="secondary">{currentPage}</Text>
-          <Button
-            icon={<RightOutlined />}
-            disabled={!nextLink || loading}
-            onClick={() => loadPage(currentPage + 1)}
-          >
-            {t("filePreview.pdf.nextPage")}
-          </Button>
+        <div className="flex items-center justify-center">
+          <Pagination
+            current={currentPage}
+            pageSize={DEFAULT_PAGE_SIZE}
+            total={Math.max(totalCount, 1)}
+            onChange={(p) => loadPage(p)}
+            showSizeChanger={false}
+            showTotal={(total) =>
+              t("toolConfig.aidp.selector.showTotal", { count: total })
+            }
+            size="small"
+            disabled={loading}
+          />
         </div>
       </Space>
     </Modal>

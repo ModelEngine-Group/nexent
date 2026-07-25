@@ -12,7 +12,14 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from pydantic_core import PydanticUndefined
 
-from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    DATA_PROCESS_SERVICE,
+    LOCAL_MCP_SERVER,
+    MCP_MANAGEMENT_API,
+)
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
@@ -872,14 +879,25 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
-            # AIDP credentials (server_url / api_key / tenant_id) are injected
-            # by ``create_agent_info`` at runtime from ``consts.const``. Strip
-            # any empty-string values persisted in the database so the Tool's
-            # Field default_factory picks them up from the injected metadata.
             if tool_name == "aidp_search":
-                for _cred_key in ("server_url", "api_key"):
-                    if not filtered_params.get(_cred_key):
-                        filtered_params.pop(_cred_key, None)
+                # AIDP credentials are sourced from ``consts.const`` (i.e. the
+                # process environment). Inject them here exactly as
+                # ``create_agent_info`` does at runtime, so validation builds
+                # the same tool instance shape. Never trust client-submitted
+                # credentials.
+                if not AIDP_SERVER_URL:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_SERVER_URL before testing aidp_search"
+                    )
+                if not AIDP_API_KEY:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_API_KEY before testing aidp_search"
+                    )
+                filtered_params["server_url"] = AIDP_SERVER_URL
+                filtered_params["api_key"] = AIDP_API_KEY
+                filtered_params["tenant_id"] = AIDP_TENANT_ID
             tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:

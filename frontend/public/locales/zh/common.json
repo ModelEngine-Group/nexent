@@ -590,6 +590,7 @@
   "toolConfig.aidp.selector.loadFailed": "加载 AIDP 知识库失败",
   "toolConfig.aidp.selector.documentCount": "文档 {{count}}",
   "toolConfig.aidp.selector.chunkCount": "分块 {{count}}",
+  "toolConfig.aidp.selector.showTotal": "共 {{count}} 条",
   "toolConfig.knowledgeBaseSelector.modelMismatch.title": "模型不匹配",
   "toolConfig.knowledgeBaseSelector.modelMismatch.description": "所选知识库的向量化模型与其他已选知识库不一致。",
   "toolConfig.knowledgeBaseSelector.modelMismatch.existing": "已选知识库",
