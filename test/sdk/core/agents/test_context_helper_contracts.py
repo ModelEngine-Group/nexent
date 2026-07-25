@@ -363,6 +363,71 @@ def test_strip_code_fences():
     assert _strip_code_fences("   ") is None
 
 
+def test_renderer_summary_legacy_dict_list_values():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {
+                "key_decisions": ["decision A", "decision B"],
+                "pending_items": [],
+                "context_to_preserve": None,
+                "custom_field": 42,
+            },
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "- decision A" in text
+    assert "- decision B" in text
+    assert "42" in text
+
+
+def test_renderer_summary_legacy_dict_all_empty_falls_back_to_json():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {"task_overview": "", "completed_work": None},
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "task_overview" in text
+
+
+def test_renderer_current_action_compact_non_standard_tool_calls():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 4,
+            "tool_calls": "raw_tool_call_string",
+            "result": "done",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "Tool calls:" in text
+
+
+def test_renderer_current_action_compact_list_tool_call_non_dict():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 5,
+            "tool_calls": ["not_a_dict_tool_call"],
+            "result": "done",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "Tool call:" in text
+
+
 def test_context_manager_management_and_diagnostic_helpers():
     manager = ContextManager(ContextManagerConfig(token_threshold=100, chars_per_token=2.0))
     item_input = ContextItemInput(id="system", type="system", content={"text": "policy"})
