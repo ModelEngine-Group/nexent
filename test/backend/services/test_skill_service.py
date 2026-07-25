@@ -4828,3 +4828,33 @@ class TestInitSkillListForTenantAsync:
             tenant_id="new-tenant",
             user_id="new-user"
         )
+
+
+class TestFormatFinalAnswerSse:
+    """Verify format_final_answer_sse handling of think-only final answers."""
+
+    def test_returns_skill_body_when_no_skill_tag(self):
+        from backend.services.skill_service import format_final_answer_sse
+        from utils.content_classifier_utils import ContentClassifier
+
+        events = format_final_answer_sse(
+            ContentClassifier(),
+            "思考中，没有任何 SKILL 标签。",
+        )
+        assert len(events) == 1
+        payload = json.loads(events[0].lstrip("data: ").rstrip())
+        assert payload["type"] == "skill_body"
+        assert payload["content"] == "思考中，没有任何 SKILL 标签。"
+
+    def test_keeps_classifier_path_when_skill_tag_present(self):
+        from backend.services.skill_service import format_final_answer_sse
+        from utils.content_classifier_utils import ContentClassifier
+
+        events = format_final_answer_sse(
+            ContentClassifier(),
+            "<SKILL>body content</SKILL>",
+        )
+        joined = "".join(json.loads(e.lstrip("data: ").rstrip())["type"] + ":" +
+                          json.loads(e.lstrip("data: ").rstrip())["content"]
+                          for e in events)
+        assert "skill_body:body content" in joined

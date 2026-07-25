@@ -94,6 +94,72 @@ class TestContentClassifier:
         assert len(results) >= 1
         assert results[0]["type"] == "others"
 
+    def test_unknown_tag_followed_by_skill(self):
+        """Unknown reasoning tag (<think>) must not swallow the following <SKILL>.
+
+        Reproduces the regression where <think>xxx</think><SKILL>body</SKILL> was
+        emitted entirely as 'others' because the buffer of non-tag content was
+        flushed past the embedded '<SKILL>' tag.
+        """
+        classifier = ContentClassifier()
+
+        results = classifier.classify("<think>reasoning</think><SKILL>body</SKILL>")
+
+        skill_events = [r for r in results if r.get("type") == "skill_body"]
+        assert len(skill_events) >= 1, (
+            "Expected at least one skill_body event; got: " + repr(results)
+        )
+        combined = "".join(e["content"] for e in skill_events)
+        assert "body" in combined
+
+        # Reasoning content should still surface as 'others'
+        others_events = [r for r in results if r.get("type") == "others"]
+        assert any("reasoning" in e["content"] for e in others_events), (
+            "Expected the reasoning text to be preserved as 'others'; got: " + repr(results)
+        )
+
+        # After </SKILL> the state should be 'summary'
+        assert classifier.state == "summary"
+
+    def test_text_with_embedded_skill_tag(self):
+        """A known tag embedded in non-tag text must still be recognised."""
+        classifier = ContentClassifier()
+
+        results = classifier.classify("hello world<SKILL>body</SKILL>")
+
+        skill_events = [r for r in results if r.get("type") == "skill_body"]
+        assert len(skill_events) >= 1
+        assert any("body" in e["content"] for e in skill_events)
+        # Prefix text is still surfaced as 'others'
+        others_events = [r for r in results if r.get("type") == "others"]
+        assert any("hello world" in e["content"] for e in others_events)
+
+    def test_streaming_unknown_then_skill(self):
+        """Streaming chunks where <think> and <SKILL> arrive separately still classify correctly."""
+        classifier = ContentClassifier()
+
+        # Reasoning tag arrives first, then SKILL body in a separate chunk
+        classifier.classify("<think>reasoning")
+        classifier.classify("</think><SKILL>body")
+        results = classifier.classify(" content</SKILL>")
+
+        skill_events = [r for r in results if r.get("type") == "skill_body"]
+        assert any("body" in e["content"] or "content" in e["content"]
+                   for e in skill_events)
+
+    def test_unknown_tag_emitted_as_single_event(self):
+        """An unknown tag should be emitted as a single chunk, not split char-by-char."""
+        classifier = ContentClassifier()
+
+        results = classifier.classify("<think>reasoning</think> rest")
+
+        # No split on '<' so the '<think>' should appear in a single others event
+        others_events = [r for r in results if r.get("type") == "others"]
+        assert any("<think>" in e["content"] for e in others_events), (
+            "Expected <think> to be preserved in a single others event; got: "
+            + repr(results)
+        )
+
     def test_streaming_characters(self):
         """Test streaming character-by-character classification."""
         classifier = ContentClassifier()

@@ -607,7 +607,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
         url=quick_config.get("base_url", ""),
         temperature=0.1,
         top_p=0.95,
-        ssl_verify=True,
+        ssl_verify=False,
         model_factory=quick_config.get("model_factory")
     )
 
