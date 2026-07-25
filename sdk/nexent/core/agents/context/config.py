@@ -43,7 +43,9 @@ class ContextManagerConfig:
         "task_overview": "User's core request and success criteria (<=150 words)",
         "completed_work": "Work completed, files or results produced (<=200 words)",
         "key_decisions": "Important findings, decisions made and reasons (<=200 words)",
+        "unresolved_issues": "Problems, errors, or questions encountered but not yet resolved (<=150 words)",
         "pending_items": "Specific steps pending, blockers (<=150 words)",
+        "next_steps": "Concrete planned next actions and their expected outcomes (<=150 words)",
         "context_to_preserve": "User preferences, domain details, commitments (<=150 words)",
     })
 

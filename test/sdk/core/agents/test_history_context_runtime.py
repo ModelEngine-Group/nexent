@@ -28,7 +28,9 @@ class _Response:
         "## Task Overview\n\ntask\n\n"
         "## Completed Work\n\nwork\n\n"
         "## Key Decisions\n\ndecision\n\n"
+        "## Unresolved Issues\n\nunresolved\n\n"
         "## Pending Items\n\npending\n\n"
+        "## Next Steps\n\nnext\n\n"
         "## Context to Preserve\n\ncontext"
     )
     token_usage = None

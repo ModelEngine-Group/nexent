@@ -70,7 +70,9 @@ _SUMMARY_FIELD_HEADINGS: dict[str, str] = {
     "task_overview": "Task Overview",
     "completed_work": "Completed Work",
     "key_decisions": "Key Decisions",
+    "unresolved_issues": "Unresolved Issues",
     "pending_items": "Pending Items",
+    "next_steps": "Next Steps",
     "context_to_preserve": "Context to Preserve",
 }
 
