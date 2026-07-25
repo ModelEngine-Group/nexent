@@ -48,7 +48,7 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "others",
 ];
 
-function isNewSkillPaddingItem(
+export function isNewSkillPaddingItem(
   item: MyEditableSkillListItem
 ): item is NewSkillPaddingItem {
   return "new_skill_padding" in item && item.new_skill_padding === true;

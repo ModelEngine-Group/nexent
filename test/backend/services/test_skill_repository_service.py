@@ -831,6 +831,7 @@ def test_mapping_and_filter_helpers_cover_edge_branches():
     }) == {
         "skill_repository_id": 9,
         "status": "shared",
+        "content": None,
         "create_time": created_at.isoformat(),
     }
     assert srs._matches_ownership(
@@ -1029,6 +1030,7 @@ def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
     assert result["items"][0]["repository_info"] == [{
         "skill_repository_id": 1,
         "status": "shared",
+        "content": None,
         "create_time": None,
     }]
 

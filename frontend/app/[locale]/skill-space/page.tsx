@@ -33,7 +33,10 @@ import type {
 import type { Skill } from "@/types/agentConfig";
 import { CountBadge } from "./components/SkillRepositoryControls";
 import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailModal";
-import { MineSkillsView } from "./components/MineSkillsView";
+import {
+  isNewSkillPaddingItem,
+  MineSkillsView,
+} from "./components/MineSkillsView";
 import { RepositoryView } from "./components/RepositoryView";
 import { ReviewSkillList } from "./components/ReviewSkillList";
 import {
@@ -261,7 +264,7 @@ export default function SkillRepositoryPage() {
     return (
       items.find(
         (item): item is MyEditableSkillItem =>
-          !("new_skill_padding" in item && item.new_skill_padding) &&
+          !isNewSkillPaddingItem(item) &&
           item.skill_id === reviewDeepLink.skillId
       ) ?? null
     );
