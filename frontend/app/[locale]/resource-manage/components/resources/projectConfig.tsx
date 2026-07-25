@@ -188,7 +188,7 @@ export default function ProjectConfigTab() {
             name="icon"
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
-              <span>{ t('project.config.logo.change') }</span>
+              <span>{t('project.config.page.complete.logo')}</span>
               <img className="h-7" src="/modelengine-logo2.png" alt={"old logo1"}></img>
               { previewUrl && <img className="h-7" src={previewUrl} alt={"new logo1"}></img>}
             </div>
@@ -204,7 +204,7 @@ export default function ProjectConfigTab() {
             name="icon2"
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
-              <span>{ t('project.config.logo.change') }</span>
+              <span>{t('project.config.page.simple.log')}</span>
               <img className="h-7" src="/modelengine-logo.png" alt={"old logo2"}></img>
               { previewUrl2 && <img className="h-7" src={previewUrl2} alt={"new logo2"}></img>}
             </div>

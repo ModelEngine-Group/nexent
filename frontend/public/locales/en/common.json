@@ -3832,5 +3832,7 @@
   "project.config.logo.size": "Image size must not exceed 200KB",
   "project.config.update.success": "Configuration updated successfully, effective after page refresh",
   "project.config.page.subtitle": "Subtitle",
-  "project.config.page.description": "Page description"
+  "project.config.page.description": "Page description",
+  "project.config.page.complete.logo": "Full logo",
+  "project.config.page.simple.log": "Simplified logo"
 }

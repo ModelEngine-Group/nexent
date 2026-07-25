@@ -3832,5 +3832,7 @@
   "project.config.logo.size": "图片大小不超过200KB",
   "project.config.update.success": "更新配置成功，刷新页面后生效",
   "project.config.page.subtitle": "子标题",
-  "project.config.page.description": "页面描述"
+  "project.config.page.description": "页面描述",
+  "project.config.page.complete.logo": "完整logo",
+  "project.config.page.simple.log": "精简logo"
 }
