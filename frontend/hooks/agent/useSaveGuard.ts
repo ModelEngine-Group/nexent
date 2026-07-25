@@ -40,12 +40,40 @@ async function batchUpdateToolConfigs(
   for (const tool of currentTools) {
     const toolId = parseInt(tool.id);
     const isEnabled = true; // Selected tools are always enabled
-    const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-      acc[param.name] = param.value;
-      return acc;
-    }, {} as Record<string, any>) || {};
 
     try {
+      const existingConfig = await searchToolConfig(toolId, agentId);
+      const existingParams =
+        existingConfig.success && existingConfig.data?.params
+          ? existingConfig.data.params
+          : {};
+      const baselineTool = baselineTools.find(
+        (candidate) => parseInt(candidate.id) === toolId
+      );
+      const baselineParams = (baselineTool?.initParams || []).reduce(
+        (acc: Record<string, any>, param: any) => {
+          acc[param.name] = param.value;
+          return acc;
+        },
+        {} as Record<string, any>
+      );
+      const params = (tool.initParams || []).reduce(
+        (acc: Record<string, any>, param: any) => {
+          const currentValue = param.value;
+          const resolvedValue =
+            currentValue !== null && currentValue !== undefined
+              ? currentValue
+              : existingParams[param.name] ??
+                baselineParams[param.name] ??
+                param.default;
+          if (resolvedValue !== null && resolvedValue !== undefined) {
+            acc[param.name] = resolvedValue;
+          }
+          return acc;
+        },
+        {} as Record<string, any>
+      );
+
       // Update or create tool instance with current params and enabled status
       await updateToolConfig(toolId, agentId, params, isEnabled);
     } catch (error) {
@@ -124,6 +152,19 @@ export const useSaveGuard = () => {
         .map((skill: any) => Number(skill.skill_id))
         .filter((id: number) => Number.isFinite(id));
 
+      // Update existing tool instances before /agent/update. The agent update
+      // endpoint toggles enabled tools using the params already stored in the
+      // database, so this ordering prevents stale null params from overwriting
+      // the values configured in the editor.
+      if (currentAgentId !== null && currentAgentId !== undefined) {
+        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
+        await batchUpdateToolConfigs(
+          currentAgentId,
+          currentEditedAgent.tools || [],
+          baselineTools
+        );
+      }
+
       const result = await updateAgentInfo({
         agent_id: currentAgentId ?? undefined, // undefined=create, number=update
         name: currentEditedAgent.name,
@@ -187,9 +228,16 @@ export const useSaveGuard = () => {
           }
         }
 
-        // Batch process tool configurations for both create and update modes
-        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
-        await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
+        // Batch process tool configurations for newly created agents. Existing
+        // agents were updated before /agent/update to avoid parameter overwrite.
+        if (currentAgentId === null || currentAgentId === undefined) {
+          const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
+          await batchUpdateToolConfigs(
+            finalAgentId,
+            currentEditedAgent.tools || [],
+            baselineTools
+          );
+        }
 
         // Common logic for both creation and update: refresh cache and update store
         await queryClient.invalidateQueries({

@@ -803,7 +803,10 @@ export const searchAgentInfo = async (
                     name: param.name,
                     type: convertParamType(param.type),
                     required: !param.optional,
-                    value: param.default,
+                    value:
+                      param.value !== undefined && param.value !== null
+                        ? param.value
+                        : param.default,
                     description: param.description,
                     description_zh: param.description_zh,
                   }))
