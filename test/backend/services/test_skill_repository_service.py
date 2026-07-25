@@ -231,7 +231,11 @@ def setup_function():
     }
 
 
-def _repository_record(status="not_shared", publisher_user_id="user-1"):
+def _repository_record(
+    status="not_shared",
+    publisher_user_id="user-1",
+    created_by="user-1",
+):
     return {
         "skill_repository_id": 1,
         "skill_id": 10,
@@ -247,7 +251,7 @@ def _repository_record(status="not_shared", publisher_user_id="user-1"):
         "skill_info_json": {
             "content": "content",
             "tags": ["tag"],
-            "created_by": "user-1",
+            "created_by": created_by,
         },
         "create_time": None,
         "update_time": None,
@@ -373,7 +377,11 @@ def test_update_status_dev_cannot_approve_review():
 
 def test_update_status_dev_cannot_update_other_users_listing():
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="shared", publisher_user_id="someone-else")
+        _repository_record(
+            status="shared",
+            publisher_user_id="someone-else",
+            created_by="someone-else",
+        )
     )
 
     with pytest.raises(ForbiddenError):
@@ -383,6 +391,32 @@ def test_update_status_dev_cannot_update_other_users_listing():
             user_id="user-1",
             tenant_id="tenant-1",
         )
+
+
+@pytest.mark.parametrize("initial_status", ["pending_review", "shared"])
+def test_update_status_skill_creator_can_update_admin_listing(initial_status):
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(
+            status=initial_status,
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+        _repository_record(
+            status="not_shared",
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="not_shared",
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result["status"] == "not_shared"
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
 
 
 def test_install_skill_from_repository_success_increments_downloads():

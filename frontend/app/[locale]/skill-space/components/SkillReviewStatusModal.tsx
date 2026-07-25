@@ -70,10 +70,16 @@ export function SkillReviewStatusModal({
       title: canTakeDown
         ? t("skillRepository.reviewStatus.confirmTakeDown")
         : t("skillRepository.reviewStatus.confirmWithdraw"),
-      content: title,
+      content: canTakeDown
+        ? t("skillRepository.reviewStatus.confirmTakeDownContent", {
+            name: title,
+          })
+        : t("skillRepository.reviewStatus.confirmWithdrawContent", {
+            name: title,
+          }),
       okText: canTakeDown
         ? t("skillRepository.action.status.notShared")
-        : t("skillRepository.reviewStatus.withdraw"),
+        : t("skillRepository.reviewStatus.withdrawApply"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: onSetNotShared,
@@ -135,22 +141,16 @@ export function SkillReviewStatusModal({
         </div>
       </div>
 
-      <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-        <div className="flex justify-between gap-4">
-          <span>{t("skillRepository.reviewStatus.repositoryRecord")}</span>
-          <span className="font-medium text-slate-700 dark:text-slate-200">
-            #{repositoryInfo.skill_repository_id}
-          </span>
-        </div>
-        {submittedAt ? (
+      {submittedAt ? (
+        <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
           <div className="flex justify-between gap-4">
             <span>{t("skillRepository.reviewStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </Modal>
   );
 }

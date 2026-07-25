@@ -237,6 +237,33 @@ export default function SkillRepositoryPage() {
     ? (installMutation.variables?.skillRepositoryId ?? null)
     : null;
 
+  useEffect(() => {
+    const total = repositoryData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / REPOSITORY_PAGE_SIZE));
+    if (repositoryPage > totalPages) {
+      setRepositoryPage(totalPages);
+    }
+  }, [repositoryData?.pagination?.total, repositoryPage]);
+
+  useEffect(() => {
+    const total = mineData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / MINE_PAGE_SIZE));
+    if (minePage > totalPages) {
+      setMinePage(totalPages);
+    }
+  }, [mineData?.pagination?.total, minePage]);
+
+  useEffect(() => {
+    const total = reviewData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+    if (reviewPage > totalPages) {
+      setReviewPage(totalPages);
+    }
+  }, [reviewData?.pagination?.total, reviewPage]);
+
   const getDuplicateSkillNames = (error: unknown): string[] | null => {
     const detail =
       error instanceof Error && "detail" in error

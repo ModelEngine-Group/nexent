@@ -30,9 +30,7 @@ export async function invalidateSkillRepositoryCaches(
   ] as const;
 
   await Promise.all(
-    keys.map((queryKey) =>
-      queryClient.refetchQueries({ queryKey, type: "all" })
-    )
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
   );
 }
 

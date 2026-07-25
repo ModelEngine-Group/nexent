@@ -561,8 +561,11 @@ def _validate_publisher_status_transition(
 ) -> Optional[Dict[str, str]]:
     if record.get("publisher_tenant_id") != tenant_id:
         raise ForbiddenError("Not authorized to update this repository listing")
-    if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-        raise ForbiddenError("Not authorized to update this repository listing")
+    if user_role == "DEV":
+        snapshot = _as_dict(record.get("skill_info_json"))
+        owner_user_id = snapshot.get("created_by") or record.get("publisher_user_id")
+        if str(owner_user_id) != str(user_id):
+            raise ForbiddenError("Not authorized to update this repository listing")
     if user_role == "ADMIN" and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
         return None
     if transition not in _PUBLISHER_STATUS_TRANSITIONS:
