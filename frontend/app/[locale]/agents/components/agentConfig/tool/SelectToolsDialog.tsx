@@ -83,10 +83,14 @@ export default function SelectToolsDialog({
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { serverList: rawServers } = useMcpServerList({ enabled: open, tenantId });
+  const allMcpServerNames = useMemo(
+    () => new Set(rawServers.map((s) => s.service_name)),
+    [rawServers],
+  );
   const visibleMcpNames = useMemo(
     () => new Set(
       rawServers
-        .filter((s) => s.permission === "EDIT" || s.group_ids)
+        .filter((s) => !s.permission || s.permission === "EDIT" || s.permission === "READ_ONLY" || s.group_ids)
         .map((s) => s.service_name),
     ),
     [rawServers],
@@ -125,9 +129,9 @@ export default function SelectToolsDialog({
       const sourceTools = availableTools.filter(
         (t: any) => t.source === tab.sourceValue
       );
-      // For MCP tools, only show those from visible MCP servers
+      // For MCP tools: show API-added (not in server list) or from visible servers
       const filteredTools = tab.key === "mcp"
-        ? sourceTools.filter((t: any) => visibleMcpNames.has(t.usage))
+        ? sourceTools.filter((t: any) => !allMcpServerNames.has(t.usage) || visibleMcpNames.has(t.usage))
         : sourceTools;
       const catMap = new Map<string, any[]>();
       for (const tool of filteredTools) {
@@ -151,7 +155,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools, visibleMcpNames]);
+  }, [availableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {
