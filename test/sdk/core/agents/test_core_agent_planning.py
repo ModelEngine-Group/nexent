@@ -51,7 +51,17 @@ mock_jinja2.StrictUndefined = MagicMock()
 mock_smolagents = _mock_module("smolagents")
 
 mock_agents = _mock_module("smolagents.agents")
-mock_agents.CodeAgent = type("CodeAgent", (), {})
+class _CodeAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_name = kwargs.get("name", "agent")
+        self.model = kwargs.get("model")
+        self.logger = MagicMock()
+        self.tools = kwargs.get("tools", {}) or {}
+        self.managed_agents = kwargs.get("managed_agents", {}) or {}
+        self.code_block_tags = ["python", ""]
+
+
+mock_agents.CodeAgent = _CodeAgent
 mock_agents.AgentError = type("AgentError", (Exception,), {})
 mock_agents.ActionOutput = type("ActionOutput", (), {})
 mock_agents.RunResult = type("RunResult", (), {})
@@ -349,6 +359,21 @@ def _make_core_agent(*, enable_planning=False, redis_client=None,
 
 class TestEnablePlanningInit:
     """CoreAgent branches on enable_planning: PlanRepo instantiated only when True."""
+
+    def test_init_preserves_run_identity_and_pops_sdk_kwargs(self):
+        observer = MessageObserver()
+        agent = CoreAgent(
+            observer=observer,
+            enable_planning=False,
+            conversation_id=273,
+            user_id="user-1",
+            context_runtime=SimpleNamespace(),
+        )
+
+        assert agent.conversation_id == 273
+        assert agent.user_id == "user-1"
+        assert agent.enable_planning is False
+        assert agent.plan_repo is None
 
     def test_plan_repo_built_when_enabled(self):
         agent = _make_core_agent(enable_planning=True)

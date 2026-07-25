@@ -3385,6 +3385,42 @@ class TestCreateSingleAgent:
         with pytest.raises(TypeError, match="agent_config must be a AgentConfig object"):
             nexent_agent_instance.create_single_agent("not_an_agent_config")
 
+    def test_wrap_subagent_uses_config_identity_and_name(self, nexent_agent_instance):
+        """Test _wrap_subagent loads the wrapper and resolves managed-agent metadata."""
+        inner_agent = MagicMock(name="inner_agent")
+        sub_agent_config = MagicMock(agent_id="managed-1", name="Research agent")
+
+        wrapped_agent = nexent_agent_instance._wrap_subagent(inner_agent, sub_agent_config)
+
+        assert wrapped_agent._inner is inner_agent
+        assert wrapped_agent._observer is nexent_agent_instance.observer
+        assert wrapped_agent._agent_id == "managed-1"
+        assert wrapped_agent._agent_name == "Research agent"
+
+    def test_create_single_agent_passes_context_item_override(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        """Test create_single_agent converts the supplied context input sequence into runtime state."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        context_item = MagicMock()
+        agent_config = AgentConfig(
+            name="context_agent",
+            description="Agent with runtime context",
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            result = nexent_agent_instance.create_single_agent(
+                agent_config,
+                context_items_override=(context_item,),
+            )
+
+        context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
+        assert result is mock_core_agent
+        assert context_runtime.items == [context_item]
+
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
         nexent_agent_instance.model_config_list = [mock_model_config]

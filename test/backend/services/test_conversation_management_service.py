@@ -214,6 +214,7 @@ from backend.services.conversation_management_service import (
         get_sources_service,
         generate_conversation_title_service,
         update_conversation_agent_id_service,
+        update_conversation_chat_mode_service,
         update_message_opinion_service,
         get_message_id_by_index_impl
     )
@@ -524,6 +525,66 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(str(context.exception), "database down")
         mock_update_conversation_agent_id.assert_called_once_with(
             123, 7, self.user_id)
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_success(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.return_value = True
+
+        result = update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        self.assertTrue(result)
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_not_found(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.return_value = False
+
+        with self.assertRaises(Exception) as context:
+            update_conversation_chat_mode_service(123, "execution", self.user_id)
+
+        self.assertIn("Conversation 123 does not exist", str(context.exception))
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="execution",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_database_error(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.side_effect = Exception("database down")
+
+        with self.assertRaises(Exception) as context:
+            update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        self.assertEqual(str(context.exception), "database down")
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_propagates_value_error(
+        self, mock_update_conversation_chat_mode
+    ):
+        mock_update_conversation_chat_mode.side_effect = ValueError("invalid database value")
+
+        with self.assertRaisesRegex(ValueError, "invalid database value"):
+            update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    def test_update_conversation_chat_mode_service_rejects_invalid_mode(self):
+        with self.assertRaisesRegex(ValueError, "Invalid chat_mode 'invalid'"):
+            update_conversation_chat_mode_service(123, "invalid", self.user_id)
 
     @patch('backend.services.conversation_management_service.get_conversation_list')
     def test_get_conversation_list_service(self, mock_get_conversation_list):

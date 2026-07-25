@@ -1890,6 +1890,7 @@ class TestRunStreamRealExecution:
             FINAL_ANSWER = "FINAL_ANSWER"
             ERROR = "ERROR"
             OTHER = "OTHER"
+            TOOL = "TOOL"
             MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
 
         mock_observer = MagicMock()
@@ -2859,3 +2860,51 @@ def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones()
     assert module.CoreAgent._known_tool_names(agent) == set()
     assert module.CoreAgent._managed_agent_names(agent) == set()
     assert module.CoreAgent._non_emitting_tool_names(agent) == set()
+
+
+def test_wrap_visible_tool_events_supports_sequence_containers_and_skips_hidden_tools():
+    """Wrap visible sequence tools while leaving explicitly hidden tools untouched."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+
+    class Tool:
+        def __init__(self, name, emit_tool_event=True):
+            self.name = name
+            self.emit_tool_event = emit_tool_event
+            self.calls = []
+
+        def forward(self, **kwargs):
+            self.calls.append(kwargs)
+            return self.name
+
+    visible = Tool("visible")
+    hidden = Tool("hidden", emit_tool_event=False)
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.tools = [visible, hidden]
+    agent.managed_agents = []
+    agent.observer = observer
+    agent.agent_name = "test-agent"
+
+    agent._wrap_visible_tool_events()
+
+    assert visible.forward(query="value") == "visible"
+    assert hidden.forward(query="value") == "hidden"
+    assert visible.calls == [{"query": "value"}]
+    assert hidden.calls == [{"query": "value"}]
+    observer.add_message.assert_called_once()
+    assert observer.add_message.call_args.kwargs["tool_name"] == "visible"
+
+
+def test_wrap_visible_tool_events_skips_tools_without_forward():
+    """Ignore sequence entries that do not expose a callable forward method."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.tools = [type("NoForwardTool", (), {"name": "broken"})()]
+    agent.managed_agents = []
+    agent.observer = MagicMock()
+    agent.agent_name = "test-agent"
+
+    agent._wrap_visible_tool_events()
+
+    assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
