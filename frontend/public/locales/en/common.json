@@ -3819,8 +3819,8 @@
   "toolConfig.validation.array.invalid": "Please enter valid array JSON",
   "toolConfig.validation.object.invalid": "Please enter valid object JSON",
 
-  "project.config": "Project config",
-  "project.config.title": "Project Title",
+  "project.config": "System config",
+  "project.config.title": "System Title",
   "project.config.language.en": "Please enter the English configuration.",
   "project.config.language.zh": "Please enter the Chinese configuration.",
   "project.config.about.us": "External Link",
