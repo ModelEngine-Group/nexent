@@ -68,7 +68,7 @@ class HistoryCompressor:
             call_type="history_incremental" if summary else "history_summary",
             prompt_type="incremental" if summary else "initial",
         )
-        if not generated.summary_text:
+        if not generated.summary_text or "##" not in generated.summary_text:
             return HistoryCompressionResult(
                 records=tuple(generated.records),
                 fallback_turns=self._safe_fallback(turns),
