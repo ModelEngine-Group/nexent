@@ -27,6 +27,7 @@ from nexent.core.agents.context.formatting import (
     _format_skills_description,
     _format_tools_description,
 )
+from nexent.core.agents.context.llm_summary import _strip_code_fences
 from nexent.core.agents.context.rendering import ContextItemRenderer, ContextItemRenderingError
 from nexent.core.agents.context.step_renderer import StepRenderer
 from nexent.core.context_runtime.contracts import (
@@ -300,6 +301,66 @@ def test_renderer_current_action_without_raw_messages():
     assert "Step 1:" in text
     assert "Result: done" in text
     assert not text.lstrip().startswith("{")
+
+
+def test_renderer_current_action_compact_with_tool_calls():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 3,
+            "tool_calls": [{"name": "search", "arguments": {"q": "foo"}}],
+            "observations": "found 5 results",
+            "error": None,
+            "result": "answer is 42",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "Step 3:" in text
+    assert "Called tool 'search'" in text
+    assert "Observation: found 5 results" in text
+    assert "Result: answer is 42" in text
+    assert not text.lstrip().startswith("{")
+
+
+def test_renderer_current_action_compact_with_single_tool_call_dict():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 2,
+            "tool_calls": {"name": "execute", "arguments": {"code": "print(1)"}},
+            "result": "1",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "Called tool 'execute'" in text
+
+
+def test_renderer_summary_legacy_dict_renders_markdown():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {"task_overview": "did work", "completed_work": "finished"},
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "## Task Overview" in text
+    assert "did work" in text
+    assert "## Completed Work" in text
+
+
+def test_strip_code_fences():
+    assert _strip_code_fences("plain text") == "plain text"
+    assert _strip_code_fences("```markdown\n# Title\n```") == "# Title"
+    assert _strip_code_fences("```\ncontent\n```") == "content"
+    assert _strip_code_fences("") is None
+    assert _strip_code_fences("   ") is None
 
 
 def test_context_manager_management_and_diagnostic_helpers():
