@@ -3480,10 +3480,12 @@ class TestCreateSingleAgent:
                 assert a2a_agent_info is not None
                 assert hasattr(a2a_agent_info, 'agent_id')
 
-                # Verify wrapper was passed to CoreAgent
+                # Verify the A2A agent is nested in the managed-agent observer wrapper.
                 mock_core_agent_fn.assert_called_once()
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert len(managed) == 1
+                assert managed[0]._inner is mock_wrapper_instance
 
     def test_create_single_agent_with_multiple_external_a2a_agents(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """Test create_single_agent correctly creates multiple external A2A agent wrappers."""
@@ -3526,10 +3528,13 @@ class TestCreateSingleAgent:
 
                 assert mock_wrapper_class.call_count == 2
 
-                # Verify both wrappers were passed to CoreAgent
+                # Verify both A2A agents are nested in managed-agent observer wrappers.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance_1 in core_agent_call_kwargs["managed_agents"]
-                assert mock_wrapper_instance_2 in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert [wrapped_agent._inner for wrapped_agent in managed] == [
+                    mock_wrapper_instance_1,
+                    mock_wrapper_instance_2,
+                ]
 
     def test_create_single_agent_with_external_a2a_agent_import_error(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent handles import error for ExternalA2AAgentWrapper."""
@@ -3627,12 +3632,12 @@ class TestCreateSingleAgent:
                 # Verify external wrapper was created
                 mock_wrapper_class.assert_called_once()
 
-                # Verify CoreAgent received both sub-agent and external wrapper
+                # Verify CoreAgent received wrappers around both managed agents.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
                 managed = core_agent_call_kwargs["managed_agents"]
                 assert len(managed) == 2
-                assert isinstance(managed[0], mock_core_agent_class)  # Sub-agent
-                assert managed[1] == mock_wrapper_instance  # External wrapper
+                assert isinstance(managed[0]._inner, mock_core_agent_class)
+                assert managed[1]._inner is mock_wrapper_instance
 
 
 class TestAddHistoryToAgentEdgeCases:

@@ -325,6 +325,7 @@ class TestConversationManagementService(unittest.TestCase):
             unit_content="print('hi')",
             user_id=self.user_id,
             unit_status="streaming",
+            tool_call_id=None,
         )
 
     @patch('backend.services.conversation_management_service.create_source_image')
@@ -690,7 +691,7 @@ class TestConversationManagementService(unittest.TestCase):
             if unit["type"] == "history_summary"]
         self.assertEqual(summary_units, [{
             "type": "history_summary", "content": summary_content,
-            "unit_index": 2, "unit_status": "completed",
+            "unit_index": 2, "unit_status": "completed", "tool_call_id": None,
         }])
 
     @patch('backend.services.conversation_management_service.get_conversation_history')

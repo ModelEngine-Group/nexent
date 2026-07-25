@@ -441,7 +441,6 @@ class Message:
             result["agent_id"] = self.agent_id
         if self.agent_name is not None:
             result["agent_name"] = self.agent_name
-        # Depth is 0 for the main agent; every chunk carries it so the
-        # frontend can group by depth without bookkeeping state.
-        result["depth"] = self.depth
+        if self.depth:
+            result["depth"] = self.depth
         return json.dumps(result, ensure_ascii=False)

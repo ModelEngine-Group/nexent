@@ -869,7 +869,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         ).where(
             ConversationMessageUnit.message_id == ConversationMessage.message_id,
             ConversationMessageUnit.delete_flag == 'N',
-            ConversationMessageUnit.unit_type is not None
+            ConversationMessageUnit.unit_type.is_not(None)
         ).scalar_subquery()
 
         query = select(
