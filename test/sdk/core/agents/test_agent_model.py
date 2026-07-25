@@ -852,6 +852,16 @@ class TestAgentRunInfoPlanning:
         run_info = self._make_run_info(enable_planning=True)
         assert run_info.enable_planning is True
 
+    def test_run_identity_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.conversation_id is None
+        assert run_info.user_id is None
+
+    def test_run_identity_can_be_set(self):
+        run_info = self._make_run_info(conversation_id=273, user_id="user-1")
+        assert run_info.conversation_id == 273
+        assert run_info.user_id == "user-1"
+
     def test_redis_client_defaults_to_none(self):
         run_info = self._make_run_info()
         assert run_info.redis_client is None

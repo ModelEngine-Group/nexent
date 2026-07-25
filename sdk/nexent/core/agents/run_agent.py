@@ -152,6 +152,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 redis_client=agent_run_info.redis_client,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                 minio_client=getattr(agent_run_info, "minio_client", None),
+                conversation_id=agent_run_info.conversation_id,
+                user_id=agent_run_info.user_id,
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -176,6 +178,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     redis_client=agent_run_info.redis_client,
                     sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                     minio_client=getattr(agent_run_info, "minio_client", None),
+                    conversation_id=agent_run_info.conversation_id,
+                    user_id=agent_run_info.user_id,
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,

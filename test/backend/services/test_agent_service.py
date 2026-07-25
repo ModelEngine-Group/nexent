@@ -4449,11 +4449,17 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
     mock_generate_stream.return_value = stream_chunks()
     mock_agent_request.conversation_id = None
     mock_agent_request.is_debug = False
+    mock_agent_request.enable_plan = True
 
     response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
 
     # Assert conversation was created
-    mock_create_conversation.assert_called_once()
+    mock_create_conversation.assert_called_once_with(
+        title="New Conversation",
+        user_id="u",
+        agent_id=mock_agent_request.agent_id,
+        chat_mode="planning" if mock_agent_request.enable_plan else "execution",
+    )
 
     # Assert agent_request got the new conversation_id
     assert mock_agent_request.conversation_id == 999
@@ -4968,6 +4974,79 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     # Verify unregister was called
     assert unregister_called.get("conv_id") == 999
     assert unregister_called.get("user_id") == "u"
+
+
+@pytest.mark.asyncio
+async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
+    """Tool units retain tool name and arguments for historical reloads."""
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="hello",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    plan_content = json.dumps({
+        "plan_id": "hainan_travel_plan",
+        "title": "Hainan travel plan",
+        "steps": [{"id": f"step-{index}", "title": f"Step {index}", "description": ""}
+                  for index in range(1, 4)],
+    })
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "tool",
+            "content": "",
+            "tool_name": "create_plan",
+            "tool_arguments": {"plan_id": "hainan_travel_plan"},
+            "role": "tool",
+        })
+        yield json.dumps({"type": "plan", "content": plan_content})
+
+    class ImmediateFuture:
+        def __init__(self, value):
+            self.value = value
+
+        def result(self):
+            return self.value
+
+    save_unit = MagicMock(return_value=4243)
+    monkeypatch.setattr("backend.services.agent_service.agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr("backend.services.agent_service.save_message", MagicMock(return_value=4242), raising=False)
+    monkeypatch.setattr("backend.services.agent_service.save_message_unit", save_unit, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *args, **kwargs: ImmediateFuture(fn(*args, **kwargs)),
+        raising=False,
+    )
+    monkeypatch.setattr("backend.services.agent_service.update_unit_content", MagicMock(), raising=False)
+    monkeypatch.setattr("backend.services.agent_service.update_unit_status", MagicMock(), raising=False)
+    monkeypatch.setattr("backend.services.agent_service.update_message_status", MagicMock(), raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        MagicMock(),
+        raising=False,
+    )
+
+    memory_context = MagicMock()
+    memory_context.user_config.memory_switch = False
+    [chunk async for chunk in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_context
+    )]
+
+    tool_call = next(
+        call_item for call_item in save_unit.call_args_list
+        if call_item.kwargs["unit_type"] == "tool"
+    )
+    persisted = json.loads(tool_call.kwargs["unit_content"])
+    assert persisted == {
+        "content": "",
+        "tool_name": "create_plan",
+        "tool_arguments": {"plan_id": "hainan_travel_plan"},
+        "role": "tool",
+    }
 
 
 @pytest.mark.asyncio

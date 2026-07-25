@@ -1,4 +1,6 @@
+import contextvars
 import time
+
 import pytest
 
 from sdk.nexent.core.tools.parallel_executor import _parallel_executor, ParallelExecutorTool
@@ -22,6 +24,11 @@ def _slow(seconds: float = 0.1, **kwargs):
 def _raise(exc_type=ValueError, message="test error"):
     """Callable that raises an exception."""
     raise exc_type(message)
+
+
+def _read_context(**kwargs):
+    """Return the value stored in the test context variable."""
+    return kwargs["context_var"].get()
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +69,19 @@ class TestTwoTupleMode:
         assert len(result) == 3
         for i in range(3):
             assert str(i + 1) in result[i]
+
+    def test_context_variables_are_available_in_worker_threads(self):
+        context_var = contextvars.ContextVar("test_context_var", default=None)
+        token = context_var.set("call-123")
+        try:
+            result = _parallel_executor(
+                (_read_context, {"context_var": context_var}),
+                (_read_context, {"context_var": context_var}),
+            )
+        finally:
+            context_var.reset(token)
+
+        assert result == ["call-123", "call-123"]
 
 
 # ---------------------------------------------------------------------------
