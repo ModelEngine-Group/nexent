@@ -182,7 +182,7 @@ function decodeJwtPayload(token) {
       const decoded = Buffer.from(padded, "base64").toString("utf-8");
       return JSON.parse(decoded)
   } catch (error) {
-    console.error("decodeJwtPayload error:", err.message);
+    console.error("decodeJwtPayload error:", error.message);
     return null;
   }
 }
