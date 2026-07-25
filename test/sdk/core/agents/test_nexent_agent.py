@@ -1,3 +1,4 @@
+import importlib
 import json
 import sys
 import types
@@ -498,8 +499,33 @@ def mock_core_agent():
 
 
 # ----------------------------------------------------------------------------
-# Tests for helper functions (_has_host_tools, _is_retriever_tool)
+# Tests for type-only imports and helper functions
 # ----------------------------------------------------------------------------
+
+
+def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
+    """Verify type-only imports resolve their expected public symbols."""
+    context_module = types.ModuleType("sdk.nexent.core.agents.context")
+    context_item_input = type("ContextItemInput", (), {})
+    context_module.ContextItemInput = context_item_input
+
+    subagent_module = types.ModuleType("sdk.nexent.core.agents.subagent_wrapper")
+    subagent_tool_wrapper = type("SubAgentToolWrapper", (), {})
+    subagent_module.SubAgentToolWrapper = subagent_tool_wrapper
+
+    monkeypatch.setattr("typing.TYPE_CHECKING", True)
+    with patch.dict(
+        sys.modules,
+        {
+            "sdk.nexent.core.agents.context": context_module,
+            "sdk.nexent.core.agents.subagent_wrapper": subagent_module,
+        },
+    ):
+        reloaded_module = importlib.reload(nexent_agent)
+        assert reloaded_module.ContextItemInput is context_item_input
+        assert reloaded_module.SubAgentToolWrapper is subagent_tool_wrapper
+
+    importlib.reload(nexent_agent)
 
 
 def test_has_host_tools_with_host_tool():

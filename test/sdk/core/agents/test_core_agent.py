@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import threading
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
 
@@ -320,6 +320,33 @@ def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
     stream.close()
 
     agent.context_runtime.finalize_evidence.assert_called_once_with(status="cancelled")
+
+
+def test_get_context_summary_returns_runtime_context_manager_summary():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    context_manager = MagicMock()
+    context_manager.get_summary.return_value = "compressed summary"
+    agent.context_runtime = SimpleNamespace(context_manager=context_manager)
+
+    assert agent._get_context_summary() == "compressed summary"
+    context_manager.get_summary.assert_called_once_with()
+
+
+def test_get_context_summary_returns_none_when_manager_is_unavailable():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent.context_runtime = SimpleNamespace()
+
+    assert agent._get_context_summary() is None
+
+
+def test_get_context_summary_returns_none_when_manager_summary_fails():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    context_manager = MagicMock()
+    context_manager.get_summary.side_effect = RuntimeError("summary unavailable")
+    agent.context_runtime = SimpleNamespace(context_manager=context_manager)
+
+    assert agent._get_context_summary() is None
+    context_manager.get_summary.assert_called_once_with()
 
 
 # ----------------------------------------------------------------------------
