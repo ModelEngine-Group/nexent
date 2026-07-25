@@ -100,56 +100,82 @@ def _ensure_index_name(
 def _resolve_tenant_embedding_model_info(
     tenant_id: str,
 ) -> Optional[EmbeddingModelInfo]:
-    """Return the first available tenant embedding model, or ``None``."""
+    """Return the embedding model selected by the tenant, or ``None``."""
     logger.debug("[EMBEDDING_MODEL_LOOKUP] tenant_id=%s", tenant_id)
-    
-    try:
-        from database import model_management_db
-    except ImportError:  # pragma: no cover - defensive
-        logger.warning("[EMBEDDING_MODEL_LOOKUP] model_management_db import failed")
-        return None
 
     try:
-        records = model_management_db.get_model_records(
-            {"model_type": "embedding"}, tenant_id
+        from database.tenant_config_db import get_single_config_info
+        from utils.config_utils import tenant_config_manager
+
+        record = get_single_config_info(tenant_id, "EMBEDDING_ID")
+        if not record or not record.get("config_value"):
+            logger.info(
+                "[EMBEDDING_MODEL_LOOKUP] EMBEDDING_ID is not configured "
+                "for tenant=%s",
+                tenant_id,
+            )
+            return None
+        model_config = tenant_config_manager.get_model_config(
+            "EMBEDDING_ID",
+            tenant_id=tenant_id,
         )
-        logger.debug("[EMBEDDING_MODEL_LOOKUP] found %d model records", len(records))
-        for rec in records:
-            logger.debug("[EMBEDDING_MODEL_LOOKUP] record: model_name=%s connect_status=%s base_url=%s dimension=%s",
-                        rec.get("model_name"), rec.get("connect_status"), 
-                        rec.get("base_url"), rec.get("max_tokens"))
     except Exception:
         logger.exception(
-            "Failed to load tenant embedding model for tenant=%s", tenant_id
+            "Failed to load configured tenant embedding model for tenant=%s",
+            tenant_id,
         )
         return None
 
-    for record in records:
-        if record.get("connect_status", "").lower() == "available":
-            model_name = record.get("model_name")
-            model_repo = record.get("model_repo")
-            base_url = record.get("base_url")
-            api_key = record.get("api_key")
-            dimension = record.get("max_tokens")
-            logger.debug("[EMBEDDING_MODEL_LOOKUP] checking available model: model_name=%s model_repo=%s base_url=%s dimension=%s",
-                        model_name, model_repo, base_url, dimension)
-            if not all([model_name, base_url, api_key, dimension]):
-                logger.warning("[EMBEDDING_MODEL_LOOKUP] skipping model due to missing fields: name=%s base_url=%s api_key=%s dimension=%s",
-                              model_name, base_url, "***" if api_key else None, dimension)
-                continue
-            result = EmbeddingModelInfo(
-                model_name=model_name,
-                model_repo=model_repo,
-                dimension=int(dimension),
-                base_url=base_url,
-                api_key=api_key,
-                ssl_verify=bool(record.get("ssl_verify", True)),
-            )
-            logger.debug("[EMBEDDING_MODEL_LOOKUP] resolved to: %s", result)
-            return result
+    if not model_config:
+        logger.warning(
+            "[EMBEDDING_MODEL_LOOKUP] configured EMBEDDING_ID does not "
+            "resolve to a model for tenant=%s",
+            tenant_id,
+        )
+        return None
 
-    logger.warning("[EMBEDDING_MODEL_LOOKUP] no available embedding model found for tenant=%s", tenant_id)
-    return None
+    model_name = model_config.get("model_name")
+    base_url = model_config.get("base_url")
+    dimension = model_config.get("max_tokens")
+    if not all([model_name, base_url, dimension]):
+        logger.warning(
+            "[EMBEDDING_MODEL_LOOKUP] configured model is incomplete for "
+            "tenant=%s model_name=%s",
+            tenant_id,
+            model_name,
+        )
+        return None
+
+    try:
+        return EmbeddingModelInfo(
+            model_name=model_name,
+            model_repo=model_config.get("model_repo"),
+            dimension=int(dimension),
+            base_url=base_url,
+            api_key=model_config.get("api_key") or "sk-no-api-key",
+            ssl_verify=bool(model_config.get("ssl_verify", True)),
+        )
+    except (TypeError, ValueError):
+        logger.exception(
+            "[EMBEDDING_MODEL_LOOKUP] configured model has invalid dimension "
+            "for tenant=%s",
+            tenant_id,
+        )
+        return None
+
+
+def is_tenant_embedding_configured(tenant_id: str) -> bool:
+    """Return whether the tenant has an active ``EMBEDDING_ID`` row."""
+    from database.tenant_config_db import get_single_config_info
+
+    record = get_single_config_info(tenant_id, "EMBEDDING_ID")
+    return bool(record and record.get("config_value"))
+
+
+def get_tenant_memory_index_name(tenant_id: str) -> Optional[str]:
+    """Return the memory index derived from the selected embedding model."""
+    model_info = _resolve_tenant_embedding_model_info(tenant_id)
+    return model_info.get_index_name() if model_info is not None else None
 
 
 def _compute_content_embedding(
@@ -274,6 +300,15 @@ class MemoryRecordService:
                 embedding_model_info = resolved_model_info
                 index_name = _ensure_index_name(record, embedding_model_info)
 
+        if (
+            actor == "agent"
+            and layer == MemoryLayer.AGENT.value
+            and embedding_model_info is None
+        ):
+            raise MemoryRecordError(
+                "Failed to store memory: tenant embedding model is not configured"
+            )
+
         if not embedding and embedding_model_info is not None:
             embedding = _compute_content_embedding(content, embedding_model_info)
 
@@ -282,6 +317,14 @@ class MemoryRecordService:
             idempotency_key=record["idempotency_key"],
         )
         if existing is not None:
+            if existing.get("content") == content:
+                return {
+                    "memory_id": existing.get("memory_id"),
+                    "layer": layer,
+                    "memory_type": resolved_type,
+                    "event": "UNCHANGED",
+                    "indexed": False,
+                }
             memory_id = memory_record_db.upsert_memory_record_by_idempotency(
                 {
                     # Existing primary key preserved implicitly via
@@ -480,7 +523,7 @@ class MemoryRecordService:
         offset: int = 0,
         include_deleted: bool = False,
     ) -> List[Dict[str, Any]]:
-        return memory_record_db.list_memory_records(
+        rows = memory_record_db.list_memory_records(
             tenant_id,
             user_id=user_id,
             agent_id=agent_id,
@@ -492,6 +535,14 @@ class MemoryRecordService:
             offset=offset,
             include_deleted=include_deleted,
         )
+        current_index_name = get_tenant_memory_index_name(tenant_id)
+        for row in rows:
+            if row.get("layer") == MemoryLayer.AGENT.value:
+                row["embedding_compatible"] = bool(
+                    current_index_name
+                    and row.get("es_index_name") == current_index_name
+                )
+        return rows
 
     def list_full_context_memories(
         self,

@@ -39,6 +39,10 @@ from services.memory_config_service import (
     set_agent_share,
     set_memory_switch,
 )
+from services.memory_record_service import (
+    get_tenant_memory_index_name,
+    is_tenant_embedding_configured,
+)
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
@@ -59,6 +63,28 @@ def load_configs(authorization: Optional[str] = Header(None)):
         logger.error("load_configs failed: %s", e)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail="Failed to load configuration")
+
+
+@router.get("/config/embedding-status")
+def get_embedding_status(authorization: Optional[str] = Header(None)):
+    """Return tenant embedding availability and the active memory index."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "configured": is_tenant_embedding_configured(tenant_id),
+                "current_es_index_name": get_tenant_memory_index_name(tenant_id),
+            },
+        )
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logger.error("get_embedding_status failed: %s", e)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Failed to load embedding configuration status",
+        )
 
 
 @router.post("/config/set")

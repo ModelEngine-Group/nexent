@@ -280,6 +280,13 @@ class AgentConfig(BaseModel):
         description="Authorized fine-grained context item inputs for SDK assembly",
         default=None
     )
+    pre_run_tool_events: List[Dict[str, Any]] = Field(
+        description=(
+            "Structured tool and result events completed before the model loop "
+            "and emitted through the normal streaming persistence path."
+        ),
+        default_factory=list,
+    )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,

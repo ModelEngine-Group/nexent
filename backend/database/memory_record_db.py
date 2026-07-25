@@ -18,10 +18,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from sqlalchemy import and_
+from sqlalchemy import String, and_, cast
 
 from .client import filter_property, get_db_session
-from .db_models import MemoryRecord
+from .db_models import AgentInfo, ConversationRecord, MemoryRecord
 
 
 logger = logging.getLogger("memory_record_db")
@@ -278,13 +278,36 @@ def list_memory_records(
         layer = None
     if memory_type == "":
         memory_type = None
-    if status == "":
+    all_statuses = status == ""
+    if all_statuses:
         status = None
 
     with get_db_session() as session:
         try:
-            query = session.query(MemoryRecord).filter(
-                MemoryRecord.tenant_id == tenant_id,
+            query = (
+                session.query(
+                    MemoryRecord,
+                    AgentInfo.display_name.label("agent_display_name"),
+                    AgentInfo.name.label("agent_name"),
+                    ConversationRecord.conversation_title,
+                )
+                .outerjoin(
+                    AgentInfo,
+                    and_(
+                        cast(AgentInfo.agent_id, String) == MemoryRecord.agent_id,
+                        AgentInfo.version_no == 0,
+                        AgentInfo.delete_flag != "Y",
+                    ),
+                )
+                .outerjoin(
+                    ConversationRecord,
+                    and_(
+                        cast(ConversationRecord.conversation_id, String)
+                        == MemoryRecord.conversation_id,
+                        ConversationRecord.delete_flag != "Y",
+                    ),
+                )
+                .filter(MemoryRecord.tenant_id == tenant_id)
             )
             if user_id is not None:
                 query = query.filter(MemoryRecord.user_id == user_id)
@@ -300,14 +323,25 @@ def list_memory_records(
                 query = query.filter(MemoryRecord.memory_type == memory_type)
             if status is not None:
                 query = query.filter(MemoryRecord.status == status)
-            elif not include_deleted:
+            elif not include_deleted and not all_statuses:
                 query = query.filter(MemoryRecord.status == "active")
             if not include_deleted:
                 query = query.filter(MemoryRecord.delete_flag == "N")
 
             query = query.order_by(MemoryRecord.update_time.desc())
             query = query.limit(limit).offset(offset)
-            return [_record_to_dict(row) for row in query.all()]
+            result = []
+            for (
+                record,
+                agent_display_name,
+                agent_name,
+                conversation_title,
+            ) in query.all():
+                item = _record_to_dict(record)
+                item["agent_name"] = agent_display_name or agent_name
+                item["conversation_title"] = conversation_title
+                result.append(item)
+            return result
         except Exception:
             session.rollback()
             logger.exception("list_memory_records failed")

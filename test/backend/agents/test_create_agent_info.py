@@ -1848,6 +1848,8 @@ class TestCreateAgentConfig:
         enable_context_manager: bool,
         prepared_prompt: str,
         components: Optional[List[Mock]] = None,
+        memory_switch: bool = False,
+        fixed_search_result: str = "No relevant memories found.",
     ):
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
@@ -1859,6 +1861,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
                 patch('backend.agents.create_agent_info.build_context_inputs') as mock_build_components, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
                 patch(
                     'backend.agents.create_agent_info.ContextManagerConfig',
@@ -1878,12 +1881,18 @@ class TestCreateAgentConfig:
             mock_get_template.return_value = {}
             mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
-                user_config=Mock(memory_switch=False),
+                user_config=Mock(
+                    memory_switch=memory_switch,
+                    agent_share_option="always",
+                    disable_agent_ids=[],
+                    disable_user_agent_ids=[],
+                ),
                 memory_config={},
                 tenant_id="tenant_1",
                 user_id="user_1",
                 agent_id="agent_1",
             )
+            mock_search_tool.return_value.forward.return_value = fixed_search_result
             mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
@@ -1894,6 +1903,7 @@ class TestCreateAgentConfig:
                 "build_components": mock_build_components,
                 "prepare_templates": mock_prepare_templates,
                 "agent_config": mock_agent_config,
+                "search_tool": mock_search_tool,
             }
 
     @pytest.mark.asyncio
@@ -1913,6 +1923,68 @@ class TestCreateAgentConfig:
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_routes_memory_policy_through_context_items(self):
+        memory_tools = [
+            types.SimpleNamespace(name="search_memory"),
+            types.SimpleNamespace(name="store_memory"),
+        ]
+        with patch(
+            "backend.agents.create_agent_info._get_skill_script_tools",
+            return_value=memory_tools,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        context_kwargs = mocks["build_components"].call_args.kwargs
+        policy = context_kwargs["memory_tool_policy"]
+        assert "### Memory Tool Policy" in policy
+        assert "search_memory" not in policy
+        assert "store_memory" in policy
+        assert "instructions" not in mocks["agent_config"].call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_runs_fixed_search_once_without_exposing_tool(self):
+        result_text = "Found 1 relevant memories:\n[1] Existing preference"
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=True,
+            prepared_prompt="",
+            memory_switch=True,
+            fixed_search_result=result_text,
+        )
+
+        search_instance = mocks["search_tool"].return_value
+        search_instance.forward.assert_called_once_with("test query", 5)
+
+        context_kwargs = mocks["build_components"].call_args.kwargs
+        assert context_kwargs["memory_list"] == [{
+            "memory": result_text,
+            "memory_level": "retrieved",
+        }]
+        assert "search_memory" not in context_kwargs["tools"]
+        assert "search_memory" not in context_kwargs["memory_tool_policy"]
+        assert all(
+            tool.name != "search_memory"
+            for tool in mocks["agent_config"].call_args.kwargs["tools"]
+        )
+        assert mocks["agent_config"].call_args.kwargs["pre_run_tool_events"] == [
+            {
+                "type": "tool",
+                "content": "",
+                "tool_name": "search_memory",
+                "tool_arguments": {
+                    "query": "test query",
+                    "top_k": 5,
+                },
+            },
+            {
+                "type": "execution_logs",
+                "content": result_text,
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -2052,6 +2124,7 @@ class TestCreateAgentConfig:
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
                 verification_config=ANY,
@@ -3600,6 +3673,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
+                conversation_id=None,
                 enable_planning=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)

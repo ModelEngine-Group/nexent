@@ -30,6 +30,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from database.user_tenant_db import get_user_tenant_by_user_id
 from services.memory_context_service import get_memory_context_service
 from services.memory_record_service import (
     MemoryRecordError,
@@ -42,6 +43,16 @@ from utils.auth_utils import get_current_user_id
 logger = logging.getLogger("memory_record_app")
 logger.setLevel(logging.DEBUG)
 router = APIRouter(prefix="/memory")
+
+
+def _require_tenant_admin(user_id: str) -> None:
+    """Reject tenant-memory writes from non-ADMIN users."""
+    user_tenant = get_user_tenant_by_user_id(user_id) or {}
+    if str(user_tenant.get("user_role") or "").upper() != "ADMIN":
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Tenant memory creation requires the ADMIN role",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +122,8 @@ def create_record(
     manual management and for Dreaming promotion.
     """
     user_id, tenant_id = get_current_user_id(authorization)
+    if payload.layer.strip().lower() == "tenant":
+        _require_tenant_admin(user_id)
     service = get_memory_record_service()
     try:
         result = service.create_memory(
@@ -170,13 +183,14 @@ def list_records(
     offset: int = Query(default=0, ge=0),
 ):
     user_id, tenant_id = get_current_user_id(authorization)
+    normalized_layer = layer.strip().lower() if layer else None
     service = get_memory_record_service()
     rows = service.list_memories(
         tenant_id,
-        user_id=user_id,
+        user_id=None if normalized_layer == "tenant" else user_id,
         agent_id=agent_id,
         conversation_id=conversation_id,
-        layer=layer.strip().lower() if layer else None,
+        layer=normalized_layer,
         memory_type=memory_type,
         status=status,
         limit=limit,

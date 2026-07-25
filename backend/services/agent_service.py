@@ -5,7 +5,6 @@ import io
 import json
 import logging
 import os
-import uuid
 import zipfile
 from collections import deque
 from typing import Any, Callable, Optional, Dict, List
@@ -22,7 +21,7 @@ from agents.create_agent_info import create_agent_run_info, create_tool_config_l
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
-from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
+from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
@@ -62,7 +61,12 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
+from database.model_management_db import (
+    get_model_by_model_id,
+    get_model_by_model_id_ignore_delete,
+    get_model_id_by_display_name,
+    get_valid_model_ids,
+)
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -987,8 +991,18 @@ async def _stream_agent_chunks(
         yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
+    async def _iter_run_chunks():
+        for event in getattr(
+            agent_run_info.agent_config,
+            "pre_run_tool_events",
+            (),
+        ):
+            yield json.dumps(event, ensure_ascii=False)
+        async for agent_chunk in agent_run(agent_run_info):
+            yield agent_chunk
+
     try:
-        async for chunk in agent_run(agent_run_info):
+        async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
             chunk_content: str = ""
             try:
@@ -1231,6 +1245,21 @@ async def _stream_agent_chunks(
                     elif streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
+                        persisted_unit_content = chunk_content
+                        if chunk_type in ("tool", "tool-call"):
+                            persisted_unit_content = json.dumps(
+                                {
+                                    "content": chunk_content,
+                                    "tool_name": data.get("tool_name"),
+                                    "tool_arguments": data.get("tool_arguments"),
+                                    **(
+                                        {"role": data["role"]}
+                                        if data.get("role") is not None
+                                        else {}
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            )
                         try:
                             new_unit_id = submit(
                                 save_message_unit,
@@ -1238,7 +1267,7 @@ async def _stream_agent_chunks(
                                 conversation_id=agent_request.conversation_id,
                                 unit_index=next_unit_index,
                                 unit_type=chunk_type,
-                                unit_content=chunk_content,
+                                unit_content=persisted_unit_content,
                                 user_id=user_id,
                                 unit_status="streaming",
                             ).result()
@@ -1251,7 +1280,7 @@ async def _stream_agent_chunks(
                         else:
                             current_unit = {
                                 "type": chunk_type,
-                                "content": chunk_content,
+                                "content": persisted_unit_content,
                                 "unit_id": new_unit_id,
                                 "unit_index": next_unit_index,
                                 "mergeable": mergeable,
@@ -2749,6 +2778,7 @@ async def prepare_agent_run(
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
+
     agent_run_info = await create_agent_run_info(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
@@ -2763,6 +2793,7 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        conversation_id=agent_request.conversation_id,
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
     )
@@ -2821,10 +2852,7 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
 
 
 # Helper function for run_agent_stream. ``enable_memory`` controls whether
-# memory preprocessing tokens (``MEMORY_SEARCH_START_MSG`` /
-# ``MEMORY_SEARCH_DONE_MSG`` / ``MEMORY_SEARCH_FAIL_MSG``) are emitted and
-# whether memory retrieval is performed at agent-build time. When memory is
-# disabled the call collapses to the simpler no-memory streaming path.
+# fixed pre-run retrieval and the model-directed store_memory tool are enabled.
 async def generate_stream(
     agent_request: AgentRequest,
     user_id: str,
@@ -2840,39 +2868,13 @@ async def generate_stream(
         user_id: The caller user id.
         tenant_id: The caller tenant id.
         language: UI/i18n language (``"zh"`` / ``"en"``).
-        enable_memory: When ``True`` the memory preprocess tokens are
-            emitted and ``prepare_agent_run`` is invoked with
-            ``allow_memory_search=True``. A ``MemoryPreparationException``
-            triggers a single fallback to the no-memory path so the run
-            still produces output instead of erroring out. When ``False``
-            the function behaves like the legacy
-            ``generate_stream_no_memory`` and skips all of the above.
+        enable_memory: When ``True``, memory retrieval runs once before the
+            model loop and store_memory is loaded for model-directed use. A
+            ``MemoryPreparationException`` triggers a single fallback to the
+            no-memory path so the run still produces output.
         channel: Optional streaming channel; when ``None`` a fresh channel
-            is created lazily when memory preprocessing is enabled.
+            is created lazily when memory is enabled.
     """
-    # Helper to emit memory_search token.
-    def _memory_token(message_text: str) -> str:
-        payload = {
-            "type": "memory_search",
-            "content": json.dumps({"message": message_text}, ensure_ascii=False),
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
-    msg_start = MEMORY_SEARCH_START_MSG
-    msg_done = MEMORY_SEARCH_DONE_MSG
-    msg_fail = MEMORY_SEARCH_FAIL_MSG
-
-    # Prepare preprocess task tracking only when memory is enabled, mirroring
-    # the legacy ``generate_stream_with_memory`` behavior.
-    task_id: Optional[str] = None
-    if enable_memory:
-        task_id = str(uuid.uuid4())
-        current_task = asyncio.current_task()
-        if current_task:
-            preprocess_manager.register_preprocess_task(
-                task_id, agent_request.conversation_id, current_task
-            )
-
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
     _outer_task = asyncio.current_task()
@@ -2897,39 +2899,29 @@ async def generate_stream(
     memory_enabled_runtime = False
     try:
         if enable_memory:
-            # Peek the user-level memory switch before retrieving memories so
-            # the start / done / fail tokens are gated on the same flag the
-            # old ``generate_stream_with_memory`` honored.
+            # Resolve the user-level switch for tool loading only.
             memory_context_preview = build_memory_context(
                 user_id, tenant_id, agent_request.agent_id
             )
             memory_enabled_runtime = bool(
                 memory_context_preview.user_config.memory_switch
             )
-            if memory_enabled_runtime:
-                await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
-                yield f"data: {_memory_token(msg_start)}\n\n"
 
-        # Prepare run: with ``allow_memory_search=True`` this performs memory
-        # retrieval; with ``False`` it skips and just builds the agent.
+        # Prepare the agent with or without memory. The preparation path runs
+        # fixed retrieval before the model loop and exposes only store_memory.
         try:
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
-                allow_memory_search=enable_memory,
+                allow_memory_search=memory_enabled_runtime,
             )
         except Exception as prep_err:
             # Normalize any preparation error to MemoryPreparationException so
             # the memory-enabled path can decide between retry-without-memory
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
-
-        if memory_enabled:
-            # Emit completion token once memory is ready
-            await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
-            yield f"data: {_memory_token(msg_done)}\n\n"
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -2950,10 +2942,6 @@ async def generate_stream(
             await channel.publish(_safe_agent_stream_error_chunk())
             yield _safe_agent_stream_error_chunk()
             return
-
-        if memory_enabled_runtime:
-            await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
-            yield f"data: {_memory_token(msg_fail)}\n\n"
 
         try:
             # Single fallback: re-issue this generator with memory turned off
@@ -2988,8 +2976,6 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
-        # Always unregister preprocess task
-        preprocess_manager.unregister_preprocess_task(task_id)
 
 
 def _detect_resume_position(
@@ -3869,4 +3855,3 @@ def get_sandbox_minio_client() -> Optional[Any]:
         secure=MINIO_SECURE,
     )
     return client
-

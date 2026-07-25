@@ -25,6 +25,8 @@ sys.modules["backend.database.client"] = client_mod
 # Stub SQLAlchemy ``and_``
 sqlalchemy_mod = types.ModuleType("sqlalchemy")
 sqlalchemy_mod.and_ = lambda *args, **kwargs: ("and_", args, kwargs)
+sqlalchemy_mod.String = str
+sqlalchemy_mod.cast = lambda value, target: value
 sys.modules["sqlalchemy"] = sqlalchemy_mod
 
 
@@ -45,6 +47,9 @@ class _Column:
 
     def isnot(self, other):
         return ("isnot", self.name, other)
+
+    def label(self, _name):
+        return self
 
 
 class MemoryRecord:
@@ -81,7 +86,23 @@ class MemoryRecord:
             setattr(self, k, v)
 
 
+class AgentInfo:
+    agent_id = _Column("agent_id")
+    version_no = _Column("version_no")
+    display_name = _Column("display_name")
+    name = _Column("name")
+    delete_flag = _Column("delete_flag")
+
+
+class ConversationRecord:
+    conversation_id = _Column("conversation_id")
+    conversation_title = _Column("conversation_title")
+    delete_flag = _Column("delete_flag")
+
+
 db_models_mod.MemoryRecord = MemoryRecord
+db_models_mod.AgentInfo = AgentInfo
+db_models_mod.ConversationRecord = ConversationRecord
 sys.modules["database.db_models"] = db_models_mod
 sys.modules["backend.database.db_models"] = db_models_mod
 
@@ -252,6 +273,7 @@ def test_list_memory_records_filters(monkeypatch, mock_session_ctx):
 
     query = MagicMock()
     session.query.return_value = query
+    query.outerjoin.return_value = query
     query.filter.return_value = query
     query.order_by.return_value = query
     query.limit.return_value = query
@@ -268,6 +290,57 @@ def test_list_memory_records_filters(monkeypatch, mock_session_ctx):
 
     assert rows == []
     query.filter.assert_called()  # tenant + user + layer + status + delete_flag
+
+
+def test_list_memory_records_enriches_agent_and_conversation(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    record = MemoryRecord(
+        memory_id=1,
+        tenant_id="t1",
+        user_id="u1",
+        agent_id="7",
+        conversation_id="9",
+        layer="agent",
+        memory_type="short_term",
+        status="active",
+        content="remember this",
+        concept_tags=[],
+        es_index_name=None,
+        create_time=None,
+        update_time=None,
+        created_by="u1",
+        updated_by="u1",
+        delete_flag="N",
+        idempotency_key="key",
+        recall_count=0,
+        daily_count=0,
+        grounded_count=0,
+        last_recalled_at=None,
+        query_hashes=[],
+        recall_days=[],
+        light_hits=0,
+        rem_hits=0,
+        last_light_at=None,
+        last_rem_at=None,
+    )
+    query = MagicMock()
+    session.query.return_value = query
+    query.outerjoin.return_value = query
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.offset.return_value = query
+    query.all.return_value = [(record, "Agent Seven", "agent-seven", "Source chat")]
+    monkeypatch.setattr(
+        "backend.database.memory_record_db.get_db_session", lambda: ctx
+    )
+
+    rows = memory_record_db.list_memory_records(
+        "t1", user_id="u1", layer="agent", status=""
+    )
+
+    assert rows[0]["agent_name"] == "Agent Seven"
+    assert rows[0]["conversation_title"] == "Source chat"
 
 
 def test_increment_recall_stats(monkeypatch, mock_session_ctx):

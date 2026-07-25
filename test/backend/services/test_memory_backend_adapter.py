@@ -73,6 +73,9 @@ class MemoryLayer:
     TENANT = _Singleton("tenant", "tenant")
     USER = _Singleton("user", "user")
     AGENT = _Singleton("agent", "agent")
+    tenant = TENANT
+    user = USER
+    agent = AGENT
     _registry = {"tenant": TENANT, "user": USER, "agent": AGENT}
 
     def __new__(cls, value):
@@ -89,6 +92,9 @@ class MemorySearchRequest:
 
 class MemorySearchResult:
     def __init__(self, **kwargs):
+        kwargs.setdefault("source", "internal")
+        kwargs.setdefault("is_external", False)
+        kwargs.setdefault("metadata", {})
         self.__dict__.update(kwargs)
 
 
@@ -126,12 +132,19 @@ retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
 record_service_mod.get_memory_record_service = MagicMock(
     name="get_memory_record_service"
 )
+record_service_mod.MemoryRecordError = type("MemoryRecordError", (Exception,), {})
+record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
+    name="_resolve_tenant_embedding_model_info",
+    return_value=EmbeddingModelInfo(),
+)
 retrieval_service_mod.get_memory_retrieval_service = MagicMock(
     name="get_memory_retrieval_service"
 )
 
 sys.modules["services.memory_record_service"] = record_service_mod
 sys.modules["services.memory_retrieval_service"] = retrieval_service_mod
+sys.modules["backend.services.memory_record_service"] = record_service_mod
+sys.modules["backend.services.memory_retrieval_service"] = retrieval_service_mod
 
 
 from backend.services import memory_backend_adapter
@@ -180,6 +193,48 @@ def test_backend_store_hook_forwards_layer_and_type(fake_record_service):
     assert kwargs["actor"] == "agent"
 
 
+def test_backend_store_hook_normalizes_integer_conversation_id(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": "agent",
+        "memory_type": "short_term",
+        "agent_id": "a1",
+        "conversation_id": 167,
+        "idempotency_key": "k1",
+    }
+
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["conversation_id"] == "167"
+
+
+def test_backend_store_hook_fails_without_embedding_model(fake_record_service):
+    resolver = record_service_mod._resolve_tenant_embedding_model_info
+    previous = resolver.return_value
+    resolver.return_value = None
+    try:
+        with pytest.raises(record_service_mod.MemoryRecordError):
+            asyncio.get_event_loop().run_until_complete(
+                memory_backend_adapter._backend_store_hook(
+                    {
+                        "tenant_id": "t1",
+                        "user_id": "u1",
+                        "content": "hi",
+                        "layer": "agent",
+                        "memory_type": "short_term",
+                    }
+                )
+            )
+        fake_record_service.create_memory.assert_not_called()
+    finally:
+        resolver.return_value = previous
+
+
 def test_backend_search_hook_returns_serialized_results(fake_retrieval_service):
     payload = {
         "tenant_id": "t1",
@@ -197,6 +252,29 @@ def test_backend_search_hook_returns_serialized_results(fake_retrieval_service):
     assert len(results) == 1
     assert results[0]["memory_id"] == "1"
     assert results[0]["layer"] == "agent"
+
+
+def test_backend_search_hook_returns_empty_without_embedding_model(
+    fake_retrieval_service,
+):
+    retrieval_service_mod.get_memory_retrieval_service.reset_mock()
+    resolver = record_service_mod._resolve_tenant_embedding_model_info
+    previous = resolver.return_value
+    resolver.return_value = None
+    try:
+        results = asyncio.get_event_loop().run_until_complete(
+            memory_backend_adapter._backend_search_hook(
+                {
+                    "tenant_id": "t1",
+                    "user_id": "u1",
+                    "query": "hi",
+                }
+            )
+        )
+        assert results == []
+        retrieval_service_mod.get_memory_retrieval_service.assert_not_called()
+    finally:
+        resolver.return_value = previous
 
 
 def test_build_memory_service_for_agent_returns_memory_service():

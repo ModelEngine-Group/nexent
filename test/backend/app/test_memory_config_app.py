@@ -74,6 +74,52 @@ class TestMemoryConfigLoad:
                     "detail"] == "Failed to load configuration"
 
 
+class TestMemoryEmbeddingStatus:
+    def test_embedding_status_success(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id",
+            return_value=("u", "t"),
+        ), patch(
+            "apps.memory_config_app.is_tenant_embedding_configured",
+            return_value=True,
+        ), patch(
+            "apps.memory_config_app.get_tenant_memory_index_name",
+            return_value="mem_repo_model_1024",
+        ):
+            resp = client.get(
+                "/memory/config/embedding-status",
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json() == {
+            "configured": True,
+            "current_es_index_name": "mem_repo_model_1024",
+        }
+
+    def test_embedding_status_without_configuration(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id",
+            return_value=("u", "t"),
+        ), patch(
+            "apps.memory_config_app.is_tenant_embedding_configured",
+            return_value=False,
+        ), patch(
+            "apps.memory_config_app.get_tenant_memory_index_name",
+            return_value=None,
+        ):
+            resp = client.get(
+                "/memory/config/embedding-status",
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json() == {
+            "configured": False,
+            "current_es_index_name": None,
+        }
+
+
 class TestSetSingleConfig:
     def test_set_memory_switch_true_string(self):
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
@@ -247,4 +293,3 @@ class TestDisableUserAgentEndpoints:
 # ``/memory/add``, ``/memory/search``, ``/memory/list``, ``/memory/delete/{id}``
 # and ``/memory/clear`` endpoints. New tests for the ``MemoryService`` facade
 # will land once Phase 2 of the memory refactor ships.
-

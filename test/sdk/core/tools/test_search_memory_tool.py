@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -103,6 +104,7 @@ def _make_tool(
     agent_id="a1",
     conversation_id="c1",
     observer=None,
+    embedding_configured=True,
 ):
     """Construct the tool with every constructor kwarg supplied explicitly,
     matching how ``nexent_agent`` wires the runtime instance."""
@@ -114,25 +116,27 @@ def _make_tool(
         agent_id=agent_id,
         conversation_id=conversation_id,
         observer=observer,
+        embedding_configured=embedding_configured,
     )
 
 
 def _make_context(records_by_layer=None):
     """Build a stubbed ``MemorySearchContext`` with duck-typed records.
 
-    Keys may be either ``MemoryLayer`` enum values (tenant/user/agent) or
-    the literal string ``"external"`` to populate the pipeline's separate
-    external bucket.
+    String keys populate the corresponding prompt buckets.
     """
-    from nexent.memory.models import MemoryLayer, MemorySearchContext
-
-    context = MemorySearchContext()
+    context = SimpleNamespace(
+        tenant_long_term=[],
+        user_long_term=[],
+        agent_short_term=[],
+        external=[],
+    )
     if not records_by_layer:
         return context
     layer_attr = {
-        MemoryLayer.TENANT: "tenant_long_term",
-        MemoryLayer.USER: "user_long_term",
-        MemoryLayer.AGENT: "agent_short_term",
+        "tenant": "tenant_long_term",
+        "user": "user_long_term",
+        "agent": "agent_short_term",
         "external": "external",
     }
     for layer_enum, items in records_by_layer.items():
@@ -197,7 +201,6 @@ class TestSearchMemoryToolPipelinePath:
         assert kwargs["agent_id"] == "a1"
         assert kwargs["query"] == "user preferences"
         assert kwargs["top_k"] == 5
-        # Only AGENT layer is queried — tenant/user are full-context.
         assert kwargs["layers"] == ["agent"]
 
         # Output formatting includes the section header and per-record lines.
@@ -206,8 +209,8 @@ class TestSearchMemoryToolPipelinePath:
         assert "Likes dark mode" in result
         assert "Owns two cats" in result
 
-    def test_pipeline_path_renders_all_layer_buckets(self):
-        """All four layer buckets render their own section header when populated."""
+    def test_pipeline_path_discards_non_agent_buckets(self):
+        """Only agent short-term memory may be returned by search_memory."""
         service = _async_context_service(_make_context({
             "tenant": [_StubRecord("Global policy X", score=0.99, source="es")],
             "user": [_StubRecord("Loves cats", score=0.88, source="es")],
@@ -218,17 +221,13 @@ class TestSearchMemoryToolPipelinePath:
 
         out = t.forward(query="anything", top_k=5)
 
-        for header in (
-            "#### Tenant Long-term Memory",
-            "#### User Long-term Memory",
-            "#### Agent Short-term Memory",
-            "#### External Memory",
-        ):
-            assert header in out
-        assert "Global policy X" in out
-        assert "Loves cats" in out
+        assert "#### Agent Short-term Memory" in out
+        assert "Tenant Long-term Memory" not in out
+        assert "User Long-term Memory" not in out
+        assert "External Memory" not in out
+        assert "Global policy X" not in out
+        assert "Loves cats" not in out
         assert "Active thread Y" in out
-        assert "Web hit Z" in out
 
     def test_pipeline_path_no_results_renders_empty_message(self):
         """Empty context surfaces the standard empty marker."""
@@ -253,21 +252,16 @@ class TestSearchMemoryToolPipelinePath:
         assert kwargs["conversation_id"] == "c-42"
         assert kwargs["top_k"] == 7
 
-    def test_pipeline_path_emits_running_prompt(self, observer):
-        """A running prompt is reported via the observer when wired."""
+    def test_pipeline_path_does_not_emit_legacy_running_prompt(self, observer):
+        """Fixed retrieval visibility is emitted by the streaming service."""
         service = _async_context_service(_make_context({}))
         t = _make_tool(memory_context_service=service, observer=observer)
 
         t.forward(query="anything")
 
-        observer.add_message.assert_called_once()
-        # First positional arg is the agent name (empty here), second is
-        # the ProcessType enum.
-        from sdk.nexent.core.utils.observer import ProcessType
-        call_args = observer.add_message.call_args.args
-        assert call_args[1] == ProcessType.TOOL
+        observer.add_message.assert_not_called()
 
-    def test_pipeline_exception_falls_back_to_legacy_memory_service(self, observer):
+    def test_pipeline_exception_falls_back_to_legacy_memory_service(self, observer, caplog):
         """When the pipeline raises, the tool falls back to the
         ``memory_service.search_memory`` legacy path."""
         bad_service = AsyncMock(name="bad_service")
@@ -293,22 +287,41 @@ class TestSearchMemoryToolPipelinePath:
         # Legacy path produced one record with the standard formatting.
         assert "Found 1 relevant memories" in out
         assert "Fallback hit" in out
+        assert "event=memory_tool_degraded tool=search_memory" in caplog.text
+        assert "fallback=memory_service" in caplog.text
+        assert "pipeline exploded" not in caplog.text
 
 
 class TestSearchMemoryToolLegacyFallback:
     """The legacy path remains intact when no ``memory_context_service``."""
 
-    def test_no_services_configured(self, observer):
+    def test_no_services_configured(self, observer, caplog):
         """With neither backend service wired, the tool returns the
         explicit configuration-error message rather than raising."""
         t = _make_tool(observer=observer)
         out = t.forward(query="anything")
         assert "Memory search failed" in out
         assert "MemoryService" in out
+        assert "event=memory_tool_failed tool=search_memory" in caplog.text
+        assert "reason=service_not_configured" in caplog.text
 
-    def test_legacy_memory_service_path(self, observer):
+    def test_embedding_not_configured_returns_empty_list(self, observer, caplog):
+        caplog.set_level("INFO")
+        service = MagicMock(name="legacy_memory_service")
+        t = _make_tool(
+            memory_service=service,
+            observer=observer,
+            embedding_configured=False,
+        )
+
+        assert t.forward(query="anything") == "[]"
+        service.search_memory.assert_not_called()
+        assert "reason=embedding_not_configured" in caplog.text
+
+    def test_legacy_memory_service_path(self, observer, caplog):
         """The legacy direct ``memory_service.search_memory`` path still
         produces the historical output format."""
+        caplog.set_level("INFO")
         legacy_records = [
             _StubRecord("Legacy alpha", score=0.55, source="es"),
             _StubRecord("Legacy beta", score=0.33, source="es"),
@@ -330,8 +343,12 @@ class TestSearchMemoryToolLegacyFallback:
         assert "Legacy beta" in out
         # Legacy format did not render the per-layer section header.
         assert "#### Agent Short-term Memory" not in out
+        assert "event=memory_tool_invoked tool=search_memory" in caplog.text
+        assert "event=memory_tool_completed tool=search_memory" in caplog.text
+        assert "path=memory_service result_count=2" in caplog.text
+        assert "agent query" not in caplog.text
 
-    def test_legacy_exception_returns_graceful_error(self, observer):
+    def test_legacy_exception_returns_graceful_error(self, observer, caplog):
         """A failure in the legacy path still surfaces as a soft error."""
         async def _boom(**kwargs):
             raise RuntimeError("backend unreachable")
@@ -343,3 +360,6 @@ class TestSearchMemoryToolLegacyFallback:
         out = t.forward(query="anything")
         assert "Memory search failed" in out
         assert "backend unreachable" in out
+        assert "event=memory_tool_failed tool=search_memory" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "backend unreachable" not in caplog.text

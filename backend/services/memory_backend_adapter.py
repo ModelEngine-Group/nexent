@@ -33,6 +33,7 @@ from nexent.memory.models import (
 from nexent.memory.service import MemoryService
 
 from .memory_record_service import (
+    MemoryRecordError,
     _resolve_tenant_embedding_model_info,
     get_memory_record_service,
 )
@@ -61,6 +62,10 @@ async def _backend_store_hook(
 
     if embedding is None and layer_value == MemoryLayer.AGENT.value:
         embedding_model_info = _resolve_tenant_embedding_model_info(tenant_id)
+        if embedding_model_info is None:
+            raise MemoryRecordError(
+                "Failed to store memory: tenant embedding model is not configured"
+            )
 
     result = service.create_memory(
         tenant_id=tenant_id,
@@ -69,7 +74,11 @@ async def _backend_store_hook(
         layer=layer_value,
         memory_type=memory_type_value,
         agent_id=payload.get("agent_id"),
-        conversation_id=payload.get("conversation_id"),
+        conversation_id=(
+            str(payload["conversation_id"])
+            if payload.get("conversation_id") not in (None, "")
+            else None
+        ),
         idempotency_key=payload.get("idempotency_key"),
         embedding=embedding,
         embedding_model_info=embedding_model_info,
@@ -82,6 +91,8 @@ async def _backend_search_hook(
     payload: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     """Adapter for ``MemoryService.search_memory`` -> ``MemoryRetrievalService``."""
+    if _resolve_tenant_embedding_model_info(payload["tenant_id"]) is None:
+        return []
     retrieval = get_memory_retrieval_service()
     request = MemorySearchRequest(
         tenant_id=payload["tenant_id"],

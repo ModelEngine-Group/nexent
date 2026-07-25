@@ -149,6 +149,7 @@ class _FakeEmbeddingModelInfo:
 
 
 embedding_model_pkg.EmbeddingModelInfo = _FakeEmbeddingModelInfo
+embedding_model_pkg.get_embedding_client = MagicMock()
 memory_pkg.embedding_model = embedding_model_pkg
 sys.modules["nexent.memory.embedding_model"] = embedding_model_pkg
 
@@ -194,6 +195,7 @@ class MemoryIndexService:
 memory_index_service_mod.MemoryIndexService = MemoryIndexService
 memory_index_service_mod.get_memory_index_service = lambda: MemoryIndexService()
 sys.modules["services.memory_index_service"] = memory_index_service_mod
+sys.modules["backend.services.memory_index_service"] = memory_index_service_mod
 
 
 # ---------------------------------------------------------------------------
@@ -223,14 +225,10 @@ def fake_db(monkeypatch):
     fake.get_memory_record = MagicMock(return_value={"memory_id": 1, "es_index_name": "mem_idx"})
     fake.list_memory_records = MagicMock(return_value=[])
 
-    fake_model_db = MagicMock(name="model_management_db")
-    fake_model_db.get_model_records.return_value = []
-
     fake_client = MagicMock(name="embedding_client")
     fake_client.get_embeddings.return_value = [[0.1, 0.2]]
 
     monkeypatch.setattr(memory_record_service, "memory_record_db", fake)
-    monkeypatch.setattr(memory_record_service, "model_management_db", fake_model_db)
     monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
     return fake
 
@@ -266,6 +264,7 @@ def test_create_memory_agent_short_term_writes_pg_and_es(service, fake_db):
 
 
 def test_create_memory_agent_without_idempotency_key_generates_one(service, fake_db):
+    fake_index_info = _FakeEmbeddingModelInfo(index_name="mem_current")
     result = service.create_memory(
         tenant_id="t1",
         user_id="u1",
@@ -273,6 +272,8 @@ def test_create_memory_agent_without_idempotency_key_generates_one(service, fake
         layer="agent",
         memory_type="short_term",
         agent_id="a1",
+        embedding=[0.1, 0.2],
+        embedding_model_info=fake_index_info,
     )
     assert result["event"] == "ADD"
     assert result["memory_id"] == 1
@@ -341,32 +342,49 @@ def test_soft_delete_memory_cascades_to_index(service, fake_db):
     service.index_service.delete_record.assert_called_once_with(1, "mem_idx")
 
 
-def test_list_memories_delegates_to_db(service, fake_db):
-    fake_db.list_memory_records.return_value = [{"memory_id": 1}]
+def test_list_memories_marks_agent_embedding_compatibility(
+    service, fake_db, monkeypatch
+):
+    fake_db.list_memory_records.return_value = [
+        {
+            "memory_id": 1,
+            "layer": "agent",
+            "es_index_name": "mem_current",
+        },
+        {
+            "memory_id": 2,
+            "layer": "agent",
+            "es_index_name": "mem_previous",
+        },
+    ]
+    monkeypatch.setattr(
+        memory_record_service,
+        "get_tenant_memory_index_name",
+        lambda _tenant_id: "mem_current",
+    )
     rows = service.list_memories("t1", user_id="u1", layer="agent")
-    assert rows == [{"memory_id": 1}]
+    assert rows[0]["embedding_compatible"] is True
+    assert rows[1]["embedding_compatible"] is False
     fake_db.list_memory_records.assert_called_once()
 
 
 def test_create_memory_agent_auto_resolves_tenant_embedding_model(service, fake_db, monkeypatch):
     fake_db.find_by_idempotency.return_value = None
-    fake_db.get_model_records = MagicMock(
-        return_value=[
-            {
-                "model_name": "text-embedding-3-small",
-                "model_repo": "openai",
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "sk-test",
-                "max_tokens": 1536,
-                "ssl_verify": True,
-                "connect_status": "available",
-            }
-        ]
-    )
 
     fake_index_info = _FakeEmbeddingModelInfo(index_name="mem_openai_text_embedding_3_small_1536")
+    fake_index_info.model_name = "text-embedding-3-small"
+    fake_index_info.dimension = 1536
+    fake_index_info.base_url = "https://api.openai.com/v1"
+    fake_index_info.api_key = "sk-test"
+    fake_index_info.model_repo = "openai"
+    fake_index_info.ssl_verify = True
+    monkeypatch.setattr(
+        memory_record_service,
+        "_resolve_tenant_embedding_model_info",
+        lambda _tenant_id: fake_index_info,
+    )
     fake_client = MagicMock(name="embedding_client")
-    fake_client.get_embeddings.return_value = [[0.1, 0.2]]
+    fake_client.return_value.get_embeddings.return_value = [[0.1, 0.2]]
     monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
 
     result = service.create_memory(
@@ -398,43 +416,49 @@ def test_create_memory_agent_auto_resolves_tenant_embedding_model(service, fake_
     assert index_call.kwargs["embedding_model_info"] == fake_index_info
 
 
-def test_create_memory_agent_without_tenant_embedding_model_stays_pg_only(service, fake_db):
+def test_create_memory_agent_without_tenant_embedding_model_fails(service, fake_db, monkeypatch):
     fake_db.find_by_idempotency.return_value = None
-    fake_db.get_model_records = MagicMock(return_value=[])
-
-    result = service.create_memory(
-        tenant_id="t1",
-        user_id="u1",
-        content="hello",
-        layer="agent",
-        memory_type="short_term",
-        agent_id="a1",
-        idempotency_key="k1",
+    monkeypatch.setattr(
+        memory_record_service,
+        "_resolve_tenant_embedding_model_info",
+        lambda _tenant_id: None,
     )
-    assert result["event"] == "ADD"
-    assert result["indexed"] is False
+
+    with pytest.raises(memory_record_service.MemoryRecordError):
+        service.create_memory(
+            tenant_id="t1",
+            user_id="u1",
+            content="hello",
+            layer="agent",
+            memory_type="short_term",
+            agent_id="a1",
+            idempotency_key="k1",
+        )
+    fake_db.insert_memory_record.assert_not_called()
     service.index_service.index_record.assert_not_called()
 
 
 def test_create_memory_agent_embedding_compute_failure_degrades_gracefully(service, fake_db, monkeypatch):
     fake_db.find_by_idempotency.return_value = None
-    fake_db.get_model_records = MagicMock(
-        return_value=[
-            {
-                "model_name": "text-embedding-3-small",
-                "model_repo": "openai",
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "sk-test",
-                "max_tokens": 1536,
-                "ssl_verify": True,
-                "connect_status": "available",
-            }
-        ]
+    fake_index_info = _FakeEmbeddingModelInfo(index_name="mem_current")
+    fake_index_info.model_name = "text-embedding-3-small"
+    fake_index_info.dimension = 1536
+    fake_index_info.base_url = "https://api.openai.com/v1"
+    fake_index_info.api_key = "sk-test"
+    fake_index_info.model_repo = "openai"
+    fake_index_info.ssl_verify = True
+    monkeypatch.setattr(
+        memory_record_service,
+        "_resolve_tenant_embedding_model_info",
+        lambda _tenant_id: fake_index_info,
     )
 
     fake_client = MagicMock(name="embedding_client")
     fake_client.return_value.get_embeddings.side_effect = RuntimeError("upstream timeout")
     monkeypatch.setattr(memory_record_service, "get_embedding_client", fake_client)
+    service.index_service.index_record.side_effect = (
+        lambda *, embedding, **_kwargs: embedding is not None
+    )
 
     result = service.create_memory(
         tenant_id="t1",
@@ -449,4 +473,5 @@ def test_create_memory_agent_embedding_compute_failure_degrades_gracefully(servi
     assert result["memory_id"] == 1
     assert result["indexed"] is False
     fake_db.insert_memory_record.assert_called_once()
-    service.index_service.index_record.assert_not_called()
+    service.index_service.index_record.assert_called_once()
+    assert service.index_service.index_record.call_args.kwargs["embedding"] is None

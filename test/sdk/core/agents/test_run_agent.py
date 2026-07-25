@@ -43,6 +43,49 @@ class _MockToolCollection(MagicMock):
 
 setattr(mock_smolagents, "ToolCollection", _MockToolCollection)
 
+
+def test_log_memory_value_assessment_for_store_attempt(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="167",
+        invocation_count=1,
+        successful_store_count=1,
+        last_outcome="completed",
+    )
+    agent = types.SimpleNamespace(tools={"store_memory": store_tool})
+
+    run_agent._log_memory_value_assessment(agent)
+
+    assert "event=memory_value_assessment" in caplog.text
+    assert "decision=store_attempted" in caplog.text
+    assert "successful_store_count=1" in caplog.text
+    assert "conversation_id=167" in caplog.text
+
+
+def test_log_memory_value_assessment_for_skip_and_unavailable(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="168",
+        invocation_count=0,
+        successful_store_count=0,
+        last_outcome="not_invoked",
+    )
+
+    run_agent._log_memory_value_assessment(
+        types.SimpleNamespace(tools={"store_memory": store_tool})
+    )
+    run_agent._log_memory_value_assessment(types.SimpleNamespace(tools={}))
+
+    assert "decision=skip" in caplog.text
+    assert "last_outcome=not_invoked" in caplog.text
+    assert "decision=unavailable" in caplog.text
+
 # Create dummy smolagents sub-modules to satisfy indirect imports
 for _sub in [
     "agents",

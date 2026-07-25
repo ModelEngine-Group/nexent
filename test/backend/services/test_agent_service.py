@@ -5548,8 +5548,8 @@ async def test_run_agent_stream_skip_user_save(
 
 
 @pytest.mark.asyncio
-async def test_generate_stream_emits_tokens_and_unregisters(monkeypatch):
-    """generate_stream emits start/done tokens and unregisters preprocess task."""
+async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monkeypatch):
+    """generate_stream loads memory tools without emitting pre-search tokens."""
     # Prepare AgentRequest & Request
     agent_request = AgentRequest(
         agent_id=7,
@@ -5587,26 +5587,6 @@ async def test_generate_stream_emits_tokens_and_unregisters(monkeypatch):
         raising=False,
     )
 
-    # Track preprocess register/unregister
-    calls = {"registered": None, "unregistered": None}
-
-    def fake_register(task_id, conv_id, task):
-        calls["registered"] = (task_id, conv_id, bool(task))
-
-    def fake_unregister(task_id):
-        calls["unregistered"] = task_id
-
-    monkeypatch.setattr(
-        "backend.services.agent_service.preprocess_manager.register_preprocess_task",
-        fake_register,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service.preprocess_manager.unregister_preprocess_task",
-        fake_unregister,
-        raising=False,
-    )
-
     # Collect output
     out = []
     async for d in agent_service.generate_stream(
@@ -5614,20 +5594,20 @@ async def test_generate_stream_emits_tokens_and_unregisters(monkeypatch):
     ):
         out.append(d)
 
-    # Expect start and done memory tokens then body chunks
-    from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG
-
-    assert any("memory_search" in s and MEMORY_SEARCH_START_MSG in s for s in out)
-    assert any("memory_search" in s and MEMORY_SEARCH_DONE_MSG in s for s in out)
+    assert not any("memory_search" in chunk for chunk in out)
     assert "data: bodyA\n\n" in out and "data: bodyB\n\n" in out
-    # Unregister must be called
-    assert calls["registered"] is not None
-    assert calls["unregistered"] is not None
+    agent_service.prepare_agent_run.assert_awaited_once_with(
+        agent_request=agent_request,
+        user_id="u",
+        tenant_id="t",
+        language=agent_service.LANGUAGE["ZH"],
+        allow_memory_search=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_generate_stream_fallback_on_failure(monkeypatch):
-    """generate_stream should emit fail token and fall back when memory prep fails."""
+    """Fallback output does not claim a pre-loop memory search occurred."""
     agent_request = AgentRequest(
         agent_id=8,
         conversation_id=888,
@@ -5666,29 +5646,14 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
         raising=False,
     )
 
-    # Track preprocess unregister
-    called = {"unregistered": False}
-
-    def fake_unregister(task_id):
-        called["unregistered"] = True
-
-    monkeypatch.setattr(
-        "backend.services.agent_service.preprocess_manager.unregister_preprocess_task",
-        fake_unregister,
-        raising=False,
-    )
-
     out = []
     async for d in agent_service.generate_stream(
         agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
 
-    from consts.const import MEMORY_SEARCH_FAIL_MSG
-
-    assert any("memory_search" in s and MEMORY_SEARCH_FAIL_MSG in s for s in out)
+    assert not any("memory_search" in chunk for chunk in out)
     assert "data: fb1\n\n" in out
-    assert called["unregistered"]
 
 
 @pytest.mark.asyncio
@@ -14815,23 +14780,34 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
         raising=False,
     )
     monkeypatch.setattr(agent_service, "build_memory_context", lambda *args, **kwargs: memory_preview)
+    mock_prepare_agent_run = AsyncMock(
+        return_value=(agent_run_info, memory_ctx)
+    )
     monkeypatch.setattr(
         agent_service,
         "prepare_agent_run",
-        AsyncMock(return_value=(agent_run_info, memory_ctx)),
+        mock_prepare_agent_run,
     )
     monkeypatch.setattr(agent_service, "_stream_agent_chunks", fake_stream_agent_chunks)
 
     chunks = []
-    async for chunk in agent_service.generate_stream_with_memory(
+    async for chunk in agent_service.generate_stream(
         agent_request,
         "user1",
         "tenant1",
         "en",
+        enable_memory=True,
     ):
         chunks.append(chunk)
 
     assert chunks == ["data: done\n\n"]
+    mock_prepare_agent_run.assert_awaited_once_with(
+        agent_request=agent_request,
+        user_id="user1",
+        tenant_id="tenant1",
+        language="en",
+        allow_memory_search=False,
+    )
     fake_preprocess_manager.register_preprocess_task.assert_not_called()
     fake_preprocess_manager.unregister_preprocess_task.assert_called_once()
 

@@ -25,8 +25,13 @@ sys.path.insert(
 database_pkg = types.ModuleType("database")
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
+user_tenant_db_mod = types.ModuleType("database.user_tenant_db")
+user_tenant_db_mod.get_user_tenant_by_user_id = MagicMock(
+    return_value={"user_role": "ADMIN"}
+)
 sys.modules["database"] = database_pkg
 sys.modules["backend.database"] = database_pkg
+sys.modules["database.user_tenant_db"] = user_tenant_db_mod
 
 services_pkg = types.ModuleType("services")
 record_service_mod = types.ModuleType("services.memory_record_service")
@@ -115,11 +120,22 @@ def client(monkeypatch):
     """Build a TestClient and patch services per test."""
     from apps import memory_record_app
 
+    user_tenant_db_mod.get_user_tenant_by_user_id.return_value = {
+        "user_role": "ADMIN"
+    }
     fake_record_service = MagicMock()
-    fake_record_service.create_memory = MagicMock(
-        return_value={"memory_id": 1, "event": "ADD", "layer": "user",
-                       "memory_type": "long_term", "indexed": False}
-    )
+    def _fake_create_memory(**kwargs):
+        if kwargs.get("layer") == "bogus":
+            raise _MemoryRecordError("invalid layer")
+        return {
+            "memory_id": 1,
+            "event": "ADD",
+            "layer": kwargs.get("layer", "user"),
+            "memory_type": "long_term",
+            "indexed": False,
+        }
+
+    fake_record_service.create_memory = MagicMock(side_effect=_fake_create_memory)
     fake_record_service.list_memories = MagicMock(
         return_value=[{"memory_id": 1, "content": "x"}]
     )
@@ -132,10 +148,10 @@ def client(monkeypatch):
     record_service_mod.get_memory_record_service.return_value = fake_record_service
 
     fake_retrieval = MagicMock()
-    async def _fake_search(request, **_):
+    async def _fake_search_memories(**_):
         return [MemorySearchResult(memory_id="1", content="x", score=0.9,
                                     layer=MemoryLayer.AGENT)]
-    fake_retrieval.search = _fake_search
+    fake_retrieval.search_memories = _fake_search_memories
     retrieval_service_mod.get_memory_retrieval_service.return_value = fake_retrieval
 
     fake_context = MagicMock()
@@ -185,6 +201,46 @@ def test_create_record_rejects_invalid_layer(client):
     assert response.status_code == 406
 
 
+def test_create_tenant_record_requires_admin(client):
+    cli, services = client
+    user_tenant_db_mod.get_user_tenant_by_user_id.return_value = {
+        "user_role": "USER"
+    }
+
+    response = cli.post(
+        "/memory/records",
+        json={
+            "layer": "tenant",
+            "content": "shared policy",
+            "memory_type": "long_term",
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert response.status_code == 403
+    services["record"].create_memory.assert_not_called()
+
+
+def test_create_tenant_record_allows_admin(client):
+    cli, services = client
+    user_tenant_db_mod.get_user_tenant_by_user_id.return_value = {
+        "user_role": "ADMIN"
+    }
+
+    response = cli.post(
+        "/memory/records",
+        json={
+            "layer": "tenant",
+            "content": "shared policy",
+            "memory_type": "long_term",
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert response.status_code == 200
+    services["record"].create_memory.assert_called_once()
+
+
 def test_list_records_filters_by_user(client):
     cli, services = client
     response = cli.get(
@@ -195,6 +251,17 @@ def test_list_records_filters_by_user(client):
     body = response.json()
     assert body["count"] == 1
     services["record"].list_memories.assert_called_once()
+    assert services["record"].list_memories.call_args.kwargs["user_id"] == "u1"
+
+
+def test_list_tenant_records_are_shared_across_users(client):
+    cli, services = client
+    response = cli.get(
+        "/memory/records?layer=tenant&limit=10",
+        headers={"Authorization": "Bearer test"},
+    )
+    assert response.status_code == 200
+    assert services["record"].list_memories.call_args.kwargs["user_id"] is None
 
 
 def test_delete_record_returns_success(client):

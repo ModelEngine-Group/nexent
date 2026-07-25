@@ -168,17 +168,20 @@ class MemoryService:
             embedding=embedding,
         )
 
+        backend_result: Dict[str, Any] = {}
         if self.backend_store is not None:
             try:
-                await self.backend_store(backend_payload)
+                backend_result = await self.backend_store(backend_payload) or {}
             except Exception as exc:  # noqa: BLE001 - surfaced as warning
                 logger.error("backend_store hook failed: %s", exc)
                 raise
 
         return StoreMemoryResult(
-            memory_id=memory_record.memory_id,
-            event="ADD",
-            content=content,
+            memory_id=str(
+                backend_result.get("memory_id") or memory_record.memory_id
+            ),
+            event=str(backend_result.get("event") or "ADD"),
+            content=str(backend_result.get("content") or content),
             layer=layer,
             memory_type=memory_type,
         )

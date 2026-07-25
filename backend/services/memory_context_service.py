@@ -21,10 +21,9 @@ from nexent.memory.models import (
     MemoryLayer,
     MemorySearchContext,
     MemorySearchRequest,
-    MemorySearchResult,
     PipelineConfig,
-    RetrievalPipeline,
 )
+from nexent.memory.retrieval.pipeline import RetrievalPipeline
 from nexent.memory.policy import MemoryRetrievalPolicy
 
 from consts.const import (

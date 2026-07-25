@@ -101,6 +101,76 @@ def test_invalid_memory_payload_fails_at_backend_boundary():
         build_context_inputs(memory_list=[object()])
 
 
+def test_memory_tool_policy_is_a_required_system_item_rendered_verbatim():
+    policy = (
+        "### Memory Tool Policy\n"
+        "Evaluate this turn and call `store_memory` when durable memory exists."
+    )
+
+    items = build_context_inputs(memory_tool_policy=policy, language="en")
+    policy_items = [item for item in items if item.id == "system:memory_tool_policy"]
+
+    assert len(policy_items) == 1
+    assert policy_items[0].type == ContextItemType.SYSTEM
+    assert policy_items[0].content == {"text": policy}
+    assert policy_items[0].metadata["authority"] == "platform"
+
+    normalized = normalize_context_inputs(items)
+    normalized_policy = next(item for item in normalized if item.id == "system:memory_tool_policy")
+    assert normalized_policy.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert policy in rendered_text
+    assert rendered_text.count(policy) == 1
+
+
+def test_memory_tool_policy_is_omitted_when_empty():
+    items = build_context_inputs(memory_tool_policy="")
+
+    assert all(item.id != "system:memory_tool_policy" for item in items)
+
+
+def test_long_term_memory_prompt_is_a_required_system_item():
+    context = (
+        "### Tenant Long-term Memory\n- Follow company policy\n\n"
+        "### User Long-term Memory\n- Prefers concise answers"
+    )
+
+    items = build_context_inputs(
+        long_term_memory_prompt=context,
+        language="en",
+    )
+    memory_item = next(
+        item for item in items if item.id == "system:long_term_memory"
+    )
+
+    assert memory_item.type == ContextItemType.SYSTEM
+    assert memory_item.content == {"text": context}
+    assert memory_item.metadata["authority"] == "retrieved"
+
+    normalized = normalize_context_inputs(items)
+    normalized_item = next(
+        item for item in normalized if item.id == "system:long_term_memory"
+    )
+    assert normalized_item.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    system_text = "\n".join(
+        block["text"]
+        for message in messages
+        if message["role"] == "system"
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert context in system_text
+
+
 def test_group_rendering_uses_only_selected_tool_items():
     items = normalize_context_inputs(build_context_inputs(
         tools={
