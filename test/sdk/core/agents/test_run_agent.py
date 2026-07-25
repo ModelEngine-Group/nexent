@@ -296,6 +296,8 @@ def basic_agent_run_info(mock_observer):
         observer=mock_observer,
         agent_config=agent_cfg,
         stop_event=Event(),
+        conversation_id=273,
+        user_id="test_user",
     )
 
 
@@ -320,6 +322,8 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         redis_client=basic_agent_run_info.redis_client,
         sandbox_config=None,
         minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -423,6 +427,8 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         redis_client=basic_agent_run_info.redis_client,
         sandbox_config=None,
         minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow

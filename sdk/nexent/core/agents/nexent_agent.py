@@ -23,6 +23,7 @@ from .core_agent import CoreAgent, convert_code_format
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
+    from .subagent_wrapper import SubAgentToolWrapper
 
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
@@ -155,7 +156,9 @@ class NexentAgent:
                  mcp_tool_collection=None,
                  redis_client=None,
                  sandbox_config=None,
-                 minio_client=None):
+                 minio_client=None,
+                 conversation_id=None,
+                 user_id=None):
         """
         Initialize the NexentAgent factory.
 
@@ -169,6 +172,8 @@ class NexentAgent:
                 When None, uses LocalPythonExecutor (backwards-compatible).
             minio_client: Optional MinIO client for output file sync.
                 Required when sandbox_config.auto_sync_outputs is True.
+            conversation_id: Optional conversation id for plan persistence.
+            user_id: Optional user id for plan persistence.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -180,6 +185,8 @@ class NexentAgent:
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
         self.minio_client = minio_client
+        self.conversation_id = conversation_id
+        self.user_id = user_id
 
         self.agent = None
 
@@ -441,6 +448,39 @@ class NexentAgent:
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
+    def _wrap_subagent(
+        self,
+        inner_agent: Any,
+        sub_agent_config: Any,
+        agent_id: Any = None,
+    ) -> "SubAgentToolWrapper":
+        """Wrap a sub-agent ``Tool`` so the observer sees nesting boundaries.
+
+        Both internal ``AgentConfig``-derived managed agents and external
+        ``ExternalA2AAgentConfig``-derived wrappers funnel through here, so
+        every nested invocation emits ``subagent_start``/``subagent_end``
+        regardless of which kind of sub-agent was added to ``managed_agents``.
+        """
+        from .subagent_wrapper import SubAgentToolWrapper
+
+        resolved_id = (
+            agent_id
+            if agent_id is not None
+            else getattr(sub_agent_config, "agent_id", None)
+            or getattr(sub_agent_config, "_sub_agent_id", None)
+        )
+        agent_name = (
+            getattr(sub_agent_config, "name", None)
+            or getattr(inner_agent, "name", None)
+            or "subagent"
+        )
+        return SubAgentToolWrapper(
+            inner_agent=inner_agent,
+            observer=self.observer,
+            agent_id=resolved_id,
+            agent_name=str(agent_name),
+        )
+
     def create_single_agent(
         self,
         agent_config: AgentConfig,
@@ -485,12 +525,17 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Recurse for managed agents.  Mark _managed_context=True so they
-                # do NOT create their own sandbox (smolagents contract: managed
-                # sub-agents share the parent's python_executor).
+                # Create managed agents recursively without creating a second sandbox.
+                raw_managed_agents = []
+                for sub_agent_config in agent_config.managed_agents:
+                    inner_agent = self.create_single_agent(
+                        sub_agent_config,
+                        _managed_context=True,
+                    )
+                    raw_managed_agents.append((inner_agent, sub_agent_config))
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config, _managed_context=True)
-                    for sub_agent_config in agent_config.managed_agents
+                    self._wrap_subagent(inner_agent, sub_agent_config)
+                    for inner_agent, sub_agent_config in raw_managed_agents
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
@@ -507,7 +552,13 @@ class NexentAgent:
                             stop_event=self.stop_event,
                             observer=self.observer
                         )
-                        managed_agents_list.append(wrapper)
+                        managed_agents_list.append(
+                            self._wrap_subagent(
+                                wrapper,
+                                ext_agent_config,
+                                agent_id=str(ext_agent_config.agent_id),
+                            )
+                        )
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
@@ -597,6 +648,8 @@ class NexentAgent:
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
                 executor=python_executor,
             )
             agent.stop_event = self.stop_event

@@ -102,7 +102,8 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
 
 
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
-                        agent_id: Optional[int] = None) -> Dict[str, Any]:
+                        agent_id: Optional[int] = None,
+                        chat_mode: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -110,6 +111,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         conversation_title: Conversation title
         user_id: Reserved parameter for created_by and updated_by fields
         agent_id: Agent used by the latest run in this conversation
+        chat_mode: Initial UI chat mode ('planning' or 'execution'). Defaults
+            to the column default ('execution') when omitted.
 
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
@@ -119,6 +122,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
         if agent_id is not None:
             data["agent_id"] = agent_id
+        if chat_mode is not None:
+            data["chat_mode"] = chat_mode
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -126,6 +131,7 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
+            ConversationRecord.chat_mode,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -139,6 +145,7 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
             "agent_id": record.agent_id,
+            "chat_mode": record.chat_mode or "execution",
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -199,6 +206,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         message_units: List of message units, each containing:
             - type: Unit type
             - content: Unit content
+            - tool_call_id (optional): ID of the originating tool invocation
         message_id: Message ID (integer)
         conversation_id: Conversation ID (integer)
         user_id: Reserved parameter for created_by and updated_by fields
@@ -224,6 +232,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "unit_index": idx,
                 "unit_type": unit['type'],
                 "unit_content": _serialize_unit_content(unit['content']),
+                "tool_call_id": unit.get("tool_call_id"),
                 "delete_flag": 'N'
             }
 
@@ -244,7 +253,8 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
 def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,
-                        unit_status: str = 'completed') -> int:
+                        unit_status: str = 'completed',
+                        tool_call_id: Optional[str] = None) -> int:
     """
     Insert a single ConversationMessageUnit row.
 
@@ -256,6 +266,9 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Reserved parameter for created_by and updated_by fields
         unit_status: Lifecycle status (streaming / completed)
+        tool_call_id: Unique ID of the originating tool invocation. None for
+            units that are not tied to a specific tool call. The frontend uses
+            this field to attribute side-channel output in parallel execution.
 
     Returns:
         int: Newly created unit ID (auto-increment ID)
@@ -264,7 +277,6 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         message_id = int(message_id)
         conversation_id = int(conversation_id)
         unit_index = int(unit_index)
-
         row_data = {
             "message_id": message_id,
             "conversation_id": conversation_id,
@@ -272,6 +284,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "unit_type": unit_type,
             "unit_content": _serialize_unit_content(unit_content),
             "unit_status": unit_status,
+            "tool_call_id": tool_call_id,
             "delete_flag": 'N',
         }
         if user_id:
@@ -500,6 +513,7 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
+            ConversationRecord.chat_mode,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -523,6 +537,7 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
             conversation = as_dict(record)
             conversation['create_time'] = int(conversation['create_time'])
             conversation['update_time'] = int(conversation['update_time'])
+            conversation['chat_mode'] = conversation.get('chat_mode') or 'execution'
             result.append(conversation)
 
         return result
@@ -552,6 +567,50 @@ def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: O
         stmt = update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
+        ).values(update_data)
+
+        result = session.execute(stmt)
+        return result.rowcount > 0
+
+
+# Allowed values for conversation_record_t.chat_mode. Anything outside this set
+# is rejected at the service boundary so the column never stores free-form text.
+CHAT_MODE_VALUES = {"planning", "execution"}
+
+
+def update_conversation_chat_mode(
+    conversation_id: int,
+    chat_mode: str,
+    user_id: Optional[str] = None,
+) -> bool:
+    """
+    Update the persisted UI chat mode of a conversation.
+
+    Args:
+        conversation_id: Conversation ID (integer)
+        chat_mode: New mode. Must be one of 'planning' or 'execution'.
+        user_id: Reserved parameter for updated_by field
+
+    Returns:
+        bool: Whether the operation was successful
+    """
+    if chat_mode not in CHAT_MODE_VALUES:
+        raise ValueError(
+            f"Invalid chat_mode '{chat_mode}'. Allowed values: {sorted(CHAT_MODE_VALUES)}"
+        )
+
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+        update_data = {
+            "chat_mode": chat_mode,
+            "update_time": func.current_timestamp(),
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        stmt = update(ConversationRecord).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.delete_flag == 'N',
         ).values(update_data)
 
         result = session.execute(stmt)
@@ -776,6 +835,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         check_stmt = select(
             ConversationRecord.conversation_id,
             ConversationRecord.agent_id,
+            ConversationRecord.chat_mode,
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -800,7 +860,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                     'unit_type', ConversationMessageUnit.unit_type,
                     'unit_content', ConversationMessageUnit.unit_content,
                     'unit_status', ConversationMessageUnit.unit_status,
-                    'unit_index', ConversationMessageUnit.unit_index
+                    'unit_index', ConversationMessageUnit.unit_index,
+                    'tool_call_id', ConversationMessageUnit.tool_call_id
                 )
             )
         ).select_from(
@@ -808,7 +869,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         ).where(
             ConversationMessageUnit.message_id == ConversationMessage.message_id,
             ConversationMessageUnit.delete_flag == 'N',
-            ConversationMessageUnit.unit_type is not None
+            ConversationMessageUnit.unit_type.is_not(None)
         ).scalar_subquery()
 
         query = select(
@@ -871,6 +932,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         return {
             'conversation_id': conversation['conversation_id'],
             'agent_id': conversation.get('agent_id'),
+            'chat_mode': conversation.get('chat_mode') or 'execution',
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

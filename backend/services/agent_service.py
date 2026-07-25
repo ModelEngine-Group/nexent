@@ -108,6 +108,7 @@ from services.conversation_management_service import (
     save_source_search,
     save_skill_files_to_conversation,
     update_conversation_agent_id_service,
+    update_conversation_chat_mode_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -204,6 +205,18 @@ def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
         if payload.get("absolute_path"):
             payloads.append(payload)
     return payloads
+
+
+def _serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
+    """Preserve tool metadata in the existing message-unit content column."""
+    if data.get("type") not in {"tool", "tool-call"}:
+        return content
+
+    payload: Dict[str, Any] = {"content": content}
+    for field in ("tool_name", "tool_arguments", "role"):
+        if field in data:
+            payload[field] = data[field]
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
@@ -1022,6 +1035,8 @@ async def _stream_agent_chunks(
                     elif chunk_type not in ("search_content_placeholder",):
                         # New unit - this will be the next index after assignment
                         data["unit_index"] = next_unit_index
+                    # Tool events and side-channel output carry the same ID
+                    # from the observer's actual invocation context.
                     # Re-serialize the chunk with unit_index for accurate frontend skip
                     chunk = json.dumps(data)
                     logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
@@ -1183,6 +1198,7 @@ async def _stream_agent_chunks(
                                 unit_content='{"placeholder": true}',
                                 user_id=user_id,
                                 unit_status="completed",
+                                tool_call_id=data.get("tool_call_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(
@@ -1245,21 +1261,9 @@ async def _stream_agent_chunks(
                     elif streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        persisted_unit_content = chunk_content
-                        if chunk_type in ("tool", "tool-call"):
-                            persisted_unit_content = json.dumps(
-                                {
-                                    "content": chunk_content,
-                                    "tool_name": data.get("tool_name"),
-                                    "tool_arguments": data.get("tool_arguments"),
-                                    **(
-                                        {"role": data["role"]}
-                                        if data.get("role") is not None
-                                        else {}
-                                    ),
-                                },
-                                ensure_ascii=False,
-                            )
+                        persisted_content = _serialize_stream_unit_content(
+                            data, chunk_content
+                        )
                         try:
                             new_unit_id = submit(
                                 save_message_unit,
@@ -1267,9 +1271,10 @@ async def _stream_agent_chunks(
                                 conversation_id=agent_request.conversation_id,
                                 unit_index=next_unit_index,
                                 unit_type=chunk_type,
-                                unit_content=persisted_unit_content,
+                                unit_content=persisted_content,
                                 user_id=user_id,
                                 unit_status="streaming",
+                                tool_call_id=data.get("tool_call_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(
@@ -1280,7 +1285,7 @@ async def _stream_agent_chunks(
                         else:
                             current_unit = {
                                 "type": chunk_type,
-                                "content": persisted_unit_content,
+                                "content": persisted_content,
                                 "unit_id": new_unit_id,
                                 "unit_index": next_unit_index,
                                 "mergeable": mergeable,
@@ -2813,6 +2818,8 @@ async def prepare_agent_run(
     agent_run_info.context_input = _build_authorized_context_input(
         agent_run_info, historical_context
     )
+    agent_run_info.conversation_id = agent_request.conversation_id
+    agent_run_info.user_id = user_id
 
     # ContextManager is created exactly once by the SDK Agent creation entry.
     # The application boundary only injects the persistence callback into its
@@ -3090,6 +3097,7 @@ async def run_agent_stream(
             title=default_title,
             user_id=resolved_user_id,
             agent_id=agent_request.agent_id,
+            chat_mode="planning" if agent_request.enable_plan else "execution",
         )
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3111,6 +3119,11 @@ async def run_agent_stream(
         )
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
+        update_conversation_chat_mode_service(
+            conversation_id=agent_request.conversation_id,
+            chat_mode="planning" if agent_request.enable_plan else "execution",
+            user_id=resolved_user_id,
+        )
 
     if (
         not agent_request.is_debug
