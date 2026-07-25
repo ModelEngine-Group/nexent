@@ -1078,24 +1078,28 @@ export default function ToolConfigModal({
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
   useEffect(() => {
-    if (formValues) {
-      const newParams = [...currentParams];
+    if (!formValues) return;
+
+    setCurrentParams((previousParams) => {
+      if (previousParams.length === 0) return previousParams;
+
+      const newParams = [...previousParams];
       Object.entries(formValues).forEach(([fieldName, value]) => {
         const index = parseInt(fieldName.replace("param_", ""));
         if (!isNaN(index) && newParams[index]) {
           const paramName = newParams[index].name;
           // Skip knowledge base selector field (controlled by handleHaotianKbConfirm)
-          if (
-            paramName === "index_names" ||
-            paramName === "dataset_ids"
-          ) {
+          if (paramName === "index_names" || paramName === "dataset_ids") {
             return;
           }
+          // Ant Design emits null while fields are being initialized. Preserve
+          // the configured value instead of replacing it with the transient null.
+          if (value === null || value === undefined) return;
           newParams[index] = { ...newParams[index], value };
         }
       });
-      setCurrentParams(newParams);
-    }
+      return newParams;
+    });
   }, [formValues]);
 
   const handleSave = async () => {
@@ -1103,18 +1107,35 @@ export default function ToolConfigModal({
     setHasSubmitted(true);
 
     try {
-      // Force sync form values to currentParams before validation
+      // Capture the latest form values locally so the save does not depend on
+      // the asynchronous currentParams state update completing first.
       const latestFormValues = form.getFieldsValue();
-      if (latestFormValues) {
-        const newParams = [...currentParams];
-        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
-          const index = parseInt(fieldName.replace("param_", ""));
-          if (!isNaN(index) && newParams[index]) {
-            newParams[index] = { ...newParams[index], value };
-          }
-        });
-        setCurrentParams(newParams);
-      }
+      const paramsToSave = currentParams.map((param) => {
+        if (param.value !== null && param.value !== undefined) {
+          return param;
+        }
+
+        const initialParam = initialParams.find(
+          (candidate) => candidate.name === param.name
+        );
+        return initialParam &&
+          initialParam.value !== null &&
+          initialParam.value !== undefined
+          ? { ...param, value: initialParam.value }
+          : param;
+      });
+      Object.entries(latestFormValues || {}).forEach(([fieldName, value]) => {
+        const index = parseInt(fieldName.replace("param_", ""));
+        if (
+          !isNaN(index) &&
+          paramsToSave[index] &&
+          value !== null &&
+          value !== undefined
+        ) {
+          paramsToSave[index] = { ...paramsToSave[index], value };
+        }
+      });
+      setCurrentParams(paramsToSave);
 
       await form.validateFields();
 
@@ -1138,20 +1159,11 @@ export default function ToolConfigModal({
         return;
       }
 
-      // Convert params to backend format (use the synced params)
-      const paramsObj = currentParams.reduce(
-        (acc, param) => {
-          acc[param.name] = param.value;
-          return acc;
-        },
-        {} as Record<string, any>
-      );
-
       // Update local state: Add tool to selected tools with updated params and display_names
       // Include display_names for knowledge base tools to pass to prompt generation
       const updatedTool: typeof toolToSave = {
         ...toolToSave,
-        initParams: currentParams,
+        initParams: paramsToSave,
         // Store knowledge base display names for prompt generation
         ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
           ? { display_names: selectedKbDisplayNames }
@@ -1181,7 +1193,7 @@ export default function ToolConfigModal({
 
       // Call original onSave if provided
       if (onSave) {
-        onSave(currentParams);
+        onSave(paramsToSave);
       }
     } catch {
       // Form validation failed, error will be shown by antd Form

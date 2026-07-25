@@ -146,7 +146,9 @@ export default function ToolManagement({
               return {
                 ...param,
                 value:
-                  instanceValue !== undefined ? instanceValue : param.value,
+                  instanceValue !== undefined && instanceValue !== null
+                    ? instanceValue
+                    : param.value,
               };
             }) ||
             defaultTool.initParams ||
