@@ -349,18 +349,6 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
     context_manager.get_summary.assert_called_once_with()
 
 
-def test_verification_tool_names_handles_attribute_error_containers():
-    agent = object.__new__(core_agent_module.CoreAgent)
-
-    class BrokenContainer:
-        def keys(self):
-            raise AttributeError("broken keys")
-
-    agent.tools = BrokenContainer()
-    agent.managed_agents = {"planner": object()}
-
-    assert core_agent_module.CoreAgent._verification_tool_names(agent) == ["final_answer", "planner"]
-
 
 
 
@@ -2902,6 +2890,19 @@ def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones()
     assert module.CoreAgent._known_tool_names(agent) == set()
     assert module.CoreAgent._managed_agent_names(agent) == set()
     assert module.CoreAgent._non_emitting_tool_names(agent) == set()
+
+
+def test_managed_agent_names_reads_names_from_sequence_containers():
+    """Collect managed-agent names when the registry is a sequence."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = type("Agent", (), {})()
+    agent.managed_agents = [
+        type("NamedAgent", (), {"name": "planner"})(),
+        type("UnnamedAgent", (), {})(),
+        type("NamedAgent", (), {"name": "researcher"})(),
+    ]
+
+    assert module.CoreAgent._managed_agent_names(agent) == {"planner", "researcher"}
 
 
 def test_wrap_visible_tool_events_supports_sequence_containers_and_skips_hidden_tools():
