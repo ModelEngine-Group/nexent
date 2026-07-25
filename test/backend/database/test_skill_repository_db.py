@@ -239,10 +239,13 @@ def test_update_repository_status_applies_optional_values(monkeypatch, mock_sess
         publisher_tenant_id="tenant-2",
         publisher_user_id="user-2",
         submitted_by="dev@example.com",
+        content="please review",
     )
 
     assert affected == 1
-    assert statement.values.call_args.kwargs["publisher_tenant_id"] == "tenant-2"
+    values = statement.values.call_args.kwargs
+    assert values["publisher_tenant_id"] == "tenant-2"
+    assert values["content"] == "please review"
 
 
 def test_increment_downloads_updates_audit_user(monkeypatch, mock_session):

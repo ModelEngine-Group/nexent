@@ -442,6 +442,31 @@ def test_update_status_admin_rejects_pending_review():
     )
 
 
+def test_update_status_admin_approves_without_content():
+    """Approve without review note omits content from notification details."""
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "ADMIN",
+        "user_email": "admin@example.com",
+    }
+    shared = _repository_record(status="shared")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(status="pending_review"),
+        shared,
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="shared",
+        user_id="admin-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result["status"] == "shared"
+    details = srs.create_repository_review_notification.call_args.kwargs["details"]
+    assert "content" not in details
+    srs.deactivate_notifications.assert_called_once()
+
+
 def test_update_status_dev_cannot_approve_review():
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
         _repository_record(status="pending_review")
