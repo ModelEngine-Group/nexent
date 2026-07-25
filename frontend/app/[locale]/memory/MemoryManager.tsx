@@ -36,6 +36,7 @@ import {
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
+import { Can } from "@/components/permission/Can";
 import {
   loadMemoryConfig,
   setMemorySwitch,
@@ -277,6 +278,9 @@ export function MemoryManager() {
   };
 
   const openEdit = (record: MemoryRecord) => {
+    if (scope === "agent" && record.embedding_compatible === false) {
+      return;
+    }
     setEditing(record);
     form.setFieldsValue({
       memory_type: record.memory_type,
@@ -424,16 +428,23 @@ export function MemoryManager() {
       width: scope === "agent" ? 72 : 112,
       render: (_, record) => (
         <Space size={4}>
-          {scope !== "agent" && (
-            <Tooltip title="编辑">
+          <Tooltip
+            title={
+              scope === "agent" && record.embedding_compatible === false
+                ? "当前向量模型与该记忆不兼容，无法编辑"
+                : "编辑"
+            }
+          >
               <Button
                 type="text"
                 aria-label="编辑记忆"
                 icon={<Edit3 size={17} />}
+                disabled={
+                  scope === "agent" && record.embedding_compatible === false
+                }
                 onClick={() => openEdit(record)}
               />
-            </Tooltip>
-          )}
+          </Tooltip>
           <Tooltip title="删除">
             <Button
               type="text"
@@ -489,7 +500,7 @@ export function MemoryManager() {
             <Title level={4}>{meta.label} 记忆</Title>
             <Text type="secondary">{meta.description}</Text>
           </div>
-          {scope !== "agent" && (
+          {scope === "user" && (
             <Button
               type="primary"
               icon={<Plus size={17} />}
@@ -497,6 +508,17 @@ export function MemoryManager() {
             >
               新建记忆
             </Button>
+          )}
+          {scope === "tenant" && (
+            <Can permission="mem.tenant:create">
+              <Button
+                type="primary"
+                icon={<Plus size={17} />}
+                onClick={openCreate}
+              >
+                新建记忆
+              </Button>
+            </Can>
           )}
         </Flex>
 
@@ -561,6 +583,11 @@ export function MemoryManager() {
           loading={loadingByScope[scope]}
           columns={columns}
           dataSource={visibleRecords}
+          rowClassName={(record) =>
+            scope === "agent" && record.embedding_compatible === false
+              ? "memory-row-incompatible"
+              : ""
+          }
           pagination={{
             defaultPageSize: 10,
             pageSizeOptions: [10, 20, 50],

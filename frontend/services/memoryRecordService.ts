@@ -16,6 +16,7 @@ export interface MemoryRecord {
   status: MemoryStatus;
   content: string;
   create_time: string | null;
+  embedding_compatible?: boolean;
 }
 
 export interface MemoryRecordInput {
