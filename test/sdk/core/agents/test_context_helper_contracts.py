@@ -42,7 +42,11 @@ class _Role(Enum):
 
 def test_summary_output_normalization_and_fallback(caplog):
     assert format_summary_output("   ") is None
-    assert format_summary_output('```json\n{"fact": "保留"}\n```') == '{\n  "fact": "保留"\n}'
+
+    markdown_result = format_summary_output('```json\n{"fact": "保留"}\n```')
+    assert "# Compact Result of History" in markdown_result
+    assert "## Fact" in markdown_result
+    assert "保留" in markdown_result
 
     assert format_summary_output("plain summary") == "plain summary"
     assert "not valid JSON" in caplog.text

@@ -17,10 +17,66 @@ def format_summary_output(raw_output: str) -> str | None:
     if not cleaned:
         return None
     try:
-        return json.dumps(json.loads(cleaned), ensure_ascii=False, indent=2)
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return _json_summary_to_markdown(parsed)
+        # Non-dict JSON (rare) — return as plain text
+        return cleaned
     except json.JSONDecodeError:
         logger.warning("Summary output is not valid JSON; keeping it transient")
         return cleaned
+
+
+_SUMMARY_FIELD_HEADINGS: dict[str, str] = {
+    "task_overview": "Task Overview",
+    "completed_work": "Completed Work",
+    "key_decisions": "Key Decisions",
+    "pending_items": "Pending Items",
+    "context_to_preserve": "Context to Preserve",
+}
+
+
+def _json_summary_to_markdown(data: dict) -> str:
+    """Convert a structured JSON summary dict to Markdown with headings.
+
+    Produces output like::
+
+        # Compact Result of History
+
+        ## Task Overview
+
+        The user asked to ...
+
+        ## Completed Work
+
+        - Modified file A
+        - Updated config B
+
+    Unknown keys are rendered as ``## Pretty Key`` (title-cased).
+    """
+    sections: list[str] = []
+    for key, value in data.items():
+        heading = _SUMMARY_FIELD_HEADINGS.get(key, key.replace("_", " ").title())
+        if isinstance(value, list):
+            items = [str(v) for v in value if v]
+            if not items:
+                continue
+            body = "\n".join(f"- {item}" for item in items)
+        elif isinstance(value, str):
+            body = value.strip()
+            if not body:
+                continue
+        elif value is None:
+            continue
+        else:
+            body = str(value)
+        sections.append(f"## {heading}\n\n{body}")
+
+    if not sections:
+        # All fields empty — fall back to raw JSON so nothing is lost
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    return "# Compact Result of History\n\n" + "\n\n".join(sections)
 
 def _is_context_length_error(error: Exception) -> bool:
     text = str(error).lower()
