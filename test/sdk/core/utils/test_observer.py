@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -307,7 +308,7 @@ class TestMessageObserver:
             "agent_name": "Researcher",
             "depth": 1,
         }
-        assert observer._current_depth == 1
+        assert observer._current_depth.get() == 1
 
     def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
         """Close sub-agent events without allowing the nesting depth below zero."""
@@ -325,7 +326,36 @@ class TestMessageObserver:
             "agent_name": "Researcher",
             "depth": 1,
         }
-        assert observer._current_depth == 0
+        assert observer._current_depth.get() == 0
+
+    def test_subagent_depth_isolated_across_threads(self, observer):
+        """Keep independent sub-agent depths for concurrent tool execution."""
+        barrier = threading.Barrier(2)
+
+        def run_subagent(agent_id, agent_name):
+            observer.add_subagent_start(agent_id, agent_name)
+            barrier.wait(timeout=5)
+            observer.add_message(agent_name, ProcessType.OTHER, "working")
+            observer.add_subagent_end(agent_id, agent_name)
+
+        first = threading.Thread(
+            target=run_subagent,
+            args=("agent-1", "Researcher"),
+        )
+        second = threading.Thread(
+            target=run_subagent,
+            args=("agent-2", "Writer"),
+        )
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+        assert all(message["depth"] == 1 for message in messages)
+        assert observer._current_depth.get() == 0
 
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""

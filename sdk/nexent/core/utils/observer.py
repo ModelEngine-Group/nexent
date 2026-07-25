@@ -131,10 +131,9 @@ class MessageObserver:
         self.think_end_pattern = re.compile(r"</think>")
 
         # Sub-agent nesting depth. 0 = main agent, +1 per entered sub-agent.
-        # Every emitted message inherits this depth so the frontend can group
-        # nested reasoning/tool chunks without re-deriving state from the
-        # subagent_start/subagent_end markers.
-        self._current_depth = 0
+        # Context-local storage prevents concurrently executing tools from
+        # affecting each other's frontend nesting hierarchy.
+        self._current_depth: ContextVar[int] = ContextVar("current_depth", default=0)
         self._tool_call_id: ContextVar[str | None] = ContextVar(
             "tool_call_id", default=None
         )
@@ -317,7 +316,7 @@ class MessageObserver:
                     tool_arguments=tool_arguments,
                     tool_call_id=tool_call_id,
                     agent_id=agent_id,
-                    depth=self._current_depth).to_json())
+                    depth=self._current_depth.get()).to_json())
 
     @contextmanager
     def tool_call_context(self, tool_call_id: str):
@@ -341,7 +340,8 @@ class MessageObserver:
             task: Optional task text forwarded from the parent's call (e.g.
                 ``task="search the weather"``).
         """
-        self._current_depth += 1
+        depth = self._current_depth.get() + 1
+        self._current_depth.set(depth)
         payload = json.dumps(
             {
                 "agent_id": agent_id,
@@ -356,7 +356,7 @@ class MessageObserver:
                 payload,
                 agent_id=agent_id,
                 agent_name=agent_name,
-                depth=self._current_depth,
+                depth=depth,
             ).to_json()
         )
 
@@ -366,6 +366,7 @@ class MessageObserver:
         Depth is clamped at 0 to stay resilient against unbalanced starts/ends
         from upstream tooling.
         """
+        depth = self._current_depth.get()
         payload = json.dumps(
             {"agent_id": agent_id, "agent_name": agent_name},
             ensure_ascii=False,
@@ -376,10 +377,10 @@ class MessageObserver:
                 payload,
                 agent_id=agent_id,
                 agent_name=agent_name,
-                depth=max(self._current_depth, 1),
+                depth=max(depth, 1),
             ).to_json()
         )
-        self._current_depth = max(0, self._current_depth - 1)
+        self._current_depth.set(max(0, depth - 1))
 
     def add_model_reasoning_content(self, reasoning_content):
         """
