@@ -3126,6 +3126,7 @@
   "common.agentType.single": "Single Agent",
   "common.agentType.multi": "Multi Agent",
   "common.selectAll": "Select All",
+  "common.deselectAll": "Deselect All",
   "common.count": "Count",
   "common.id": "ID",
   "common.progress": "Progress",
