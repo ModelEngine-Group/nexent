@@ -368,6 +368,10 @@ with patch.dict("sys.modules", module_mocks):
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
 
+# Retain the tested module after patch.dict restores the module registry so it
+# can be reloaded by tests that exercise conditional imports.
+sys.modules["sdk.nexent.core.agents.nexent_agent"] = nexent_agent
+
 
 # Keep the lightweight runtime modules available for create_single_agent()
 # tests.  They exercise runtime selection after the import-time patch.dict
@@ -513,10 +517,18 @@ def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
     subagent_tool_wrapper = type("SubAgentToolWrapper", (), {})
     subagent_module.SubAgentToolWrapper = subagent_tool_wrapper
 
+    agent_model_module = types.ModuleType("sdk.nexent.core.agents.agent_model")
+    agent_model_module.AgentConfig = AgentConfig
+    agent_model_module.AgentHistory = AgentHistory
+    agent_model_module.ModelConfig = ModelConfig
+    agent_model_module.ToolConfig = ToolConfig
+
     monkeypatch.setattr("typing.TYPE_CHECKING", True)
     with patch.dict(
         sys.modules,
         {
+            **module_mocks,
+            "sdk.nexent.core.agents.agent_model": agent_model_module,
             "sdk.nexent.core.agents.context": context_module,
             "sdk.nexent.core.agents.subagent_wrapper": subagent_module,
         },
@@ -524,8 +536,6 @@ def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
         reloaded_module = importlib.reload(nexent_agent)
         assert reloaded_module.ContextItemInput is context_item_input
         assert reloaded_module.SubAgentToolWrapper is subagent_tool_wrapper
-
-    importlib.reload(nexent_agent)
 
 
 def test_has_host_tools_with_host_tool():
