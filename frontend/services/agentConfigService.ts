@@ -526,9 +526,9 @@ export const exportAgent = async (agentId: number) => {
 
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
-      const filename =
-        response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
-      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename);
       return {
         success: true,
         data: null,
@@ -559,6 +559,25 @@ export const exportAgent = async (agentId: number) => {
       message: "Export failed, please try again later",
     };
   }
+};
+
+/**
+ * Extract filename from Content-Disposition header
+ * Handles both quoted and unquoted filename values
+ * @param contentDisposition The Content-Disposition header value
+ * @returns Extracted filename or null if not found
+ */
+const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+  if (match && match[1]) {
+    return match[1].replace(/['"]/g, "").trim();
+  }
+
+  return null;
 };
 
 /**

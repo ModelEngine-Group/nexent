@@ -209,7 +209,12 @@ export default function AgentSelectorHeader({
   const handleExportAgent = async (agent: Agent) => {
     try {
       const result = await exportAgent(Number(agent.id));
-      if (result.success && result.data) {
+      if (!result.success) {
+        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        return;
+      }
+
+      if (result.data) {
         const blob = new Blob([JSON.stringify(result.data, null, 2)], {
           type: "application/json",
         });
@@ -221,12 +226,9 @@ export default function AgentSelectorHeader({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.message.agentExportSuccess"));
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.agentImportFailed")
-        );
       }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
     } catch (error) {
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
