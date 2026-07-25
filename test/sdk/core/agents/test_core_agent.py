@@ -349,6 +349,21 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
     context_manager.get_summary.assert_called_once_with()
 
 
+def test_verification_tool_names_handles_attribute_error_containers():
+    agent = object.__new__(core_agent_module.CoreAgent)
+
+    class BrokenContainer:
+        def keys(self):
+            raise AttributeError("broken keys")
+
+    agent.tools = BrokenContainer()
+    agent.managed_agents = {"planner": object()}
+
+    assert core_agent_module.CoreAgent._verification_tool_names(agent) == ["final_answer", "planner"]
+
+
+
+
 # ----------------------------------------------------------------------------
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
