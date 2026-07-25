@@ -768,6 +768,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="admin_uid",
             review_status="shared", submitted_by=None,
+            content=None,
         )
         mock_link_mcp.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid", market_id=2,
@@ -786,6 +787,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="admin_uid",
             review_status="rejected", submitted_by=None,
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.update_mcp_market_status')
@@ -803,6 +805,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=1, user_id="uid",
             review_status="pending_review", submitted_by="user@test.com",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.update_mcp_market_status')
@@ -818,6 +821,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="uid",
             review_status="not_shared", submitted_by=None,
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
@@ -859,6 +863,7 @@ class TestApproveCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         mock_change.assert_called_once_with(
             tenant_id="tid", user_id="admin_uid",
             market_id=10, new_status="shared",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
@@ -886,6 +891,7 @@ class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         mock_change.assert_called_once_with(
             tenant_id="tid", user_id="admin_uid",
             market_id=10, new_status="rejected",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
