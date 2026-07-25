@@ -141,8 +141,20 @@ sys.modules["nexent.memory.policy"] = memory_policy
 
 
 class _FakeEmbeddingModelInfo:
-    def __init__(self, index_name="mem_test_1536"):
-        self._index_name = index_name
+    def __init__(self, index_name=None, **kwargs):
+        self.__dict__.update(kwargs)
+        if index_name is not None:
+            self._index_name = index_name
+        else:
+            components = [
+                "mem",
+                kwargs.get("model_repo"),
+                kwargs.get("model_name"),
+                str(kwargs.get("dimension")),
+            ]
+            self._index_name = "_".join(
+                str(value).lower() for value in components if value
+            )
 
     def get_index_name(self):
         return self._index_name
@@ -475,3 +487,54 @@ def test_create_memory_agent_embedding_compute_failure_degrades_gracefully(servi
     fake_db.insert_memory_record.assert_called_once()
     service.index_service.index_record.assert_called_once()
     assert service.index_service.index_record.call_args.kwargs["embedding"] is None
+
+
+def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
+    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db.get_single_config_info = MagicMock(
+        return_value={"config_value": "42"}
+    )
+    config_utils = types.ModuleType("utils.config_utils")
+    config_utils.tenant_config_manager = MagicMock()
+    config_utils.tenant_config_manager.get_model_config.return_value = {
+        "model_name": "embedding-current",
+        "model_repo": "repo",
+        "base_url": "https://embedding.example/v1",
+        "api_key": "secret",
+        "max_tokens": 1024,
+        "ssl_verify": True,
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "database.tenant_config_db",
+        tenant_config_db,
+    )
+    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+
+    result = memory_record_service._resolve_tenant_embedding_model_info("t1")
+
+    assert result.model_name == "embedding-current"
+    assert result.get_index_name() == "mem_repo_embedding-current_1024"
+    config_utils.tenant_config_manager.get_model_config.assert_called_once_with(
+        "EMBEDDING_ID",
+        tenant_id="t1",
+    )
+
+
+def test_resolve_tenant_embedding_model_requires_active_config(monkeypatch):
+    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db.get_single_config_info = MagicMock(return_value={})
+    config_utils = types.ModuleType("utils.config_utils")
+    config_utils.tenant_config_manager = MagicMock()
+    monkeypatch.setitem(
+        sys.modules,
+        "database.tenant_config_db",
+        tenant_config_db,
+    )
+    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+
+    assert (
+        memory_record_service._resolve_tenant_embedding_model_info("t1")
+        is None
+    )
+    config_utils.tenant_config_manager.get_model_config.assert_not_called()
