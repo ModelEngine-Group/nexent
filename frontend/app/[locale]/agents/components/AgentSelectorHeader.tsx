@@ -1,11 +1,11 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
+import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
@@ -84,6 +84,7 @@ export default function AgentSelectorHeader({
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [agentSearch, setAgentSearch] = useState("");
 
   // Mutations
   const updateAgentMutation = useMutation({
@@ -440,8 +441,19 @@ export default function AgentSelectorHeader({
     }
   };
 
+  const filteredAgents = useMemo(() => {
+    const query = agentSearch.trim().toLowerCase();
+    if (!query) return agents;
+
+    return agents.filter((agent: Agent) =>
+      [agent.display_name, agent.name, agent.description].some((value) =>
+        String(value || "").toLowerCase().includes(query)
+      )
+    );
+  }, [agentSearch, agents]);
+
   // Dropdown menu items (only agents)
-  const agentMenuItems = agents.flatMap((agent: Agent, index: number) => {
+  const agentMenuItems = filteredAgents.flatMap((agent: Agent, index: number) => {
     const isAvailable = agent.is_available !== false;
     const displayName = agent.display_name || "";
     const name = agent.name || "";
@@ -579,7 +591,7 @@ export default function AgentSelectorHeader({
     };
 
     // Add divider after each item except the last one
-    const divider = index < agents.length - 1
+    const divider = index < filteredAgents.length - 1
       ? { key: `divider-${agent.id}`, type: 'divider' as const }
       : null;
 
@@ -625,11 +637,39 @@ export default function AgentSelectorHeader({
               trigger={["click"]}
               placement="bottomLeft"
               open={dropdownOpen}
-              onOpenChange={setDropdownOpen}
-              menu={{ 
-                items: agentMenuItems,
-                style: { maxHeight: 500, overflowY: 'auto' }
+              onOpenChange={(open) => {
+                setDropdownOpen(open);
+                if (!open) setAgentSearch("");
               }}
+              menu={{
+                items: agentMenuItems,
+              }}
+              popupRender={(menu) => (
+                <div className="overflow-hidden rounded-lg bg-white shadow-lg">
+                  <div className="border-b border-gray-100 p-2">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        autoFocus
+                        value={agentSearch}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        onChange={(event) => setAgentSearch(event.target.value)}
+                        placeholder={t("agentSelector.searchPlaceholder")}
+                        allowClear
+                        className="pl-7"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {filteredAgents.length > 0 ? menu : (
+                      <div className="px-3 py-8 text-center text-sm text-gray-400">
+                        {t("agentSelector.noSearchResults")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
               styles={{
                 root: {
@@ -746,7 +786,6 @@ export default function AgentSelectorHeader({
             selectedAgentForRelationship.display_name ||
             selectedAgentForRelationship.name
           }
-          
         />
       )}
 
