@@ -63,7 +63,11 @@ class ContentClassifier:
         elif len(potential_tag) > self.MAX_TAG_LENGTH:
             results.extend(self._emit_dos_protected_content())
         else:
-            results.extend(self._emit_potential_tag_start())
+            # Unknown tag (e.g. <think>...</think> from reasoning models):
+            # emit the whole tag as plain text in the current state and skip past it.
+            # This preserves the reasoning content in "others" while ensuring the next
+            # tag (e.g. <SKILL>) is still seen by the parser instead of being swallowed.
+            results.extend(self._emit_unknown_tag(gt_pos))
 
         return results
 
@@ -115,23 +119,36 @@ class ContentClassifier:
         self.buffer = self.buffer[1:]
         return results
 
-    def _emit_potential_tag_start(self) -> List[Dict[str, Any]]:
-        """Handle buffer starting with '<' that doesn't match any known tag."""
+    def _emit_unknown_tag(self, gt_pos: int) -> List[Dict[str, Any]]:
+        """Emit an unrecognized tag (from '<' through '>') as plain text content.
+
+        Keeps the tag in the current state (e.g. reasoning tags like <think> or </think>
+        remain visible as 'others') while advancing past the entire tag so the parser
+        can correctly detect the next known tag such as <SKILL>.
+        """
         results = []
-        event = self._create_event("<")
+        unknown_tag = self.buffer[:gt_pos + 1]
+        event = self._create_event(unknown_tag)
         if event:
             results.append(event)
-        self.buffer = self.buffer[1:]
+        self.buffer = self.buffer[gt_pos + 1:]
         return results
 
     def _process_non_tag_content(self) -> List[Dict[str, Any]]:
-        """Process buffered content that doesn't start with '<'."""
+        """Process buffered content that does not start with '<'.
+
+        Stops at the next '<' so any embedded tag (e.g. <SKILL>) is left in the
+        buffer for the next iteration instead of being emitted as plain text.
+        """
         results = []
-        emit_len = min(len(self.buffer), 64)
-        event = self._create_event(self.buffer[:emit_len])
-        if event:
-            results.append(event)
-        self.buffer = self.buffer[emit_len:]
+        next_lt_pos = self.buffer.find("<")
+        boundary = next_lt_pos if next_lt_pos != -1 else len(self.buffer)
+        emit_len = min(boundary, 64)
+        if emit_len > 0:
+            event = self._create_event(self.buffer[:emit_len])
+            if event:
+                results.append(event)
+            self.buffer = self.buffer[emit_len:]
         return results
 
     def _match_known_tag_with_buffer(self, buffer_content: str) -> Optional[str]:
