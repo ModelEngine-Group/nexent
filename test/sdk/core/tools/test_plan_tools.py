@@ -211,9 +211,9 @@ UpdatePlanStepTool = plan_tools_module.UpdatePlanStepTool
 PlanStatus = plan_tools_module.PlanStatus
 
 
-def test_plan_tools_are_hidden_from_generic_tool_events():
-    """Plan state tools use dedicated plan SSE events instead of tool cards."""
-    assert CreatePlanTool.emit_tool_event is False
+def test_create_plan_emits_generic_tool_events_but_updates_do_not():
+    """Plan creation emits a tool event, while updates use dedicated SSE events."""
+    assert getattr(CreatePlanTool, "emit_tool_event", True) is True
     assert UpdatePlanStepTool.emit_tool_event is False
 
 
