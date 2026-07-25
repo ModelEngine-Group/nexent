@@ -3387,8 +3387,8 @@ class TestCreateSingleAgent:
 
     def test_wrap_subagent_uses_config_identity_and_name(self, nexent_agent_instance):
         """Test _wrap_subagent loads the wrapper and resolves managed-agent metadata."""
-        inner_agent = MagicMock(name="inner_agent")
-        sub_agent_config = MagicMock(agent_id="managed-1", name="Research agent")
+        inner_agent = MagicMock()
+        sub_agent_config = types.SimpleNamespace(agent_id="managed-1", name="Research agent")
 
         wrapped_agent = nexent_agent_instance._wrap_subagent(inner_agent, sub_agent_config)
 
