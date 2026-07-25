@@ -24,6 +24,8 @@ interface SkillDetailModalProps {
   skill: Skill | null;
   open: boolean;
   onClose: () => void;
+  zIndex?: number;
+  maskClosable?: boolean;
 }
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
@@ -48,6 +50,8 @@ export default function SkillDetailModal({
   skill,
   open,
   onClose,
+  zIndex = 1000,
+  maskClosable = true,
 }: SkillDetailModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
@@ -136,6 +140,8 @@ export default function SkillDetailModal({
       onCancel={handleClose}
       footer={null}
       width={820}
+      zIndex={zIndex}
+      maskClosable={maskClosable}
       className="skill-detail-modal"
       styles={{
         body: {

@@ -92,6 +92,7 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+
   // Get conversation details
   async getDetail(
     conversationId: number,

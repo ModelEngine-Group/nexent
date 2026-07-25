@@ -218,9 +218,35 @@ bash deploy.sh docker --image-source local-latest
 
 > `local-latest` 会使用本地 `latest` Nexent 应用镜像并避免重新拉取这些镜像，无需修改 `deploy/docker/deploy.sh`。
 
-### 将本地镜像打包为离线部署包
+### 构建离线部署包
 
-构建本地 `latest` 镜像后，可以使用离线打包脚本把镜像和部署资源打包：
+在联网机器上，可从仓库根目录构建包含 Docker 和 Kubernetes 资源的离线部署包：
+
+```bash
+bash build.sh --package \
+  --target all \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package
+```
+
+常用参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--target` | 生成 `docker`、`k8s` 或 `all` 部署资源 |
+| `--version` | 要拉取并打包的 Nexent 镜像版本 |
+| `--platform` | 目标服务器架构：`amd64` 或 `arm64` |
+| `--components` | 部署组件，同时决定需要打包的镜像 |
+| `--image-source` | `general`、`mainland` 或 `local-latest` |
+| `--include-source` | 是否加入项目源码，默认 `false` |
+| `--compress` | 是否生成 zip 压缩包，默认 `false` |
+| `--output-dir` | 未压缩离线包的输出目录 |
+
+如需打包本地构建的 `latest` 应用镜像：
 
 ```bash
 bash build.sh --package \
@@ -233,14 +259,11 @@ bash build.sh --package \
   --output-dir offline-package/docker-local
 ```
 
-使用 `--version latest` 或 `--image-source local-latest` 时，脚本会使用本地 Nexent 应用镜像，并跳过这些 `latest` 标签的拉取。将包复制到目标机器后，可加载镜像并部署：
+`local-latest` 会复用本地 Nexent 应用镜像，不会再次拉取这些 `latest` 镜像。构建脚本会生成镜像 tar、部署资源、`manifest.yaml` 和 `checksums.txt`，且不会复制本机的 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。
 
-```bash
-cd offline-package/docker-local
-bash deploy.sh --load-images docker \
-  --version latest \
-  --components infrastructure,application,data-process,supabase \
-  --image-source local-latest
-```
+启用 `--compress true` 后，会在输出目录旁生成 `nexent-offline-<target>-<platform>-<version>.zip`。也可以手动运行 GitHub Actions 中的 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)，工作流会为 AMD64 和 ARM64 分别生成可下载的 `nexent-<version>-<platform>.zip`，默认保留 30 天。
 
-如果离线部署时需要推送到内部镜像仓库，可将 `--load-images` 替换为 `--push-images --image-registry-prefix registry.example.com/nexent`。如果省略前缀，入口脚本会先询问镜像仓库前缀，随后 `push-images.sh` 询问仓库账号和密码。部署配置会使用同一个镜像仓库前缀生成 Docker Compose 镜像引用。
+离线包的获取和安装方法参见：
+
+- [Docker 安装部署中的离线部署](../quick-start/installation#离线部署)
+- [Kubernetes 安装部署中的离线部署](../quick-start/kubernetes-installation#离线部署)
