@@ -287,6 +287,46 @@ class TestMessageObserver:
         message_data = json.loads(observer.get_cached_message()[0])
         assert message_data["tool_call_id"] == "call-123"
 
+    def test_add_subagent_start_serializes_payload_and_increments_depth(self, observer):
+        """Emit a nested sub-agent start event with replay metadata."""
+        observer.add_subagent_start("agent-1", "Researcher", task="Analyze Chinese content")
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        assert message_data == {
+            "type": ProcessType.SUBAGENT_START.value,
+            "content": json.dumps(
+                {
+                    "agent_id": "agent-1",
+                    "agent_name": "Researcher",
+                    "task": "Analyze Chinese content",
+                },
+                ensure_ascii=False,
+            ),
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "depth": 1,
+        }
+        assert observer._current_depth == 1
+
+    def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
+        """Close sub-agent events without allowing the nesting depth below zero."""
+        observer.add_subagent_end("agent-1", "Researcher")
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        assert message_data == {
+            "type": ProcessType.SUBAGENT_END.value,
+            "content": json.dumps(
+                {"agent_id": "agent-1", "agent_name": "Researcher"},
+                ensure_ascii=False,
+            ),
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "depth": 1,
+        }
+        assert observer._current_depth == 0
+
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
         observer = MessageObserver()

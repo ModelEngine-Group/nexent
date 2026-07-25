@@ -215,6 +215,7 @@ from backend.database.conversation_db import (
     save_history_summary,
     soft_delete_all_conversations_by_user,
     update_conversation_agent_id,
+    update_conversation_chat_mode,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -1062,6 +1063,56 @@ def test_update_conversation_agent_id_not_found(monkeypatch, mock_session_ctx):
     result = update_conversation_agent_id(123, 45)
 
     assert result is False
+    session.execute.assert_called_once()
+
+
+# =============================================================================
+# Tests for update_conversation_chat_mode
+# =============================================================================
+
+
+def test_update_conversation_chat_mode_rejects_invalid_mode(monkeypatch, mock_session_ctx):
+    """Reject invalid chat modes before opening a database session."""
+    _, ctx = mock_session_ctx
+    get_session = MagicMock(return_value=ctx)
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", get_session)
+
+    with pytest.raises(ValueError, match="Invalid chat_mode 'invalid'"):
+        update_conversation_chat_mode(123, "invalid")
+
+    get_session.assert_not_called()
+
+
+def test_update_conversation_chat_mode_success(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """Persist a valid chat mode and return True when a row is updated."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 1
+    session.execute.return_value = update_result
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_chat_mode("123", "planning", user_id="user-1")
+
+    assert result is True
+    assert fresh_update_mock["chat_mode"] == "planning"
+    assert fresh_update_mock["updated_by"] == "user-1"
+    assert "update_time" in fresh_update_mock
+    session.execute.assert_called_once()
+
+
+def test_update_conversation_chat_mode_not_found(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """Return False when no non-deleted conversation matches the ID."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 0
+    session.execute.return_value = update_result
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_chat_mode(123, "execution")
+
+    assert result is False
+    assert fresh_update_mock["chat_mode"] == "execution"
+    assert "updated_by" not in fresh_update_mock
     session.execute.assert_called_once()
 
 
