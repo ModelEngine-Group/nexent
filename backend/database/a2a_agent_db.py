@@ -240,6 +240,7 @@ def create_external_agent_from_url(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "timeout_seconds": getattr(agent, "timeout_seconds", 300),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -347,6 +348,7 @@ def create_external_agent_from_nacos(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "timeout_seconds": getattr(agent, "timeout_seconds", 300),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -385,6 +387,7 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "agent_url": agent.agent_url,
             "streaming": agent.streaming,
             "protocol_type": agent.protocol_type,
+            "timeout_seconds": getattr(agent, "timeout_seconds", 300),
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
@@ -443,6 +446,7 @@ def list_external_agents(
                 "agent_url": agent.agent_url,
                 "streaming": agent.streaming,
                 "protocol_type": agent.protocol_type,
+                "timeout_seconds": getattr(agent, "timeout_seconds", 300),
                 "supported_interfaces": agent.supported_interfaces,
                 "source_type": agent.source_type,
                 "source_url": agent.source_url,
@@ -519,6 +523,65 @@ def _find_interface_by_protocol_type(
     return None
 
 
+def _validate_timeout_seconds(timeout_seconds: Optional[int]) -> Optional[int]:
+    """Validate A2A timeout settings."""
+    if timeout_seconds is None:
+        return None
+    if timeout_seconds < 1 or timeout_seconds > 3600:
+        raise ValueError("timeout_seconds must be between 1 and 3600")
+    return timeout_seconds
+
+
+def update_external_agent_call_settings(
+    external_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    timeout_seconds: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """Update custom call settings for an external A2A agent."""
+    validated_timeout = _validate_timeout_seconds(timeout_seconds)
+
+    with _get_db_session() as session:
+        agent = session.query(A2AExternalAgent).filter(
+            A2AExternalAgent.id == external_agent_id,
+            A2AExternalAgent.tenant_id == tenant_id,
+            A2AExternalAgent.delete_flag != 'Y'
+        ).first()
+
+        if not agent:
+            return None
+
+        if timeout_seconds is not None:
+            setattr(agent, "timeout_seconds", validated_timeout)
+        agent.updated_by = user_id
+        agent.update_time = datetime.now(timezone.utc)
+        session.flush()
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "description": agent.description,
+            "version": agent.version,
+            "agent_url": agent.agent_url,
+            "protocol_type": agent.protocol_type,
+            "timeout_seconds": getattr(agent, "timeout_seconds", 300),
+            "streaming": agent.streaming,
+            "supported_interfaces": agent.supported_interfaces,
+            "source_type": agent.source_type,
+            "source_url": agent.source_url,
+            "nacos_config_id": agent.nacos_config_id,
+            "nacos_agent_name": agent.nacos_agent_name,
+            "raw_card": agent.raw_card,
+            "is_available": agent.is_available,
+            "last_check_at": agent.last_check_at.isoformat() if agent.last_check_at else None,
+            "last_check_result": agent.last_check_result,
+            "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
+            "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
+            "create_time": agent.create_time.isoformat() if agent.create_time else None,
+            "update_time": agent.update_time.isoformat() if agent.update_time else None,
+        }
+
+
 def update_external_agent_protocol(
     external_agent_id: int,
     tenant_id: str,
@@ -567,6 +630,7 @@ def update_external_agent_protocol(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "timeout_seconds": getattr(agent, "timeout_seconds", 300),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -852,6 +916,7 @@ def query_external_sub_agents(
                 "version": agent.version,
                 "agent_url": agent.agent_url,
                 "protocol_type": agent.protocol_type,
+                "timeout_seconds": getattr(agent, "timeout_seconds", 300),
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,
                 "raw_card": agent.raw_card,

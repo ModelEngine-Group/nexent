@@ -88,28 +88,53 @@ function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]):
 // Agent Protocol Setting Popover Component
 interface AgentProtocolSettingProps {
   agent: A2AExternalAgent;
-  onProtocolChange: (agentId: string, protocolType: string) => void;
+  onSettingsChange: (
+    agentId: string,
+    settings: {
+      protocolType: string;
+      timeoutSeconds: number | null;
+    }
+  ) => Promise<boolean>;
 }
 
-function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtocolSettingProps>) {
+function AgentProtocolSetting({ agent, onSettingsChange }: Readonly<AgentProtocolSettingProps>) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState(
     (agent as any).protocol_type || "JSONRPC"
   );
+  const [timeoutSeconds, setTimeoutSeconds] = useState(String(agent.timeout_seconds || 300));
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const availableProtocols = extractAvailableProtocols(agent.supported_interfaces);
 
   useEffect(() => {
     setSelectedProtocol((agent as any).protocol_type || "JSONRPC");
-  }, [(agent as any).protocol_type]);
+    setTimeoutSeconds(String(agent.timeout_seconds || 300));
+    setSettingsError(null);
+  }, [(agent as any).protocol_type, agent.timeout_seconds]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    setSettingsError(null);
+    const parsedTimeout = Number(timeoutSeconds);
+
+    try {
+      if (!Number.isInteger(parsedTimeout) || parsedTimeout < 1 || parsedTimeout > 3600) {
+        throw new Error(t("a2a.protocol.timeoutRange", { defaultValue: "Timeout must be between 1 and 3600 seconds" }));
+      }
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : t("a2a.protocol.invalidSettings", { defaultValue: "Invalid settings" }));
+      return;
+    }
+
     setSaving(true);
-    onProtocolChange(String(agent.id), selectedProtocol);
+    const saved = await onSettingsChange(String(agent.id), {
+      protocolType: selectedProtocol,
+      timeoutSeconds: parsedTimeout,
+    });
     setSaving(false);
-    setOpen(false);
+    if (saved) setOpen(false);
   };
 
   return (
@@ -147,6 +172,24 @@ function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtoco
               );
             })}
           </Radio.Group>
+          <div style={{ marginTop: 12 }}>
+            <Text type="secondary" className="text-xs">
+              {t("a2a.protocol.timeoutSeconds", { defaultValue: "Timeout seconds" })}
+            </Text>
+            <Input
+              size="small"
+              type="number"
+              min={1}
+              max={3600}
+              value={timeoutSeconds}
+              onChange={(e) => setTimeoutSeconds(e.target.value)}
+            />
+          </div>
+          {settingsError && (
+            <Text type="danger" className="text-xs">
+              {settingsError}
+            </Text>
+          )}
           <div style={{ marginTop: 12, textAlign: "right" }}>
             <Space>
               <Button size="small" onClick={() => setOpen(false)}>
@@ -274,15 +317,31 @@ export default function A2AAgentDiscoveryModal({
     }
   };
 
-  // Update agent protocol
-  const handleProtocolChange = async (agentId: string, protocolType: string) => {
-    const result = await a2aClientService.updateAgentProtocol(agentId, protocolType);
-    if (result.success) {
-      messageApi.success(t("a2a.protocol.updateSuccess"));
-      loadAgents();
-    } else {
-      messageApi.error(result.message || t("a2a.protocol.updateFailed"));
+  // Update agent protocol and call settings
+  const handleSettingsChange = async (
+    agentId: string,
+    settings: {
+      protocolType: string;
+      timeoutSeconds: number | null;
     }
+  ): Promise<boolean> => {
+    const protocolResult = await a2aClientService.updateAgentProtocol(agentId, settings.protocolType);
+    if (!protocolResult.success) {
+      messageApi.error(protocolResult.message || t("a2a.protocol.updateFailed"));
+      return false;
+    }
+
+    const settingsResult = await a2aClientService.updateAgentSettings(agentId, {
+      timeout_seconds: settings.timeoutSeconds,
+    });
+    if (!settingsResult.success) {
+      messageApi.error(settingsResult.message || t("a2a.protocol.updateFailed"));
+      return false;
+    }
+
+    messageApi.success(t("a2a.protocol.updateSuccess"));
+    loadAgents();
+    return true;
   };
 
   // Add to local agent
@@ -395,7 +454,7 @@ export default function A2AAgentDiscoveryModal({
           </Tooltip>
           <AgentProtocolSetting
             agent={record}
-            onProtocolChange={handleProtocolChange}
+            onSettingsChange={handleSettingsChange}
           />
           <Tooltip title={t("a2a.chat.title")}>
             <Button

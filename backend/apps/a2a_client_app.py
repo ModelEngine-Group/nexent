@@ -46,6 +46,16 @@ class UpdateAgentProtocolRequest(BaseModel):
     )
 
 
+class UpdateAgentCallSettingsRequest(BaseModel):
+    """Request to update call settings for an external A2A agent."""
+    timeout_seconds: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=3600,
+        description="Request timeout in seconds for calling the agent"
+    )
+
+
 class TestNacosConnectionRequest(BaseModel):
     """Request to test Nacos connectivity without saving the config."""
     nacos_addr: str = Field(description="Nacos server address (e.g., http://nacos-server:8848)")
@@ -276,6 +286,51 @@ async def delete_external_agent(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete agent"
+        )
+
+
+@router.put("/agents/{external_agent_id}/settings")
+async def update_agent_call_settings(
+    external_agent_id: int,
+    request: UpdateAgentCallSettingsRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Update custom call settings for an external A2A agent."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+
+        result = a2a_client_service.update_agent_call_settings(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            timeout_seconds=request.timeout_seconds,
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": result}
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Invalid A2A call settings: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Update agent call settings failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update agent call settings"
         )
 
 
