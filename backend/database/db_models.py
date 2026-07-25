@@ -51,7 +51,7 @@ class ConversationRecord(TableBase):
     chat_mode = Column(
         String(16),
         nullable=False,
-        server_default="execution",
+        server_default=text("'execution'"),
         doc="UI chat mode for the conversation: 'planning' or 'execution'",
     )
 
