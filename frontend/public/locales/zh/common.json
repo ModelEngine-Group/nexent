@@ -3003,6 +3003,7 @@
   "common.agentType.single": "单智能体",
   "common.agentType.multi": "多智能体",
   "common.selectAll": "全选",
+  "common.deselectAll": "取消全选",
   "common.count": "数量",
   "common.id": "ID",
   "common.progress": "进度",
