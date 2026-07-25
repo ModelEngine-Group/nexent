@@ -37,7 +37,7 @@ export function AsyncContent({
     return (
       <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-background/60">
         <Empty description={t("skillRepository.common.loadError")} />
-        <Button onClick={onRetry}>{t("skillRepository.common.retry")}</Button>
+        <Button onClick={onRetry}>{t("repository.common.retry")}</Button>
       </div>
     );
   }
@@ -75,7 +75,7 @@ export function PaginationBar({
       <Button
         type="default"
         className="flex size-9 items-center justify-center rounded-lg p-0"
-        aria-label={t("skillRepository.pagination.prev")}
+        aria-label={t("repository.pagination.prev")}
         disabled={page <= 1}
         onClick={() => onPageChange(Math.max(1, page - 1))}
       >
@@ -88,7 +88,7 @@ export function PaginationBar({
             type={pageNumber === page ? "primary" : "default"}
             className="flex size-9 items-center justify-center rounded-lg p-0"
             onClick={() => onPageChange(pageNumber)}
-            aria-label={t("skillRepository.pagination.page", {
+            aria-label={t("repository.pagination.page", {
               page: pageNumber,
             })}
             aria-current={pageNumber === page ? "page" : undefined}
@@ -100,7 +100,7 @@ export function PaginationBar({
       <Button
         type="default"
         className="flex size-9 items-center justify-center rounded-lg p-0"
-        aria-label={t("skillRepository.pagination.next")}
+        aria-label={t("repository.pagination.next")}
         disabled={page >= totalPages}
         onClick={() => onPageChange(Math.min(totalPages, page + 1))}
       >

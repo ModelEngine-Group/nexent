@@ -38,27 +38,28 @@ export function SkillReviewStatusModal({
   const canCancelApply = isCancelableRepositoryStatus(repositoryInfo.status);
   const canTakeDown = isTakeDownableRepositoryStatus(repositoryInfo.status);
   const submittedAt = formatRepositoryDate(repositoryInfo.create_time);
+  const listingContent = repositoryInfo.content?.trim() ?? "";
 
   const statusConfig = isPending
     ? {
         icon: Clock,
-        label: t("skillRepository.reviewStatus.pendingLabel"),
-        description: t("skillRepository.reviewStatus.pendingDescription"),
+        label: t("repository.listingStatus.pendingLabel"),
+        description: t("repository.listingStatus.pendingDescription"),
         tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
       }
     : isRejected
       ? {
           icon: XCircle,
-          label: t("skillRepository.reviewStatus.rejectedLabel"),
-          description: t("skillRepository.reviewStatus.rejectedDescription"),
+          label: t("repository.listingStatus.rejectedLabel"),
+          description: t("repository.listingStatus.rejectedDescription"),
           tone: "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
-          label: t("skillRepository.reviewStatus.sharedLabel"),
-          description: t("skillRepository.reviewStatus.sharedDescription"),
+          label: t("repository.listingStatus.listedLabel"),
+          description: t("repository.listingStatus.listedDescription"),
           tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
         };
@@ -68,11 +69,11 @@ export function SkillReviewStatusModal({
   const confirmSetNotShared = () => {
     Modal.confirm({
       title: canTakeDown
-        ? t("skillRepository.reviewStatus.confirmTakeDown")
+        ? t("repository.listingStatus.confirmTakeDownTitle")
         : t("skillRepository.reviewStatus.confirmWithdraw"),
       content: title,
       okText: canTakeDown
-        ? t("skillRepository.action.status.notShared")
+        ? t("repository.listingStatus.takeDown")
         : t("skillRepository.reviewStatus.withdraw"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
@@ -89,7 +90,7 @@ export function SkillReviewStatusModal({
       title={
         <span className="inline-flex items-center gap-2">
           <Store className="size-5 text-primary" aria-hidden />
-          {t("skillRepository.reviewStatus.title")}
+          {t("repository.listingStatus.title")}
         </span>
       }
       footer={
@@ -111,8 +112,8 @@ export function SkillReviewStatusModal({
               onClick={confirmSetNotShared}
             >
               {canTakeDown
-                ? t("skillRepository.action.status.notShared")
-                : t("skillRepository.reviewStatus.withdrawApply")}
+                ? t("repository.listingStatus.takeDown")
+                : t("repository.listingStatus.cancelApply")}
             </Button>
           ) : null}
         </div>
@@ -132,6 +133,17 @@ export function SkillReviewStatusModal({
           <p className="text-sm leading-relaxed opacity-90">
             {statusConfig.description}
           </p>
+          {listingContent ? (
+            <p className="text-sm leading-relaxed opacity-90">
+              {isPending
+                ? t("repository.listingStatus.pendingNote", {
+                    content: listingContent,
+                  })
+                : t("repository.listingStatus.reviewOpinion", {
+                    content: listingContent,
+                  })}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -144,7 +156,7 @@ export function SkillReviewStatusModal({
         </div>
         {submittedAt ? (
           <div className="flex justify-between gap-4">
-            <span>{t("skillRepository.reviewStatus.submittedAt")}</span>
+            <span>{t("repository.listingStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>

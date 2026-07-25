@@ -20,6 +20,7 @@ export interface SkillRepositoryListingItem {
   category_id?: number | null;
   author?: string | null;
   submitted_by?: string | null;
+  content?: string | null;
   can_take_down?: boolean;
 }
 
@@ -59,6 +60,7 @@ export interface MySkillRepositoryInfoItem {
     SkillRepositoryListingStatus,
     "shared" | "pending_review" | "rejected"
   >;
+  content?: string | null;
   create_time?: string | null;
 }
 
@@ -118,4 +120,5 @@ export interface SkillRepositoryListingCreatePayload {
   icon?: string;
   category_id?: number | null;
   tags?: string[];
+  content?: string;
 }

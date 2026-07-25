@@ -3,31 +3,28 @@
 import { useEffect, useState } from "react";
 import { Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
-import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
-export type AgentRepositoryReviewAction = "approve" | "reject";
+import type { CommunityMcpCard } from "@/types/mcpTools";
 
-interface AgentRepositoryReviewConfirmModalProps {
+export type McpRepositoryReviewAction = "approve" | "reject";
+
+interface McpRepositoryReviewConfirmModalProps {
   open: boolean;
-  action: AgentRepositoryReviewAction | null;
-  listing: AgentRepositoryListingItem | null;
+  action: McpRepositoryReviewAction | null;
+  service: CommunityMcpCard | null;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (content?: string) => Promise<void>;
 }
 
-function getListingTitle(listing: AgentRepositoryListingItem) {
-  return listing.display_name?.trim() || listing.name?.trim() || "";
-}
-
-export function AgentRepositoryReviewConfirmModal({
+export default function McpRepositoryReviewConfirmModal({
   open,
   action,
-  listing,
+  service,
   loading = false,
   onClose,
   onConfirm,
-}: AgentRepositoryReviewConfirmModalProps) {
+}: McpRepositoryReviewConfirmModalProps) {
   const { t } = useTranslation("common");
   const [reviewOpinion, setReviewOpinion] = useState("");
 
@@ -37,13 +34,12 @@ export function AgentRepositoryReviewConfirmModal({
     }
   }, [open]);
 
-  if (!action || !listing) {
+  if (!action || !service) {
     return null;
   }
 
   const isApprove = action === "approve";
-  const title =
-    getListingTitle(listing) || t("agentRepository.card.untitled");
+  const title = service.name?.trim() || "-";
 
   const handleOk = async () => {
     const trimmed = reviewOpinion.trim();
@@ -61,9 +57,7 @@ export function AgentRepositoryReviewConfirmModal({
       onCancel={onClose}
       onOk={handleOk}
       okText={
-        isApprove
-          ? t("repository.review.approve")
-          : t("repository.review.reject")
+        isApprove ? t("repository.review.approve") : t("repository.review.reject")
       }
       cancelText={t("common.cancel")}
       okButtonProps={isApprove ? undefined : { danger: true }}
@@ -79,13 +73,13 @@ export function AgentRepositoryReviewConfirmModal({
         </p>
         <div className="space-y-2">
           <label
-            htmlFor="agent-repository-review-opinion"
+            htmlFor="mcp-repository-review-opinion"
             className="block text-sm font-medium text-slate-700 dark:text-slate-200"
           >
             {t("repository.review.reviewOpinionLabel")}
           </label>
           <Input.TextArea
-            id="agent-repository-review-opinion"
+            id="mcp-repository-review-opinion"
             value={reviewOpinion}
             onChange={(event) => setReviewOpinion(event.target.value)}
             placeholder={t("repository.review.reviewOpinionPlaceholder")}
