@@ -159,6 +159,21 @@ def test_count_my_editable_skills_api(mocker, mock_auth_header):
     )
 
 
+def test_count_my_editable_skills_api_maps_unauthorized(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        side_effect=app_module.UnauthorizedError("expired"),
+    )
+
+    response = client.get(
+        "/repository/skill/mine/counts",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "expired"}
+
+
 def test_create_skill_repository_listing_api_maps_forbidden(mocker, mock_auth_header):
     mocker.patch(
         "apps.skill_repository_app.get_current_user_id",
