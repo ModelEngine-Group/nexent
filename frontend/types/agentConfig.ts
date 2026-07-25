@@ -537,6 +537,7 @@ export interface McpServer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  group_ids?: string;
 }
 
 // MCP tool interface definition

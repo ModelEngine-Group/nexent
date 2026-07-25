@@ -197,7 +197,7 @@ export default function AddMcpServiceLocalSection({
                         value === McpDeploymentType.LOCAL_IMAGE
                           ? draft.uploadImageFile
                           : null,
-                      groupIds: nextPermission === "PRIVATE" ? [] : draft.groupIds,
+                      groupIds: draft.groupIds,
                       ingroupPermission: nextPermission as "EDIT" | "READ_ONLY" | "PRIVATE",
                     });
                     form.setFieldValue("ingroup_permission", nextPermission);

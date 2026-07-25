@@ -86,7 +86,7 @@ export default function SelectToolsDialog({
   const visibleMcpNames = useMemo(
     () => new Set(
       rawServers
-        .filter((s) => (s as any).permission === "EDIT" || (s as any).group_ids)
+        .filter((s) => s.permission === "EDIT" || s.group_ids)
         .map((s) => s.service_name),
     ),
     [rawServers],
