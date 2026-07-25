@@ -144,7 +144,7 @@ export default function ProjectConfigTab() {
         >
           {
             customModifyLanguageConfig.map((item) => (
-              <Row gutter={16} align={"middle"}>
+              <Row gutter={16} align={"middle"} key={item.key}>
                 <Col span={12}>
                     <Form.Item
                       name={["configZh", item.key]}
