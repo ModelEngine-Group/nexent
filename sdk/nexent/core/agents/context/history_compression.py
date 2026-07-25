@@ -12,7 +12,7 @@ from .models import ContextItem, ContextItemInput, ContextItemType
 
 @dataclass(frozen=True)
 class HistorySummaryCandidate:
-    summary: dict[str, Any]
+    summary: str
     covered_through_message_id: int
     previous_summary_unit_id: int | None = None
     trigger: str = "soft_budget_exceeded"
@@ -54,9 +54,7 @@ class HistoryCompressor:
         previous = summary.content if summary else None
         sections: list[str] = []
         if previous:
-            sections.append("## Previous Summary\n" + json.dumps(
-                previous.get("summary", {}), ensure_ascii=False, indent=2
-            ))
+            sections.append("## Previous Summary\n" + str(previous.get("summary", "")))
         rendered_turns = [
             "## User\n{user}\n\n## Assistant final answer\n{assistant}".format(
                 user=turn.content["user_message"],
@@ -75,24 +73,11 @@ class HistoryCompressor:
                 records=tuple(generated.records),
                 fallback_turns=self._safe_fallback(turns),
             )
-        try:
-            payload = json.loads(generated.summary_text)
-        except (TypeError, json.JSONDecodeError):
-            # A checkpoint must be structured. Plain-text/fallback output remains transient.
-            return HistoryCompressionResult(
-                records=tuple(generated.records),
-                fallback_turns=self._safe_fallback(turns),
-            )
-        if not isinstance(payload, dict):
-            return HistoryCompressionResult(
-                records=tuple(generated.records),
-                fallback_turns=self._safe_fallback(turns),
-            )
         last_message_id = int(turns[-1].content["assistant_message_id"])
         previous_id = summary.content.get("unit_id") if summary else None
         return HistoryCompressionResult(
             candidate=HistorySummaryCandidate(
-                summary=payload,
+                summary=generated.summary_text,
                 covered_through_message_id=last_message_id,
                 previous_summary_unit_id=int(previous_id) if previous_id is not None else None,
             ),

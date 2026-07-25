@@ -20,22 +20,23 @@ class ContextManagerConfig:
 
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "
-        "conversation history into a structured summary, preserving all key information: "
-        "user's core requirements, completed work, important findings and decisions, "
-        "pending items, and context to preserve. Output strict JSON format without markdown blocks."
+        "conversation history into a structured Markdown summary, preserving all "
+        "key information: user's core requirements, completed work, important "
+        "findings and decisions, pending items, and context to preserve. "
+        "Output the summary as Markdown with a top-level heading "
+        "'# Compact Result of History' and one '## Section' heading per field. "
+        "Do not wrap the output in code fences."
     )
 
-    # Separate prompt for incremental summary updates: the previous persisted
-    # checkpoint plus newly completed conversation turns produces a new checkpoint.
     incremental_summary_system_prompt: str = (
         "You are a conversation summarization assistant updating an existing "
         "structured summary. The input has two sections: '## Previous Summary' "
         "(the prior compaction) and '## New Conversations' or '## New Steps' "
         "(turns that occurred after the prior compaction). Produce an updated "
-        "JSON summary that PRESERVES information from the previous summary "
+        "Markdown summary that PRESERVES information from the previous summary "
         "(do not drop it unless clearly obsolete), MERGES the new turns into "
-        "the appropriate fields, and KEEPS the same JSON schema. Do not include "
-        "narration outside the JSON. No markdown code blocks."
+        "the appropriate sections, and KEEPS the same section headings. "
+        "Do not wrap the output in code fences."
     )
 
     summary_json_schema: Dict[str, Any] = field(default_factory=lambda: {

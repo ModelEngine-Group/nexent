@@ -43,13 +43,10 @@ class _Role(Enum):
 def test_summary_output_normalization_and_fallback(caplog):
     assert format_summary_output("   ") is None
 
-    markdown_result = format_summary_output('```json\n{"fact": "保留"}\n```')
-    assert "# Compact Result of History" in markdown_result
-    assert "## Fact" in markdown_result
-    assert "保留" in markdown_result
+    assert format_summary_output('```markdown\n# Summary\n\ntext\n```') == "# Summary\n\ntext"
+    assert format_summary_output('```json\n{"fact": "保留"}\n```') == '{"fact": "保留"}'
 
     assert format_summary_output("plain summary") == "plain summary"
-    assert "not valid JSON" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -299,7 +296,10 @@ def test_renderer_current_action_without_raw_messages():
     )
     message = ContextItemRenderer().render([action])[0]
     assert message["role"] == "assistant"
-    assert '"result": "done"' in message["content"][0]["text"]
+    text = message["content"][0]["text"]
+    assert "Step 1:" in text
+    assert "Result: done" in text
+    assert not text.lstrip().startswith("{")
 
 
 def test_context_manager_management_and_diagnostic_helpers():
