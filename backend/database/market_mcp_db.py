@@ -150,8 +150,8 @@ def get_mcp_market_record_by_id(market_id: int) -> Dict[str, Any] | None:
         return as_dict(record) if record else None
 
 
-def check_mcp_market_name_exists(mcp_name: str) -> bool:
-    """Check if a shared market record with the given name already exists.
+def check_mcp_market_name_exists(mcp_name: str, tenant_id: str) -> bool:
+    """Check if a shared market record with the given name already exists in this tenant.
 
     Matches the partial unique index uq_mcp_market_name_active:
       WHERE delete_flag = 'N' AND review_status = 'shared'
@@ -159,6 +159,7 @@ def check_mcp_market_name_exists(mcp_name: str) -> bool:
     with get_db_session() as session:
         record = session.query(McpMarketRecord).filter(
             McpMarketRecord.mcp_name == mcp_name,
+            McpMarketRecord.tenant_id == tenant_id,
             McpMarketRecord.delete_flag != "Y",
             McpMarketRecord.review_status == "shared",
         ).first()

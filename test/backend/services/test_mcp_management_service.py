@@ -177,6 +177,25 @@ class TestToCommunityCard(unittest.TestCase):
         self.assertIsNotNone(card)
         self.assertEqual(card["sharedFields"], None)
 
+    def test_container_port_included(self):
+        """_to_community_card includes containerPort from source MCP record."""
+        with patch('database.remote_mcp_db.get_mcp_record_by_id_and_tenant') as mock_get:
+            mock_get.return_value = {
+                "container_port": 8080,
+                "authorization_token": "tok",
+                "custom_headers": None,
+            }
+            card = _to_community_card({
+                **MARKET_RECORD,
+                "source_mcp_id": 10,
+            })
+            self.assertEqual(card["containerPort"], 8080)
+
+    def test_container_port_none_when_no_source_mcp(self):
+        """containerPort is None when source_mcp_id is not set."""
+        card = _to_community_card({"source_mcp_id": None})
+        self.assertIsNone(card["containerPort"])
+
 
 class TestGetMcpReviewAdminScope(unittest.TestCase):
     """Test _get_mcp_review_admin_scope checks user role."""

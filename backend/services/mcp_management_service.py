@@ -117,6 +117,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
     # Look up authorization_token and custom_headers from the source MCP record
     source_authorization_token = None
     source_custom_headers = None
+    source_container_port = None
     source_mcp_id = row.get("source_mcp_id")
     if source_mcp_id is not None:
         try:
@@ -125,6 +126,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
             if mcp_record:
                 source_authorization_token = mcp_record.get("authorization_token")
                 source_custom_headers = mcp_record.get("custom_headers")
+                source_container_port = mcp_record.get("container_port")
         except Exception:
             pass
     return {
@@ -135,6 +137,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "sharedFields": row.get("shared_fields"),
         "authorizationToken": source_authorization_token,
         "customHeaders": source_custom_headers,
+        "containerPort": source_container_port,
         "name": row.get("mcp_name"),
         "description": row.get("description"),
         "status": "active" if raw_status == STATUS_SHARED else "inactive",
@@ -294,7 +297,7 @@ async def publish_community_mcp_service(
     community_transport_type = "container" if final_config_json is not None else "url"
 
     # Check name uniqueness among shared records only
-    if check_mcp_market_name_exists(final_name):
+    if check_mcp_market_name_exists(final_name, tenant_id):
         raise McpNameConflictError(f"MCP name '{final_name}' already exists in the community market")
 
     market_id = create_mcp_market_record(
@@ -312,6 +315,7 @@ async def publish_community_mcp_service(
             "group_ids": convert_list_to_string(group_ids) if group_ids else None,
             "ingroup_permission": ingroup_permission,
             "shared_fields": shared_fields,
+            "container_port": source_record.get("container_port"),
         },
         tenant_id=tenant_id,
         user_id=user_id,
@@ -373,7 +377,7 @@ async def update_community_mcp_service(
         next_transport_type = "url"
 
     # Check name uniqueness if name is changing
-    if name is not None and name != current.get("mcp_name") and check_mcp_market_name_exists(name):
+    if name is not None and name != current.get("mcp_name") and check_mcp_market_name_exists(name, tenant_id):
         raise McpNameConflictError(f"MCP name '{name}' already exists in the community market")
 
     # Update fields

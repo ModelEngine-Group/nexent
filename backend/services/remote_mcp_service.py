@@ -299,6 +299,9 @@ async def add_remote_mcp_server_list(
     custom_headers: dict | None = None,
     source: str | None = "local",
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ):
     """Add a remote MCP server to the list.
 
@@ -339,6 +342,9 @@ async def add_remote_mcp_server_list(
         "source": source,
         "container_port": container_port,
         "registry_json": {"_toolNames": tool_names},
+        "group_ids": group_ids,
+        "ingroup_permission": ingroup_permission,
+        "shared_fields": shared_fields,
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -395,6 +401,7 @@ async def add_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    skip_health_check: bool = False,
 ) -> None:
     """Add an MCP service record.
 
@@ -482,9 +489,10 @@ async def add_mcp_service(
                 resolved_registry_json["_toolNames"] = api_tools
         else:
             headers = _build_mcp_headers(authorization_token, custom_headers)
-            tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
-            if tool_names:
-                resolved_registry_json["_toolNames"] = tool_names
+            if not skip_health_check:
+                tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+                if tool_names:
+                    resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
@@ -1423,6 +1431,9 @@ async def upload_and_start_mcp_image(
     port: int,
     service_name: str | None = None,
     env_vars: str | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1499,7 +1510,10 @@ async def upload_and_start_mcp_image(
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
         authorization_token=authorization_token,
-        container_port=port
+        container_port=port,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
     return {

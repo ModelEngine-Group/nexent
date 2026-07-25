@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Select, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
@@ -57,12 +57,14 @@ interface AddMcpServiceLocalSectionProps {
   active: boolean;
   enableUploadImage?: boolean;
   onAdded: () => void;
+  onSubmittingChange?: (submitting: boolean) => void;
 }
 
 export default function AddMcpServiceLocalSection({
   active,
   enableUploadImage = false,
   onAdded,
+  onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
@@ -83,6 +85,11 @@ export default function AddMcpServiceLocalSection({
       onAdded();
     },
   });
+
+  // Notify parent modal of submitting state to block close during submission
+  useEffect(() => {
+    onSubmittingChange?.(submitting);
+  }, [submitting, onSubmittingChange]);
 
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -182,7 +189,7 @@ export default function AddMcpServiceLocalSection({
                       value === McpDeploymentType.LOCAL_IMAGE
                         ? McpTransportType.CONTAINER
                         : McpTransportType.URL;
-                    const nextPermission = value === McpDeploymentType.API ? "PRIVATE" : "READ_ONLY";
+                    const nextPermission = "READ_ONLY";
                     patchDraft({
                       deploymentType: value,
                       transportType: nextTransport,
