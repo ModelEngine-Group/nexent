@@ -21,6 +21,14 @@ terminal_stub = types.ModuleType("sdk.nexent.core.tools.terminal_tool")
 terminal_stub.TerminalTool = MagicMock()
 sys.modules.setdefault("sdk.nexent.core.tools.terminal_tool", terminal_stub)
 
+class _ProcessType:
+    OTHER = "OTHER"
+    CARD = "CARD"
+    SEARCH_CONTENT = "SEARCH_CONTENT"
+    PICTURE_WEB = "PICTURE_WEB"
+
+ProcessType = _ProcessType
+
 import sdk.nexent.core.tools.analyze_text_file_tool as module
 from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool
 
@@ -264,7 +272,7 @@ class TestAnalyzeTextFileTool:
             template_type="analyze_file", language="en")
 
     def test_detect_file_type_pdf_and_zip_office_formats(self, tool):
-        assert tool.detect_file_type(b"%PDF-1.7") == "pdf"
+        assert tool.detect_file_type(b"%PDF-1.7") == ".pdf"
 
         for marker, expected in [
             ("word/document.xml", "docx"),
@@ -293,14 +301,14 @@ class TestAnalyzeTextFileTool:
                 return stream_name == "Workbook"
 
         monkeypatch.setattr(module.olefile, "OleFileIO", FakeOle)
-        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1data") == "xls"
+        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1data") == ".xls"
 
         def raise_ole_error(_):
             raise module.olefile.OleFileError("bad ole")
 
         monkeypatch.setattr(module.olefile, "OleFileError", OleFileError, raising=False)
         monkeypatch.setattr(module.olefile, "OleFileIO", raise_ole_error)
-        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1bad") == "txt"
+        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1bad") == ".txt"
 
     def test_build_search_results_defaults_and_cite_index(self, tool):
         results = tool._build_search_results([
