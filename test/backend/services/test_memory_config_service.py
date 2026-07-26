@@ -188,6 +188,38 @@ class TestMemoryConfigService(unittest.TestCase):
         ok = _update_single_config(self.user_id, "MEMORY_SWITCH", "Y")
         self.assertFalse(ok)
 
+    @patch("backend.services.memory_config_service.delete_config_by_config_id", return_value=True)
+    @patch("backend.services.memory_config_service.update_config_by_id", return_value=True)
+    @patch("backend.services.memory_config_service.get_memory_config_info")
+    def test_update_single_config_cleans_up_duplicates(self, m_get_info, m_update, m_del):
+        m_get_info.return_value = [
+            {"config_id": 10, "config_value": "N"},
+            {"config_id": 20, "config_value": "Y"},
+            {"config_id": 30, "config_value": "N"},
+        ]
+        from backend.services.memory_config_service import _update_single_config
+
+        ok = _update_single_config(self.user_id, "MEMORY_SWITCH", "Y")
+        self.assertTrue(ok)
+        m_update.assert_called_once()
+        self.assertEqual(m_del.call_count, 2)
+        m_del.assert_any_call(20, updated_by=self.user_id)
+        m_del.assert_any_call(30, updated_by=self.user_id)
+
+    @patch("backend.services.memory_config_service.delete_config_by_config_id", return_value=False)
+    @patch("backend.services.memory_config_service.update_config_by_id", return_value=True)
+    @patch("backend.services.memory_config_service.get_memory_config_info")
+    def test_update_single_config_duplicate_cleanup_failure_logged(self, m_get_info, m_update, m_del):
+        m_get_info.return_value = [
+            {"config_id": 10, "config_value": "N"},
+            {"config_id": 20, "config_value": "Y"},
+        ]
+        from backend.services.memory_config_service import _update_single_config
+
+        ok = _update_single_config(self.user_id, "MEMORY_SWITCH", "Y")
+        self.assertTrue(ok)
+        m_del.assert_called_once_with(20, updated_by=self.user_id)
+
     # ------------------------------ _add_multi_value ------------------------------
     @patch("backend.services.memory_config_service.insert_config", return_value=True)
     @patch("backend.services.memory_config_service.get_memory_config_info", return_value=[])

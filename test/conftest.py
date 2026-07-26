@@ -43,6 +43,47 @@ if _sdk_dir not in sys.path:
 sys.modules.update({k: v for k, v in _mem0_stubs.items() if k not in sys.modules})
 sys.modules.update({k: v for k, v in _optional_sdk_stubs.items() if k not in sys.modules})
 
+# Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
+# in environments where the optional SDK is not installed.  We register a
+# permissive module-like object that exposes ``open_workbook`` so the .xls
+# parsing path can be imported without raising.  Individual test files
+# (e.g. ``test_evaluation_set_excel_utils.py``) replace this with a richer
+# fake that mimics the sheet-level API for the .xls tests.
+class _XlrdProxy(types.ModuleType):
+    """Permissive xlrd stub.
+
+    Exposes a callable ``open_workbook`` attribute so that ``xlrd.open_workbook(...)``
+    works at import time.  Returns a shape that satisfies the bits of the .xls
+    parsing path used by ``evaluation_set_excel_utils`` well enough to import
+    without crashing; richer behaviour is supplied by per-test-file overrides.
+    """
+
+    def __init__(self):
+        super().__init__("xlrd")
+        self._sentinel = object()
+
+    def open_workbook(self, file_contents=b""):
+        # Return a fully-formed stub book that survives ``sheet_by_index``,
+        # ``sheet.nrows``, ``sheet.row_values`` and ``sheet.cell_value`` —
+        # these are the four accessors used in the .xls branch.
+        class _Sheet:
+            nrows = 0
+            def row_values(self, _rowx):
+                return []
+
+            def cell_value(self, _rowx, _colx):
+                return None
+
+        class _Book:
+            def sheet_by_index(self, _idx):
+                return _Sheet()
+
+        return _Book()
+
+
+if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
+    sys.modules["xlrd"] = _XlrdProxy()
+
 _tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
 os.makedirs(_tmp_root, exist_ok=True)
 os.environ.setdefault("TMP", _tmp_root)

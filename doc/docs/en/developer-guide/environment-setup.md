@@ -8,7 +8,7 @@ Use this guide to prepare your environment before developing with Nexent. It sep
 
 ## 🧱 Common Requirements
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
 - Docker & Docker Compose
 - `uv` (Python package manager)

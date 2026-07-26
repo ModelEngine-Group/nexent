@@ -43,6 +43,8 @@ const buildCapacityRequestBody = (model: {
   defaultOutputReserveTokens?: number;
   tokenizerFamily?: string;
   capacitySource?: string;
+  acceptedSuggestionMatchKind?: string;
+  acceptedCapabilityProfileVersion?: string;
 }) => ({
   ...(model.contextWindowTokens !== undefined
     ? { context_window_tokens: model.contextWindowTokens }
@@ -61,6 +63,18 @@ const buildCapacityRequestBody = (model: {
     : {}),
   ...(model.capacitySource !== undefined
     ? { capacity_source: model.capacitySource }
+    : {}),
+  // W11 accept-signal: audit-only fields the app layer pops before the
+  // service write so model_capacity_suggestion_accept_total can count
+  // accepted catalog matches.
+  ...(model.acceptedSuggestionMatchKind !== undefined
+    ? { accepted_suggestion_match_kind: model.acceptedSuggestionMatchKind }
+    : {}),
+  ...(model.acceptedCapabilityProfileVersion !== undefined
+    ? {
+        accepted_capability_profile_version:
+          model.acceptedCapabilityProfileVersion,
+      }
     : {}),
 });
 
@@ -101,6 +115,12 @@ const mapCapacityCoverageFromApi = (coverage: any): CapacityCoverage => ({
     suggestionAvailable: Boolean(model.suggestion_available),
   })),
 });
+
+type ModelConnectivityResult = {
+  connectivity: boolean;
+  modelName?: string;
+  error?: string;
+};
 
 // Error class
 export class ModelError extends Error {
@@ -198,6 +218,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -420,6 +442,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -605,6 +629,50 @@ export const modelService = {
       }
       log.error(`验证模型 ${displayName} 连接失败:`, error);
       return false;
+    }
+  },
+
+  checkManageTenantModelConnectivityDetail: async (
+    tenantId: string,
+    displayName: string,
+    modelType: string,
+    signal?: AbortSignal
+  ): Promise<ModelConnectivityResult> => {
+    try {
+      if (!displayName) return { connectivity: false };
+      const response = await fetch(API_ENDPOINTS.model.manageModelHealthcheck, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          display_name: displayName,
+          model_type: modelType,
+        }),
+        signal,
+      });
+      const result = await response.json();
+      if (response.status === 200 && result.data) {
+        return {
+          connectivity: Boolean(result.data.connectivity),
+          modelName: result.data.model_name,
+          error: result.data.error,
+        };
+      }
+      return {
+        connectivity: false,
+        error: result.detail || result.message,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      return {
+        connectivity: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 
@@ -923,6 +991,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -1005,6 +1075,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(

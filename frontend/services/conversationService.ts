@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListItem,
+  ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
@@ -33,6 +34,23 @@ export const conversationService = {
     }
 
     throw new ApiError(data.code, data.message);
+  },
+
+  // Get conversation detail
+  async getById(conversationId: string): Promise<ApiConversationDetail> {
+    const response = await fetch(API_ENDPOINTS.conversation.detail(Number(conversationId)), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    const data = (await response.json()) as ApiConversationResponse;
+    const conversationData = data.data?.[0];
+
+    if (data.code === 0 && conversationData) {
+      return conversationData;
+    }
+
+    throw new Error(`Conversation ${conversationId} not found`);
   },
 
   // Create new conversation
@@ -73,6 +91,7 @@ export const conversationService = {
 
     throw new ApiError(data.code, data.message);
   },
+
 
   // Get conversation details
   async getDetail(
@@ -887,7 +906,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
-      conversation_id: number;
+      conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
       minio_files?: Array<{
@@ -903,6 +922,7 @@ export const conversationService = {
       model_id?: number; // Optional model override
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
+      is_resume?: boolean; // Add resume mode parameter for streaming recovery
     },
     signal?: AbortSignal
   ) {
@@ -916,6 +936,11 @@ export const conversationService = {
         is_debug: params.is_debug || false,
       };
 
+      // Only include conversation_id if it has a value
+      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+        requestParams.conversation_id = params.conversation_id;
+      }
+
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {
         requestParams.agent_id = params.agent_id;
@@ -927,7 +952,17 @@ export const conversationService = {
         requestParams.version_no = params.version_no;
       }
 
-      const response = await fetch(API_ENDPOINTS.agent.run, {
+      // Build URL with query parameters for resume mode
+      let url = API_ENDPOINTS.agent.run;
+      const queryParams = new URLSearchParams();
+      if (params.is_resume) {
+        queryParams.append("resume", "true");
+      }
+      if (queryParams.toString()) {
+        url = `${url}?${queryParams.toString()}`;
+      }
+
+      const response = await fetch(url, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(requestParams),
@@ -936,6 +971,14 @@ export const conversationService = {
 
       if (!response.body) {
         throw new Error("Response body is null");
+      }
+
+      // Check content-type to distinguish JSON response from SSE stream
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        // JSON response (e.g., from resume mode when agent finished)
+        const data = await response.json();
+        return { type: "json", data };
       }
 
       return response.body.getReader();

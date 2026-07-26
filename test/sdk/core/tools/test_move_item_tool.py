@@ -179,10 +179,7 @@ class TestMoveItemToolForward:
         assert result_data["items_moved"] == 1
         assert result_data["message"] == f"File moved successfully from {source_path} to {dest_path}"
 
-        # Verify observer messages
-        move_item_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Moving file/directory..."
-        )
+        # Verify CARD observer message
         move_item_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "move", "text": f"Moving {source_path} to {dest_path}"}], ensure_ascii=False)
@@ -422,11 +419,6 @@ class TestMoveItemToolForward:
         result_data = json.loads(result)
 
         assert result_data["status"] == "success"
-
-        # Verify Chinese running prompt
-        move_item_tool_zh.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在移动文件/文件夹..."
-        )
 
         # Verify Chinese card content
         move_item_tool_zh.observer.add_message.assert_any_call(

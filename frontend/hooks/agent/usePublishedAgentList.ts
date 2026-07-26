@@ -1,10 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchPublishedAgentList as fetchPublishedAgentListService } from "@/services/agentConfigService";
-import { useMemo, useEffect } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { Agent } from "@/types/agentConfig";
 
-export function usePublishedAgentList() {
+interface UsePublishedAgentListOptions {
+	page?: number;
+	pageSize?: number;
+}
+
+export function usePublishedAgentList({
+	page = 1,
+	pageSize = Number.MAX_SAFE_INTEGER,
+}: UsePublishedAgentListOptions = {}) {
 	const queryClient = useQueryClient();
+	const [search, setSearch] = useState("");
 
 	const query = useQuery({
 		queryKey: ["publishedAgentsList"],
@@ -13,22 +22,69 @@ export function usePublishedAgentList() {
 			if (!res || !res.success) {
 				throw new Error(res?.message || "Failed to fetch published agents");
 			}
-			return res.data || [];
+			return (res.data || []) as Agent[];
 		},
 		staleTime: 60_000,
+		refetchOnMount: "always",
 		enabled: true,
 	});
 
 	const agents = query.data ?? [];
 
 	const availableAgents = useMemo(() => {
-		return (agents as Agent[]).filter((a) => a.is_available !== false);
+		return agents.filter((a) => a.is_available !== false);
 	}, [agents]);
+
+	const availableMainAgents = useMemo(() => {
+		return agents.filter((agent) => agent.is_available !== false && agent.is_main_agent !== false);
+	}, [agents]);
+
+	const filteredAgents = useMemo(() => {
+		const trimmedSearch = search.trim();
+		if (!trimmedSearch) {
+			return availableMainAgents;
+		}
+
+		const searchLower = trimmedSearch.toLowerCase();
+		return availableMainAgents.filter((agent) => {
+			const name = agent.name?.toLowerCase() || "";
+			const displayName = agent.display_name?.toLowerCase() || "";
+			const description = agent.description?.toLowerCase() || "";
+			const author = agent.author?.toLowerCase() || "";
+			return (
+				name.includes(searchLower) ||
+				displayName.includes(searchLower) ||
+				description.includes(searchLower) ||
+				author.includes(searchLower)
+			);
+		});
+	}, [availableMainAgents, search]);
+
+	const totalPages = useMemo(() => {
+		return Math.max(1, Math.ceil(filteredAgents.length / pageSize));
+	}, [filteredAgents.length, pageSize]);
+
+	const paginatedAgents = useMemo(() => {
+		const startIndex = (page - 1) * pageSize;
+		return filteredAgents.slice(startIndex, startIndex + pageSize);
+	}, [filteredAgents, page, pageSize]);
+
+	const updateSearch = useCallback((value: string) => {
+		setSearch(value);
+	}, []);
 
 	return {
 		...query,
 		agents,
 		availableAgents,
+		availableMainAgents,
+		paginatedAgents,
+		filteredAgents,
+		page,
+		totalPages,
+		pageSize,
+		search,
+		updateSearch,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] }),
 	};
 }

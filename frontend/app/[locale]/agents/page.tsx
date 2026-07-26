@@ -43,13 +43,14 @@ export default function AgentSetupOrchestrator() {
 
   // Handle auto-create mode from URL params
   useEffect(() => {
-    const create = searchParams.get('create');
-    if (create === 'true') {
+    const create = searchParams?.get("create");
+    if (create === "true") {
       setTimeout(() => {
         enterCreateMode();
       }, 100);
     }
-  }, [searchParams, enterCreateMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enterCreateMode]);
 
   // Handle auto-select agent from URL params (agent_id)
   useEffect(() => {
@@ -80,9 +81,10 @@ export default function AgentSetupOrchestrator() {
 
   const headerStyle: React.CSSProperties = {
     padding: 0,
-    height: 120,
-    lineHeight: '120px',
-    background: '#fff',
+    minHeight: 120,
+    height: "auto",
+    lineHeight: "normal",
+    background: "#fff",
     flexShrink: 0,
   };
 

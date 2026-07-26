@@ -63,7 +63,7 @@ class TestListToolsAPI:
         assert data[1]["name"] == "Tool2"
 
         mock_get_user_id.assert_called_once_with(None)
-        mock_list_all_tools.assert_called_once_with(tenant_id="tenant456")
+        mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
 
     @patch('apps.tool_config_app.get_current_user_id')
     def test_list_tools_auth_error(self, mock_get_user_id):
@@ -1188,6 +1188,63 @@ class TestErrorHandling:
         response = client.get("/tool/list")
         assert response.status_code == HTTPStatus.OK
         mock_get_user_id.assert_called_with(None)
+
+
+class TestUpdateToolLabelsAPI:
+    """Test endpoint for updating tool labels"""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('database.tool_db.update_tool_labels')
+    def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id):
+        """Test successful labels update"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_labels.return_value = True
+
+        response = client.put(
+            "/tool/labels",
+            json={"tool_id": 1, "labels": ["database", "search"]}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["labels"] == ["database", "search"]
+        mock_get_user_id.assert_called_once_with(None)
+        mock_update_labels.assert_called_once_with(
+            1, "tenant456", ["database", "search"], "user123"
+        )
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('database.tool_db.update_tool_labels')
+    def test_update_tool_labels_not_found(self, mock_update_labels, mock_get_user_id):
+        """Test update labels returns 404 when tool not found"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_labels.return_value = False
+
+        response = client.put(
+            "/tool/labels",
+            json={"tool_id": 1, "labels": ["label1"]}
+        )
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "Tool not found" in data["detail"]
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('database.tool_db.update_tool_labels')
+    def test_update_tool_labels_service_error(self, mock_update_labels, mock_get_user_id):
+        """Test update labels returns 500 on service error"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_labels.side_effect = Exception("DB error")
+
+        response = client.put(
+            "/tool/labels",
+            json={"tool_id": 1, "labels": ["label1"]}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to update tool labels" in data["detail"]
 
 
 if __name__ == "__main__":

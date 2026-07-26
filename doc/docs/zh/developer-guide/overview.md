@@ -27,7 +27,7 @@ nexent/
 
 ### 后端技术栈
 - **框架**: FastAPI
-- **语言**: Python 3.10+
+- **语言**: Python 3.11+
 - **数据库**: PostgreSQL + Redis + Elasticsearch
 - **文件存储**: MinIO
 - **任务队列**: Celery + Ray
@@ -59,7 +59,7 @@ nexent/
 - **详细信息**: 查看 [前端概览](../frontend/overview)
 
 ### 🔧 后端开发  
-- **技术栈**: FastAPI + Python 3.10+ + PostgreSQL + Redis + Elasticsearch
+- **技术栈**: FastAPI + Python 3.11+ + PostgreSQL + Redis + Elasticsearch
 - **核心功能**: API服务、智能体管理、数据处理、向量搜索
 - **详细信息**: 查看 [后端概览](../backend/overview)
 

@@ -134,7 +134,8 @@ from backend.database.group_db import (
     query_group_ids_by_user,
     check_user_in_group,
     count_group_users,
-    check_group_name_exists
+    check_group_name_exists,
+    query_groups_by_users,
 )
 
 
@@ -1286,3 +1287,62 @@ def test_remove_group_users_no_rows_affected(monkeypatch, mock_session):
     result = remove_group_users(group_id=999, removed_by="admin_user")
 
     assert result == 0
+
+
+def test_query_groups_by_users_success(monkeypatch, mock_session):
+    """Test batch querying group names for multiple users"""
+    session, _ = mock_session
+
+    # Mock query(TGUser.user_id, TGInfo.group_name).join(...).filter(...).all()
+    mock_join = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [
+        ("user1", "engineering"),
+        ("user1", "qa"),
+        ("user2", "engineering"),
+    ]
+    mock_join.filter.return_value = mock_filter
+    mock_query = MagicMock()
+    mock_query.join.return_value = mock_join
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_groups_by_users(["user1", "user2", "user3"])
+
+    assert result["user1"] == ["engineering", "qa"]
+    assert result["user2"] == ["engineering"]
+    # user3 had no group memberships in the query results
+    assert result["user3"] == []
+
+
+def test_query_groups_by_users_empty_input():
+    """Test batch querying with empty user list returns empty dict"""
+    result = query_groups_by_users([])
+
+    assert result == {}
+
+
+def test_query_groups_by_users_no_memberships(monkeypatch, mock_session):
+    """Test batch querying when none of the users have group memberships"""
+    session, _ = mock_session
+
+    mock_join = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = []
+    mock_join.filter.return_value = mock_filter
+    mock_query = MagicMock()
+    mock_query.join.return_value = mock_join
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_groups_by_users(["user1", "user2"])
+
+    assert result == {"user1": [], "user2": []}

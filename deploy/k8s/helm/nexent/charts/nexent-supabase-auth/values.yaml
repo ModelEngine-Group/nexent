@@ -5,6 +5,11 @@ image:
   tag: v2.170.0
   pullPolicy: IfNotPresent
 
+initImage:
+  repository: postgres
+  tag: 15-alpine
+  pullPolicy: IfNotPresent
+
 resources:
   requests:
     memory: 512Mi

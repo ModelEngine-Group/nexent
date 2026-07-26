@@ -57,8 +57,6 @@ class DeleteFileTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
-        self.running_prompt_zh = "正在删除文件..."
-        self.running_prompt_en = "Deleting file..."
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -92,10 +90,9 @@ class DeleteFileTool(Tool):
 
     def forward(self, file_path: str) -> str:
         try:
-            # Send tool run message if observer is available
+            # Tool running chunk is emitted by the SDK tool-call bridge in
+            # core_agent.py. We only emit the deletion card from inside the tool.
             if self.observer:
-                running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
                 card_content = [{"icon": "trash", "text": f"Deleting {file_path}"}]
                 self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

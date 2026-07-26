@@ -51,7 +51,8 @@ export const fetchKnowledgeBaseInfo = async (
 export const validateFileType = (file: File, t: TFunction, message: any): boolean => {
   const validTypes = [
     'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword', // .doc
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/markdown',
@@ -75,7 +76,9 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
     if (
       name.endsWith('.md') ||
       name.endsWith('.markdown') ||
-      name.endsWith('.csv')
+      name.endsWith('.csv') ||
+      name.endsWith('.doc') ||
+      name.endsWith('.docx')
     ) {
       isValidType = true;
     }

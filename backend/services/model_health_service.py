@@ -38,8 +38,17 @@ def _normalize_embedding_url(base_url: str) -> str:
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
     """Infer model_factory from base_url if not already set or is generic.
 
-    Uses the shared W11 host map so embedding and LLM/VLM inference do not drift.
+    For embedding/multi_embedding, uses legacy logic (only dashscope) to avoid
+    changing existing behavior. For other types (VLM), uses extended inference
+    so tokenpony URLs can be recognized for catalog healthcheck.
     """
+    # Embedding types: keep legacy behavior (only dashscope)
+    if model_type in EMBEDDING_TYPES:
+        if "dashscope" in base_url.lower():
+            return DASHSCOPE_MODEL_FACTORY
+        return current_factory
+
+    # Non-embedding types (VLM, etc): use extended inference
     try:
         from services.model_capacity_suggestion_service import pick_provider_from_base_url
 
@@ -345,7 +354,13 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
                 "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             logger.error(f"Error checking model connectivity: {str(e)}")
             update_model_record(model["model_id"], update_data)
-            raise e
+            if isinstance(e, ValueError):
+                raise e
+            return {
+                "connectivity": False,
+                "model_name": model_name,
+                "error": str(e),
+            }
 
         if connectivity:
             logger.info(
@@ -358,10 +373,11 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         if ssl_verify_fallback:
             update_data["ssl_verify"] = False
         update_model_record(model["model_id"], update_data)
-        return {
+        result = {
             "connectivity": connectivity,
             "model_name": model_name,
         }
+        return result
     except Exception as e:
         logger.error(f"Error checking model connectivity: {str(e)}")
         if 'model' in locals() and model:

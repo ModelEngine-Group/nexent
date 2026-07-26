@@ -319,7 +319,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   ]);
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
+    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
       {/* Fixed header area */}
       <div
         className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
@@ -332,7 +332,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center min-w-0" style={{ gap: "6px" }}>
+          <div className="flex items-center min-w-0 overflow-x-auto" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -391,16 +391,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   backgroundColor: "#1677ff",
                   color: "white",
                   border: "none",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  minWidth: 0,
+                  flexShrink: 0,
                 }}
                 className="hover:!bg-blue-600"
                 type="primary"
                 onClick={onDataMateConfig}
                 icon={<SettingOutlined />}
               >
-                <span className="overflow-hidden text-ellipsis">
+                <span className="truncate max-w-[120px]">
                   {t("knowledgeBase.button.dataMateConfig")}
                 </span>
               </Button>
@@ -409,13 +407,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
 
         {/* Search and filter area */}
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex items-start gap-3 flex-wrap">
           <Input
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<SearchOutlined />}
             value={effectiveSearchKeyword}
             onChange={(e) => handleSearchChange(e.target.value)}
-            style={{ width: 250 }}
+            className="flex-1 min-w-0"
             allowClear
           />
 
@@ -425,7 +423,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               placeholder={t("knowledgeBase.filter.source.placeholder")}
               value={effectiveSelectedSources}
               onChange={handleSourcesChange}
-              style={{ minWidth: 150 }}
+              className="flex-1 min-w-0"
               allowClear
               maxTagCount={2}
             >
@@ -445,7 +443,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               placeholder={t("knowledgeBase.filter.model.placeholder")}
               value={effectiveSelectedModels}
               onChange={handleModelsChange}
-              style={{ minWidth: 180 }}
+              className="flex-1 min-w-0"
               allowClear
               maxTagCount={2}
             >

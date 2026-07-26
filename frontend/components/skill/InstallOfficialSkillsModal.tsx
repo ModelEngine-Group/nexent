@@ -98,7 +98,7 @@ export function InstallOfficialSkillsModal({
       confirmLoading={Array.from(installing).length > 0}
       width={560}
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       {loading ? (
         <div className="flex items-center justify-center py-8">

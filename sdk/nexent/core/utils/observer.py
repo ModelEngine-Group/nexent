@@ -1,6 +1,8 @@
 import json
 import re
 from collections import deque
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
@@ -19,15 +21,22 @@ class ProcessType(Enum):
     ERROR = "error"  # error field
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
+    HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
 
     SEARCH_CONTENT = "search_content"  # search content in tool
     PICTURE_WEB = "picture_web"  # record the image after联网搜索
 
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
+    SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
     VERIFICATION = "verification"  # layered ReAct self-verification status
+    PLAN = "plan"  # structured plan JSON for planning feature
+    PLAN_STEP_UPDATE = "plan_step_update"  # single plan step status update
+
+    SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
+    SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
 
 
 # message transformer base class
@@ -73,16 +82,9 @@ class ParseTransformer(MessageTransformer):
 
 
 class ExecutionLogsTransformer(MessageTransformer):
-    # execution log template
-    TEMPLATES = {"zh": "\n📝 执行结果\n", "en": "\n📝 Execution Logs\n"}
-
     def transform(self, **kwargs: Any) -> str:
         """convert the message of execution log"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template + f"```bash\n{content}\n```\n"
+        return kwargs.get("content", "")
 
 
 class FinalAnswerTransformer(MessageTransformer):
@@ -99,23 +101,10 @@ class TokenCountTransformer(MessageTransformer):
         return kwargs.get("content", "")
 
 
-class ErrorTransformer(MessageTransformer):
-    # error template
-    TEMPLATES = {"zh": "\n💥 运行出错： \n{0}\n", "en": "\n💥 Error: \n{0}\n"}
-
-    def transform(self, **kwargs: Any) -> str:
-        """convert the message of error"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template.format(content)
-
-
 class MessageObserver:
     # set the maximum buffer size, can be adjusted according to needs
     MAX_TOKEN_BUFFER_SIZE = 10
-    
+
     def __init__(self, lang="zh"):
         # unified output to the front end string, changed to queue
         self.message_query = []
@@ -141,6 +130,14 @@ class MessageObserver:
         self.think_start_pattern = re.compile(r"<think>")
         self.think_end_pattern = re.compile(r"</think>")
 
+        # Sub-agent nesting depth. 0 = main agent, +1 per entered sub-agent.
+        # Context-local storage prevents concurrently executing tools from
+        # affecting each other's frontend nesting hierarchy.
+        self._current_depth: ContextVar[int] = ContextVar("current_depth", default=0)
+        self._tool_call_id: ContextVar[str | None] = ContextVar(
+            "tool_call_id", default=None
+        )
+
     def _init_message_transformers(self):
         """initialize the mapping of message type to transformer"""
         default_transformer = DefaultTransformer()
@@ -151,17 +148,21 @@ class MessageObserver:
             ProcessType.PARSE: ParseTransformer(),
             ProcessType.EXECUTION_LOGS: ExecutionLogsTransformer(),
             ProcessType.FINAL_ANSWER: FinalAnswerTransformer(),
-            ProcessType.ERROR: ErrorTransformer(),
+            ProcessType.ERROR: default_transformer,
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
+            ProcessType.HISTORY_SUMMARY: default_transformer,
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
+            ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
+            ProcessType.VERIFICATION: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
-            ProcessType.VERIFICATION: default_transformer
+            ProcessType.PLAN: default_transformer,
+            ProcessType.PLAN_STEP_UPDATE: default_transformer
         }
 
     def add_model_new_token(self, new_token):
@@ -170,10 +171,10 @@ class MessageObserver:
         """
         # Add token to think buffer
         self.think_buffer.append(new_token)
-        
+
         # Check for think tag patterns in the buffer
         buffer_text = ''.join(self.think_buffer)
-        
+
         # Check for think start tag
         if not self.in_think_mode:
             start_match = self.think_start_pattern.search(buffer_text)
@@ -185,7 +186,7 @@ class MessageObserver:
                 think_content = buffer_text[start_match.end():]
                 if think_content:
                     self.think_buffer.append(think_content)
-        
+
         # Check for think end tag
         if self.in_think_mode:
             end_match = self.think_end_pattern.search(buffer_text)
@@ -197,7 +198,7 @@ class MessageObserver:
                 if think_content:
                     self.message_query.append(
                         Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
-                
+
                 # Process content after </think> as normal content
                 after_think = buffer_text[end_match.end():]
                 if after_think:
@@ -205,13 +206,19 @@ class MessageObserver:
                 self.think_buffer.clear()
 
         while len(self.think_buffer) > self.MAX_TOKEN_BUFFER_SIZE:
-            think_content = self.think_buffer.popleft()
-            # In think mode, output accumulated content as deep thinking
-            if self.in_think_mode:
-                self.message_query.append(
-                    Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
-            else:
-                self._process_normal_content(think_content)
+            # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
+            # Each flush is a single message_query.append with multiple tokens concatenated
+            accumulated_content = ''.join(list(self.think_buffer)[:-self.MAX_TOKEN_BUFFER_SIZE])
+            # Remove the flushed tokens from buffer
+            for _ in range(len(self.think_buffer) - self.MAX_TOKEN_BUFFER_SIZE):
+                self.think_buffer.popleft()
+            # Send accumulated content
+            if accumulated_content:
+                if self.in_think_mode:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, accumulated_content).to_json())
+                else:
+                    self._process_normal_content(accumulated_content)
 
 
     def _process_normal_content(self, content):
@@ -219,7 +226,7 @@ class MessageObserver:
         Process normal content (non-deep-think content) for code block detection
         """
         self.token_buffer.append(content)
-        
+
         # concatenate the buffer into text for checking code blocks
         buffer_text = ''.join(self.token_buffer)
 
@@ -256,10 +263,15 @@ class MessageObserver:
         else:
             # not found the code block marker, pop the first token from the queue (if the buffer length exceeds a certain size)
             max_buffer_size = self.MAX_TOKEN_BUFFER_SIZE
-            while len(self.token_buffer) > max_buffer_size:
-                oldest_token = self.token_buffer.popleft()
+            if len(self.token_buffer) > max_buffer_size:
+                # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
+                accumulated_content = ''.join(list(self.token_buffer)[:-max_buffer_size])
+                # Remove the flushed tokens from buffer
+                for _ in range(len(self.token_buffer) - max_buffer_size):
+                    self.token_buffer.popleft()
+                # Send accumulated content
                 self.message_query.append(
-                    Message(self.current_mode, oldest_token).to_json())
+                    Message(self.current_mode, accumulated_content).to_json())
 
     def flush_remaining_tokens(self):
         """
@@ -279,7 +291,7 @@ class MessageObserver:
                 if think_buffer_text:
                     self._process_normal_content(think_buffer_text)
             self.think_buffer.clear()
-        
+
         # Process remaining normal buffer content
         if self.token_buffer:
             buffer_text = ''.join(self.token_buffer)
@@ -293,8 +305,82 @@ class MessageObserver:
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
+
+        tool_name = kwargs.get("tool_name")
+        tool_arguments = kwargs.get("tool_arguments")
+        tool_call_id = kwargs.get("tool_call_id") or self._tool_call_id.get()
+        agent_id = kwargs.get("agent_id")
+
         self.message_query.append(
-            Message(process_type, formatted_content).to_json())
+            Message(process_type, formatted_content, tool_name=tool_name,
+                    tool_arguments=tool_arguments,
+                    tool_call_id=tool_call_id,
+                    agent_id=agent_id,
+                    depth=self._current_depth.get()).to_json())
+
+    @contextmanager
+    def tool_call_context(self, tool_call_id: str):
+        """Associate observer output with one executing tool invocation."""
+        token = self._tool_call_id.set(tool_call_id)
+        try:
+            yield
+        finally:
+            self._tool_call_id.reset(token)
+
+    def add_subagent_start(self, agent_id, agent_name, task=None):
+        """Emit a subagent_start boundary and push the nesting depth.
+
+        The chunk's ``content`` is a JSON blob so the downstream persistence
+        layer (which only stores ``content`` for each unit) keeps enough
+        information to reconstruct the sub-agent card on history replay.
+
+        Args:
+            agent_id: Stable identifier of the sub-agent.
+            agent_name: Display name surfaced on the frontend sub-agent card.
+            task: Optional task text forwarded from the parent's call (e.g.
+                ``task="search the weather"``).
+        """
+        depth = self._current_depth.get() + 1
+        self._current_depth.set(depth)
+        payload = json.dumps(
+            {
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "task": task if task is not None else "",
+            },
+            ensure_ascii=False,
+        )
+        self.message_query.append(
+            Message(
+                ProcessType.SUBAGENT_START,
+                payload,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                depth=depth,
+            ).to_json()
+        )
+
+    def add_subagent_end(self, agent_id, agent_name):
+        """Emit a subagent_end boundary and pop the nesting depth.
+
+        Depth is clamped at 0 to stay resilient against unbalanced starts/ends
+        from upstream tooling.
+        """
+        depth = self._current_depth.get()
+        payload = json.dumps(
+            {"agent_id": agent_id, "agent_name": agent_name},
+            ensure_ascii=False,
+        )
+        self.message_query.append(
+            Message(
+                ProcessType.SUBAGENT_END,
+                payload,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                depth=max(depth, 1),
+            ).to_json()
+        )
+        self._current_depth.set(max(0, depth - 1))
 
     def add_model_reasoning_content(self, reasoning_content):
         """
@@ -323,10 +409,39 @@ class MessageObserver:
 
 # fixed MessageObserver output format
 class Message:
-    def __init__(self, message_type: ProcessType, content):
+    def __init__(self, message_type: ProcessType, content, tool_name: str = None,
+                 tool_arguments: dict = None, agent_id=None, agent_name: str = None,
+                 depth: int = 0, tool_call_id: str | None = None):
         self.message_type = message_type
         self.content = content
+        self.tool_name = tool_name
+        self.tool_arguments = tool_arguments
+        self.agent_id = agent_id
+        self.agent_name = agent_name
+        self.depth = depth
+        self.tool_call_id = tool_call_id
 
     # generate json format and convert to string
     def to_json(self):
-        return json.dumps({"type": self.message_type.value, "content": self.content}, ensure_ascii=False)
+        result = {"type": self.message_type.value}
+        # Always include content (running prompt text)
+        if isinstance(self.content, dict):
+            result["content"] = self.content
+        else:
+            result["content"] = self.content
+        # Add tool metadata if available
+        if self.tool_name is not None:
+            result["tool_name"] = self.tool_name
+        if self.tool_arguments is not None:
+            result["tool_arguments"] = self.tool_arguments
+        if self.tool_call_id is not None:
+            result["tool_call_id"] = self.tool_call_id
+        # Sub-agent metadata. Only emitted when populated so legacy consumers
+        # see byte-for-byte identical payloads for non-subagent chunks.
+        if self.agent_id is not None:
+            result["agent_id"] = self.agent_id
+        if self.agent_name is not None:
+            result["agent_name"] = self.agent_name
+        if self.depth:
+            result["depth"] = self.depth
+        return json.dumps(result, ensure_ascii=False)

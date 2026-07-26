@@ -59,8 +59,6 @@ class LinkupSearchTool(Tool):
         self.client = LinkupClient(api_key=linkup_api_key)
         self.max_results = max_results
         self.record_ops = 1
-        self.running_prompt_en = "Searching the web..."
-        self.running_prompt_zh = "网络搜索中..."
         self.image_filter = image_filter
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
 
@@ -76,10 +74,10 @@ class LinkupSearchTool(Tool):
         if len(results) == 0:
             raise Exception('No results found! Try a less restrictive/shorter query.')
 
-        # Send tool running message
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. We only emit the search card from inside the tool.
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

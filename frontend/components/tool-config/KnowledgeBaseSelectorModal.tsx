@@ -581,6 +581,7 @@ export default function KnowledgeBaseSelectorModal({
       knowledge_base_search: t("toolConfig.knowledgeBaseSelector.title.local"),
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
+      ragflow_search: t("toolConfig.knowledgeBaseSelector.title.ragflow"),
       idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
     };
     return (

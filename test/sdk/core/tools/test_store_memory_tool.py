@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
-from sdk.nexent.core.tools.store_memory_tool import StoreMemoryTool
+from sdk.nexent.core.utils.observer import MessageObserver
+from sdk.nexent.core.tools.store_memory_tool import StoreMemoryTool, _run_coroutine
 
 
 @pytest.fixture
 def mock_observer():
-    observer = MagicMock(spec=MessageObserver)
+    observer = MagicMock()
     observer.lang = "en"
     return observer
 
@@ -31,30 +31,6 @@ def store_memory_tool(mock_observer, mock_user_config):
         memory_user_config=mock_user_config,
         observer=mock_observer,
     )
-
-
-def test_observer_english_message(store_memory_tool, mock_observer):
-    mock_observer.lang = "en"
-    with patch(
-        "sdk.nexent.memory.memory_service.add_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        store_memory_tool.forward("some content")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "Saving to memory...")
-
-
-def test_observer_chinese_message(store_memory_tool, mock_observer):
-    mock_observer.lang = "zh"
-    with patch(
-        "sdk.nexent.memory.memory_service.add_memory_in_levels",
-        new_callable=AsyncMock,
-        return_value={"results": []},
-    ):
-        store_memory_tool.forward("some content")
-
-    mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "保存到记忆中...")
 
 
 def test_no_observer(store_memory_tool):
@@ -283,3 +259,46 @@ def test_forward_exception_does_not_increment_counter(store_memory_tool):
         store_memory_tool.forward("some content")
 
     assert store_memory_tool.store_count == 0
+
+
+def test_levels_none_config_conservative_default(mock_observer):
+    """When memory_user_config is None, apply conservative default (no agent-level sharing)."""
+    tool = StoreMemoryTool(
+        memory_config={"test": "config"},
+        tenant_id="tenant_1",
+        user_id="user_1",
+        agent_id="agent_1",
+        memory_user_config=None,
+        observer=mock_observer,
+    )
+
+    with patch(
+        "sdk.nexent.memory.memory_service.add_memory_in_levels",
+        new_callable=AsyncMock,
+        return_value={"results": [{"event": "ADD", "memory": "fact"}]},
+    ) as mock_add:
+        tool.forward("some content")
+
+    call_kwargs = mock_add.call_args[1]
+    assert call_kwargs["memory_levels"] == ["user_agent"]
+    assert "agent" not in call_kwargs["memory_levels"]
+
+
+def test_run_coroutine_no_running_loop():
+    async def sample_coro():
+        return "result"
+
+    result = _run_coroutine(sample_coro())
+    assert result == "result"
+
+
+def test_run_coroutine_with_running_loop():
+    async def sample_coro():
+        return "result"
+
+    async def run_with_loop():
+        return _run_coroutine(sample_coro())
+
+    import asyncio
+    result = asyncio.run(run_with_loop())
+    assert result == "result"

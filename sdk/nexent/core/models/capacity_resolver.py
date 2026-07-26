@@ -17,7 +17,7 @@ FINGERPRINT_SCHEMA_VERSION = 1
 CountingMode = Literal["exact", "estimated"]
 WindowShape = Literal["combined", "separate"]
 CapacitySource = Literal[
-    "operator", "profile", "provider_candidate", "legacy", "unknown"
+    "operator", "profile", "provider_candidate", "legacy", "default", "unknown"
 ]
 ReasoningWindowBehavior = Literal["none", "reserved", "unknown"]
 ProviderOverheadBehavior = Literal["negligible", "bounded", "unknown"]

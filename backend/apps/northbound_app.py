@@ -18,6 +18,7 @@ from services.northbound_service import (
     start_streaming_chat,
     stop_chat,
     get_agent_info_list,
+    get_agent_info_by_name_for_northbound,
     update_conversation_title,
     upload_files_for_northbound,
 )
@@ -344,6 +345,32 @@ async def list_agents(request: Request):
         raise e
     except Exception as e:
         logging.error(f"Failed to list agents: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/agents/{agent_name}")
+async def get_agent_by_name(
+    request: Request,
+    agent_name: str,
+):
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_info_by_name_for_northbound(ctx=ctx, agent_name=agent_name)
+    except ValueError as e:
+        logging.error(f"Invalid agent detail request: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        logging.info(f"Published agent not found: {agent_name}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except LimitExceededError as e:
+        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to get agent by name: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 

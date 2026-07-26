@@ -169,9 +169,12 @@ class TestErrorCodeValues:
 class TestErrorCodeHttpStatusMapping:
     """Test class for ERROR_CODE_HTTP_STATUS mapping."""
 
-    def test_dify_auth_error_maps_to_401(self):
-        """Test DIFY_AUTH_ERROR maps to HTTP 401."""
-        assert ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR] == 401
+    def test_dify_auth_error_maps_to_502(self):
+        """Upstream Dify auth failures are mapped to 502 (bad gateway), not 401.
+
+        401 is reserved for this system's identity/session failures only.
+        """
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR] == 502
 
     def test_dify_config_invalid_maps_to_400(self):
         """Test DIFY_CONFIG_INVALID maps to HTTP 400."""
@@ -249,9 +252,12 @@ class TestErrorCodeHttpStatusMapping:
         """Test SYSTEM_TIMEOUT maps to HTTP 504."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.SYSTEM_TIMEOUT] == 504
 
-    def test_idata_auth_error_maps_to_401(self):
-        """Test IDATA_AUTH_ERROR maps to HTTP 401."""
-        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_AUTH_ERROR] == 401
+    def test_idata_auth_error_maps_to_502(self):
+        """Upstream iData auth failures are mapped to 502 (bad gateway), not 401.
+
+        401 is reserved for this system's identity/session failures only.
+        """
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.IDATA_AUTH_ERROR] == 502
 
     def test_idata_config_invalid_maps_to_400(self):
         """Test IDATA_CONFIG_INVALID maps to HTTP 400."""

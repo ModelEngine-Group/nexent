@@ -40,7 +40,11 @@ export function transformMessagesToTaskMessages(
       currentUserMsgId = message.id;
     }
     // Assistant messages - extract task messages from steps
-    else if (message.role === MESSAGE_ROLES.ASSISTANT && message.steps && message.steps.length > 0) {
+    else if (
+      message.role === MESSAGE_ROLES.ASSISTANT &&
+      message.steps &&
+      message.steps.length > 0
+    ) {
       message.steps.forEach((step) => {
         // Process step.contents
         if (step.contents && step.contents.length > 0) {
@@ -54,18 +58,24 @@ export function transformMessagesToTaskMessages(
               subType: content.subType,
               // For preprocess messages, include the full contents array for TaskWindow
               // For search_content_placeholder messages, include search results from message level
-              _messageContainer: 
-                content.type === chatConfig.contentTypes.PREPROCESS 
+              _messageContainer:
+                content.type === chatConfig.contentTypes.PREPROCESS
                   ? { contents: step.contents }
-                  : content.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER && message.searchResults
+                  : content.type ===
+                        chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER &&
+                      message.searchResults
                     ? { search: message.searchResults }
                     : undefined,
             } as any;
 
             // Handle truncation messages specially - buffer them instead of adding immediately
             if (content.type === "truncation") {
-              const truncationId = `${content.filename || 'unknown'}_${content.message || ''}_${currentUserMsgId || 'no_user'}`;
-              if (!processedTruncationIds.has(truncationId) && currentUserMsgId && truncationBuffer.has(currentUserMsgId)) {
+              const truncationId = `${content.filename || "unknown"}_${content.message || ""}_${currentUserMsgId || "no_user"}`;
+              if (
+                !processedTruncationIds.has(truncationId) &&
+                currentUserMsgId &&
+                truncationBuffer.has(currentUserMsgId)
+              ) {
                 const buffer = truncationBuffer.get(currentUserMsgId) || [];
                 buffer.push(taskMsg);
                 truncationBuffer.set(currentUserMsgId, buffer);
@@ -76,7 +86,11 @@ export function transformMessagesToTaskMessages(
               taskMsgs.push(taskMsg);
 
               // If there is a related user message, add it to the corresponding task group
-              if (currentUserMsgId && conversationGroups.has(currentUserMsgId)) {
+              if (
+                content.type !== chatConfig.messageTypes.HISTORY_SUMMARY &&
+                currentUserMsgId &&
+                conversationGroups.has(currentUserMsgId)
+              ) {
                 const tasks = conversationGroups.get(currentUserMsgId) || [];
                 tasks.push(taskMsg);
                 conversationGroups.set(currentUserMsgId, tasks);
@@ -189,7 +203,8 @@ export function transformMessagesToTaskMessages(
                 buffer.forEach((truncationMsg) => {
                   taskMsgs.push(truncationMsg);
                   if (conversationGroups.has(relatedUserMsgId!)) {
-                    const tasks = conversationGroups.get(relatedUserMsgId!) || [];
+                    const tasks =
+                      conversationGroups.get(relatedUserMsgId!) || [];
                     tasks.push(truncationMsg);
                     conversationGroups.set(relatedUserMsgId!, tasks);
                   }
@@ -215,4 +230,3 @@ export function transformMessagesToTaskMessages(
     conversationGroups,
   };
 }
-

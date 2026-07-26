@@ -1,5 +1,7 @@
+import type { TFunction } from "i18next";
 import type { McpServer } from "@/types/agentConfig";
 import type {
+  CommunityMcpCard,
   McpServiceItem,
   RegistryMcpCard,
   RegistryPackageArgumentInput,
@@ -7,8 +9,10 @@ import type {
   RegistryRemoteVariable,
 } from "@/types/mcpTools";
 import {
+  FILTER_ALL,
   MCP_PORT_RANGE,
   McpContainerStatus,
+  McpDeploymentType,
   McpHealthStatus,
   McpSource,
   McpTransportType,
@@ -38,6 +42,34 @@ export const getTransportLabelKey = (
   return "mcpTools.serverType.url";
 };
 
+export const getDeploymentTypeLabelKey = (
+  deploymentType: McpDeploymentType | string
+): string => {
+  if (deploymentType === McpDeploymentType.CONTAINER)
+    return "mcpTools.deploymentType.container";
+  if (deploymentType === McpDeploymentType.API)
+    return "mcpTools.deploymentType.api";
+  if (deploymentType === McpDeploymentType.LOCAL_IMAGE)
+    return "mcpTools.deploymentType.localImage";
+  return "mcpTools.deploymentType.remoteLink";
+};
+
+export const resolveDeploymentType = (item: {
+  transportType: McpTransportType;
+  deploymentType?: McpDeploymentType;
+  configJson?: Record<string, unknown>;
+  serverUrl?: string;
+}): McpDeploymentType => {
+  if (item.deploymentType) return item.deploymentType;
+  if (item.configJson && typeof item.configJson === "object" && "openapi" in item.configJson) {
+    return McpDeploymentType.API;
+  }
+  if (item.transportType === McpTransportType.CONTAINER || item.configJson) {
+    return McpDeploymentType.CONTAINER;
+  }
+  return McpDeploymentType.REMOTE_LINK;
+};
+
 /** i18n key for a service's `healthStatus`. */
 export const getHealthStatusKey = (status: McpHealthStatus): string => {
   if (status === McpHealthStatus.HEALTHY) return "mcpTools.health.healthy";
@@ -57,6 +89,130 @@ export const getContainerStatusKey = (
   return "mcpTools.containerStatus.unknown";
 };
 
+const stringifyErrorValue = (value: unknown): string => {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value == null ? "" : String(value);
+};
+
+export const extractMcpErrorMessage = (error: unknown): string => {
+  const raw =
+    error instanceof Error ? error.message : stringifyErrorValue(error);
+  const text = raw.trim();
+  if (!text) return "";
+
+  try {
+    const parsed = JSON.parse(text) as {
+      detail?: unknown;
+      message?: unknown;
+      error?: unknown;
+    };
+    return (
+      stringifyErrorValue(parsed.detail) ||
+      stringifyErrorValue(parsed.message) ||
+      stringifyErrorValue(parsed.error) ||
+      text
+    );
+  } catch {
+    return text;
+  }
+};
+
+const getErrorCode = (error: unknown): string => {
+  if (!error || typeof error !== "object" || !("code" in error)) return "";
+  return String((error as { code?: unknown }).code ?? "");
+};
+
+const isTechnicalErrorMessage = (message: string): boolean => {
+  if (message.length > 180) return true;
+  return /traceback|exceptiongroup|stack trace|fastmcp|httpx|httpcore|pydantic|baseexception|\[errno|connecterror|readerror|timeouterror/i.test(
+    message
+  );
+};
+
+const addErrorText = (
+  t: TFunction,
+  key: string,
+  fallback: string
+): string => {
+  const translated = t(key, { defaultValue: fallback });
+  return translated === key ? fallback : translated;
+};
+
+export const getMcpAddErrorMessage = (
+  error: unknown,
+  t: TFunction
+): string => {
+  const msg = extractMcpErrorMessage(error);
+  const normalized = msg.toLowerCase();
+  const errorCode = getErrorCode(error);
+
+  if (/already exists|name conflict|name already used/.test(normalized)) {
+    return addErrorText(t, "mcpTools.add.error.nameExists", "An MCP service with this name already exists. Please use a different name.");
+  }
+  if (
+    /port.*(already|in use|occupied|conflict|unavailable)|address already in use/.test(
+      normalized
+    )
+  ) {
+    return addErrorText(t, "mcpTools.add.error.portUnavailable", "The port is unavailable or already in use. Choose another port and try again.");
+  }
+  if (/docker|container runtime|daemon/.test(normalized)) {
+    return addErrorText(t, "mcpTools.add.error.dockerUnavailable", "Docker is unavailable. Make sure Docker is running and try again.");
+  }
+  if (
+    /unauthorized|forbidden|authentication|authorization|invalid token|bearer|401|403/.test(
+      normalized
+    )
+  ) {
+    return addErrorText(t, "mcpTools.add.error.authenticationFailed", "MCP service authentication failed. Check the Bearer token or custom headers.");
+  }
+  if (/timeout|timed out|etimedout/.test(normalized)) {
+    return addErrorText(t, "mcpTools.add.error.connectionTimeout", "Timed out while connecting to the MCP service. Check network connectivity and service responsiveness.");
+  }
+  if (
+    /econnrefused|connection refused|actively refused|no connection could be made/.test(
+      normalized
+    )
+  ) {
+    return addErrorText(t, "mcpTools.add.error.connectionRefused", "The MCP service port refused the connection. Confirm the service is running and the port is correct.");
+  }
+  if (
+    /does not support mcp|mcp protocol|protocol|invalid sse|404|not found|wrong path|endpoint/.test(
+      normalized
+    )
+  ) {
+    return addErrorText(t, "mcpTools.add.error.protocolOrPathInvalid", "The MCP protocol or path does not match. Confirm the URL ends with the correct endpoint, such as /sse or /mcp.");
+  }
+  if (
+    /enotfound|eai_again|getaddrinfo|dns|network unreachable|ehostunreach|unreachable/.test(
+      normalized
+    )
+  ) {
+    return addErrorText(t, "mcpTools.add.error.connectionUnreachable", "Cannot reach the MCP service address. Check the domain, network, or host address.");
+  }
+  if (
+    /connection|connecterror|disconnected|closed|reset|failed to fetch|networkerror/.test(
+      normalized
+    ) ||
+    errorCode === "503"
+  ) {
+    return addErrorText(t, "mcpTools.add.error.connectionFailed", "Failed to connect to the MCP service. Verify the service URL, authentication settings, and service status.");
+  }
+
+  if (msg && !isTechnicalErrorMessage(msg)) {
+    return msg;
+  }
+
+  return addErrorText(t, "mcpTools.add.failed", "Failed to add MCP service");
+};
+
 export const filterServiceCards = (
   services: McpServiceItem[],
   searchValue: string
@@ -73,6 +229,33 @@ export const filterServiceCards = (
       item.tags.some((tag) => tag.toLowerCase().includes(keyword))
     );
   });
+};
+
+export const matchesNameOrTag = (
+  item: { name?: string; tags?: string[] },
+  searchValue: string
+): boolean => {
+  const keyword = searchValue.trim().toLowerCase();
+  if (!keyword) return true;
+  return (
+    (item.name || "").toLowerCase().includes(keyword) ||
+    (item.tags || []).some((tag) => tag.toLowerCase().includes(keyword))
+  );
+};
+
+export const filterByDeploymentType = <T extends {
+  transportType: McpTransportType;
+  deploymentType?: McpDeploymentType;
+  configJson?: Record<string, unknown>;
+  serverUrl?: string;
+}>(items: T[], deploymentType: McpDeploymentType | typeof FILTER_ALL): T[] => {
+  if (deploymentType === FILTER_ALL) return items;
+  return items.filter((item) => resolveDeploymentType(item) === deploymentType);
+};
+
+export const paginateItems = <T>(items: T[], page: number, pageSize: number): T[] => {
+  const safePage = Math.max(1, page);
+  return items.slice((safePage - 1) * pageSize, safePage * pageSize);
 };
 
 // ---------------------------------------------------------------------------
@@ -699,4 +882,3 @@ export const collectPackageEnvValues = (
 export const isValidPort = (port: number | undefined): port is number => {
   return typeof port === "number" && Number.isInteger(port) && port >= MCP_PORT_RANGE.MIN && port <= MCP_PORT_RANGE.MAX;
 };
-

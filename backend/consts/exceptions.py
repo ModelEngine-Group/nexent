@@ -95,6 +95,12 @@ class UnauthorizedError(Exception):
     pass
 
 
+class ForbiddenError(Exception):
+    """Raised when an authenticated user lacks permission."""
+
+    pass
+
+
 class SignatureValidationError(Exception):
     """Raised when X-Signature header is missing or does not match the expected HMAC value."""
 
@@ -258,6 +264,25 @@ class SkillException(Exception):
     pass
 
 
+class QuotaExceededError(Exception):
+    """Raised when tenant storage hard limit is exceeded during file upload."""
+
+    def __init__(self, message: str, usage_bytes: int = 0, hard_limit_bytes: int = 0, exceeded_by_bytes: int = 0):
+        super().__init__(message)
+        self.usage_bytes = usage_bytes
+        self.hard_limit_bytes = hard_limit_bytes
+        self.exceeded_by_bytes = exceeded_by_bytes
+
+
+class PlatformQuotaConflictError(Exception):
+    """Raised when a platform or tenant quota update violates allocation rules."""
+
+    def __init__(self, message: str, error: str, details: dict):
+        super().__init__(message)
+        self.error = error
+        self.details = details
+
+
 class OAuthProviderError(Exception):
     """Raised when OAuth provider configuration is invalid or provider returns an error."""
 
@@ -286,7 +311,6 @@ class UnsupportedOperationError(Exception):
 
 # Common aliases
 ParameterInvalidError = ValidationError
-ForbiddenError = Exception  # Generic fallback
 ServiceUnavailableError = Exception  # Generic fallback
 DatabaseError = Exception  # Generic fallback
 TimeoutError = TimeoutException

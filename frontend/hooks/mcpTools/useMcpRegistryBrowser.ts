@@ -11,6 +11,7 @@ interface RegistryFilters {
   version: string;
   updatedSince: string;
   includeDeleted: boolean;
+  source: string;
 }
 
 const INITIAL_FILTERS: RegistryFilters = {
@@ -18,6 +19,7 @@ const INITIAL_FILTERS: RegistryFilters = {
   version: "latest",
   updatedSince: "",
   includeDeleted: false,
+  source: "official",
 };
 
 /**
@@ -51,6 +53,7 @@ export function useMcpRegistryBrowser(enabled: boolean) {
     filters.version,
     filters.updatedSince,
     filters.includeDeleted,
+    filters.source,
   ]);
 
   const query = useQuery({
@@ -60,6 +63,7 @@ export function useMcpRegistryBrowser(enabled: boolean) {
       filters.version,
       filters.updatedSince,
       filters.includeDeleted,
+      filters.source,
       cursorHistory[pageIndex],
     ],
     enabled,
@@ -69,6 +73,7 @@ export function useMcpRegistryBrowser(enabled: boolean) {
         version: filters.version || undefined,
         updatedSince: filters.updatedSince || undefined,
         includeDeleted: filters.includeDeleted,
+        source: filters.source || undefined,
         cursor: cursorHistory[pageIndex],
       });
       return result.data;

@@ -242,7 +242,7 @@ flowchart LR
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 监控总开关 |
 | `MONITORING_PROVIDER` | `otlp` | 监控 provider 和部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值 |
+| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值；speed 模式下可见，标准模式下仅超级管理员可见 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint |
@@ -300,7 +300,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 ```
 
-前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 并通过 `/monitoring/status` 返回给前端；该值为空时前端不显示监控入口。因此本地 Grafana 形态需要在后端 `.env` 中设置：
+前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 并通过 `/monitoring/status` 返回给前端；该值为空时前端不显示监控入口。speed 模式下配置 URL 后即可显示，标准模式下只有超级管理员可见。因此本地 Grafana 形态需要在 `deploy/env/monitoring.env` 中设置：
 
 ```bash
 MONITORING_PROVIDER=grafana
@@ -362,11 +362,11 @@ Zipkin 当前本地形态只转发 traces；metrics 进入 Collector debug pipel
 
 ## 本地化部署设计
 
-本地化部署通过 `docker/start-monitoring.sh` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
+本地化部署通过 Docker 部署脚本的 `--monitoring-provider` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
 
 | 形态 | Collector 配置 | 本地服务 | 数据去向 | 说明 |
 |------|----------------|----------|----------|------|
-| `otlp` | `otel-collector-config.yml` | Collector | debug exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台；`collector` 仅作为启动脚本兼容别名 |
+| `otlp` | `otel-collector-config.yml` | Collector | debug exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台 |
 | `phoenix` | `otel-collector-phoenix-config.yml` | Collector + Phoenix | `http://phoenix:6006/v1/traces` | Phoenix 容器同时提供 UI 和 OTLP HTTP/gRPC trace collector，适合本地 trace debug |
 | `langfuse` | `otel-collector-langfuse-config.yml` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | `http://langfuse-web:3000/api/public/otel/v1/traces` | Langfuse v3 依赖多组件，适合完整 LLMOps 能力验证 |
 | `langsmith` | `otel-collector-langsmith-config.yml` | Collector | `https://api.smith.langchain.com/otel/v1/traces` | 在线 LangSmith trace 分析；API Key 只配置在 Collector 环境 |
@@ -376,13 +376,13 @@ Zipkin 当前本地形态只转发 traces；metrics 进入 Collector debug pipel
 启动命令：
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack otlp
-./start-monitoring.sh --stack phoenix
-./start-monitoring.sh --stack langfuse
-./start-monitoring.sh --stack langsmith
-./start-monitoring.sh --stack grafana
-./start-monitoring.sh --stack zipkin
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider phoenix
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langfuse
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin
 ```
 
 部署脚本职责：

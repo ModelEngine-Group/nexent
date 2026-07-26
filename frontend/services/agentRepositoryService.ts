@@ -14,6 +14,7 @@ import type {
   AgentRepositoryListingStatus,
   MyEditableAgentListParams,
   MyEditableAgentListResponse,
+  RepositoryImportPrecheckResponse,
 } from "@/types/agentRepository";
 
 export async function fetchAgentRepositoryListings(
@@ -120,9 +121,11 @@ export async function createAgentRepositoryListing(
 
 export async function updateAgentRepositoryStatus(
   agentRepositoryId: number,
-  status: AgentRepositoryListingStatus
+  status: AgentRepositoryListingStatus,
+  content?: string
 ): Promise<AgentRepositoryListingItem> {
   try {
+    const trimmedContent = content?.trim();
     const response = await fetchWithErrorHandling(
       API_ENDPOINTS.agentRepository.updateStatus(agentRepositoryId),
       {
@@ -131,7 +134,10 @@ export async function updateAgentRepositoryStatus(
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(trimmedContent ? { content: trimmedContent } : {}),
+        }),
       }
     );
 
@@ -148,12 +154,72 @@ export async function updateAgentRepositoryStatus(
   }
 }
 
+export async function fetchRepositoryImportPrecheck(
+  agentRepositoryId: number
+): Promise<RepositoryImportPrecheckResponse> {
+  try {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.agentRepository.importPrecheck(agentRepositoryId),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch repository import precheck: ${response.statusText}`
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    log.error("Error fetching repository import precheck:", error);
+    throw error;
+  }
+}
+
+export async function importAgentFromRepository(
+  agentRepositoryId: number
+): Promise<void> {
+  try {
+    const response = await fetch(
+      API_ENDPOINTS.agentRepository.import(agentRepositoryId),
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const detail = errorData?.detail;
+      const error = new Error(
+        typeof detail === "string"
+          ? detail
+          : `Failed to import agent from repository: ${response.statusText}`
+      ) as Error & { status?: number; detail?: unknown };
+      error.status = response.status;
+      error.detail = detail;
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof Error && "status" in error) {
+      throw error;
+    }
+    log.error("Error importing agent from repository:", error);
+    throw error;
+  }
+}
+
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
   fetchAgentRepositoryListingDetail,
   fetchMyEditableAgents,
   createAgentRepositoryListing,
   updateAgentRepositoryStatus,
+  fetchRepositoryImportPrecheck,
+  importAgentFromRepository,
 };
 
 export default agentRepositoryService;

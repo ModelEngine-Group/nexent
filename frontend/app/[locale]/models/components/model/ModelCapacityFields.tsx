@@ -1,7 +1,40 @@
-import { Alert, Button, Input, Tag, Tooltip } from "antd";
+import { Alert, AutoComplete, Button, Input, Space, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { CapacitySuggestion } from "@/types/modelConfig";
+
+// W11 spec L767-790. Common token-count presets surfaced as a fallback
+// preset selector when no catalog suggestion populates the field. The
+// values mirror MAX_TOKEN_OPTIONS in ModelMaxTokensInput so the two
+// surfaces (legacy max_tokens batch input and capacity panel) offer
+// the same dropdown choices. Operators can still type a custom value;
+// AutoComplete accepts free numeric input.
+const CONTEXT_WINDOW_PRESET_OPTIONS = [
+  { value: "4096", label: "4K / 4,096" },
+  { value: "8192", label: "8K / 8,192" },
+  { value: "16384", label: "16K / 16,384" },
+  { value: "32768", label: "32K / 32,768" },
+  { value: "65536", label: "64K / 65,536" },
+  { value: "131072", label: "128K / 131,072" },
+  { value: "204800", label: "200K / 204,800" },
+  { value: "262144", label: "256K / 262,144" },
+  { value: "1048576", label: "1M / 1,048,576" },
+];
+
+// Shared by both default_output_reserve_tokens and max_output_tokens. The
+// reserve list maps to spec L782-790 verbatim; reusing it for max_output
+// gives operators the same dropdown choices they already see for the
+// reserve field. Values above 16K (e.g. GPT-4.1's 32K cap, GLM-5.1's
+// 131K cap) still work via free-text typing through AutoComplete.
+const OUTPUT_RESERVE_PRESET_OPTIONS = [
+  { value: "256", label: "256" },
+  { value: "512", label: "512" },
+  { value: "1024", label: "1K / 1,024" },
+  { value: "2048", label: "2K / 2,048" },
+  { value: "4096", label: "4K / 4,096" },
+  { value: "8192", label: "8K / 8,192" },
+  { value: "16384", label: "16K / 16,384" },
+];
 
 export type CapacitySource =
   | "operator"
@@ -27,7 +60,6 @@ interface ModelCapacityFieldsProps {
   validationError?: string | null;
   capacitySource?: CapacitySource | null;
   capabilityProfileVersion?: string | null;
-  showDeprecatedMaxTokensWarning?: boolean;
   /**
    * 'add' shows a flat panel with the four user-facing fields
    * (context_window, max_input, max_output, tokenizer) and supports required
@@ -56,6 +88,8 @@ interface ModelCapacityFieldsProps {
    * `applyDefaults` option -- callers should pass matching booleans.
    */
   applyDefaultsOnEmpty?: boolean;
+  /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
+  acceptedSuggestion?: CapacitySuggestion | null;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -237,7 +271,6 @@ export const ModelCapacityFields = ({
   validationError,
   capacitySource,
   capabilityProfileVersion,
-  showDeprecatedMaxTokensWarning,
   formMode = "edit",
   requiredFields = [],
   suggestion,
@@ -245,16 +278,34 @@ export const ModelCapacityFields = ({
   suggestionLoading = false,
   legacyMaxTokensCandidate,
   applyDefaultsOnEmpty = true,
+  acceptedSuggestion,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
-  // Show the actionable legacy-value prompt only while the input is still
-  // empty -- once the user applies (or types their own value), the prompt
-  // disappears so we don't keep nagging.
+  // Legacy max_tokens can mean either thing -- before W1 split capacity,
+  // operators sometimes typed the provider context window there
+  // (128000, 32768, ...) and sometimes the per-call output cap (4096,
+  // 8192, ...). We can't tell from the value alone, so we surface both
+  // target fields and let the operator pick. The button order is the
+  // only heuristic: values >= LEGACY_CONTEXT_WINDOW_THRESHOLD are
+  // far more likely to be context windows (no real model caps output
+  // at 32K+ in practice), so the "Apply as Context Window" button leads;
+  // below the threshold the "Apply as Max Output" button leads.
+  //
+  // Each button is independently gated by its target field being empty
+  // -- once the operator commits a value to that column we stop nagging
+  // about it. When both fields are filled the whole alert hides.
+  const LEGACY_CONTEXT_WINDOW_THRESHOLD = 16_384;
+  const legacyValuePositive =
+    legacyMaxTokensCandidate !== undefined && legacyMaxTokensCandidate > 0;
+  const canApplyAsContextWindow =
+    legacyValuePositive && value.contextWindowTokens.trim() === "";
+  const canApplyAsMaxOutput =
+    legacyValuePositive && value.maxOutputTokens.trim() === "";
   const showLegacyMaxTokensPrompt =
-    legacyMaxTokensCandidate !== undefined &&
-    legacyMaxTokensCandidate > 0 &&
-    value.maxOutputTokens.trim() === "";
+    canApplyAsContextWindow || canApplyAsMaxOutput;
+  const contextWindowIsRecommended =
+    (legacyMaxTokensCandidate ?? 0) >= LEGACY_CONTEXT_WINDOW_THRESHOLD;
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
@@ -276,18 +327,43 @@ export const ModelCapacityFields = ({
       }
     : {};
 
+  // Per W11 spec L762-765, the context-window and output-reserve fields
+  // expose a preset selector when no catalog suggestion is available. The
+  // suggestion-set check is per-field: if the suggestion populated this
+  // exact field, plain numeric input avoids burying the suggested value
+  // behind dropdown chrome. Otherwise show the preset list to help
+  // operators avoid typos like "1280000" instead of "128000".
+  const suggestionFields = suggestion?.suggestions ?? null;
+  const fieldHasSuggestion = (field: keyof ModelCapacityFormState): boolean => {
+    if (!suggestionFields) return false;
+    const suggested = (suggestionFields as Record<string, unknown>)[field];
+    return suggested != null && suggested !== "";
+  };
+
   const renderNumberInput = (
     field: keyof ModelCapacityFormState,
     labelKey: string,
-    tooltipKey: string
-  ) => (
-    <div>
-      <label className="block mb-1 text-sm font-medium text-gray-700">
-        <Tooltip title={t(tooltipKey)}>
-          <span>{t(labelKey)}</span>
-        </Tooltip>
-        {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
-      </label>
+    tooltipKey: string,
+    presetOptions?: { value: string; label: string }[]
+  ) => {
+    const showPreset = presetOptions && !fieldHasSuggestion(field);
+    const inputControl = showPreset ? (
+      <AutoComplete
+        className="w-full"
+        value={value[field]}
+        options={presetOptions}
+        placeholder={defaultPlaceholders[field]}
+        onChange={(next) => onChange(field, String(next ?? ""))}
+        filterOption={(input, option) =>
+          String(option?.label ?? "")
+            .toLowerCase()
+            .includes(input.toLowerCase()) ||
+          String(option?.value ?? "").includes(input)
+        }
+      >
+        <Input inputMode="numeric" pattern="[0-9]*" />
+      </AutoComplete>
+    ) : (
       <Input
         type="number"
         min="1"
@@ -295,8 +371,21 @@ export const ModelCapacityFields = ({
         placeholder={defaultPlaceholders[field]}
         onChange={(event) => onChange(field, event.target.value)}
       />
-    </div>
-  );
+    );
+    return (
+      <div>
+        <label className="block mb-1 text-sm font-medium text-gray-700">
+          <Tooltip title={t(tooltipKey)}>
+            <span>{t(labelKey)}</span>
+          </Tooltip>
+          {requiredSet.has(field) && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
+        </label>
+        {inputControl}
+      </div>
+    );
+  };
 
   const content = (
     <div className="space-y-3">
@@ -321,32 +410,44 @@ export const ModelCapacityFields = ({
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensDetected", {
-            value: legacyMaxTokensCandidate,
-            defaultValue: `Detected legacy max_tokens = ${legacyMaxTokensCandidate}. Apply it as max_output_tokens?`,
+          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+            maxTokens: legacyMaxTokensCandidate,
           })}
-          action={
-            <Button
-              size="small"
-              type="primary"
-              onClick={() =>
-                onChange(
-                  "maxOutputTokens",
-                  String(legacyMaxTokensCandidate)
-                )
-              }
-            >
-              {t("model.dialog.capacity.legacyMaxTokens.apply", {
-                defaultValue: "Apply",
+          description={
+            <Space size={6} wrap className="mt-2">
+              {(contextWindowIsRecommended
+                ? ["context", "output"]
+                : ["output", "context"]
+              ).map((target, idx) => {
+                if (target === "context" && !canApplyAsContextWindow) {
+                  return null;
+                }
+                if (target === "output" && !canApplyAsMaxOutput) {
+                  return null;
+                }
+                const labelKey =
+                  target === "context"
+                    ? "model.dialog.capacity.legacyMaxTokens.applyAsContext"
+                    : "model.dialog.capacity.legacyMaxTokens.applyAsOutput";
+                const fieldName =
+                  target === "context"
+                    ? "contextWindowTokens"
+                    : "maxOutputTokens";
+                return (
+                  <Button
+                    key={target}
+                    size="small"
+                    type={idx === 0 ? "primary" : "default"}
+                    onClick={() =>
+                      onChange(fieldName, String(legacyMaxTokensCandidate))
+                    }
+                  >
+                    {t(labelKey)}
+                  </Button>
+                );
               })}
-            </Button>
+            </Space>
           }
-        />
-      ) : showDeprecatedMaxTokensWarning ? (
-        <Alert
-          type="warning"
-          showIcon
-          message={t("model.dialog.capacity.deprecatedMaxTokens")}
         />
       ) : null}
 
@@ -360,34 +461,24 @@ export const ModelCapacityFields = ({
               : t("model.dialog.capacity.suggestion.notFound")
           }
           description={
-            <div className="space-y-2">
-              <div className="text-xs">
-                {suggestion.matchExplanation ||
-                  t("model.dialog.capacity.suggestion.noExplanation")}
-              </div>
-              {hasSuggestion && (
+            hasSuggestion ? (
+              <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  {suggestion.matchKind && (
-                    <Tag>
-                      {t(
-                        `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
-                        { defaultValue: suggestion.matchKind }
-                      )}
-                    </Tag>
-                  )}
-                  {suggestion.matchConfidence && (
-                    <Tag color="blue">
-                      {t(
-                        `model.dialog.capacity.suggestion.confidence.${suggestion.matchConfidence}`,
-                        { defaultValue: suggestion.matchConfidence }
-                      )}
-                    </Tag>
-                  )}
                   {suggestion.canonicalModelName && (
-                    <Tag color="green">{suggestion.canonicalModelName}</Tag>
+                    <span className="font-medium text-sm">
+                      {suggestion.canonicalModelName}
+                    </span>
                   )}
-                  {suggestion.suggestedProvider && (
-                    <Tag color="purple">{suggestion.suggestedProvider}</Tag>
+                  {suggestion.matchKind && (
+                    <>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-xs text-gray-500">
+                        {t(
+                          `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
+                          { defaultValue: suggestion.matchKind }
+                        )}
+                      </span>
+                    </>
                   )}
                   {onUseSuggestion && (
                     <Button
@@ -400,20 +491,22 @@ export const ModelCapacityFields = ({
                     </Button>
                   )}
                 </div>
-              )}
-            </div>
+                {suggestion.matchKind === "catalog_fuzzy" &&
+                  (!acceptedSuggestion ||
+                    (acceptedSuggestion &&
+                      acceptedSuggestion.canonicalModelName !==
+                        suggestion.canonicalModelName)) && (
+                    <div className="text-xs text-yellow-700">
+                      {t("model.dialog.capacity.suggestion.profileMissWarning")}
+                    </div>
+                  )}
+              </div>
+            ) : (
+              <div className="text-xs">
+                {t("model.dialog.capacity.suggestion.notFoundDescription")}
+              </div>
+            )
           }
-        />
-      )}
-
-      {/* The empty hint suggested "fill later if needed", which contradicts
-          required-field asterisks. Only render it when there are no required
-          fields, so edit dialogs with required capacity stay self-consistent. */}
-      {!source && !hasValues && !isAddMode && requiredSet.size === 0 && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("model.dialog.capacity.emptyHint")}
         />
       )}
 
@@ -421,7 +514,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "contextWindowTokens",
           "model.dialog.capacity.contextWindowTokens",
-          "model.dialog.capacity.contextWindowTokens.tooltip"
+          "model.dialog.capacity.contextWindowTokens.tooltip",
+          CONTEXT_WINDOW_PRESET_OPTIONS
         )}
         {renderNumberInput(
           "maxInputTokens",
@@ -431,7 +525,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens",
-          "model.dialog.capacity.maxOutputTokens.tooltip"
+          "model.dialog.capacity.maxOutputTokens.tooltip",
+          OUTPUT_RESERVE_PRESET_OPTIONS
         )}
         {/* defaultOutputReserveTokens is rendered in both add and edit modes
             so newly added rows do not silently fall back to the SDK default at
@@ -440,7 +535,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "defaultOutputReserveTokens",
           "model.dialog.capacity.defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
+          "model.dialog.capacity.defaultOutputReserveTokens.tooltip",
+          OUTPUT_RESERVE_PRESET_OPTIONS
         )}
       </div>
 

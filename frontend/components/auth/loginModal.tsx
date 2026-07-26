@@ -18,6 +18,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { forcedLoginService } from "@/services/forcedLoginService";
 import { oauthService } from "@/services/oauthService";
 import { casService, CasConfig } from "@/services/casService";
 import log from "@/lib/logger";
@@ -35,7 +36,9 @@ function OAuthLoginButtons() {
   >([]);
 
   useEffect(() => {
-    oauthService.getEnabledProviders().then((p) => setProviders(p));
+    oauthService.getConfig().then((config) => {
+      setProviders(config.login_mode === "disabled" ? [] : config.providers);
+    });
   }, []);
 
   if (providers.length === 0) return null;
@@ -135,26 +138,13 @@ export function LoginModal() {
   useEffect(() => {
     const error = searchParams.get("oauth_error");
     if (error) {
+      if (!isAuthenticated) {
+        forcedLoginService.suppressOAuthAutoLogin();
+      }
       setOauthError(getOAuthLoginErrorMessage(error));
       router.replace("/");
     }
-  }, [searchParams, router, getOAuthLoginErrorMessage]);
-
-  useEffect(() => {
-    if (!isLoginModalOpen || isAuthenticated || isSpeedMode) return;
-    let cancelled = false;
-
-    casService.getConfig().then((config) => {
-      if (cancelled) return;
-      if (config.enabled && config.login_mode === "force") {
-        casService.startLogin();
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoginModalOpen, isAuthenticated, isSpeedMode]);
+  }, [searchParams, router, getOAuthLoginErrorMessage, isAuthenticated]);
 
   const resetForm = () => {
     setEmailError("");

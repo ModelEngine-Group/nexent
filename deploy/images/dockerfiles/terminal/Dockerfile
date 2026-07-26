@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM ubuntu:24.04
 
 ARG TERMINAL_VARIANT=slim

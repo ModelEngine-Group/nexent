@@ -1,9 +1,13 @@
-import logging
-import math
 from typing import Any, Collection, Dict, List, Optional
 
 from sqlalchemy import and_, case, false, func, or_, true, update
 
+from consts.agent_repository import (
+    OWNERSHIP_ALL,
+    OWNERSHIP_CREATED,
+    OWNERSHIP_OTHERS,
+    STATUS_NOT_SHARED,
+)
 from consts.const import (
     CAN_EDIT_ALL_USER_ROLES,
     PERMISSION_EDIT,
@@ -11,32 +15,6 @@ from consts.const import (
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import AgentInfo, AgentRepository, AgentVersion
 from database.group_db import query_group_ids_by_user
-
-logger = logging.getLogger("agent_repository_db")
-
-# Listing status: not_shared (未共享), pending_review (待审核),
-# rejected (审核驳回), shared (已共享)
-STATUS_NOT_SHARED = "not_shared"
-STATUS_PENDING_REVIEW = "pending_review"
-STATUS_REJECTED = "rejected"
-STATUS_SHARED = "shared"
-
-VALID_REPOSITORY_STATUSES = frozenset({
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-})
-
-OWNERSHIP_ALL = "all"
-OWNERSHIP_CREATED = "created"
-OWNERSHIP_OTHERS = "others"
-
-VALID_OWNERSHIP_FILTERS = frozenset({
-    OWNERSHIP_ALL,
-    OWNERSHIP_CREATED,
-    OWNERSHIP_OTHERS,
-})
 
 _UPSERT_IMMUTABLE_FIELDS = frozenset({
     "agent_id",
@@ -50,7 +28,6 @@ _UPSERT_SNAPSHOT_FIELDS = frozenset({
     "display_name",
     "description",
     "author",
-    "category_id",
     "tags",
     "tool_count",
     "version_name",
@@ -86,17 +63,7 @@ def insert_agent_repository_record(
         return int(new_record.agent_repository_id)
 
 
-def get_agent_repository_by_id(repository_id: int) -> Optional[dict]:
-    """Fetch a repository listing by primary key."""
-    with get_db_session() as session:
-        record = session.query(AgentRepository).filter(
-            AgentRepository.agent_repository_id == repository_id,
-            AgentRepository.delete_flag != "Y",
-        ).first()
-        return as_dict(record) if record else None
-
-
-def get_agent_repository_by_id_and_publisher(
+def get_agent_repository_by_id(
     repository_id: int,
     publisher_tenant_id: str,
 ) -> Optional[dict]:
@@ -202,7 +169,6 @@ def list_agent_repository_summaries(
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    category_id: Optional[int] = None,
 ) -> List[dict]:
     """List active repository summaries for a publisher tenant without heavy JSON blobs."""
     with get_db_session() as session:
@@ -215,12 +181,12 @@ def list_agent_repository_summaries(
             AgentRepository.display_name,
             AgentRepository.description,
             AgentRepository.status,
-            AgentRepository.category_id,
             AgentRepository.tags,
             AgentRepository.tool_count,
             AgentRepository.version_name,
             AgentRepository.icon,
             AgentRepository.downloads,
+            AgentRepository.content,
         ).filter(
             AgentRepository.delete_flag != "Y",
             AgentRepository.publisher_tenant_id == publisher_tenant_id,
@@ -229,8 +195,6 @@ def list_agent_repository_summaries(
             query = query.filter(AgentRepository.status == status)
         if agent_id is not None:
             query = query.filter(AgentRepository.agent_id == agent_id)
-        if category_id is not None:
-            query = query.filter(AgentRepository.category_id == category_id)
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [
             {
@@ -242,12 +206,12 @@ def list_agent_repository_summaries(
                 "display_name": row.display_name,
                 "description": row.description,
                 "status": row.status,
-                "category_id": row.category_id,
                 "tags": row.tags,
                 "tool_count": row.tool_count,
                 "version_name": row.version_name,
                 "icon": row.icon,
                 "downloads": row.downloads,
+                "content": row.content,
             }
             for row in rows
         ]
@@ -266,7 +230,6 @@ def update_agent_repository_by_id(
         "description",
         "author",
         "submitted_by",
-        "category_id",
         "tags",
         "tool_count",
         "version_name",
@@ -275,6 +238,7 @@ def update_agent_repository_by_id(
         "version_no",
         "agent_info_json",
         "status",
+        "content",
     }
     update_fields = {
         key: value
@@ -308,6 +272,7 @@ def update_agent_repository_status_by_id(
     publisher_tenant_id: Optional[str] = None,
     publisher_user_id: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    content: Optional[str] = None,
 ) -> int:
     """Update repository listing status by primary key. Returns affected row count."""
     update_values: Dict[str, Any] = {
@@ -320,6 +285,8 @@ def update_agent_repository_status_by_id(
         update_values["publisher_user_id"] = publisher_user_id
     if submitted_by is not None:
         update_values["submitted_by"] = submitted_by
+    if content is not None:
+        update_values["content"] = content
 
     with get_db_session() as session:
         where_clauses = [
@@ -361,26 +328,6 @@ def reset_agent_repository_status(
         return int(result.rowcount or 0)
 
 
-def soft_delete_agent_repository_by_id(
-    *,
-    repository_id: int,
-    publisher_tenant_id: str,
-    user_id: str,
-) -> int:
-    """Soft-delete a repository listing owned by the publisher tenant."""
-    with get_db_session() as session:
-        result = session.execute(
-            update(AgentRepository)
-            .where(
-                AgentRepository.agent_repository_id == repository_id,
-                AgentRepository.publisher_tenant_id == publisher_tenant_id,
-                AgentRepository.delete_flag != "Y",
-            )
-            .values(delete_flag="Y", updated_by=user_id)
-        )
-        return int(result.rowcount or 0)
-
-
 def list_agent_repository_by_publisher(
     publisher_tenant_id: str,
     *,
@@ -399,76 +346,6 @@ def list_agent_repository_by_publisher(
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [as_dict(row) for row in rows]
 
-
-def _build_group_ids_overlap_condition(user_group_ids: set[int]):
-    """Build SQL condition for CSV group_ids overlapping user_group_ids."""
-    if not user_group_ids:
-        return false()
-    padded = func.concat(",", AgentInfo.group_ids, ",")
-    return or_(*(padded.like(f"%,{gid},%") for gid in user_group_ids))
-
-
-def _build_editable_agent_filter(
-    user_id: str,
-    *,
-    can_edit_all: bool,
-    user_group_ids: set[int],
-):
-    """Build SQL WHERE clause for agents the user can edit."""
-    if can_edit_all:
-        return true()
-    group_overlap = _build_group_ids_overlap_condition(user_group_ids)
-    return or_(
-        AgentInfo.created_by == user_id,
-        and_(
-            AgentInfo.ingroup_permission == PERMISSION_EDIT,
-            group_overlap,
-        ),
-    )
-
-
-def _resolve_editable_agent_access(
-    user_id: str,
-    user_role: str,
-) -> tuple[bool, set[int], Any]:
-    """Resolve role-based edit access and the editable-agent SQL filter."""
-    role = (user_role or "").upper()
-    can_edit_all = role in CAN_EDIT_ALL_USER_ROLES
-    user_group_ids: set[int] = set()
-    if not can_edit_all:
-        user_group_ids = set(query_group_ids_by_user(user_id) or [])
-    editable_filter = _build_editable_agent_filter(
-        user_id,
-        can_edit_all=can_edit_all,
-        user_group_ids=user_group_ids,
-    )
-    return can_edit_all, user_group_ids, editable_filter
-
-
-def _build_ownership_filter(user_id: str, ownership_filter: str):
-    """Build SQL WHERE clause for mine-tab ownership filtering."""
-    if ownership_filter == OWNERSHIP_CREATED:
-        return AgentInfo.created_by == user_id
-    if ownership_filter == OWNERSHIP_OTHERS:
-        return or_(
-            AgentInfo.created_by != user_id,
-            AgentInfo.created_by.is_(None),
-        )
-    return true()
-
-
-def _build_editable_agent_base_filters(
-    tenant_id: str,
-    editable_filter: Any,
-) -> tuple[Any, ...]:
-    """Shared base filters for editable draft agents in a tenant."""
-    return (
-        AgentInfo.tenant_id == tenant_id,
-        AgentInfo.version_no == 0,
-        AgentInfo.delete_flag != "Y",
-        AgentInfo.enabled.is_(True),
-        editable_filter,
-    )
 
 
 def list_agent_repository_by_agent_ids(
@@ -491,6 +368,7 @@ def list_agent_repository_by_agent_ids(
                 AgentRepository.version_no,
                 AgentRepository.version_name,
                 AgentRepository.create_time,
+                AgentRepository.content,
             )
             .filter(
                 AgentRepository.delete_flag != "Y",
@@ -513,36 +391,70 @@ def list_agent_repository_by_agent_ids(
             "version_no": row.version_no,
             "version_name": row.version_name,
             "create_time": row.create_time,
+            "content": row.content,
         }
         for row in rows
     ]
 
 
-def list_editable_agents_for_user(
-    tenant_id: str,
-    user_id: str,
-    *,
-    user_role: str,
-    ownership_filter: str = OWNERSHIP_ALL,
-) -> List[dict]:
-    """List draft agents in a tenant that the user can edit.
+def increment_agent_repository_downloads(agent_repository_id: int) -> int:
+    """Increment download count for an active repository listing."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentRepository)
+            .where(
+                AgentRepository.agent_repository_id == agent_repository_id,
+                AgentRepository.delete_flag != "Y",
+            )
+            .values(downloads=func.coalesce(AgentRepository.downloads, 0) + 1)
+        )
+        return int(result.rowcount or 0)
 
-    Queries version_no=0 rows and returns agent_id, name, display_name, description,
-    current_version_no, and the current published version_name and create_time
-    (via LEFT JOIN on ag_tenant_agent_version_t) for agents where permission resolves to EDIT.
+
+def sum_agent_repository_downloads_by_agent_ids(
+    agent_ids: List[int],
+) -> Dict[int, int]:
+    """Sum downloads across all repository rows for each agent_id.
+
+    Includes soft-deleted rows and does not filter by status or publisher.
     """
-    _, _, editable_filter = _resolve_editable_agent_access(user_id, user_role)
-    ownership_clause = _build_ownership_filter(user_id, ownership_filter)
+    if not agent_ids:
+        return {}
+
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                AgentRepository.agent_id,
+                func.coalesce(func.sum(AgentRepository.downloads), 0).label(
+                    "total_downloads"
+                ),
+            )
+            .filter(AgentRepository.agent_id.in_(agent_ids))
+            .group_by(AgentRepository.agent_id)
+            .all()
+        )
+
+    return {int(row.agent_id): int(row.total_downloads) for row in rows}
+
+
+def fetch_draft_agent_mine_metadata(
+    tenant_id: str,
+    agent_ids: List[int],
+) -> Dict[int, dict]:
+    """Batch-fetch draft agent fields needed by the mine tab.
+
+    Returns a map of agent_id to created_by, current_version_no, version_name,
+    and version_create_time (from the published version row when present).
+    """
+    if not agent_ids:
+        return {}
 
     with get_db_session() as session:
         rows = (
             session.query(
                 AgentInfo.agent_id,
-                AgentInfo.name,
-                AgentInfo.display_name,
-                AgentInfo.description,
-                AgentInfo.current_version_no,
                 AgentInfo.created_by,
+                AgentInfo.current_version_no,
                 AgentVersion.version_name,
                 AgentVersion.create_time,
             )
@@ -556,64 +468,22 @@ def list_editable_agents_for_user(
                 ),
             )
             .filter(
-                *_build_editable_agent_base_filters(tenant_id, editable_filter),
-                ownership_clause,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+                AgentInfo.enabled.is_(True),
+                AgentInfo.agent_id.in_(agent_ids),
             )
-            .order_by(AgentInfo.create_time.desc())
             .all()
         )
 
-    return [
-        {
-            "agent_id": row.agent_id,
-            "name": row.name,
-            "display_name": row.display_name,
-            "description": row.description,
-            "current_version_no": row.current_version_no,
+    return {
+        int(row.agent_id): {
             "created_by": row.created_by,
+            "current_version_no": row.current_version_no,
             "version_name": row.version_name,
             "version_create_time": row.create_time,
         }
         for row in rows
-    ]
-
-
-def count_editable_agents_by_ownership(
-    tenant_id: str,
-    user_id: str,
-    *,
-    user_role: str,
-) -> Dict[str, int]:
-    """Count editable draft agents grouped by ownership for mine-tab badges."""
-    _, _, editable_filter = _resolve_editable_agent_access(user_id, user_role)
-    created_case = case(
-        (AgentInfo.created_by == user_id, 1),
-        else_=0,
-    )
-    others_case = case(
-        (
-            or_(
-                AgentInfo.created_by != user_id,
-                AgentInfo.created_by.is_(None),
-            ),
-            1,
-        ),
-        else_=0,
-    )
-
-    with get_db_session() as session:
-        row = (
-            session.query(
-                func.count(AgentInfo.agent_id),
-                func.coalesce(func.sum(created_case), 0),
-                func.coalesce(func.sum(others_case), 0),
-            )
-            .filter(*_build_editable_agent_base_filters(tenant_id, editable_filter))
-            .one()
-        )
-
-    return {
-        "all": int(row[0] or 0),
-        "created": int(row[1] or 0),
-        "others": int(row[2] or 0),
     }
+

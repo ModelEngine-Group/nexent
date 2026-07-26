@@ -663,16 +663,12 @@ export function useCompareStream({
         if (!reader) throw new Error(translate("agent.debug.nullResponse"));
 
         const streamResult = await handleStreamResponse(
-          reader,
+          reader as ReadableStreamDefaultReader<Uint8Array>,
           guardedSetSideMessages,
           resetCompareTimeout,
           params.stepIdCounterRef,
           () => {},
-          false,
-          () => {},
-          async () => {},
-          params.conversationId,
-          conversationService,
+          () => {}, // onConversationCreated - compare mode does not auto-create
           true,
           t
         );

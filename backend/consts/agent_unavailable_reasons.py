@@ -20,6 +20,7 @@ class AgentUnavailableReason:
     # Tool issues
     TOOL_UNAVAILABLE = "tool_unavailable"
     ALL_TOOLS_DISABLED = "all_tools_disabled"
+    MCP_MODEL_UNAVAILABLE = "mcp_model_unavailable"
 
     # Agent issues
     AGENT_NOT_FOUND = "agent_not_found"
@@ -35,6 +36,7 @@ class AgentUnavailableReason:
             cls.TOOL_UNAVAILABLE,
             cls.ALL_TOOLS_DISABLED,
             cls.AGENT_NOT_FOUND,
+            cls.MCP_MODEL_UNAVAILABLE,
         ]
 
     @classmethod

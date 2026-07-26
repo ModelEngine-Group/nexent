@@ -125,6 +125,7 @@ class MockAgent:
         self.few_shots_prompt = None
         self.parent_agent_id = None
         self.provide_run_summary = None
+        self.is_main_agent = True
         self.business_description = None
         self.prompt_template_id = None
         self.prompt_template_name = None

@@ -25,7 +25,7 @@ from backend.middleware.exception_handler import (
     create_success_response,
 )
 from consts.exceptions import AppException
-from consts.error_code import ErrorCode
+from consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 
 
@@ -153,7 +153,9 @@ class TestCreateErrorResponse:
         """Test creating error response with default values."""
         response = create_error_response(ErrorCode.DIFY_AUTH_ERROR)
 
-        assert response.status_code == 401
+        # Upstream auth failures map to 502 (see DIFY_AUTH_ERROR in ERROR_CODE_HTTP_STATUS);
+        # 401 is reserved for this system's identity/session failures.
+        assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]
         assert response.body is not None
 
     def test_create_error_response_custom_message(self):
@@ -164,7 +166,7 @@ class TestCreateErrorResponse:
             message=custom_message
         )
 
-        assert response.status_code == 401
+        assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]
 
     def test_create_error_response_with_trace_id(self):
         """Test creating error response with trace ID."""
@@ -174,7 +176,7 @@ class TestCreateErrorResponse:
             trace_id=trace_id
         )
 
-        assert response.status_code == 401
+        assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]  
 
     def test_create_error_response_with_details(self):
         """Test creating error response with additional details."""
@@ -196,10 +198,14 @@ class TestCreateErrorResponse:
         assert response.status_code == 502
 
     def test_create_error_response_dify_auth_error(self):
-        """Test creating error response for DIFY_AUTH_ERROR."""
+        """Test creating error response for DIFY_AUTH_ERROR.
+
+        Upstream Dify auth failures map to 502; 401 is reserved for this
+        system's identity/session failures only.
+        """
         response = create_error_response(ErrorCode.DIFY_AUTH_ERROR)
 
-        assert response.status_code == 401
+        assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]  
 
     def test_create_error_response_dify_config_invalid(self):
         """Test creating error response for DIFY_CONFIG_INVALID."""
@@ -305,7 +311,8 @@ class TestExceptionHandlerMiddleware:
 
         response = await middleware.dispatch(mock_request, mock_call_next)
 
-        assert response.status_code == 401
+        # Upstream auth failures are mapped to 502 in ERROR_CODE_HTTP_STATUS.
+        assert response.status_code == ERROR_CODE_HTTP_STATUS[ErrorCode.DIFY_AUTH_ERROR]  
 
     @pytest.mark.asyncio
     async def test_dispatch_http_exception(self):

@@ -72,8 +72,22 @@ try:
         ),
         unit="errors",
     )
+    # W11 spec line 709: emitted when the operator clicks "Use suggestion" and
+    # saves. Combined with model_capacity_suggestion_dispatch_profile_hit_total
+    # at /agent/run, gives the "95% of accepted catalog suggestions produce
+    # the expected runtime capability_profile_version" SLO ratio.
+    _capacity_suggestion_accept_total = _capacity_suggestion_meter.create_counter(
+        name="model_capacity_suggestion_accept_total",
+        description=(
+            "Count of model save events that carried an accepted W11 "
+            "capacity suggestion, labelled by match_kind and provider. "
+            "Audit signal only -- not persisted to model_record_t."
+        ),
+        unit="accepts",
+    )
 except Exception:  # pragma: no cover - OTel is optional at runtime
     _capacity_suggestion_coverage_errors_total = None
+    _capacity_suggestion_accept_total = None
 
 
 # Per-process dedup for the warning log emitted when the catalog-matcher
@@ -98,6 +112,51 @@ def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> 
             },
         )
     except Exception:  # pragma: no cover - never break coverage for telemetry
+        pass
+
+
+# Wire-only fields the frontend ships when the operator clicks "Use suggestion"
+# and saves. They are audit/metrics input; runtime never reads them. The app
+# layer pops them off the request payload via `pop_capacity_accept_signal` so
+# the service/DB layer never sees them.
+_ACCEPT_SIGNAL_KEYS = (
+    "accepted_suggestion_match_kind",
+    "accepted_capability_profile_version",
+)
+
+
+def pop_capacity_accept_signal(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Strip audit-only accept-signal fields from a save payload and return them.
+
+    Returns the popped values as {'match_kind': ..., 'capability_profile_version': ...}
+    when match_kind is present, else None. Callers forward the dict to
+    `_record_capacity_suggestion_accept` once the model_factory is known.
+    """
+    if not isinstance(payload, dict):
+        return None
+    popped = {key: payload.pop(key, None) for key in _ACCEPT_SIGNAL_KEYS}
+    match_kind = popped.get("accepted_suggestion_match_kind")
+    if not match_kind:
+        return None
+    return {
+        "match_kind": match_kind,
+        "capability_profile_version": popped.get("accepted_capability_profile_version"),
+    }
+
+
+def _record_capacity_suggestion_accept(match_kind: str, provider: Optional[str]) -> None:
+    """Emit the accept_total counter for one operator-accepted suggestion save."""
+    if _capacity_suggestion_accept_total is None:
+        return
+    try:
+        _capacity_suggestion_accept_total.add(
+            1,
+            {
+                "match_kind": match_kind,
+                "provider": (provider or "unknown").lower(),
+            },
+        )
+    except Exception:  # pragma: no cover - never break save for telemetry
         pass
 
 

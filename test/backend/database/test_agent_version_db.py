@@ -1148,6 +1148,28 @@ def test_get_next_version_no_existing_versions(monkeypatch, mock_session):
     assert result == 6  # Should be 5 + 1
 
 
+def test_get_next_version_no_includes_soft_deleted_snapshots(monkeypatch, mock_session):
+    """Test that a soft-deleted snapshot version number is not reused."""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.scalar = lambda: 2
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    db_models_mock.AgentInfo.delete_flag.__eq__.reset_mock()
+
+    result = get_next_version_no(agent_id=1, tenant_id="tenant1")
+
+    assert result == 3
+    filter_conditions = query.filter.call_args.args
+    assert db_models_mock.AgentInfo.delete_flag.__eq__.call_count == 0
+    assert len(filter_conditions) == 2
+
+
 def test_delete_version_success(monkeypatch, mock_session):
     """Test successfully deleting a version"""
     session, query = mock_session

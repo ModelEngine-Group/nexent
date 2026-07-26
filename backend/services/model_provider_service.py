@@ -151,7 +151,16 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         **capacity_kwargs,
     )
 
-    model_dict = model_obj.model_dump()
+    # W11 accept-signal fields live on ModelRequest for app-layer ingest but
+    # are audit-only and have no DB column. model_dump() would otherwise
+    # resurrect them as None and SQLAlchemy raises "Unconsumed column names"
+    # at insert time. Exclude before the dict reaches create_model_record.
+    model_dict = model_obj.model_dump(
+        exclude={
+            "accepted_suggestion_match_kind",
+            "accepted_capability_profile_version",
+        }
+    )
     model_dict["model_repo"] = model_repo or ""
 
     # Determine the correct base_url and, for embeddings, update the actual

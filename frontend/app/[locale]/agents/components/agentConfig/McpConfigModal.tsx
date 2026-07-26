@@ -890,6 +890,7 @@ export default function McpConfigModal({
                             style={{ flex: 0.8 }}
                             maxLength={20}
                             disabled={actionsLocked || addingServer}
+                            autoComplete="off"
                           />
                           <Input
                             placeholder={t("mcpConfig.addServer.urlPlaceholder")}
@@ -897,6 +898,7 @@ export default function McpConfigModal({
                             onChange={(e) => setNewServerUrl(e.target.value)}
                             style={{ flex: 3 }}
                             disabled={actionsLocked || addingServer}
+                            autoComplete="off"
                           />
                         </div>
                         <Input.TextArea
@@ -920,6 +922,7 @@ export default function McpConfigModal({
                             onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
                             disabled={actionsLocked || addingServer}
                             style={{ flex: 1 }}
+                            autoComplete="new-password"
                           />
                           <Button
                             type="primary"

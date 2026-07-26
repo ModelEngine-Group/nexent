@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { DOCUMENT_ACTION_TYPES } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { DocumentState, DocumentAction } from "@/types/knowledgeBase";
+import type { QuotaStatusResponse } from "@/types/quota";
 import log from "@/lib/logger";
 
 // Reducer function
@@ -140,7 +141,7 @@ export const DocumentContext = createContext<{
     kbId: string,
     files: File[],
     modelId?: number
-  ) => Promise<void>;
+  ) => Promise<{ quota_status?: QuotaStatusResponse } | undefined>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
 }>({
   state: {
@@ -154,7 +155,7 @@ export const DocumentContext = createContext<{
   },
   dispatch: () => {},
   fetchDocuments: async () => {},
-  uploadDocuments: async () => {},
+  uploadDocuments: async () => undefined,
   deleteDocument: async () => {},
 });
 
@@ -266,7 +267,7 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
 
       try {
-        await knowledgeBaseService.uploadDocuments(
+        const uploadResult = await knowledgeBaseService.uploadDocuments(
           kbId,
           files,
           undefined,
@@ -299,6 +300,7 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
         // Clear upload files
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: [] });
+        return uploadResult;
       } catch (error) {
         log.error(t("document.error.upload"), error);
         dispatch({

@@ -11,12 +11,21 @@ export type ToolKbType =
   | "datamate_search"
   | "idata_search"
   | "haotian_search"
+  | "ragflow_search"
   | "aidp_search";
 
 /**
  * Configuration for Dify tool
  */
 export interface DifyConfig {
+  serverUrl: string;
+  apiKey: string;
+}
+
+/**
+ * Configuration for RAGFlow tool
+ */
+export interface RagflowConfig {
   serverUrl: string;
   apiKey: string;
 }
@@ -50,7 +59,7 @@ export interface AidpConfig {
  */
 export interface UseKnowledgeBaseConfigChangeHandlerOptions {
   toolKbType: ToolKbType | null;
-  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | undefined;
+  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | RagflowConfig | undefined;
   onConfigChange: () => void;
 }
 
@@ -66,6 +75,12 @@ export function useKnowledgeBaseConfigChangeHandler({
 }: UseKnowledgeBaseConfigChangeHandlerOptions) {
   // Track previous Dify config to detect changes
   const prevDifyConfig = useRef<DifyConfig>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
+  // Track previous RAGFlow config to detect changes
+  const prevRagflowConfig = useRef<RagflowConfig>({
     serverUrl: "",
     apiKey: "",
   });
@@ -90,35 +105,29 @@ export function useKnowledgeBaseConfigChangeHandler({
   // Track if initial load is complete to avoid duplicate API calls
   const isInitialLoadComplete = useRef(false);
 
-  // Handle Dify config change
+  // Generic handler for tools that use serverUrl + apiKey config
+  // (dify_search and ragflow_search share the same config shape and change-detection logic)
   useEffect(() => {
-    if (toolKbType !== "dify_search" || !config) {
+    const isRelevantTool = toolKbType === "dify_search" || toolKbType === "ragflow_search";
+    if (!isRelevantTool || !config) {
       return;
     }
 
-    const difyConfig = config as DifyConfig;
+    const typedConfig = config as { serverUrl: string; apiKey: string };
+    const prevRef = toolKbType === "dify_search" ? prevDifyConfig : prevRagflowConfig;
 
-    // Skip initial load - only handle actual config changes
-    if (!prevDifyConfig.current.serverUrl && !prevDifyConfig.current.apiKey) {
-      prevDifyConfig.current = { ...difyConfig };
+    // Skip initial load — only handle actual config changes
+    if (!prevRef.current.serverUrl && !prevRef.current.apiKey) {
+      prevRef.current = { ...typedConfig };
       return;
     }
 
-    const hasUrlChanged = difyConfig.serverUrl !== prevDifyConfig.current.serverUrl;
-    const hasApiKeyChanged = difyConfig.apiKey !== prevDifyConfig.current.apiKey;
+    const hasUrlChanged = typedConfig.serverUrl !== prevRef.current.serverUrl;
+    const hasApiKeyChanged = typedConfig.apiKey !== prevRef.current.apiKey;
 
-    // If URL or API key has changed, trigger callback
     if (hasUrlChanged || hasApiKeyChanged) {
-      // Only clear and refetch if both values are not empty
-      if (difyConfig.serverUrl && difyConfig.apiKey) {
-        onConfigChange();
-      } else {
-        // Clear knowledge base list when URL or API key is cleared
-        onConfigChange();
-      }
-
-      // Update previous config
-      prevDifyConfig.current = { ...difyConfig };
+      onConfigChange();
+      prevRef.current = { ...typedConfig };
       isInitialLoadComplete.current = true;
     }
   }, [toolKbType, config, onConfigChange]);
@@ -219,6 +228,7 @@ export function useKnowledgeBaseConfigChangeHandler({
   // Reset handler - useful when modal closes to reset the tracking state
   const resetTracker = useCallback(() => {
     prevDifyConfig.current = { serverUrl: "", apiKey: "" };
+    prevRagflowConfig.current = { serverUrl: "", apiKey: "" };
     prevDatamateServerUrl.current = "";
     prevIdataConfig.current = { serverUrl: "", apiKey: "", userId: "" };
     prevAidpConfig.current = { serverUrl: "", apiKey: "" };

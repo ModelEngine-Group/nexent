@@ -16,7 +16,7 @@ def split_string_inline_comment(s: str) -> Tuple[str, Optional[str]]:
     idx = s.find(" # ")
     if idx == -1:
         return s, None
-    return s[:idx].rstrip(), s[idx + 3 :].strip() or None
+    return s[:idx].rstrip(), s[idx + 3:].strip() or None
 
 
 def strip_params_comments_for_db(obj: Any) -> Any:

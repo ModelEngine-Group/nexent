@@ -905,80 +905,64 @@ export const ModelConfigSection = forwardRef<
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
             justifyContent: "flex-start",
+            gap: 8,
             paddingRight: 12,
             marginLeft: "4px",
             minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
           }}
         >
-          <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            {modelEngineEnable && (
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  onClick={handleSyncModels}
-                  style={{ width: "100%" }}
-                  icon={<RefreshCw size={16} />}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.syncModelEngine")}
-                  </span>
-                </Button>
-              </Col>
-            )}
-            <Can permission="model:create">
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  icon={<Plus size={16} />}
-                  onClick={() => {
-                    setAddModalDefaultIsBatch(false);
-                    setIsAddModalOpen(true);
-                  }}
-                  style={{ width: "100%" }}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.addCustomModel")}
-                  </span>
-                </Button>
-              </Col>
-            </Can>
-            <Can permission="model:update">
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  icon={<PenLine size={16} />}
-                  onClick={() => setIsDeleteModalOpen(true)}
-                  style={{ width: "100%" }}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.editCustomModel")}
-                  </span>
-                </Button>
-              </Col>
-            </Can>
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button
-                type="primary"
-                size="middle"
-                icon={<ShieldCheck size={16} />}
-                onClick={verifyModels}
-                loading={isVerifying}
-                style={{ width: "100%" }}
-                block
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.checkConnectivity")}
-                </span>
-              </Button>
-            </Col>
-          </Row>
+          {modelEngineEnable && (
+            <Button
+              type="primary"
+              size="middle"
+              onClick={handleSyncModels}
+              icon={<RefreshCw size={16} />}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.syncModelEngine")}
+              </span>
+            </Button>
+          )}
+          <Can permission="model:create">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<Plus size={16} />}
+              onClick={() => {
+                setAddModalDefaultIsBatch(false);
+                setIsAddModalOpen(true);
+              }}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.addCustomModel")}
+              </span>
+            </Button>
+          </Can>
+          <Can permission="model:update">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<PenLine size={16} />}
+              onClick={() => setIsDeleteModalOpen(true)}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.editCustomModel")}
+              </span>
+            </Button>
+          </Can>
+          <Button
+            type="primary"
+            size="middle"
+            icon={<ShieldCheck size={16} />}
+            onClick={verifyModels}
+            loading={isVerifying}
+          >
+            <span className="button-text-full">
+              {t("modelConfig.button.checkConnectivity")}
+            </span>
+          </Button>
         </div>
 
         {capacityCoverage && capacityCoverage.bareCount > 0 && (

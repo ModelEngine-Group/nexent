@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { App, Button, Modal, Select } from "antd";
-import { Share2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { App, Button, Dropdown, Input, Modal, Select, Spin } from "antd";
+import { ChevronDown, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  AGENT_REPOSITORY_CATEGORIES,
   AGENT_REPOSITORY_ICONS,
   AGENT_REPOSITORY_PRESET_TAGS,
 } from "@/const/agentRepository";
+import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { getAgentRepositoryTagLabel, resolveAgentRepositoryTagForSubmit } from "@/lib/agentRepositoryLabels";
+import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
 import {
-  getAgentRepositoryCategoryLabel,
-  getAgentRepositoryTagLabel,
-} from "@/lib/agentRepositoryLabels";
+  buildApplyListingFormPrefill,
+  pickApplyListingPrefillSource,
+} from "@/lib/agentRepositoryMine";
 import type {
   AgentRepositoryListingCreatePayload,
   MyEditableAgentItem,
@@ -20,6 +22,7 @@ import type {
 
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
+const MAX_ICON_LENGTH = 32;
 
 interface MineApplyListingModalProps {
   open: boolean;
@@ -40,14 +43,26 @@ export function MineApplyListingModal({
   const { message } = App.useApp();
 
   const icons = AGENT_REPOSITORY_ICONS;
-  const categories = AGENT_REPOSITORY_CATEGORIES;
   const presetTags = AGENT_REPOSITORY_PRESET_TAGS;
 
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(
-    null
-  );
+  const [iconInput, setIconInput] = useState("");
+  const [iconError, setIconError] = useState<string | null>(null);
+  const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [listingContent, setListingContent] = useState("");
+
+  const agentId = agent?.agent_id;
+  const {
+    data: listingsData,
+    isSuccess: isListingsSuccess,
+    isFetching: isListingsFetching,
+  } = useAgentRepositoryListings(
+    agentId != null
+      ? { agent_id: agentId, page: 1, page_size: 100 }
+      : undefined,
+    open && agentId != null
+  );
 
   const tagOptions = useMemo(
     () =>
@@ -58,20 +73,86 @@ export function MineApplyListingModal({
     [presetTags, t]
   );
 
+  const invalidIconMessage = t(
+    "agentRepository.mine.applyModal.validation.iconInvalid"
+  );
+
+  const applyIconInputFromValue = useCallback(
+    (value: string, showErrorWhenInvalid = true) => {
+      setIconInput(value);
+
+      const trimmedValue = value.trim();
+      if (!trimmedValue) {
+        setSelectedIcon(null);
+        setIconError(null);
+        return;
+      }
+
+      if (isSingleSimpleEmoji(trimmedValue)) {
+        setSelectedIcon(trimmedValue);
+        setIconError(null);
+        return;
+      }
+
+      setSelectedIcon(null);
+      setIconError(showErrorWhenInvalid ? invalidIconMessage : null);
+    },
+    [invalidIconMessage]
+  );
+
+  const clearIconState = useCallback(() => {
+    setIconInput("");
+    setSelectedIcon(null);
+    setIconError(null);
+  }, []);
+
   useEffect(() => {
     if (!open) {
       return;
     }
-    setSelectedIcon(icons[0] ?? null);
-    setSelectedCategoryId(categories[0]?.id ?? null);
-    setSelectedTags([]);
-  }, [open, icons, categories]);
 
-  if (!agent) {
-    return null;
-  }
+    if (!agent || !isListingsSuccess) {
+      clearIconState();
+      setSelectedTags([]);
+      setListingContent("");
+      return;
+    }
 
-  const title = agent.name?.trim() || t("agentRepository.card.untitled");
+    const source = pickApplyListingPrefillSource(
+      listingsData?.items ?? [],
+      agent.version_label
+    );
+    const prefill = buildApplyListingFormPrefill(source, {
+      maxTags: MAX_TAGS,
+    });
+
+    if (!prefill) {
+      clearIconState();
+      setSelectedTags([]);
+      setListingContent("");
+      return;
+    }
+
+    const trimmedIcon = prefill.icon?.trim();
+    if (trimmedIcon && isSingleSimpleEmoji(trimmedIcon)) {
+      applyIconInputFromValue(trimmedIcon, false);
+    } else {
+      clearIconState();
+    }
+
+    setSelectedTags(prefill.tags);
+    setListingContent("");
+  }, [
+    open,
+    agent,
+    isListingsSuccess,
+    listingsData,
+    clearIconState,
+    applyIconInputFromValue,
+  ]);
+
+  const title =
+    agent?.name?.trim() || t("agentRepository.card.untitled");
 
   const normalizeTags = (tags: string[]) => {
     const normalized: string[] = [];
@@ -87,17 +168,44 @@ export function MineApplyListingModal({
     return normalized;
   };
 
+  const handlePresetIconClick = (icon: string) => {
+    applyIconInputFromValue(icon, false);
+    setPresetDropdownOpen(false);
+  };
+
+  const presetDropdown = (
+    <div className="min-w-[280px] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+      <div className="grid grid-cols-5 gap-2">
+        {icons.map((icon) => (
+          <button
+            key={icon}
+            type="button"
+            onClick={() => handlePresetIconClick(icon)}
+            className="flex size-10 items-center justify-center rounded-lg border border-slate-200 text-2xl transition-colors hover:border-primary hover:bg-primary/5 dark:border-slate-700 dark:hover:border-primary"
+            aria-label={icon}
+          >
+            <span aria-hidden>{icon}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const handleSubmit = () => {
+    if (iconInput.trim() && !isSingleSimpleEmoji(iconInput)) {
+      setIconError(invalidIconMessage);
+      message.warning(invalidIconMessage);
+      return;
+    }
+
     if (!selectedIcon) {
       message.warning(t("agentRepository.mine.applyModal.validation.icon"));
       return;
     }
-    if (selectedCategoryId == null) {
-      message.warning(t("agentRepository.mine.applyModal.validation.category"));
-      return;
-    }
 
-    const tags = normalizeTags(selectedTags);
+    const tags = normalizeTags(selectedTags).map((tag) =>
+      resolveAgentRepositoryTagForSubmit(tag, t)
+    );
     if (tags.length === 0) {
       message.warning(t("agentRepository.mine.applyModal.validation.tags"));
       return;
@@ -121,14 +229,14 @@ export function MineApplyListingModal({
 
     onSubmit({
       icon: selectedIcon,
-      category_id: selectedCategoryId,
       tags,
+      content: listingContent.trim(),
     });
   };
 
   return (
     <Modal
-      open={open}
+      open={open && agent != null}
       onCancel={onClose}
       centered
       destroyOnHidden
@@ -153,70 +261,98 @@ export function MineApplyListingModal({
         {t("agentRepository.mine.applyModal.agentName", { name: title })}
       </p>
 
-      <div className="space-y-5">
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.icon")}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {icons.map((icon) => {
-              const isSelected = selectedIcon === icon;
-              return (
-                <button
-                  key={icon}
-                  type="button"
-                  onClick={() => setSelectedIcon(icon)}
-                  className={`flex size-11 items-center justify-center rounded-xl border text-2xl transition-colors ${
-                    isSelected
-                      ? "border-primary bg-primary/10 ring-2 ring-primary/30"
-                      : "border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800"
-                  }`}
-                  aria-label={icon}
-                  aria-pressed={isSelected}
+      <Spin spinning={isListingsFetching && open}>
+        <div className="space-y-5">
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.icon")}
+            </p>
+            <Input
+              value={iconInput}
+              onChange={(event) =>
+                applyIconInputFromValue(event.target.value)
+              }
+              maxLength={MAX_ICON_LENGTH}
+              status={iconError ? "error" : undefined}
+              className="!h-[3.75rem] !w-[6.5rem] shrink-0 !text-4xl"
+              styles={{
+                root: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  paddingBlock: 0,
+                },
+                input: {
+                  paddingInline: 2,
+                  paddingBlock: 0,
+                  textAlign: "center",
+                  fontSize: "2.25rem",
+                  lineHeight: 1,
+                },
+              }}
+              suffix={
+                <Dropdown
+                  open={presetDropdownOpen}
+                  onOpenChange={setPresetDropdownOpen}
+                  trigger={["click"]}
+                  popupRender={() => presetDropdown}
                 >
-                  <span aria-hidden>{icon}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+                  <button
+                    type="button"
+                    className="inline-flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    aria-label={t(
+                      "agentRepository.mine.applyModal.iconPresetPicker"
+                    )}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <ChevronDown className="size-4" aria-hidden />
+                  </button>
+                </Dropdown>
+              }
+            />
+            {iconError ? (
+              <p className="text-xs text-red-500">{iconError}</p>
+            ) : (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t("agentRepository.mine.applyModal.customIconHint")}
+              </p>
+            )}
+          </section>
 
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.category")}
-          </p>
-          <Select
-            className="w-full"
-            value={selectedCategoryId ?? undefined}
-            onChange={setSelectedCategoryId}
-            options={categories.map((category) => ({
-              label: getAgentRepositoryCategoryLabel(category, t),
-              value: category.id,
-            }))}
-            placeholder={t("agentRepository.mine.applyModal.categoryPlaceholder")}
-          />
-        </section>
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.tags")}
+            </p>
+            <Select
+              mode="tags"
+              className="w-full"
+              value={selectedTags}
+              onChange={setSelectedTags}
+              options={tagOptions}
+              maxCount={MAX_TAGS}
+              placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t("agentRepository.mine.applyModal.tagsHint", {
+                count: MAX_TAGS,
+              })}
+            </p>
+          </section>
 
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.tags")}
-          </p>
-          <Select
-            mode="tags"
-            className="w-full"
-            value={selectedTags}
-            onChange={setSelectedTags}
-            options={tagOptions}
-            maxCount={MAX_TAGS}
-            placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
-          />
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t("agentRepository.mine.applyModal.tagsHint", {
-              count: MAX_TAGS,
-            })}
-          </p>
-        </section>
-      </div>
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.content")}
+            </p>
+            <Input.TextArea
+              value={listingContent}
+              onChange={(event) => setListingContent(event.target.value)}
+              rows={4}
+              placeholder={t(
+                "agentRepository.mine.applyModal.contentPlaceholder"
+              )}
+            />
+          </section>
+        </div>
+      </Spin>
     </Modal>
   );
 }

@@ -25,7 +25,6 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     icon: Optional[str] = None
     downloads: int = Field(0, ge=0)
     tags: Optional[List[str]] = None
-    category_id: Optional[int] = 0
     tool_count: Optional[int] = Field(None, ge=0)
 
 
@@ -44,11 +43,11 @@ def mock_auth_header():
     return {"Authorization": "Bearer test_token"}
 
 
-def test_list_agent_repository_listings_api_defaults_dedupe_without_agent_id(
+def test_list_agent_repository_listings_api_success(
     mocker,
     mock_auth_header,
 ):
-    """Test list API defaults to dedupe when agent_id is not provided."""
+    """Test list API forwards query parameters to service."""
     mock_get_user_id = mocker.patch(
         "apps.agent_repository_app.get_current_user_id"
     )
@@ -67,16 +66,17 @@ def test_list_agent_repository_listings_api_defaults_dedupe_without_agent_id(
         "test_tenant_id",
         status=None,
         agent_id=None,
-        deduplicate_by_agent_id=True,
-        category_id=None,
+        page=1,
+        page_size=10,
+        search=None,
     )
 
 
-def test_list_agent_repository_listings_api_disables_dedupe_for_agent_id(
+def test_list_agent_repository_listings_api_passes_agent_id(
     mocker,
     mock_auth_header,
 ):
-    """Test agent_id lookup defaults to returning all records for the agent."""
+    """Test list API forwards agent_id query parameter to service."""
     mock_get_user_id = mocker.patch(
         "apps.agent_repository_app.get_current_user_id"
     )
@@ -97,16 +97,17 @@ def test_list_agent_repository_listings_api_disables_dedupe_for_agent_id(
         "test_tenant_id",
         status=None,
         agent_id=123,
-        deduplicate_by_agent_id=False,
-        category_id=None,
+        page=1,
+        page_size=10,
+        search=None,
     )
 
 
-def test_list_agent_repository_listings_api_passes_explicit_dedupe(
+def test_list_agent_repository_listings_api_passes_pending_review_status(
     mocker,
     mock_auth_header,
 ):
-    """Test explicit dedupe query parameter overrides the agent_id default."""
+    """Test list API forwards pending_review status to service."""
     mock_get_user_id = mocker.patch(
         "apps.agent_repository_app.get_current_user_id"
     )
@@ -118,7 +119,46 @@ def test_list_agent_repository_listings_api_passes_explicit_dedupe(
     mock_list.return_value = {"items": []}
 
     response = client.get(
-        "/repository/agent?agent_id=123&deduplicate_by_agent_id=true",
+        "/repository/agent?status=pending_review",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(
+        "test_tenant_id",
+        status="pending_review",
+        agent_id=None,
+        page=1,
+        page_size=10,
+        search=None,
+    )
+
+
+def test_list_agent_repository_listings_api_passes_pagination_and_search(
+    mocker,
+    mock_auth_header,
+):
+    """Test list API forwards pagination and search query parameters to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list.return_value = {
+        "items": [],
+        "pagination": {
+            "page": 2,
+            "page_size": 6,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent?page=2&page_size=6&search=alpha",
         headers=mock_auth_header,
     )
 
@@ -126,9 +166,10 @@ def test_list_agent_repository_listings_api_passes_explicit_dedupe(
     mock_list.assert_called_once_with(
         "test_tenant_id",
         status=None,
-        agent_id=123,
-        deduplicate_by_agent_id=True,
-        category_id=None,
+        agent_id=None,
+        page=2,
+        page_size=6,
+        search="alpha",
     )
 
 
@@ -295,6 +336,8 @@ def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
         status="shared",
         user_id="test_user_id",
         tenant_id="test_tenant_id",
+        notify_content=None,
+        content=None,
     )
     assert response.json()["status"] == "shared"
 
@@ -365,7 +408,6 @@ def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_aut
 
     payload = {
         "icon": "🤖",
-        "category_id": 2,
         "tags": ["代码审查", "自定义"],
         "downloads": 0,
     }
@@ -395,12 +437,19 @@ def test_list_my_editable_agents_api_success_default_ownership(
     )
     mock_list_mine = mocker.patch(
         "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_list_mine.return_value = {
         "items": [{"agent_id": 1, "name": "Agent One", "repository_info": []}],
         "counts": {"all": 1, "created": 1, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 1,
+            "total_pages": 1,
+        },
     }
 
     response = client.get("/repository/agent/mine", headers=mock_auth_header)
@@ -409,12 +458,23 @@ def test_list_my_editable_agents_api_success_default_ownership(
     assert response.json() == {
         "items": [{"agent_id": 1, "name": "Agent One", "repository_info": []}],
         "counts": {"all": 1, "created": 1, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 1,
+            "total_pages": 1,
+        },
     }
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_list_mine.assert_called_once_with(
         tenant_id="test_tenant_id",
         user_id="test_user_id",
         ownership="all",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -428,10 +488,20 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
     )
     mock_list_mine = mocker.patch(
         "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_list_mine.return_value = {"items": [], "counts": {"all": 0, "created": 0, "others": 0}}
+    mock_list_mine.return_value = {
+        "items": [],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
 
     response = client.get(
         "/repository/agent/mine?ownership=others",
@@ -443,6 +513,140 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
         tenant_id="test_tenant_id",
         user_id="test_user_id",
         ownership="others",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=False,
+        agent_id=None,
+    )
+
+
+def test_list_my_editable_agents_api_passes_pagination_and_search(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards pagination and search query parameters to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list_mine.return_value = {
+        "items": [],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 2,
+            "page_size": 5,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent/mine?page=2&page_size=5&search=alpha",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list_mine.assert_called_once_with(
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        ownership="all",
+        page=2,
+        page_size=5,
+        search="alpha",
+        new_agent_padding=False,
+        agent_id=None,
+    )
+
+
+def test_list_my_editable_agents_api_passes_new_agent_padding(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards new_agent_padding query parameter to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list_mine.return_value = {
+        "items": [{"new_agent_padding": True}],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 6,
+            "total": 1,
+            "total_pages": 1,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent/mine?new_agent_padding=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list_mine.assert_called_once_with(
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        ownership="all",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=True,
+        agent_id=None,
+    )
+
+
+def test_list_my_editable_agents_api_passes_agent_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards agent_id query parameter to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list_mine.return_value = {
+        "items": [],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent/mine?agent_id=123",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list_mine.assert_called_once_with(
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        ownership="all",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=False,
+        agent_id=123,
     )
 
 
@@ -453,6 +657,7 @@ def test_list_my_editable_agents_api_bad_request(mocker, mock_auth_header):
     )
     mock_list_mine = mocker.patch(
         "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -517,4 +722,39 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         agent_repository_id=42,
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
+    )
+
+
+def test_check_repository_import_precheck_api_passes_tenant_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test import precheck API forwards caller tenant_id to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_precheck = mocker.patch(
+        "apps.agent_repository_app.check_repository_import_precheck_impl",
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_precheck.return_value = {
+        "agent_repository_id": 42,
+        "display_name": "Agent One",
+        "total_count": 1,
+        "available_count": 1,
+        "percent": 100,
+        "has_abnormal": False,
+        "items": [],
+    }
+
+    response = client.get(
+        "/repository/agent/42/import_precheck",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_precheck.assert_called_once_with(
+        agent_repository_id=42,
+        tenant_id="test_tenant_id",
     )

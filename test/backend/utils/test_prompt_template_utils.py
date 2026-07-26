@@ -16,6 +16,20 @@ from utils.prompt_template_utils import (
 class TestPromptTemplateUtils:
     """Test cases for prompt_template_utils module"""
 
+    @pytest.mark.parametrize(
+        ("is_manager", "language"),
+        [(True, "zh"), (True, "en"), (False, "zh"), (False, "en")],
+    )
+    def test_agent_templates_contain_only_non_context_sections(self, is_manager, language):
+        """Stable context must not be sourced from YAML after runtime consolidation."""
+        result = get_agent_prompt_template(is_manager=is_manager, language=language)
+
+        assert "system_prompt" not in result
+        assert "final_answer" in result
+        assert "verification" in result
+        if is_manager:
+            assert "managed_agent" in result
+
     def test_get_agent_prompt_template_manager_zh(self, mocker):
         """Test get_agent_prompt_template for manager mode in Chinese"""
         mock_yaml_load = mocker.patch('yaml.safe_load')

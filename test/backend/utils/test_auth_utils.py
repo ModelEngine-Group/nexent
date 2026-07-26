@@ -297,8 +297,77 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     # ensure not in speed mode and no DEBUG_JWT_EXPIRE_SECONDS was set for this test
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
     monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     seconds = au.get_jwt_expiry_seconds(token)
     assert seconds == 1234
+
+
+def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
+    """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
+    now = int(time.time())
+    forged_token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "iat": now,
+            "exp": now + 10 * 365 * 24 * 60 * 60,
+            "aud": "nexent-api",
+        },
+        "attacker-secret",
+        algorithm="HS256",
+    )
+
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    seconds = au.get_jwt_expiry_seconds(forged_token)
+
+    assert seconds == 3600
+
+
+def test_get_jwt_expiry_seconds_uses_debug_override(monkeypatch):
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 77)
+
+    assert au.get_jwt_expiry_seconds("Bearer ignored-token") == 77
+
+
+def test_get_jwt_expiry_seconds_rejects_non_positive_lifetime(monkeypatch):
+    now = int(time.time())
+    token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "iat": now,
+            "exp": now,
+            "aud": "nexent-api",
+        },
+        au.MOCK_JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    assert au.get_jwt_expiry_seconds(token) == 3600
+
+
+def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+
+    with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
+        au._decode_jwt_token_for_expiry("any-token")
+
+
+def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
+    token = au.generate_test_jwt("user-1", expires_in=120)
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    expires_at = au.calculate_expires_at(token)
+
+    assert int(time.time()) + 60 <= expires_at <= int(time.time()) + 180
 
 
 def test_calculate_expires_at_speed_mode(monkeypatch):

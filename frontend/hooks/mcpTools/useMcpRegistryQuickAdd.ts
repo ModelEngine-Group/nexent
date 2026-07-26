@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
+  testMcpConnectionService,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
@@ -16,6 +17,7 @@ import {
   buildInitialQuickAddValues,
   collectPackageEnvValues,
   findMissingRequiredField,
+  getMcpAddErrorMessage,
   hasUnresolvedUrlTemplate,
   inferContainerRuntimeCommand,
   normalizeServerKey,
@@ -54,6 +56,12 @@ export function useMcpRegistryQuickAdd({
     undefined
   );
   const [submitting, setSubmitting] = useState(false);
+  const [customName, setCustomName] = useState<string>("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<{
+    success: boolean;
+    error?: string;
+  } | null>(null);
 
   const selectedOption = useMemo(
     () => options.find((option) => option.key === selectedKey) || null,
@@ -68,6 +76,8 @@ export function useMcpRegistryQuickAdd({
         return;
       }
       setCandidate(service);
+      setConnectionResult(null);
+      setCustomName(service.server?.name || "");
       setOptions(nextOptions);
       const firstKey = nextOptions[0].key;
       setSelectedKey(firstKey);
@@ -79,15 +89,18 @@ export function useMcpRegistryQuickAdd({
 
   const close = useCallback(() => {
     setCandidate(null);
+    setConnectionResult(null);
     setOptions([]);
     setSelectedKey("");
     setValues({});
     setContainerPort(undefined);
+    setCustomName("");
   }, []);
 
   const chooseOption = useCallback(
     (key: string) => {
       setSelectedKey(key);
+      setConnectionResult(null);
       const next = options.find((option) => option.key === key) || null;
       setValues(buildInitialQuickAddValues(next));
     },
@@ -98,8 +111,47 @@ export function useMcpRegistryQuickAdd({
     setValues((prev) => ({ ...prev, [formKey]: value }));
   }, []);
 
+  const testConnection = useCallback(async () => {
+    if (!candidate || !selectedOption) return;
+    if (selectedOption.transportType === McpTransportType.CONTAINER) return;
+    if (!selectedOption.serverUrl) return;
+    const finalUrl = resolveHttpServerUrl(selectedOption, values);
+    if (!finalUrl || hasUnresolvedUrlTemplate(finalUrl)) return;
+    setTestingConnection(true);
+    setConnectionResult(null);
+    try {
+      const authorization = resolveAuthorizationFromHeaders(
+        [
+          ...(selectedOption.remoteHeaders || []),
+          ...(selectedOption.packageTransportHeaders || []),
+        ],
+        values
+      );
+      const result = await testMcpConnectionService({
+        server_url: finalUrl,
+        authorization_token: authorization,
+      });
+      setConnectionResult({
+        success: result.data.success,
+        error: result.data.error,
+      });
+    } catch (error) {
+      setConnectionResult({
+        success: false,
+        error: error instanceof Error ? error.message : "Connection failed",
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  }, [candidate, selectedOption, values]);
+
   const confirm = useCallback(async () => {
     if (!candidate || !selectedOption) return;
+    const name = customName.trim();
+    if (!name) {
+      message.warning(t("mcpTools.add.validate.nameRequired"));
+      return;
+    }
     const tags: string[] = [];
 
     const allFields = [
@@ -139,7 +191,7 @@ export function useMcpRegistryQuickAdd({
         }
         const runtimeArgs = resolveRuntimeArgs(selectedOption, values);
         const envValues = collectPackageEnvValues(selectedOption, values);
-        const serverKey = normalizeServerKey(candidate.server?.name);
+        const serverKey = normalizeServerKey(name);
 
         const mcpConfig: McpContainerConfigPayload = {
           mcpServers: {
@@ -152,7 +204,7 @@ export function useMcpRegistryQuickAdd({
         };
 
         await addContainerMcpToolService({
-          name: candidate.server?.name,
+          name,
           description: candidate.server?.description,
           tags,
           source: McpSource.REGISTRY,
@@ -178,14 +230,18 @@ export function useMcpRegistryQuickAdd({
         );
 
         await addMcpToolService({
-          name: candidate.server?.name,
+          name,
           description: candidate.server?.description || "",
           source: McpSource.REGISTRY,
           server_url: finalUrl,
           tags,
           authorization_token: authorization,
           version: candidate.server?.version,
-          registry_json: candidate.server as unknown as Record<string, unknown>,
+          registry_json: {
+            ...(candidate.server as unknown as Record<string, unknown>),
+            _source: candidate._meta?.source,
+            _authorDisplayName: candidate._meta?.qualifiedName || candidate.server?.name,
+          } as Record<string, unknown>,
         });
       }
 
@@ -204,7 +260,7 @@ export function useMcpRegistryQuickAdd({
       log.error("[useMcpRegistryQuickAdd] Failed to add from registry", {
         error,
       });
-      message.error(t("mcpTools.add.failed"));
+      message.error(getMcpAddErrorMessage(error, t));
     } finally {
       setSubmitting(false);
     }
@@ -212,6 +268,7 @@ export function useMcpRegistryQuickAdd({
     candidate,
     close,
     containerPort,
+    customName,
     message,
     onSuccess,
     queryClient,
@@ -228,6 +285,8 @@ export function useMcpRegistryQuickAdd({
     selectedKey,
     values,
     containerPort,
+    customName,
+    setCustomName,
     setContainerPort,
     open,
     close,
@@ -235,5 +294,8 @@ export function useMcpRegistryQuickAdd({
     setValue,
     confirm,
     submitting,
+    testingConnection,
+    connectionResult,
+    testConnection,
   };
 }

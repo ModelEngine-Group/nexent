@@ -526,6 +526,35 @@ async def test_check_model_connectivity_exception():
 
 
 @pytest.mark.asyncio
+async def test_check_model_connectivity_probe_exception_returns_unavailable():
+    with mock.patch("backend.services.model_health_service._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("backend.services.model_health_service.get_model_by_display_name") as mock_get_model, \
+            mock.patch("backend.services.model_health_service.update_model_record") as mock_update_model, \
+            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum:
+
+        mock_enum.AVAILABLE.value = "available"
+        mock_enum.UNAVAILABLE.value = "unavailable"
+        mock_enum.DETECTING.value = "detecting"
+
+        mock_get_model.return_value = {
+            "model_id": "model123",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+            "base_url": "https://api.openai.com",
+            "api_key": "test-key"
+        }
+        mock_connectivity_check.side_effect = RuntimeError("connection refused")
+
+        response = await check_model_connectivity("GPT-4", "tenant456")
+
+        assert response["connectivity"] is False
+        assert response["model_name"] == "gpt-4"
+        assert response["error"] == "connection refused"
+        mock_update_model.assert_any_call(
+            "model123", {"connect_status": "unavailable"})
+
+
+@pytest.mark.asyncio
 async def test_check_model_connectivity_general_exception():
     # Setup
     with mock.patch("backend.services.model_health_service.get_model_by_display_name") as mock_get_model, \

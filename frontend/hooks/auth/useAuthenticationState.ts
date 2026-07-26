@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
 
@@ -8,6 +8,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { authService } from "@/services/authService";
 import { casService } from "@/services/casService";
+import { forcedLoginService } from "@/services/forcedLoginService";
 import {
   getSessionFromStorage,
   removeSessionFromStorage,
@@ -15,7 +16,6 @@ import {
   getTokenExpiresAt,
 } from "@/lib/session";
 import { getEffectiveRoutePath } from "@/lib/auth";
-import { authFlowState } from "@/lib/authFlow";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
@@ -38,7 +38,6 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [session, setSession] = useState<Session | null>(null);
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
-  const isCasLoginInProgressRef = useRef(false);
 
   // Speed mode: skip authentication checks, consider user as authenticated
   useEffect(() => {
@@ -61,9 +60,13 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   }, [isSpeedMode]);
 
   useEffect(() => {
+    if (isAuthenticated) {
+      forcedLoginService.resetOAuthAutoLoginSuppression();
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (isSpeedMode || isAuthChecking || isAuthenticated) return;
-    if (isCasLoginInProgressRef.current) return;
-    if (authFlowState.isExplicitLogoutInProgress()) return;
     if (typeof window === "undefined") return;
 
     const pathname = window.location.pathname;
@@ -71,25 +74,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     if (effectivePath === "/oauth/complete") return;
     if (effectivePath.startsWith("/share/")) return;
 
-    let cancelled = false;
-    casService.getConfig().then((config) => {
-      if (
-        cancelled ||
-        isCasLoginInProgressRef.current ||
-        authFlowState.isExplicitLogoutInProgress() ||
-        !config.enabled ||
-        config.login_mode !== "force"
-      ) {
-        return;
-      }
-
-      isCasLoginInProgressRef.current = true;
-      casService.startLogin();
-    });
-
-    return () => {
-      cancelled = true;
-    };
+    forcedLoginService.redirectIfNeeded();
   }, [isSpeedMode, isAuthChecking, isAuthenticated]);
 
   useEffect(() => {

@@ -119,8 +119,6 @@ class AnalyzeTextFileTool(Tool):
         self.time_out = 60 * 5
         self.record_ops = 1
 
-        self.running_prompt_zh = "正在分析文件..."
-        self.running_prompt_en = "Analyzing file..."
         # Dynamically apply the load_object decorator to forward method
         self.forward = self.mm.load_object(
             input_names=["file_url_list"])(self._forward_impl)
@@ -144,10 +142,6 @@ class AnalyzeTextFileTool(Tool):
         Returns:
             List[str]: One analysis string per file that aligns with the order
         """
-        # Send tool run message
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
         if file_url_list is None:
             raise ValueError("file_url_list cannot be None")
@@ -171,9 +165,9 @@ class AnalyzeTextFileTool(Tool):
                     f"Extracting text content and image info from file #{index}, query: {query}")
                 
                 # detect file type
-                file_extension = self.detect_file_type(single_file)
+                file_extension = ".json" if self._is_valid_json(single_file) else self.detect_file_type(single_file)
                 
-                filename = f"file_{index}.{file_extension}"
+                filename = f"file_{index}{file_extension}"
 
                 # Step 1: Get file content
                 raw_text = self.process_text_file(filename, single_file)
@@ -202,6 +196,15 @@ class AnalyzeTextFileTool(Tool):
             error_msg = f"Error analyzing text file: {str(e)}"
             raise Exception(error_msg)
 
+    @staticmethod
+    def _is_valid_json(file_content: bytes) -> bool:
+        """Return whether the file content is a valid JSON document."""
+        try:
+            json.loads(file_content)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            return False
+        return True
+
     def process_text_file(self, filename: str, file_content: bytes,) -> str:
         """
         Process text file, convert to text using external API
@@ -213,8 +216,13 @@ class AnalyzeTextFileTool(Tool):
         raw_text = ""
         try:
             # Upload byte data as a file
+            content_type = (
+                "application/json"
+                if filename.lower().endswith(".json")
+                else "application/octet-stream"
+            )
             files = {
-                'file': (filename, file_content, 'application/octet-stream')
+                'file': (filename, file_content, content_type)
             }
             data = {
                 'chunking_strategy': 'basic',
@@ -288,7 +296,7 @@ class AnalyzeTextFileTool(Tool):
 
     def detect_file_type(self, file_bytes: bytes) -> str:
         if file_bytes.startswith(b"%PDF"):
-            return "pdf"
+            return ".pdf"
 
         try:
             # doc/xls/ppt
@@ -296,10 +304,10 @@ class AnalyzeTextFileTool(Tool):
                 ole = olefile.OleFileIO(io.BytesIO(file_bytes))
 
                 for stream, file_type in {
-                    "WordDocument": "doc",
-                    "Workbook": "xls",
-                    "Book": "xls",
-                    "PowerPoint Document": "ppt",
+                    "WordDocument": ".doc",
+                    "Workbook": ".xls",
+                    "Book": ".xls",
+                    "PowerPoint Document": ".ppt",
                 }.items():
                     if ole.exists(stream):
                         return file_type
@@ -309,9 +317,9 @@ class AnalyzeTextFileTool(Tool):
                 names = set(zipfile.ZipFile(io.BytesIO(file_bytes)).namelist())
 
                 for marker, file_type in {
-                    "word/document.xml": "docx",
-                    "xl/workbook.xml": "xlsx",
-                    "ppt/presentation.xml": "pptx",
+                    "word/document.xml": ".docx",
+                    "xl/workbook.xml": ".xlsx",
+                    "ppt/presentation.xml": ".pptx",
                 }.items():
                     if marker in names:
                         return file_type
@@ -319,7 +327,7 @@ class AnalyzeTextFileTool(Tool):
         except olefile.OleFileError:
             logger.error("Failed to determine file extension, defaulting to txt type.")
 
-        return "txt"
+        return ".txt"
     
     
     def _build_search_results(self, image_info):

@@ -6,11 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
 import { Checkbox } from "antd";
-import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import {
   ChatMessageType,
   ProcessedMessages,
   ChatStreamMainProps,
+  TaskMessageType,
 } from "@/types/chat";
 
 import { ChatInput } from "../components/chatInput";
@@ -18,6 +19,23 @@ import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
 import { TokenMetrics } from "@/types/chat";
+
+const getHistorySummaryMessages = (
+  message: ChatMessageType
+): TaskMessageType[] =>
+  (message.steps || []).flatMap((step) =>
+    (step.contents || [])
+      .filter(
+        (content) => content.type === chatConfig.messageTypes.HISTORY_SUMMARY
+      )
+      .map((content) => ({
+        id: content.id,
+        role: MESSAGE_ROLES.ASSISTANT,
+        content: content.content,
+        timestamp: new Date(content.timestamp || Date.now()),
+        type: chatConfig.messageTypes.HISTORY_SUMMARY,
+      }))
+  );
 
 export function ChatStreamMain({
   messages,
@@ -425,6 +443,15 @@ export function ChatStreamMain({
                     currentConversationId={currentConversationId}
                     onCitationHover={onCitationHover}
                   />
+                  {message.role === MESSAGE_ROLES.ASSISTANT &&
+                    getHistorySummaryMessages(message).length > 0 && (
+                      <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+                        <TaskWindow
+                          messages={getHistorySummaryMessages(message)}
+                          isStreaming={false}
+                        />
+                      </div>
+                    )}
                   {message.role === MESSAGE_ROLES.USER &&
                     processedMessages.conversationGroups.has(message.id!) && (
                       <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">

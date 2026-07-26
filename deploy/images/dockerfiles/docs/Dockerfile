@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM node:20-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH

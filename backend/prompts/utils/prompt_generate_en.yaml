@@ -40,7 +40,13 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   ### Requirements:
   1. Examples must be specific content, hypothetical user questions.
   2. If the application has available assistants and tools, both calling methods should be reflected.
-  3. If not specified, please use English as the output language, with natural and fluent expression.
+  3. If the tool list includes parallel_executor and the example needs to call multiple independent assistants or tools at the same time, you can use parallel_executor in the code to demonstrate parallel execution (see Tasks 6, 7, 8 below).
+  4. parallel_executor syntax:
+    - 2-tuple (returns list): results = parallel_executor((tool_a, {params}), (tool_b, {params})), access via results[0], results[1]
+    - 3-tuple (returns dict): results = parallel_executor((tool_a, {params}, "name_a"), (tool_b, {params}, "name_b")), access via results["name_a"], results["name_b"]
+    - All return values are plain strings — use print() to read them
+    - Optional params: timeout=120 (per-task timeout in seconds), max_workers=4 (max concurrent threads)
+  5. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Agent Execution Process:
   To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**
@@ -169,6 +175,65 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
   </DISPLAY>
+
+  ---
+
+  Task 6: "Search for Python design patterns and Java design patterns at the same time"
+
+  Think: The two search tasks are independent. Use parallel_executor to call them in parallel.
+  Code:
+  <code>
+  results = parallel_executor(
+      (web_search, {"query": "Python design patterns"}),
+      (web_search, {"query": "Java design patterns"}),
+  )
+  print(results[0])  # Python design patterns search results
+  print(results[1])  # Java design patterns search results
+  </code>
+  # System returns Observation: [search result 1..., search result 2...]
+
+  Think: I have both search results. Now I will synthesize the answer.
+  Regarding Python design patterns...; regarding Java design patterns...
+
+  ---
+
+  Task 7: "Check code for both security issues and style problems"
+
+  Think: I need to call security_scanner and style_checker. They are independent, so I'll use parallel_executor with names.
+  Code:
+  <code>
+  results = parallel_executor(
+      (security_scanner, {"task": "Check for SQL injection and XSS vulnerabilities"}, "security"),
+      (style_checker, {"task": "Check PEP8 compliance and naming conventions"}, "style"),
+  )
+  print(results["security"])
+  print(results["style"])
+  </code>
+  # System returns Observation: {"security": "Found 1 SQL injection vulnerability...", "style": "Function names should use snake_case..."}
+
+  Think: I have both the security and style analysis results. Now I will merge them into one report.
+  Security: SQL injection vulnerability found... Style: rename functions to snake_case...
+
+  ---
+
+  Task 8: "Search for information and analyze data at the same time"
+
+  Think: Web search and data analysis are independent. Use parallel_executor with timeout to avoid long waits.
+  Code:
+  <code>
+  results = parallel_executor(
+      (web_search, {"query": "AI trends 2024"}),
+      (data_analyst, {"task": "Analyze quarterly trends in the sales CSV file"}),
+      timeout=60,
+      max_workers=2,
+  )
+  print(results[0])
+  print(results[1])
+  </code>
+  # System returns Observation: [search results..., analysis report...]
+
+  Think: I have both the search results and the analysis report. Now I will combine them.
+  AI trends 2024: ... Sales quarterly analysis: ...
 
   ---
 

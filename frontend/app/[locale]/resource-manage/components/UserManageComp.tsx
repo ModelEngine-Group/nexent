@@ -19,7 +19,7 @@ import {
   Alert,
   Space,
   Divider,
-  Tooltip
+  Tooltip,
 } from "antd";
 import {
   Users,
@@ -33,6 +33,7 @@ import {
   CircleOff,
   CircleDot,
   LoaderCircle,
+  HardDrive,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -56,6 +57,7 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
+import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
@@ -1040,7 +1042,7 @@ export default function UserManageComp() {
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const params = useParams();
-  const locale = (params.locale as string) || "en";
+  const locale = (params as { locale?: string })?.locale || "en";
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
@@ -1058,11 +1060,18 @@ export default function UserManageComp() {
   // For non-super admins, automatically select their own tenant based on user.tenantId
   // This must be declared before useQuery that uses tenantId
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [showPlatformQuota, setShowPlatformQuota] = useState(isSuperAdmin);
   useEffect(() => {
     if (!isSuperAdmin && user?.tenantId && !tenantId) {
       setTenantId(user.tenantId);
     }
   }, [isSuperAdmin, tenantId, user?.tenantId]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setShowPlatformQuota(false);
+    }
+  }, [isSuperAdmin]);
 
   // For non-super-admin users, directly fetch their tenant details
   // This ensures they always get the correct tenant info regardless of pagination
@@ -1207,7 +1216,10 @@ export default function UserManageComp() {
                   <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
                     <TenantList
                       selected={tenantId}
-                      onSelect={(id) => setTenantId(id)}
+                      onSelect={(id) => {
+                        setTenantId(id);
+                        setShowPlatformQuota(false);
+                      }}
                       tenants={tenantData?.data || []}
                       total={tenantData?.total}
                       page={tenantData?.page}
@@ -1235,9 +1247,13 @@ export default function UserManageComp() {
           </Can>
           <Col className="flex-1 flex flex-col p-6 overflow-hidden">
             <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
-              {/* Tenant name header */}
-              <div className="flex">
-                {isEditingTenantName ? (
+              {/* Platform overview / tenant name header */}
+              <div className="flex items-center justify-between gap-4">
+                {showPlatformQuota ? (
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {t("quota.platformOverview", "Platform Quota Overview")}
+                  </h2>
+                ) : isEditingTenantName ? (
                   <Input
                     ref={tenantNameInputRef}
                     value={editingTenantName}
@@ -1258,13 +1274,23 @@ export default function UserManageComp() {
                     <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 )}
-                
+                {isSuperAdmin && (
+                  <Button
+                    type={showPlatformQuota ? "primary" : "default"}
+                    icon={<HardDrive className="h-4 w-4" />}
+                    onClick={() => setShowPlatformQuota(true)}
+                  >
+                    {t("quota.platformOverview", "Platform Quota Overview")}
+                  </Button>
+                )}
               </div>
-              
+
               <div className="flex-1 min-h-0 h-full">
-                <Divider size="small"/>
+                <Divider size="small" />
                 <div className="flex h-full w-full">
-                  {tenantId ? (
+                  {isSuperAdmin && showPlatformQuota ? (
+                    <PlatformQuotaPanel />
+                  ) : tenantId ? (
                     <Tabs
                       defaultActiveKey="users"
                       className="h-full flex flex-col tenant-resource-tabs w-full overflow-hidden"
@@ -1292,7 +1318,8 @@ export default function UserManageComp() {
                         {
                           key: "knowledge",
                           label:
-                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                            t("tenantResources.tabs.knowledge") ||
+                            "Knowledge Base",
                           children: <KnowledgeList tenantId={tenantId} />,
                         },
                         {
@@ -1312,7 +1339,9 @@ export default function UserManageComp() {
                         },
                         {
                           key: "invitations",
-                          label: t("tenantResources.invitation.tab") || "Invitations",
+                          label:
+                            t("tenantResources.invitation.tab") ||
+                            "Invitations",
                           children: (
                             <InvitationList
                               tenantId={tenantId}
@@ -1338,7 +1367,6 @@ export default function UserManageComp() {
                     </div>
                   )}
                 </div>
-
               </div>
             </div>
           </Col>
@@ -1358,4 +1386,4 @@ export default function UserManageComp() {
     max-width: 100%;
     overflow: hidden;
   }
-`}</style>
+`}</style>;

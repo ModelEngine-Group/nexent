@@ -5,7 +5,12 @@ import { Copy } from "lucide-react";
 import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
 import { Button } from "antd";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 
 interface CopyButtonProps {
@@ -107,18 +112,23 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
 
   return (
     <TooltipProvider>
-      <Tooltip title={<p>{copied ? finalTooltipText.copied : finalTooltipText.copy}</p>}>
-        <Button
-          type="text"
-          size="small"
-          className={`${variantStyles.button} ${sizeStyles} ${className}`}
-          onClick={handleCopy}
-          disabled={disabled || copied}
-          style={variantStyles.style}
-          title={copied ? finalTooltipText.copied : finalTooltipText.copy}
-        >
-          <Copy className={variantStyles.icon} />
-        </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="text"
+            size="small"
+            className={`${variantStyles.button} ${sizeStyles} ${className}`}
+            onClick={handleCopy}
+            disabled={disabled || copied}
+            style={variantStyles.style}
+            title={copied ? finalTooltipText.copied : finalTooltipText.copy}
+          >
+            <Copy className={variantStyles.icon} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{copied ? finalTooltipText.copied : finalTooltipText.copy}</p>
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

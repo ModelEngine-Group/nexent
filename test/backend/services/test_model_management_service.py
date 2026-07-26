@@ -2023,3 +2023,137 @@ def test_record_capacity_coverage_error_no_op_when_counter_disabled():
     with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
         # Should not raise.
         svc._record_capacity_coverage_error(7, RuntimeError("boom"))
+
+
+# ---------------------------------------------------------------------------
+# W11 V1.5 - cross-tenant isolation and accept-signal metrics
+# ---------------------------------------------------------------------------
+
+
+def test_get_capacity_coverage_cross_tenant_isolation():
+    """Spec L312-322: a bare row in tenant B must not appear in tenant A's
+    response. The service layer relies on `get_model_records(None, tenant_id)`
+    for the scoping; this test verifies the contract by routing records by
+    tenant_id at the mock boundary and asserting both tenants see only their
+    own bare rows.
+    """
+    svc = import_svc()
+
+    tenant_a_rows = [
+        {
+            "model_id": 11,
+            "model_repo": "",
+            "model_name": "tenant-a-bare",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 8192,
+            "base_url": "https://api.tenant-a.example.com/v1",
+        },
+    ]
+    tenant_b_rows = [
+        {
+            "model_id": 22,
+            "model_repo": "",
+            "model_name": "tenant-b-bare",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 16384,
+            "base_url": "https://api.tenant-b.example.com/v1",
+        },
+    ]
+
+    def get_records_by_tenant(_filters, tenant_id):
+        if tenant_id == "tenant-a":
+            return list(tenant_a_rows)
+        if tenant_id == "tenant-b":
+            return list(tenant_b_rows)
+        return []
+
+    with mock.patch.object(svc, "get_model_records", side_effect=get_records_by_tenant), \
+            mock.patch.object(svc, "_capacity_suggestion_available", return_value=False):
+        result_a = svc.get_capacity_coverage("tenant-a")
+        result_b = svc.get_capacity_coverage("tenant-b")
+
+    assert [m["model_id"] for m in result_a["bare_models"]] == [11]
+    assert [m["model_id"] for m in result_b["bare_models"]] == [22]
+    # Neither tenant must see the other's model_id anywhere in its payload.
+    assert all(m["model_id"] != 22 for m in result_a["bare_models"])
+    assert all(m["model_id"] != 11 for m in result_b["bare_models"])
+    assert result_a["total_llm_vlm"] == 1
+    assert result_b["total_llm_vlm"] == 1
+
+
+def test_pop_capacity_accept_signal_extracts_and_strips():
+    """The frontend ships accepted_suggestion_match_kind /
+    accepted_capability_profile_version on save. Spec L500-502 marks them
+    audit-only; the app layer must strip them before the dict reaches the
+    DB write, and return the popped values so the recorder can label the
+    counter.
+    """
+    svc = import_svc()
+
+    payload = {
+        "model_name": "gpt-4o",
+        "model_factory": "openai",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+
+    signal = svc.pop_capacity_accept_signal(payload)
+
+    assert signal == {
+        "match_kind": "catalog_exact",
+        "capability_profile_version": "openai/gpt-4o@1",
+    }
+    # Audit fields must not leak through to DB write.
+    assert "accepted_suggestion_match_kind" not in payload
+    assert "accepted_capability_profile_version" not in payload
+    # Real model fields are untouched.
+    assert payload["model_name"] == "gpt-4o"
+    assert payload["context_window_tokens"] == 128000
+
+
+def test_pop_capacity_accept_signal_returns_none_without_match_kind():
+    svc = import_svc()
+
+    # Plain save: no accept fields at all.
+    assert svc.pop_capacity_accept_signal({"model_name": "x"}) is None
+
+    # match_kind missing but version present -> still treated as "no accept"
+    # since match_kind is the metric-label key and version alone is meaningless.
+    only_version = {"accepted_capability_profile_version": "x/y@1"}
+    assert svc.pop_capacity_accept_signal(only_version) is None
+    # The orphan version field is still stripped so it cannot reach the DB.
+    assert "accepted_capability_profile_version" not in only_version
+
+
+def test_record_capacity_suggestion_accept_no_op_when_counter_disabled():
+    """Same OTel-optional guard as the coverage-errors recorder."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_accept_total", None):
+        # Should not raise.
+        svc._record_capacity_suggestion_accept("catalog_exact", "openai")
+
+
+def test_record_capacity_suggestion_accept_labels_counter():
+    """When the counter is wired, the recorder forwards match_kind and a
+    lower-cased provider label so dashboards can compute per-provider
+    accept rates without inconsistent casing.
+    """
+    svc = import_svc()
+    counter = mock.MagicMock()
+
+    with mock.patch.object(svc, "_capacity_suggestion_accept_total", counter):
+        svc._record_capacity_suggestion_accept("catalog_fuzzy", "DashScope")
+
+    counter.add.assert_called_once_with(
+        1, {"match_kind": "catalog_fuzzy", "provider": "dashscope"}
+    )

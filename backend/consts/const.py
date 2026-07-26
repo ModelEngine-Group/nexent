@@ -46,6 +46,29 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Agent automation runtime configuration
+AGENT_AUTOMATION_ENABLED = os.getenv(
+    "AGENT_AUTOMATION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
+AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_POLL_INTERVAL_SECONDS", "5")
+)
+AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
+    os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
+)
+AGENT_AUTOMATION_LEASE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
+)
+AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS", "1800")
+)
+AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS", "30")
+)
+AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_MIN_INTERVAL_SECONDS", "5")
+)
+
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
@@ -88,6 +111,11 @@ SUPABASE_JWT_SECRET = os.getenv(
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
+# OAuth login mode:
+# - disabled: hide OAuth login entries and disable automatic OAuth redirects.
+# - button: show configured OAuth providers as optional login entries.
+# - force: automatically redirect when exactly one OAuth provider is configured.
+OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 
 
 # CAS SSO Configuration
@@ -189,6 +217,7 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_REGION = os.getenv("MINIO_REGION")
 MINIO_DEFAULT_BUCKET = os.getenv("MINIO_DEFAULT_BUCKET")
+MINIO_SECURE = os.getenv("MINIO_SECURE", "true").lower() == "true"
 S3_URL_PREFIX = "s3://"
 MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET = os.getenv("MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET")
 
@@ -205,6 +234,16 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT")
 REDIS_URL = os.getenv("REDIS_URL")
 REDIS_BACKEND_URL = os.getenv("REDIS_BACKEND_URL")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+RUNTIME_STATE_REDIS_URL = os.getenv("RUNTIME_STATE_REDIS_URL") or REDIS_URL
+RUNTIME_STREAM_TTL_SECONDS = int(os.getenv("RUNTIME_STREAM_TTL_SECONDS", "86400"))
+RUNTIME_STREAM_MAX_LEN = int(os.getenv("RUNTIME_STREAM_MAX_LEN", "10000"))
+RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
+RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
+RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
+RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv("RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", "1.0"))
+NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_SECONDS", "600"))
+NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
+NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
 DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
     os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
@@ -492,8 +531,105 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
     "NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
-# APP Version
-APP_VERSION = "v2.2.1"
+def _collect_version_candidates():
+    """Build the ordered list of candidate paths to read ``APP_VERSION`` from.
+
+    The order is: env override (test/script hook), the container image path,
+    and finally the local repository root. Exposed as a separate function so
+    tests can drive the resolver deterministically without monkey-patching
+    ``pathlib.Path`` globally.
+    """
+    candidates = []
+    override = os.getenv("APP_VERSION_FILE")
+    if override:
+        candidates.append(Path(override))
+    candidates.append(Path("/opt/nexent/VERSION"))
+    # backend/consts/const.py -> backend/consts -> backend -> <repo-root>
+    candidates.append(Path(__file__).resolve().parents[2] / "VERSION")
+    return candidates
+
+
+def _read_version_from(candidate):
+    """Return the parsed version string from ``candidate`` or ``None``.
+
+    Reads only the first non-blank line and strips surrounding whitespace.
+    Returns ``None`` if the file is missing, unreadable, or its first line
+    is empty after trimming.
+    """
+    try:
+        if not candidate.is_file():
+            return None
+        first_line = candidate.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    if not first_line:
+        return None
+    version = first_line[0].strip()
+    return version or None
+
+
+def _resolve_app_version(default: str = "v2.2.1") -> str:
+    """Read the semantic app version from the VERSION file.
+
+    Search order:
+      1. Explicit ``APP_VERSION_FILE`` environment override (test/script hook).
+      2. Container path ``/opt/nexent/VERSION`` (set by the runtime Dockerfile).
+      3. ``<repo-root>/VERSION`` for local development, where ``<repo-root>`` is
+         derived from this file's location (backend/consts -> repo root).
+      4. Hardcoded default as a last resort.
+    """
+    for candidate in _collect_version_candidates():
+        version = _read_version_from(candidate)
+        if version is not None:
+            return version
+    return default
+
+
+APP_VERSION = _resolve_app_version()
+
+
+# =============================================================================
+# Agent Sandbox Configuration
+# =============================================================================
+
+NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local").lower()
+"""Default sandbox isolation level: local / docker / wasm.
+   Default 'local' preserves backward-compatibility for existing deployments."""
+
+NEXENT_SANDBOX_DEFAULT_SCOPE = os.getenv("NEXENT_SANDBOX_DEFAULT_SCOPE", "system").lower()
+"""Default sandbox container lifecycle scope: session / system.
+   session  = one container per agent_run, destroyed on run end (strictest isolation).
+   system   = persistent warm pool shared by all runs (lowest cold-start latency)."""
+
+NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
+    "NEXENT_SANDBOX_DOCKER_IMAGE", "nexent/nexent-sandbox:latest"
+)
+"""Docker image used when level is 'docker'."""
+
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+
+NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
+
+NEXENT_SANDBOX_TIMEOUT_S = int(os.getenv("NEXENT_SANDBOX_TIMEOUT_S", "30"))
+
+NEXENT_SANDBOX_NETWORK_DISABLED = (
+    os.getenv("NEXENT_SANDBOX_NETWORK", "disabled").lower() == "disabled"
+)
+
+NEXENT_SANDBOX_SHELL_POLICY = os.getenv(
+    "NEXENT_SANDBOX_SHELL_POLICY", "disabled"
+).lower()
+"""Shell execution policy: disabled / restricted / boxed.
+   'disabled' is recommended — blocks subprocess/os shell calls at AST-parse time."""
+
+NEXENT_SANDBOX_OUTPUT_BUCKET = os.getenv(
+    "NEXENT_SANDBOX_OUTPUT_BUCKET", "nexent-artifacts"
+)
+"""MinIO bucket for sandbox output file sync."""
+
+NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS = (
+    os.getenv("NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", "true").lower() == "true"
+)
 
 
 # Skill Creation Streaming Configuration
@@ -504,3 +640,6 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# SSE streaming event type for status messages
+STREAM_STATUS_EVENT = "event: stream_status\n"

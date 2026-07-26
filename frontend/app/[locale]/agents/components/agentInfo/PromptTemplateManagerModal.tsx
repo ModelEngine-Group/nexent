@@ -102,16 +102,18 @@ export default function PromptTemplateManagerModal({
     try {
       const systemDefault = await promptTemplateService.detail(0);
       const seedTemplate = systemDefault || templates.find((item) => item.template_id === 0) || null;
-      editorForm.setFieldsValue({
-        template_name: "",
-        description: "",
-        template_content_zh: seedTemplate?.template_content_zh || createEmptyPromptTemplateContent(),
-        template_content_en: seedTemplate?.template_content_en || createEmptyPromptTemplateContent(),
-      });
       setEditingTemplate(null);
       setEditorSeedTemplate(seedTemplate);
       setEditorReadOnly(false);
       setEditorOpen(true);
+      queueMicrotask(() => {
+        editorForm.setFieldsValue({
+          template_name: "",
+          description: "",
+          template_content_zh: seedTemplate?.template_content_zh || createEmptyPromptTemplateContent(),
+          template_content_en: seedTemplate?.template_content_en || createEmptyPromptTemplateContent(),
+        });
+      });
     } catch (error) {
       log.error("Failed to load default prompt template:", error);
       message.error(t("businessLogic.config.template.loadError"));

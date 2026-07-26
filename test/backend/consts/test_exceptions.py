@@ -57,14 +57,19 @@ class TestAppException:
         assert result["details"] is None
 
     def test_app_exception_http_status_property(self):
-        """Test AppException.http_status property."""
+        """Test AppException.http_status property.
+
+        Upstream auth failures (e.g. DIFY_AUTH_ERROR) map to 502, not 401,
+        so that 401 is reserved exclusively for this system's identity/session
+        failures.
+        """
         exc = AppException(ErrorCode.DIFY_AUTH_ERROR)
-        assert exc.http_status == 401
+        assert exc.http_status == 502
 
     def test_app_exception_http_status_for_different_codes(self):
         """Test http_status for different error codes."""
         test_cases = [
-            (ErrorCode.DIFY_AUTH_ERROR, 401),
+            (ErrorCode.DIFY_AUTH_ERROR, 502),
             (ErrorCode.DIFY_CONFIG_INVALID, 400),
             (ErrorCode.DIFY_RATE_LIMIT, 429),
             (ErrorCode.COMMON_VALIDATION_ERROR, 400),

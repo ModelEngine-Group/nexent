@@ -267,6 +267,42 @@ def test_agent_run_api_exception(mocker, mock_auth_header):
     mock_logger.error.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
+    from consts.exceptions import ForbiddenError
+    from consts.model import AgentRequest
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+    )
+    mock_run_agent_stream.side_effect = ForbiddenError("Conversation is not accessible")
+
+    request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="test query",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Conversation is not accessible"
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
@@ -736,6 +772,48 @@ def test_export_agent_api_success(mocker, mock_auth_header):
 
 def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
     """Test export_agent_api success case returning ZIP file."""
+    mock_export_agent = mocker.patch(
+        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+    mock_export_agent.return_value = {
+        "_zip": True,
+        "data": b"PK\x03\x04test zip content",
+        "filename": "agent_export.zip"
+    }
+
+    response = config_client.post(
+        "/agent/export",
+        json={"agent_id": 123},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+    assert response.content == b"PK\x03\x04test zip content"
+
+
+def test_export_agent_api_success_with_zip_default_filename(mocker, mock_auth_header):
+    """Test export_agent_api ZIP response with default filename."""
+    mock_export_agent = mocker.patch(
+        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+    mock_export_agent.return_value = {
+        "_zip": True,
+        "data": b"PK\x03\x04minimal zip",
+    }
+
+    response = config_client.post(
+        "/agent/export",
+        json={"agent_id": 456},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+
+
+def test_export_agent_api_exception(mocker, mock_auth_header):
+    """Test export_agent_api exception handling."""
     mock_export_agent = mocker.patch(
         "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.side_effect = Exception("Test error")
@@ -1598,7 +1676,7 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
     """Test get_version_detail_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.return_value = {
@@ -1621,11 +1699,40 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
     assert "agent_snapshot" in response.json()
 
 
+def test_get_version_detail_api_draft_version_success(mocker, mock_auth_header):
+    """Test get_version_detail_api with draft version_no=0."""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_version_detail = mocker.patch(
+        "apps.agent_app._get_version_detail_or_draft")
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_get_version_detail.return_value = {
+        "agent_id": 123,
+        "name": "Draft Agent",
+        "version": {
+            "version_name": "Draft",
+            "version_status": "DRAFT",
+        },
+        "tools": [],
+    }
+
+    response = config_client.get(
+        "/agent/123/versions/0/detail",
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    mock_get_version_detail.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant_id", version_no=0
+    )
+    assert response.json()["name"] == "Draft Agent"
+
+
 def test_get_version_detail_api_not_found(mocker, mock_auth_header):
     """Test get_version_detail_api with ValueError (not found)."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = ValueError("Version not found")
@@ -1643,7 +1750,7 @@ def test_get_version_detail_api_exception(mocker, mock_auth_header):
     """Test get_version_detail_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = Exception("Database error")

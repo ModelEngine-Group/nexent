@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
 import UserList from "./resources/UserList";
 import ModelList from "./resources/ModelList";
-import KnowledgeList from "./resources/KnowledgeList";
+import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
@@ -74,7 +74,7 @@ export default function AssetOwnerResourcesComp() {
               {
                 key: "knowledge",
                 label: t("tenantResources.tabs.knowledge"),
-                children: <KnowledgeList tenantId={ASSET_OWNER_TENANT_ID} />,
+                children: <PlatformQuotaPanel />,
               },
               {
                 key: "agents",

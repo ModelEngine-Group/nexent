@@ -18,7 +18,8 @@ spec:
       labels:
         app: nexent-openssh-server
       annotations:
-        checksum/nexent-ssh: {{ dig "rolloutChecksums" "ssh" "" .Values.global | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-ssh-image: {{ dig "rolloutChecksums" "sshImage" "" .Values.global | quote }}
     spec:
       containers:
         - name: openssh-server

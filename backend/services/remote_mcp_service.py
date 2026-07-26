@@ -29,16 +29,48 @@ from database.remote_mcp_db import (
     update_mcp_record_enabled_by_id,
     update_mcp_record_container_fields_by_id,
     update_mcp_record_status_by_id,
+    update_mcp_record_registry_json_by_id,
     delete_mcp_record_by_id,
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
     get_mcp_custom_headers_by_name_and_url,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
 from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
+
+MCP_HEALTH_CHECK_TIMEOUT_SECONDS = 10
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _format_mcp_connection_error(exc: BaseException) -> str:
+    for candidate in _iter_exception_chain(exc):
+        error_type = type(candidate).__name__.lower()
+        error_text = str(candidate).lower()
+        if "timeout" in error_type or any(keyword in error_text for keyword in ("timeout", "timed out", "etimedout")):
+            return "MCP connection timeout"
+        if any(keyword in error_text for keyword in ("connection refused", "econnrefused", "actively refused")):
+            return "MCP connection refused"
+        if any(keyword in error_text for keyword in ("unauthorized", "forbidden", "authentication", "authorization", "401", "403")):
+            return "MCP authentication failed"
+        if any(keyword in error_text for keyword in ("404", "not found", "endpoint")):
+            return "MCP endpoint not found"
+        if any(keyword in error_text for keyword in ("protocol", "invalid sse")):
+            return "MCP protocol or endpoint invalid"
+        if any(keyword in error_text for keyword in ("dns", "getaddrinfo", "enotfound", "eai_again", "network unreachable")):
+            return "MCP address unreachable"
+    return "MCP connection failed"
 
 
 # ---------------------------------------------------------------------------
@@ -46,15 +78,30 @@ logger = logging.getLogger("remote_mcp_service")
 # ---------------------------------------------------------------------------
 
 async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
-    """Check if an MCP server is healthy and reachable."""
-    try:
-        url_stripped = remote_mcp_server.strip()
-        headers = {}
-        if authorization_token:
-            headers["Authorization"] = authorization_token
-        if custom_headers:
-            headers.update(custom_headers)
+    """Check if an MCP server is healthy and reachable via MCP protocol.
 
+    Returns True if the server is reachable and responds to tool listing.
+    Raises MCPConnectionError if the server is unreachable or does not support MCP.
+    """
+    url_stripped = remote_mcp_server.strip()
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    tool_names = await _mcp_protocol_health_check(url_stripped, headers)
+    if not tool_names:
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+    return True
+
+
+async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[str]:
+    """Try to establish an MCP protocol-level connection and return tool names.
+
+    Returns a list of tool names on success, or an empty list on failure.
+    """
+    try:
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
@@ -68,23 +115,87 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
                 httpx_client_factory=create_httpx_client
             )
         else:
-            # Default to StreamableHttpTransport for unrecognized formats
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
                 httpx_client_factory=create_httpx_client
             )
 
+        async def list_mcp_tools() -> list:
+            client = Client(transport=transport)
+            async with client:
+                # Verify the server can actually serve tools.
+                # This exercises API key validation and end-to-end connectivity,
+                # unlike is_connected() which only checks the initialize handshake.
+                return await client.list_tools()
+
+        tools_result = await asyncio.wait_for(
+            list_mcp_tools(),
+            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+        return [t.name for t in tools_result] if tools_result else []
+    except BaseException as e:
+        logger.debug(f"MCP protocol health check failed: {e}")
+        raise MCPConnectionError(_format_mcp_connection_error(e))
+
+
+async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
+    """Lightweight MCP connectivity check: establish an MCP initialize handshake only.
+
+    Uses fastmcp.Client in an async context manager. The ``async with client:``
+    block performs the MCP initialize handshake. After that,
+    ``client.is_connected()`` returns True if the handshake succeeded.
+
+    This is significantly faster than _mcp_protocol_health_check() which
+    additionally calls list_tools().
+    """
+    try:
+        if url_stripped.endswith("/sse"):
+            transport = SSETransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+        elif url_stripped.endswith("/mcp"):
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+        else:
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+
         client = Client(transport=transport)
         async with client:
-            connected = client.is_connected()
-            return connected
-    except BaseException as e:
-        logger.error(f"Remote MCP server health check failed: {e}", exc_info=True)
-        error_message = str(e).strip() or repr(e)
-        if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in error_message.lower():
-            raise MCPConnectionError("MCP_HEALTH_TIMEOUT")
-        raise MCPConnectionError(error_message)
+            return client.is_connected()
+    except Exception as e:
+        logger.debug(f"MCP protocol connect handshake failed: {e}")
+        return False
+
+
+async def test_mcp_connection(
+    server_url: str,
+    authorization_token: str | None = None,
+    custom_headers: dict | None = None,
+) -> bool:
+    """Test connectivity to an MCP server using a lightweight initialize handshake.
+
+    Returns True if the MCP initialize handshake succeeded, False otherwise.
+    Does NOT call list_tools(), making it faster and lighter than
+    mcp_server_health().
+    """
+    url_stripped = server_url.strip()
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    return await _mcp_protocol_connect(url_stripped, headers)
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +211,11 @@ def _is_container_record(record: dict | None) -> bool:
     """
     if not record:
         return False
-    return record.get("container_id") is not None or record.get("config_json") is not None
+    config_json = record.get("config_json")
+    # API-type MCPs store OpenAPI JSON in config_json, not container config
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        return False
+    return record.get("container_id") is not None or config_json is not None
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +319,14 @@ async def add_remote_mcp_server_list(
         logger.error(f"MCP name already exists: {remote_mcp_server_name}")
         raise MCPNameIllegal("MCP name already exists")
 
-    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token, custom_headers=custom_headers):
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    tool_names = await _mcp_protocol_health_check(remote_mcp_server.strip(), headers)
+    if not tool_names:
         raise MCPConnectionError("MCP connection failed")
 
     insert_mcp_data = {
@@ -216,8 +338,40 @@ async def add_remote_mcp_server_list(
         "custom_headers": custom_headers,
         "source": source,
         "container_port": container_port,
+        "registry_json": {"_toolNames": tool_names},
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
+
+
+def _build_mcp_headers(
+    authorization_token: str | None,
+    custom_headers: dict | None,
+) -> dict:
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+    return headers
+
+
+async def _check_mcp_connectivity(
+    server_url: str,
+    headers: dict,
+    is_container: bool,
+    name: str,
+) -> list[str] | None:
+    tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+    if not tool_names:
+        if is_container:
+            logger.warning(
+                "Container MCP service %s is not reachable yet, "
+                "tool count will be unavailable until the next refresh",
+                name,
+            )
+            return None
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+    return tool_names
 
 
 async def add_mcp_service(
@@ -233,9 +387,14 @@ async def add_mcp_service(
     custom_headers: dict | None = None,
     container_config: dict | None,
     registry_json: dict | None,
+    config_json: dict | None = None,
+    market_id: int | None = None,
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Add an MCP service record.
 
@@ -251,23 +410,83 @@ async def add_mcp_service(
         custom_headers: Custom HTTP headers
         container_config: Container configuration
         registry_json: Registry metadata JSON
+        config_json: MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)
+        market_id: Linked market record ID
         enabled: Whether the MCP is enabled
         container_id: Docker container ID
         container_port: Container port
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
     """
     status: bool | None = None
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
     is_container = container_id is not None or container_config is not None
-    config_json = container_config if is_container and isinstance(container_config, dict) else None
+    resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
+
+    if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
+        # If the name exists but the existing MCP has group restrictions that make it
+        # invisible to this user, allow the installation anyway.
+        from database.remote_mcp_db import get_mcp_records_by_tenant
+        existing = [r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name]
+        if existing:
+            existing_rec = existing[0]
+            existing_group_ids = (existing_rec.get("group_ids") or "").strip()
+            if existing_group_ids:
+                created_by = str(existing_rec.get("created_by") or existing_rec.get("user_id") or "")
+                if created_by != user_id:
+                    from database.group_db import query_group_ids_by_user
+                    user_grps = [str(g) for g in (query_group_ids_by_user(user_id) or [])]
+                    allowed = [g.strip() for g in existing_group_ids.split(",") if g.strip()]
+                    if any(g in allowed for g in user_grps):
+                        logger.error(f"MCP name already exists: {name}")
+                        raise MCPNameIllegal("MCP name already exists")
+                else:
+                    logger.error(f"MCP name already exists: {name}")
+                    raise MCPNameIllegal("MCP name already exists")
+            else:
+                logger.error(f"MCP name already exists: {name}")
+                raise MCPNameIllegal("MCP name already exists")
+
+    resolved_registry_json = registry_json or {}
+    if server_url:
+        # API-type MCPs use OpenAPI JSON, not MCP protocol
+        is_api = isinstance(resolved_config_json, dict) and "openapi" in resolved_config_json
+        if is_api:
+            # Register OpenAPI service (same as agent config flow)
+            try:
+                from services.tool_configuration_service import import_openapi_service, _refresh_openapi_services_in_mcp
+                import_openapi_service(
+                    service_name=name,
+                    openapi_json=resolved_config_json,
+                    server_url=server_url,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    service_description=description,
+                    headers_template=custom_headers,
+                    force_update=True,
+                )
+                _refresh_openapi_services_in_mcp(tenant_id)
+            except Exception as exc:
+                logger.warning(f"Failed to register OpenAPI service '{name}': {exc}")
+            # Extract tool names from OpenAPI spec for display
+            api_tools = []
+            paths = resolved_config_json.get("paths", {}) or {}
+            for path, methods in paths.items():
+                if isinstance(methods, dict):
+                    for method_name, detail in methods.items():
+                        if isinstance(detail, dict):
+                            tool_name = detail.get("operationId") or detail.get("summary") or ""
+                            if tool_name:
+                                api_tools.append(tool_name)
+            if api_tools:
+                resolved_registry_json["_toolNames"] = api_tools
+        else:
+            headers = _build_mcp_headers(authorization_token, custom_headers)
+            tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+            if tool_names:
+                resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
-        if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-            logger.error(f"MCP name already exists: {name}")
-            raise MCPNameIllegal("MCP name already exists")
-
-        if not await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers):
-            raise MCPConnectionError("MCP connection failed")
-
         status = True
 
     create_mcp_record(
@@ -280,11 +499,15 @@ async def add_mcp_service(
             "authorization_token": authorization_token,
             "custom_headers": custom_headers,
             "source": source,
-            "registry_json": registry_json,
+            "registry_json": resolved_registry_json,
+            "market_id": market_id,
             "enabled": enabled,
             "tags": tags,
             "description": description,
-            "config_json": config_json,
+            "config_json": resolved_config_json,
+            "group_ids": group_ids,
+            "ingroup_permission": ingroup_permission,
+            "shared_fields": shared_fields,
         },
         tenant_id=tenant_id,
         user_id=user_id,
@@ -301,8 +524,12 @@ async def add_container_mcp_service(
     tags: list | None,
     authorization_token: str | None,
     registry_json: dict | None,
+    market_id: int | None,
     port: int,
     mcp_config: MCPConfigRequest,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Add a container-based MCP service.
 
@@ -315,8 +542,11 @@ async def add_container_mcp_service(
         tags: MCP tags
         authorization_token: Authorization token
         registry_json: Registry metadata JSON
+        community_id: Linked community record ID
         port: Host port for the container
         mcp_config: MCP server configuration
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Returns:
         Container information dictionary
@@ -385,9 +615,12 @@ async def add_container_mcp_service(
             authorization_token=auth_token,
             container_config=container_config,
             registry_json=registry_json,
+            market_id=market_id,
             enabled=True,
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
+            group_ids=group_ids,
+            ingroup_permission=ingroup_permission,
         )
     except Exception as exc:
         logger.warning(f"Failed to start container MCP service: {exc}")
@@ -458,7 +691,12 @@ def update_mcp_service(
     server_url: str,
     authorization_token: str | None,
     custom_headers: dict | None,
+    config_json: dict | None,
     tags: list | None,
+    market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -471,7 +709,11 @@ def update_mcp_service(
         server_url: New MCP server URL
         authorization_token: Authorization token
         custom_headers: Custom HTTP headers
+        config_json: MCP configuration JSON
         tags: MCP tags
+        market_id: Linked market record ID
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Raises:
         McpNotFoundError: If MCP record is not found
@@ -480,10 +722,10 @@ def update_mcp_service(
     if not current_record:
         raise McpNotFoundError("MCP record not found")
 
-    is_container = _is_container_record(current_record)
-    config_json = None
-    if is_container:
-        config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
+    current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
+    next_config_json = config_json if config_json is not None else current_config_json
+
+    next_market_id = market_id if market_id is not None else current_record.get("market_id")
 
     update_mcp_record_manage_fields_by_id(
         mcp_id=mcp_id,
@@ -495,8 +737,12 @@ def update_mcp_service(
         source=(current_record.get("source") or "local"),
         authorization_token=authorization_token,
         custom_headers=custom_headers,
-        config_json=config_json,
+        config_json=next_config_json,
         tags=tags,
+        market_id=next_market_id,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
 
@@ -661,19 +907,30 @@ async def update_mcp_service_enabled(
             )
     elif enabled:
         server_url = current_record.get("mcp_server")
-        health_ok = await mcp_server_health(
-            remote_mcp_server=server_url,
-            authorization_token=authorization_token,
-            custom_headers=custom_headers,
-        )
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=bool(health_ok),
-        )
-        if not health_ok:
-            raise MCPConnectionError("MCP connection failed")
+        # Skip MCP protocol check for API-type MCPs
+        config_json = current_record.get("config_json")
+        api_type = isinstance(config_json, dict) and "openapi" in config_json
+        if api_type:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=True,
+            )
+        else:
+            health_ok = await mcp_server_health(
+                remote_mcp_server=server_url,
+                authorization_token=authorization_token,
+                custom_headers=custom_headers,
+            )
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=bool(health_ok),
+            )
+            if not health_ok:
+                raise MCPConnectionError("MCP connection failed")
 
     update_mcp_record_enabled_by_id(
         mcp_id=mcp_id,
@@ -754,10 +1011,42 @@ async def get_remote_mcp_server_list(
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
     can_edit_all = False
+    user_groups: list[str] | None = None
     if user_id:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
         user_role = str(user_tenant_record.get("user_role") or "").upper()
         can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        try:
+            raw_groups = query_group_ids_by_user(user_id) or []
+            user_groups = [str(g) for g in raw_groups]
+        except Exception:
+            user_groups = []
+
+    if user_groups is not None:
+        filtered_records = []
+        for record in mcp_records:
+            # NULL group_ids means public (backward compatible with pre-PR data)
+            if record.get("group_ids") is None:
+                filtered_records.append(record)
+                continue
+            record_group_ids = (record.get("group_ids") or "").strip()
+            # User can see MCPs they created
+            if str(record.get("created_by") or record.get("user_id") or "") == user_id:
+                filtered_records.append(record)
+                continue
+            # User can see MCPs where they belong to at least one allowed group
+            if user_groups:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    # Hide PRIVATE MCPs from non-creator group members (like agent behavior)
+                    ingroup_perm = (record.get("ingroup_permission") or "").upper()
+                    if ingroup_perm == "PRIVATE":
+                        continue
+                    filtered_records.append(record)
+                    continue
+        logger.info(f"[MCP group filter] user_id={user_id}, groups={user_groups}, "
+                     f"total={len(mcp_records)}, filtered={len(filtered_records)}")
+        mcp_records = filtered_records
 
     container_status_map = {}
     try:
@@ -780,6 +1069,18 @@ async def get_remote_mcp_server_list(
             permission = PERMISSION_READ
         else:
             permission = PERMISSION_EDIT if can_edit_all or str(created_by) == str(user_id) else PERMISSION_READ
+        # Public MCPs (NULL group_ids) are editable by all users
+        if record.get("group_ids") is None:
+            permission = PERMISSION_EDIT
+        # For group-shared MCPs, respect ingroup_permission
+        if permission == PERMISSION_READ and user_groups:
+            record_group_ids = (record.get("group_ids") or "").strip()
+            if record_group_ids:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    ingroup_perm = (record.get("ingroup_permission") or "READ_ONLY").upper()
+                    if ingroup_perm == "EDIT":
+                        permission = PERMISSION_EDIT
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")
@@ -808,7 +1109,12 @@ async def get_remote_mcp_server_list(
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),
             "config_json": record.get("config_json"),
+            "market_id": record.get("market_id"),
+            "is_listed_in_repository": record.get("market_id") is not None,
             "container_status": container_status,
+            "group_ids": record.get("group_ids"),
+            "ingroup_permission": record.get("ingroup_permission"),
+            "shared_fields": record.get("shared_fields"),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
@@ -1044,6 +1350,65 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
         custom_headers=custom_headers,
     )
     return [tool.__dict__ for tool in tools_info]
+
+
+async def refresh_mcp_service_tool_count(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+) -> list[str]:
+    """Connect to the MCP server, fetch tool names, and persist them to the record.
+
+    Args:
+        tenant_id: Tenant ID
+        user_id: User ID
+        mcp_id: MCP record ID
+
+    Returns:
+        List of tool names
+
+    Raises:
+        McpNotFoundError: If MCP record is not found
+        McpValidationError: If MCP record has no server URL
+        MCPConnectionError: If MCP connection fails
+    """
+    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not record:
+        raise McpNotFoundError("MCP record not found")
+
+    server_url = record.get("mcp_server")
+    if not server_url:
+        raise McpValidationError("MCP record has no server URL to connect to")
+
+    authorization_token = record.get("authorization_token")
+    custom_headers = record.get("custom_headers")
+
+    # Skip MCP protocol check for API-type MCPs (they use OpenAPI JSON, not MCP)
+    config_json = record.get("config_json")
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        return
+
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    tool_names = await _mcp_protocol_health_check(server_url, headers)
+    if not tool_names:
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+
+    registry_json = record.get("registry_json") or {}
+    registry_json["_toolNames"] = tool_names
+
+    update_mcp_record_registry_json_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        registry_json=registry_json,
+    )
+    return tool_names
 
 
 # ---------------------------------------------------------------------------

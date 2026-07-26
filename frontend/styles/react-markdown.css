@@ -315,6 +315,15 @@
   color: hsl(var(--foreground)) !important;
 }
 
+/* Deep thinking content - gray color */
+.deep-thinking-content {
+  color: #6b7280 !important;
+}
+
+.deep-thinking-content * {
+  color: #6b7280 !important;
+}
+
 .markdown-body {
   background: transparent !important;
   min-height: 1em;

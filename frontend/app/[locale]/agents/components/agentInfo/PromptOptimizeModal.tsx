@@ -16,7 +16,7 @@ import {
   Tooltip,
   Alert,
 } from "antd";
-import { MousePointer2 } from "lucide-react";
+import { MousePointer2, Sparkles } from "lucide-react";
 
 import log from "@/lib/logger";
 import { optimizePromptSection } from "@/services/promptService";
@@ -200,7 +200,12 @@ export default function PromptOptimizeModal({
 
   return (
     <Modal
-      title={title}
+      title={
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} />
+          <span>{title}</span>
+        </div>
+      }
       open={open}
       onCancel={onClose}
       width={1200}

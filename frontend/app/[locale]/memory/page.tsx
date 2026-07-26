@@ -297,32 +297,30 @@ export default function MemoryContent() {
       ),
       children: renderBaseSettings(),
     },
- [
-          {
-            key: MEMORY_TAB_KEYS.TENANT,
-            label: (
-              <span className="inline-flex items-center gap-2">
-                <UsersRound className="size-4" />
-                {t("memoryManageModal.tenantShareTab")}
-              </span>
-            ),
-            children: renderSingleList(memory.tenantSharedGroup),
-            disabled: !memory.memoryEnabled,
-          },
-          {
-            key: MEMORY_TAB_KEYS.AGENT_SHARED,
-            label: (
-              <span className="inline-flex items-center gap-2">
-                <Share2 className="size-4" />
-                {t("memoryManageModal.agentShareTab")}
-              </span>
-            ),
-            children: renderMemoryWithMenu(memory.agentSharedGroups, true),
-            disabled:
-              !memory.memoryEnabled ||
-              memory.shareOption === MEMORY_SHARE_STRATEGY.NEVER,
-          },
-        ],
+    ...(!isSpeedMode ? [{
+      key: MEMORY_TAB_KEYS.TENANT,
+      label: (
+        <span className="inline-flex items-center gap-2">
+          <UsersRound className="size-4" />
+          {t("memoryManageModal.tenantShareTab")}
+        </span>
+      ),
+      children: renderSingleList(memory.tenantSharedGroup),
+      disabled: !memory.memoryEnabled,
+    }] : []),
+    {
+      key: MEMORY_TAB_KEYS.AGENT_SHARED,
+      label: (
+        <span className="inline-flex items-center gap-2">
+          <Share2 className="size-4" />
+          {t("memoryManageModal.agentShareTab")}
+        </span>
+      ),
+      children: renderMemoryWithMenu(memory.agentSharedGroups, true),
+      disabled:
+        !memory.memoryEnabled ||
+        memory.shareOption === MEMORY_SHARE_STRATEGY.NEVER,
+    },
     {
       key: MEMORY_TAB_KEYS.USER_PERSONAL,
       label: (

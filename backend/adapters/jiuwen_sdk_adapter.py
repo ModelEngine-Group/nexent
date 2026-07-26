@@ -1,13 +1,13 @@
 """
 openjiuwen SDK adapter for Nexent.
 
-This module must be imported lazily (not at module load time) because
-openjiuwen 0.1.13 has circular import bugs in its __init__.py files that
-prevent the SDK from loading unless we bypass them.
+This module works around circular import bugs in openjiuwen 0.1.13 by:
+  1. Stubbing react_agent_evolve (causes the circular import)
+  2. Installing a meta-path finder that blocks broken __init__.py files
+  3. All of the above runs at MODULE LOAD TIME (before openjiuwen imports)
 
-Import flow:
-  backend/adapters/__init__.py -> try/except -> JiuwenSDKAdapter = None
-  -> when needed: _install_jiuwen_bypasser() -> openjiuwen imports work
+The adapters/__init__.py wraps the import in try/except so the server
+starts even when openjiuwen is not installed.
 """
 import asyncio
 import importlib.abc
@@ -17,21 +17,73 @@ import logging
 import os
 import sys
 import types
-from typing import Any, List, Literal, Optional
-
-logger = logging.getLogger("jiuwen_adapter")
-
-from adapters.exception import JiuwenSDKError
-
+from typing import Any, List, Literal, Optional, Tuple
 
 # ----------------------------------------------------------------------
-# Circular import bypasser for openjiuwen 0.1.13
-#
-# openjiuwen has broken __init__.py files that create circular import chains:
-#   tune/__init__.py -> tune.optimizer -> core.operator -> agent_evolving -> ...
-# This bypasser prevents those __init__.py files from executing while still
-# allowing regular .py submodule files to load normally.
+# MUST install bypasser + stubs before any openjiuwen import.
+# The module-level `from openjiuwen.dev_tools.tune.base import ...` below
+# triggers the entire circular import chain.  Installing the bypasser here
+# (before that line executes) breaks the cycle.
 # ----------------------------------------------------------------------
+
+# Stub react_agent_evolve so single_agent.__init__.py can import it without
+# hitting the circular core.operator dependency.
+if "openjiuwen.core.single_agent.agents.react_agent_evolve" not in sys.modules:
+    _stub = types.ModuleType("openjiuwen.core.single_agent.agents.react_agent_evolve")
+    _stub.__file__ = "<bypasser stub>"
+
+    # Provide a dummy ReActAgentEvolve class.  The real one lives in the
+    # actual react_agent_evolve.py which we cannot load at this stage
+    # because it imports ToolCallOperator from core.operator (still blocked).
+    # The stub class satisfies the import in single_agent.__init__.py.
+    class _DummyReActAgentEvolve:  # noqa: N801
+        pass
+
+    _stub.ReActAgentEvolve = _DummyReActAgentEvolve
+    _stub.__all__ = ["ReActAgentEvolve"]
+    sys.modules["openjiuwen.core.single_agent.agents.react_agent_evolve"] = _stub
+
+# NOTE: do NOT stub openjiuwen.core.single_agent.  Its real __init__.py must
+# run so that `from .schema.agent_card import AgentCard` and the other
+# relative submodule imports resolve correctly.  We only need react_agent_evolve
+# stubbed (its real file imports ToolCallOperator from core.operator, which
+# the bypasser below blocks).
+
+# Stub missing optional dependencies before openjiuwen import chain reaches them
+for _name, _attrs in [
+    ("pymilvus", {"is_successful": lambda *a, **kw: True}),
+    ("dashscope", {}),
+    ("pdfplumber", {}),
+]:
+    if _name not in sys.modules:
+        _mod = types.ModuleType(_name)
+        _mod.__path__ = []
+        for _k, _v in _attrs.items():
+            setattr(_mod, _k, _v)
+        sys.modules[_name] = _mod
+
+for _name in ["pymilvus.client", "pymilvus.client.utils"]:
+    if _name not in sys.modules:
+        _m = types.ModuleType(_name)
+        _m.__path__ = []
+        if _name == "pymilvus.client.utils":
+            _m.is_successful = lambda *a, **kw: True
+        sys.modules[_name] = _m
+
+for _name, _attrs in [
+    ("dashscope.api_entities", {}),
+    ("dashscope.api_entities.data", {}),
+    ("dashscope.api_entities.dashscope_response", {"DashScopeAPIResponse": object}),
+    ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
+    ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
+]:
+    if _name not in sys.modules:
+        _m = types.ModuleType(_name)
+        _m.__path__ = []
+        for _k, _v in _attrs.items():
+            setattr(_m, _k, _v)
+        sys.modules[_name] = _m
+
 _CIRCULAR_CHAIN = {
     "openjiuwen.agent_evolving",
     "openjiuwen.agent_evolving.trainer",
@@ -57,30 +109,24 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
         if not fullname.startswith("openjiuwen") or fullname == "openjiuwen":
             return None
-
         try:
             import openjiuwen as _oj
 
             pkg_root = _oj.__path__[0]
         except ImportError:
             return None
-
         parts = fullname.split(".")[1:]
         file_path = pkg_root
         for p in parts:
             file_path = os.path.join(file_path, p)
-
         is_package = os.path.isdir(file_path)
         if not is_package:
             return None
-
         init_path = os.path.join(file_path, "__init__.py")
         if not os.path.exists(init_path):
             return None
-
         if fullname not in _CIRCULAR_CHAIN:
             return None
-
         spec = importlib.machinery.ModuleSpec(
             fullname, self, is_package=True, origin="<init bypassed>"
         )
@@ -106,7 +152,6 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         import openjiuwen as _oj
         import importlib
 
-        # Prevent recursion when Python scans sys.meta_path for find_distributions etc.
         if name in (
             "find_distributions",
             "find_module",
@@ -118,87 +163,55 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             "__spec__",
         ):
             raise AttributeError(name)
-
         pkg_root = _oj.__path__[0]
         parts = self.__name__.split(".")[1:] + [name]
         file_path = pkg_root
         for p in parts:
             file_path = os.path.join(file_path, p)
-
-        # If it's a package directory, import it as a submodule
         if os.path.isdir(file_path) and os.path.exists(os.path.join(file_path, "__init__.py")):
             return importlib.import_module(f"{self.__name__}.{name}")
-        # If it's a regular .py file
         if os.path.exists(file_path + ".py"):
             return importlib.import_module(f"{self.__name__}.{name}")
         raise AttributeError(name)
 
 
-_bypasser_installed = False
+# Install the bypasser into sys.meta_path so it intercepts openjiuwen imports.
+for _finder in sys.meta_path:
+    if isinstance(_finder, _JiuwenInitBypasser):
+        break
+else:
+    sys.meta_path.insert(0, _JiuwenInitBypasser())
+
+# No-op: bypasser is already installed above.
+# Kept for backward compatibility with code that calls it.
+_bypasser_installed = True
 
 
 def _install_jiuwen_bypasser() -> bool:
-    """
-    Install the circular import bypasser for openjiuwen.
-    Returns True if installed, False if already installed or openjiuwen not available.
-    """
-    global _bypasser_installed
-    if _bypasser_installed:
-        return True
-
-    # Stub missing optional dependencies before openjiuwen import chain reaches them
-    _stubbed = [
-        ("pymilvus", {"is_successful": lambda *args, **kwargs: True}),
-        ("dashscope", {}),
-        ("pdfplumber", {}),
-    ]
-    for _name, _attrs in _stubbed:
-        if _name not in sys.modules:
-            _mod = types.ModuleType(_name)
-            for _k, _v in _attrs.items():
-                setattr(_mod, _k, _v)
-            sys.modules[_name] = _mod
-            _mod.__path__ = []
-
-    # Pre-create nested stub modules for pymilvus.client.utils chain
-    if "pymilvus.client" not in sys.modules:
-        _client_mod = types.ModuleType("pymilvus.client")
-        _client_mod.__path__ = []
-        sys.modules["pymilvus.client"] = _client_mod
-    if "pymilvus.client.utils" not in sys.modules:
-        _utils_mod = types.ModuleType("pymilvus.client.utils")
-        _utils_mod.is_successful = lambda *args, **kwargs: True
-        sys.modules["pymilvus.client.utils"] = _utils_mod
-
-    # Stub dashscope sub-modules that may be imported lazily
-    _dashscope_subs = [
-        ("dashscope.api_entities", {}),
-        ("dashscope.api_entities.data", {}),
-        ("dashscope.api_entities.dashscope_response", {"DashScopeAPIResponse": object}),
-        ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-        ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-    ]
-    for _name, _attrs in _dashscope_subs:
-        if _name not in sys.modules:
-            _m = types.ModuleType(_name)
-            _m.__path__ = []
-            for _k, _v in _attrs.items():
-                setattr(_m, _k, _v)
-            sys.modules[_name] = _m
-
-    try:
-        import openjiuwen  # noqa: F401
-    except ImportError:
-        return False
-
-    for finder in sys.meta_path:
-        if isinstance(finder, _JiuwenInitBypasser):
-            _bypasser_installed = True
-            return True
-
-    sys.meta_path.insert(0, _JiuwenInitBypasser())
-    _bypasser_installed = True
+    """No-op: bypasser is installed at module load time. Kept for compatibility."""
     return True
+
+# Now safe to import openjiuwen — bypasser is active.
+from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
+
+
+def _case_from_inputs_label(inputs: dict, label: dict) -> "_Case":
+    # Keep stable keys for schema; allow extra fields to exist.
+    return _Case(inputs=inputs, label=label)
+
+
+def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
+    """Try to normalize Jiuwen EvaluatedCase into (score, reason)."""
+    try:
+        score = float(getattr(evaluated, "score", 0.0) or 0.0)
+    except Exception:
+        score = 0.0
+    reason = getattr(evaluated, "reason", "") or ""
+    return score, str(reason)
+
+logger = logging.getLogger("jiuwen_adapter")
+
+from adapters.exception import JiuwenSDKError
 
 
 # ----------------------------------------------------------------------
@@ -247,8 +260,8 @@ def run_async(coro):
 # ----------------------------------------------------------------------
 # Jiuwen SDK lazy import helpers
 # ----------------------------------------------------------------------
-def _lazy_import_jiuwen_config():
-    """Lazily import only lightweight Jiuwen config classes."""
+def _lazy_import_jiuwen():
+    """延迟导入 Jiuwen SDK，避免 openjiuwen 未装时模块级 ImportError"""
     _install_jiuwen_bypasser()
 
     try:
@@ -261,8 +274,33 @@ def _lazy_import_jiuwen_config():
         ModelClientConfig,
         ProviderType,
     )
+    # Optional: allow adjusting SDK internal client timeout via config if supported.
+    # We keep import local to avoid breaking on SDK version differences.
+    try:
+        from openjiuwen.core.foundation.llm import ModelClientOptions  # type: ignore
+    except Exception:  # pragma: no cover
+        ModelClientOptions = None  # type: ignore
+    from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
+        FeedbackPromptBuilder,
+    )
+    from openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder import (
+        BadCasePromptBuilder,
+    )
+    from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
 
-    return ModelRequestConfig, ModelClientConfig, ProviderType
+    # Evaluator metrics (avoid importing openjiuwen.dev_tools.tune package root)
+    from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import LLMAsJudgeMetric
+
+    return (
+        ModelRequestConfig,
+        ModelClientConfig,
+        ProviderType,
+        FeedbackPromptBuilder,
+        BadCasePromptBuilder,
+        Case,
+        EvaluatedCase,
+        LLMAsJudgeMetric,
+    )
 
 
 def build_jiuwen_model_configs(model_id: int, tenant_id: str):
@@ -270,7 +308,7 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     from database.model_management_db import get_model_by_model_id
     from utils.config_utils import get_model_name_from_config
 
-    ModelRequestConfig, ModelClientConfig, ProviderType = _lazy_import_jiuwen_config()
+    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = _lazy_import_jiuwen()
 
     model_config = get_model_by_model_id(model_id, tenant_id)
     if not model_config:
@@ -307,6 +345,40 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     return request_config, client_config
 
 
+def _build_openai_client(
+    client_config: "ModelClientConfig", request_config: "ModelRequestConfig"
+) -> Any:
+    """
+    直接创建 OpenAIModelClient，绕过 FeedbackPromptBuilder 的深导入链。
+    """
+    _install_jiuwen_bypasser()
+    from openjiuwen.core.foundation.llm.model_clients.openai_model_client import (
+        OpenAIModelClient,
+    )
+
+    class _DirectClient:
+        """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
+
+        def __init__(self, inner: Any):
+            self._inner = inner
+            self._model = request_config.model_name
+
+        async def invoke(self, messages: list[dict]) -> Any:
+            return await self._inner.invoke(
+                model=self._model,
+                messages=messages,
+                temperature=request_config.temperature,
+                top_p=request_config.top_p,
+            )
+
+    client = OpenAIModelClient(
+        model_config=request_config, model_client_config=client_config
+    )
+    return _DirectClient(client)
+
+
+def _build_message(role: str, content: str) -> dict:
+    return {"role": role, "content": content}
 def _lazy_import_jiuwen_builders():
     """Lazily import prompt builders only when optimization paths need them."""
     _install_jiuwen_bypasser()
@@ -366,16 +438,9 @@ def _unwrap_prompt_response(text: str) -> str:
     return text
 
 
-def _lazy_import_jiuwen_tune_types():
-    """Lazily import Jiuwen tune types only when badcase flow needs them."""
-    _install_jiuwen_bypasser()
-    from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
-    return Case, EvaluatedCase
-
-
 def to_jiuwen_evaluated_case(bad_case) -> Any:
     """将 nexent BadCase 转换为 Jiuwen EvaluatedCase"""
-    Case, EvaluatedCase = _lazy_import_jiuwen_tune_types()
+    _, _, _, _, _, Case, EvaluatedCase, _ = _lazy_import_jiuwen()
 
     case = Case(
         inputs={"question": bad_case.question},
@@ -507,6 +572,103 @@ class JiuwenSDKAdapter:
         except Exception as e:
             self.logger.error(f"Jiuwen BadCasePromptBuilder 调用失败: {e}")
             raise JiuwenSDKError(f"BadCasePromptBuilder 调用失败: {e}") from e
+
+    def evaluate_semantic_consistency(
+        self,
+        *,
+        question: str,
+        expected_answer: str,
+        model_answer: str,
+        user_metrics: str = "",
+    ) -> Tuple[float, str]:
+        """LLM-as-judge semantic consistency scoring.
+
+        Returns:
+            (score, reason)
+
+        Notes:
+            openjiuwen 0.1.13 implements LLMAsJudgeMetric as a binary metric
+            (1.0 pass / 0.0 fail) by parsing a JSON result from the judge model.
+            ``metric.compute()`` only returns the numeric score; the actual judge
+            verdict (with ``result`` and ``reason``) lives in the LLM response.
+            We invoke the model directly here so we can extract **both** the score
+            and the human-readable reason from the same response.
+        """
+        self._ensure_available()
+
+        try:
+            from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
+                LLMAsJudgeMetric,
+            )
+        except Exception as exc:
+            raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
+
+        request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+
+        metric = LLMAsJudgeMetric(
+            model_config=request_config,
+            model_client_config=client_config,
+            user_metrics=user_metrics or "",
+        )
+
+        # Build the same prompt that ``metric.compute()`` uses.
+        messages = metric._template.format({
+            "question": str(question or ""),
+            "expected_answer": str(expected_answer),
+            "model_answer": str(model_answer),
+        }).to_messages()
+
+        # Append a directive requiring Chinese output for the evaluation reason.
+        # This ensures consistent Chinese language in the report regardless of
+        # the judge model's default language.
+        chinese_directive = (
+            "\n\nIMPORTANT: You MUST respond in Chinese for the 'reason' field. "
+            "The reason must be a clear explanation in Simplified Chinese. "
+            "重要提示：'reason' 字段必须使用中文撰写，用简洁的中文解释评判结果。"
+        )
+
+        if messages:
+            last = messages[-1]
+            last_role = getattr(last, "role", None)
+            # Default template returns a single UserMessage with role="user"
+            if last_role == "user":
+                last.content = (last.content or "") + chinese_directive
+            else:
+                # Append a new user message with the directive
+                from openjiuwen.core.foundation.llm import UserMessage
+                messages.append(UserMessage(content=chinese_directive.lstrip("\n")))
+
+        try:
+            response = asyncio.run(metric._model.invoke(messages)).content
+        except Exception as exc:
+            raise JiuwenSDKError(f"Judge LLM invoke failed: {exc}") from exc
+
+        try:
+            from openjiuwen.agent_evolving.utils import TuneUtils
+            data = TuneUtils.parse_json_from_llm_response(response)
+        except Exception as exc:
+            raise JiuwenSDKError(f"Failed to parse judge response: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise JiuwenSDKError(f"Judge response is not a JSON object: {response!r}")
+
+        result = data.get("result")
+        if result is True or (isinstance(result, str) and result.strip().lower() == "true"):
+            score = 1.0
+        else:
+            score = 0.0
+
+        raw_reason = data.get("reason")
+        if isinstance(raw_reason, str):
+            reason = raw_reason.strip()
+        elif isinstance(raw_reason, dict):
+            reason = raw_reason.get("reason") or ""
+        else:
+            reason = ""
+        if not reason:
+            reason = "通过" if score >= 1.0 else "失败"
+
+        return score, reason
 
     def generate(self, **kwargs) -> dict:
         """调用 Jiuwen 提示词生成能力"""
