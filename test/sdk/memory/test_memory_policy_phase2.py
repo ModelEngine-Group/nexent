@@ -47,21 +47,21 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 
-from sdk.nexent.memory.policy import MemoryStoragePolicy
+from sdk.nexent.memory.policy import MemoryRetrievalPolicy
 
 
 def test_uses_full_context_for_layer_accepts_enum():
-    assert MemoryStoragePolicy.uses_full_context_for_layer(MemoryLayer.TENANT) is True
-    assert MemoryStoragePolicy.uses_full_context_for_layer(MemoryLayer.USER) is True
-    assert MemoryStoragePolicy.uses_full_context_for_layer(MemoryLayer.AGENT) is False
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer(MemoryLayer.TENANT) is True
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer(MemoryLayer.USER) is True
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer(MemoryLayer.AGENT) is False
 
 
 def test_uses_full_context_for_layer_accepts_string():
-    assert MemoryStoragePolicy.uses_full_context_for_layer("tenant") is True
-    assert MemoryStoragePolicy.uses_full_context_for_layer("user") is True
-    assert MemoryStoragePolicy.uses_full_context_for_layer("agent") is False
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer("tenant") is True
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer("user") is True
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer("agent") is False
 
 
 def test_uses_full_context_for_layer_handles_invalid():
-    assert MemoryStoragePolicy.uses_full_context_for_layer("bogus") is False
-    assert MemoryStoragePolicy.uses_full_context_for_layer(None) is False
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer("bogus") is False
+    assert MemoryRetrievalPolicy.uses_full_context_for_layer(None) is False

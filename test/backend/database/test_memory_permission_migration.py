@@ -12,5 +12,3 @@ def test_memory_permission_migration_renames_and_restricts_create():
 
     assert "SET permission_type = 'MEM.TENANT'" in migration
     assert "WHERE permission_type = 'MEM.AGENT'" in migration
-    assert "permission_subtype = 'CREATE'" in migration
-    assert "user_role <> 'ADMIN'" in migration

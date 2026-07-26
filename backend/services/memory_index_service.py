@@ -191,9 +191,12 @@ class MemoryIndexService:
                 memory chunks.
             embedding: Pre-computed query embedding (used by the pure kNN
                 branch).
-            tenant_id / user_id / agent_id / conversation_id: isolation keys
-                compiled into an ES ``bool.filter`` so callers never see
-                another tenant's or another conversation's memories.
+            tenant_id / user_id / agent_id: isolation keys compiled into an
+                ES ``bool.filter`` so callers never see another tenant's,
+                user's, or agent's memories. ``conversation_id`` is retained
+                as record metadata but intentionally does not restrict agent
+                memory retrieval because agent memory is shared across the
+                user's conversations with the same agent.
             top_k: Maximum number of hits to return.
             hybrid: When ``True``, delegate to
                 :py:meth:`ElasticSearchCore.hybrid_search` so fuzzy
@@ -234,7 +237,6 @@ class MemoryIndexService:
             tenant_id=tenant_id,
             user_id=user_id,
             agent_id=agent_id,
-            conversation_id=conversation_id,
         )
 
         if hybrid:
@@ -271,19 +273,14 @@ class MemoryIndexService:
         tenant_id: str,
         user_id: str,
         agent_id: Optional[str],
-        conversation_id: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Assemble the ES ``filter`` clause that enforces memory isolation."""
+        """Assemble the tenant + user + agent memory isolation filter."""
         must_filters: List[Dict[str, Any]] = [
             {"term": {"metadata.tenant_id.keyword": tenant_id}},
             {"term": {"metadata.user_id.keyword": user_id}},
         ]
         if agent_id is not None:
             must_filters.append({"term": {"metadata.agent_id.keyword": agent_id}})
-        if conversation_id is not None:
-            must_filters.append(
-                {"term": {"metadata.conversation_id.keyword": conversation_id}}
-            )
         must_filters.append({"term": {"metadata.layer.keyword": "agent"}})
         return must_filters
 

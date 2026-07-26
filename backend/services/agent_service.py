@@ -3440,18 +3440,20 @@ async def run_agent_background(
     ))
 
     if memory_enabled and not agent_request.is_debug:
-        stream_gen = generate_stream_with_memory(
+        stream_gen = generate_stream(
             agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            enable_memory=True,
         )
     else:
-        stream_gen = generate_stream_no_memory(
+        stream_gen = generate_stream(
             agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            enable_memory=False,
         )
 
     chunks = 0

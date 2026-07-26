@@ -497,7 +497,7 @@ class TestPipelineConfig:
     def test_defaults(self):
         cfg = PipelineConfig()
         assert cfg.mmr_lambda == 0.7
-        assert cfg.mmr_candidate_top_k == 30
+        assert cfg.mmr_candidate_top_k == 10
         assert cfg.mmr_final_top_k == 5
         assert cfg.mmr_duplicate_threshold == 0.92
         assert cfg.half_life_days == 14

@@ -139,3 +139,71 @@ class TestHandlerCoverage:
             covered.update(handler.supported_types())
 
         assert covered == set(ContextItemType)
+
+
+def test_history_turn_to_messages_includes_only_non_empty_parts():
+    item = ContextItem(
+        item_id="history-1",
+        item_type=ContextItemType.HISTORY_TURN,
+        content={"user_query": "What is the status?", "assistant_response": "It is ready."},
+    )
+
+    assert HistoryTurnHandler().to_messages(item) == [
+        {"role": "user", "content": [{"type": "text", "text": "What is the status?"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "It is ready."}]},
+    ]
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        (None, []),
+        (
+            {"user_query": "Only a question"},
+            [{"role": "user", "content": [{"type": "text", "text": "Only a question"}]}],
+        ),
+        (
+            {"assistant_response": "Only an answer"},
+            [{"role": "assistant", "content": [{"type": "text", "text": "Only an answer"}]}],
+        ),
+    ],
+)
+def test_history_turn_to_messages_handles_missing_parts(content, expected):
+    item = ContextItem(
+        item_id="history-2",
+        item_type=ContextItemType.HISTORY_TURN,
+        content=content,
+    )
+
+    assert HistoryTurnHandler().to_messages(item) == expected
+
+
+def test_tool_call_result_to_messages_formats_call_and_result():
+    item = ContextItem(
+        item_id="tool-result-1",
+        item_type=ContextItemType.TOOL_CALL_RESULT,
+        content={"tool_call": "search('Nexent')", "execution_result": "2 results"},
+    )
+
+    assert ToolCallResultHandler().to_messages(item) == [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "[Tool Call]\nsearch('Nexent')\n\n[Execution Result]\n2 results",
+                }
+            ],
+        }
+    ]
+
+
+def test_tool_call_result_to_messages_uses_empty_values_for_missing_content():
+    item = ContextItem(
+        item_id="tool-result-2",
+        item_type=ContextItemType.TOOL_CALL_RESULT,
+        content=None,
+    )
+
+    message = ToolCallResultHandler().to_messages(item)
+    assert message[0]["content"][0]["text"] == "[Tool Call]\n\n\n[Execution Result]\n"

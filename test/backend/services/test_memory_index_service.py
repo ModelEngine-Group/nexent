@@ -154,6 +154,10 @@ def service():
     fake_vdb = ElasticSearchCore()  # real subclass, so isinstance passes
     fake_vdb.search = MagicMock(name="vdb.search")
     fake_vdb.hybrid_search = MagicMock(name="vdb.hybrid_search", return_value=[])
+    fake_vdb.create_index = MagicMock(name="vdb.create_index", return_value=True)
+    fake_vdb.create_chunk = MagicMock(name="vdb.create_chunk", return_value=True)
+    fake_vdb.delete_index = MagicMock(name="vdb.delete_index", return_value=True)
+    fake_vdb.delete_chunk = MagicMock(name="vdb.delete_chunk", return_value=True)
     svc = memory_index_service.MemoryIndexService(vdb_core=fake_vdb)
     return svc
 
@@ -196,8 +200,8 @@ def _es_hit(memory_id, content, score, layer="agent", status="active"):
 # ---------------------------------------------------------------------------
 # Pure-kNN branch (regression for the hybrid refactor)
 # ---------------------------------------------------------------------------
-def test_knn_branch_uses_metadata_filter(service, embedding):
-    """Without hybrid=True we must still see the same kNN + filter path."""
+def test_knn_branch_uses_agent_scope_filter_across_conversations(service, embedding):
+    """Agent memory is scoped by tenant/user/agent, not conversation."""
     service.vdb_core.search.return_value = _es_response([
         _es_hit(7, "hello world", 0.91),
     ])
@@ -225,7 +229,7 @@ def test_knn_branch_uses_metadata_filter(service, embedding):
     assert "metadata.tenant_id.keyword" in paths
     assert "metadata.user_id.keyword" in paths
     assert "metadata.agent_id.keyword" in paths
-    assert "metadata.conversation_id.keyword" in paths
+    assert "metadata.conversation_id.keyword" not in paths
     assert "metadata.layer.keyword" in paths
 
 
@@ -311,7 +315,7 @@ def test_hybrid_branch_delegates_with_isolation_filter(service, embedding):
     assert "metadata.tenant_id.keyword" in paths
     assert "metadata.user_id.keyword" in paths
     assert "metadata.agent_id.keyword" in paths
-    assert "metadata.conversation_id.keyword" in paths
+    assert "metadata.conversation_id.keyword" not in paths
     assert "metadata.layer.keyword" in paths
 
     assert len(results) == 1
@@ -405,3 +409,170 @@ def test_hybrid_branch_retries_without_filter_on_typeerror(service, embedding):
 
     assert calls["n"] == 2  # tried twice: with filter, then without
     assert results[0]["memory_id"] == "5"
+
+
+def test_memory_chunk_payload_uses_layer_specific_title_and_metadata():
+    agent_record = {
+        "memory_id": 7,
+        "layer": "agent",
+        "created_by": "user",
+        "update_time": "2026-07-26T12:00:00",
+        "content": "agent memory",
+        "create_time": "2026-07-26T11:00:00",
+        "tenant_id": "tn",
+        "user_id": "u1",
+        "agent_id": "a1",
+        "conversation_id": "c1",
+        "memory_type": "short_term",
+        "status": "active",
+        "idempotency_key": "idem-7",
+    }
+    agent_chunk = memory_index_service._memory_chunk_payload(
+        agent_record, [0.1, 0.2], "memory-index"
+    )
+
+    assert agent_chunk["title"] == "Short-term Memory 7"
+    assert agent_chunk["embedding_model_name"] == "memory-index"
+    assert agent_chunk["embedding"] == [0.1, 0.2]
+    assert agent_chunk["metadata"] == {
+        "memory_id": "7",
+        "tenant_id": "tn",
+        "user_id": "u1",
+        "agent_id": "a1",
+        "conversation_id": "c1",
+        "layer": "agent",
+        "memory_type": "short_term",
+        "status": "active",
+        "idempotency_key": "idem-7",
+    }
+
+    user_chunk = memory_index_service._memory_chunk_payload(
+        {"memory_id": 8, "layer": "user"}, None, "memory-index"
+    )
+    assert user_chunk["title"] == "Long-term user memory 8"
+    assert user_chunk["content"] == ""
+    assert user_chunk["author"] is None
+
+
+def test_lazy_vdb_core_and_singleton_accessor(mocker):
+    memory_index_service.reset_memory_index_service()
+    fake_vdb = MagicMock(name="lazy_vdb")
+    get_core = mocker.patch.object(
+        memory_index_service, "get_vector_db_core", return_value=fake_vdb
+    )
+
+    service = memory_index_service.MemoryIndexService()
+    assert service.vdb_core is fake_vdb
+    assert service.vdb_core is fake_vdb
+    get_core.assert_called_once_with(memory_index_service.VectorDatabaseType.ELASTICSEARCH)
+
+    first = memory_index_service.get_memory_index_service()
+    second = memory_index_service.get_memory_index_service()
+    assert first is second
+    memory_index_service.reset_memory_index_service()
+    assert memory_index_service.get_memory_index_service() is not first
+    memory_index_service.reset_memory_index_service()
+
+
+def test_index_lifecycle_returns_false_when_backend_fails(service):
+    service.vdb_core.create_index.side_effect = RuntimeError("create failed")
+    service.vdb_core.delete_index.side_effect = RuntimeError("delete failed")
+
+    assert service.ensure_index("memory-index", embedding_dim=4) is False
+    assert service.drop_index("memory-index") is False
+
+
+def test_index_record_resolves_model_index_and_writes_payload(service):
+    model_info = _FakeEmbeddingModelInfo(model_repo="repo", model_name="model", dimension=4)
+    record = {"memory_id": 12, "layer": "agent", "content": "remember this"}
+
+    assert service.index_record(record, [0.1] * 4, model_info) is True
+
+    service.vdb_core.create_index.assert_called_once_with(
+        "mem_repo_model_4", embedding_dim=4
+    )
+    create_call = service.vdb_core.create_chunk.call_args
+    assert create_call.kwargs["index_name"] == "mem_repo_model_4"
+    assert create_call.kwargs["chunk"]["id"] == "12"
+    assert create_call.kwargs["chunk"]["content"] == "remember this"
+
+
+def test_index_record_rejects_missing_index_and_handles_write_failure(service, mocker):
+    assert service.index_record({"memory_id": 1}, [0.1]) is False
+    service.vdb_core.create_chunk.side_effect = RuntimeError("write failed")
+    mocker.patch.object(service, "ensure_index", return_value=True)
+
+    assert service.index_record(
+        {"memory_id": 2, "es_index_name": "memory-index"}, [0.1]
+    ) is False
+
+
+def test_delete_record_converts_result_and_handles_failure(service):
+    service.vdb_core.delete_chunk.return_value = 1
+    assert service.delete_record(9, "memory-index") is True
+    service.vdb_core.delete_chunk.assert_called_once_with("memory-index", "9")
+
+    service.vdb_core.delete_chunk.side_effect = RuntimeError("delete failed")
+    assert service.delete_record(10, "memory-index") is False
+
+
+def test_knn_handles_response_body_objects_and_hit_defaults(service, embedding):
+    class Response:
+        body = _es_response([{
+            "_id": None,
+            "_score": None,
+            "_source": {"id": "from-source", "content": "minimal"},
+        }])
+
+    service.vdb_core.search.return_value = Response()
+    results = service.search_similar(
+        index_name="memory-index",
+        embedding=embedding,
+        tenant_id="tn",
+        user_id="u1",
+        top_k=0,
+    )
+
+    query = service.vdb_core.search.call_args.kwargs["query"]
+    assert query["knn"]["k"] == 1
+    assert query["knn"]["num_candidates"] == 50
+    assert results == [{
+        "memory_id": "from-source",
+        "content": "minimal",
+        "score": 0.0,
+        "layer": "agent",
+        "memory_type": "short_term",
+        "source": "internal",
+        "is_external": False,
+        "metadata": {},
+    }]
+
+
+def test_hybrid_returns_empty_when_backend_raises(service, embedding):
+    service.vdb_core.hybrid_search.side_effect = RuntimeError("hybrid failed")
+
+    assert service.search_similar(
+        index_name="memory-index",
+        embedding=embedding,
+        tenant_id="tn",
+        user_id="u1",
+        hybrid=True,
+        query_text="hello",
+        embedding_model=MagicMock(name="embedding-model"),
+    ) == []
+
+
+def test_safe_score_preview_handles_empty_none_and_invalid_responses():
+    assert memory_index_service._safe_score_preview({}) is None
+    assert memory_index_service._safe_score_preview(
+        {"hits": {"hits": [{"_score": None}]}}
+    ) is None
+    assert memory_index_service._safe_score_preview(
+        {"hits": {"hits": [{"_score": 0.2}, {"_score": 0.8}]}}
+    ) == {"min": 0.2, "max": 0.8}
+
+    class BrokenResponse:
+        def get(self, _key):
+            raise RuntimeError("invalid response")
+
+    assert memory_index_service._safe_score_preview(BrokenResponse()) is None

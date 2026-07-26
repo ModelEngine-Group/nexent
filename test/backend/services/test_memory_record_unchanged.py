@@ -19,6 +19,11 @@ def test_create_memory_exact_idempotency_match_is_unchanged(monkeypatch):
     service = memory_record_service.MemoryRecordService()
     service.index_service = MagicMock()
 
+    fake_embedding_model_info = MagicMock()
+    fake_embedding_model_info.get_index_name = MagicMock(
+        return_value="test_index"
+    )
+
     result = service.create_memory(
         tenant_id="t1",
         user_id="u1",
@@ -27,6 +32,7 @@ def test_create_memory_exact_idempotency_match_is_unchanged(monkeypatch):
         memory_type="short_term",
         agent_id="a1",
         idempotency_key="same-key",
+        embedding_model_info=fake_embedding_model_info,
     )
 
     assert result["event"] == "UNCHANGED"

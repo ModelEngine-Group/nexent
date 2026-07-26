@@ -118,7 +118,7 @@ def classify_error(error: ProviderError) -> ProviderErrorSeverity:
     elif error.code in non_retryable_codes:
         return ProviderErrorSeverity.NON_RETRYABLE
     else:
-        return ProviderErrorSeverity.UNKNOWN
+        return ProviderErrorSeverity.RETRYABLE
 
 
 async def execute_with_retry(

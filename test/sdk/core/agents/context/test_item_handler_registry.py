@@ -107,3 +107,39 @@ class TestItemHandlerRegistry:
 
         assert isinstance(ItemHandlerRegistry.get(ContextItemType.SYSTEM_PROMPT), SystemPromptHandler)
         assert isinstance(ItemHandlerRegistry.get(ContextItemType.TOOL), ToolHandler)
+
+    def test_base_handler_score_and_reduce_are_passthroughs(self):
+        handler = _StubHandler([ContextItemType.TOOL])
+        item = ContextItem(
+            item_id="item-1",
+            item_type=ContextItemType.TOOL,
+            content={"value": 1},
+            token_estimate=7,
+            current_representation=RepresentationTier.STRUCTURED,
+        )
+
+        assert handler.score(item, "query", {}) == 1.0
+        result = handler.reduce(item, RepresentationTier.POINTER, budget=3)
+        assert result.representation == RepresentationTier.STRUCTURED
+        assert result.token_count == 7
+        assert result.generator == "passthrough"
+        assert result.generator_version == "0.1.0"
+        assert result.admissible is True
+        assert result.loss_metadata == {}
+        assert result.content == {"value": 1}
+
+    @pytest.mark.parametrize(
+        "content, expected_text",
+        [("plain text", "plain text"), ({"value": 1}, "{'value': 1}")],
+    )
+    def test_base_handler_to_messages_stringifies_non_string_content(self, content, expected_text):
+        handler = _StubHandler([ContextItemType.TOOL])
+        item = ContextItem(
+            item_id="item-2",
+            item_type=ContextItemType.TOOL,
+            content=content,
+        )
+
+        assert handler.to_messages(item) == [
+            {"role": "user", "content": [{"type": "text", "text": expected_text}]}
+        ]

@@ -1863,6 +1863,24 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch.dict(sys.modules, {
+                    'services.memory_record_service': MagicMock(
+                        _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                    ),
+                    'services.memory_context_service': MagicMock(
+                        get_memory_context_service=MagicMock(
+                            return_value=MagicMock(
+                                build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                    tenant_long_term=(),
+                                    user_long_term=(),
+                                ))
+                            )
+                        ),
+                    ),
+                    'services.memory_backend_adapter': MagicMock(
+                        build_memory_service_for_agent=MagicMock(return_value=None),
+                    ),
+                }), \
                 patch(
                     'backend.agents.create_agent_info.ContextManagerConfig',
                     side_effect=lambda **kwargs: Mock(**kwargs),
@@ -2148,7 +2166,6 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
@@ -2209,6 +2226,7 @@ class TestCreateAgentConfig:
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_items=ANY,
+                    pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
                     verification_config=ANY,
@@ -2283,9 +2301,27 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
+                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch.dict(sys.modules, {
+                    'services.memory_record_service': MagicMock(
+                        _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                    ),
+                    'services.memory_context_service': MagicMock(
+                        get_memory_context_service=MagicMock(
+                            return_value=MagicMock(
+                                build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                    tenant_long_term=(),
+                                    user_long_term=(),
+                                ))
+                            )
+                        ),
+                    ),
+                    'services.memory_backend_adapter': MagicMock(
+                        build_memory_service_for_agent=MagicMock(return_value=None),
+                    ),
+                }):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2319,22 +2355,18 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_search_memory.return_value = {"results": [{"memory": "test"}]}
+            mock_search_tool.return_value.forward = MagicMock(
+                return_value="Found 1 result"
+            )
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
-            # Verify that memory search was called
-            mock_search_memory.assert_called_once_with(
-                query_text="test query",
-                memory_config={"test": "config"},
-                tenant_id="tenant_1",
-                user_id="user_1",
-                agent_id="agent_1",
-                memory_levels=["tenant", "agent", "user", "user_agent"]
-            )
+            # Verify that fixed search memory tool's forward was called
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
@@ -2360,9 +2392,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.get_model_by_model_id"
             ) as mock_get_model_by_id, \
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory, \
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool, \
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates:
@@ -2386,9 +2417,11 @@ class TestCreateAgentConfig:
                 "Test Description",
             ]
 
-            # memory_switch is on, but search is disabled
+            # When allow_memory_search=False, build_memory_context returns
+            # a context with memory_switch=False, which prevents the fixed
+            # search memory tool from being invoked at all.
             mock_user_config = Mock()
-            mock_user_config.memory_switch = True
+            mock_user_config.memory_switch = False
             mock_user_config.agent_share_option = "always"
             mock_user_config.disable_agent_ids = []
             mock_user_config.disable_user_agent_ids = []
@@ -2414,7 +2447,7 @@ class TestCreateAgentConfig:
                 allow_memory_search=False,
             )
 
-            mock_search_memory.assert_not_called()
+            mock_search_tool.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_model_id_none(self):
@@ -2472,6 +2505,7 @@ class TestCreateAgentConfig:
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                pre_run_tool_events=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
                 verification_config=ANY,
@@ -2480,7 +2514,14 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_exception(self):
-        """raise when search_memory_in_levels raises an exception"""
+        """Verify that errors raised by the fixed search tool are swallowed
+        and logged instead of aborting ``create_agent_config``.
+
+        The legacy multi-level ``search_memory_in_levels`` fan-out has been
+        removed; the new code path uses ``_create_fixed_search_memory_tool``
+        whose failures are caught and logged at WARNING level so the agent
+        can still start.
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2501,12 +2542,32 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.logger"
+            ) as mock_logger,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2541,26 +2602,35 @@ class TestCreateAgentConfig:
                 agent_id="agent_1",
             )
 
-            mock_search_memory.side_effect = Exception("boom")
+            mock_search_tool.return_value.forward.side_effect = Exception("boom")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
 
-            with pytest.raises(Exception) as excinfo:
-                await create_agent_config(
-                    "agent_1",
-                    "tenant_1",
-                    "user_1",
-                    "zh",
-                    "test query",
-                    allow_memory_search=True,
-                )
+            # Should NOT raise; the error is swallowed and logged.
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                allow_memory_search=True,
+            )
 
-            assert "Failed to retrieve memory list: boom" in str(excinfo.value)
+            mock_logger.warning.assert_called()
+            warning_message = mock_logger.warning.call_args[0][0]
+            assert "memory_tools_load_failed" in warning_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_agent_share_never(self):
-        """Test that agent level is removed when agent_share_option is 'never'"""
+        """Verify that with ``agent_share_option='never'`` the agent-level
+        memory search is still executed via the fixed search tool.
+
+        The legacy ``search_memory_in_levels`` multi-level fan-out has been
+        removed; the new code path always uses a single
+        ``_create_fixed_search_memory_tool`` instance whose ``forward`` is
+        invoked once during agent preparation.
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2581,9 +2651,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2596,6 +2665,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2628,7 +2715,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2645,17 +2732,17 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" not in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" in memory_levels
+            # Fixed search memory tool should have been invoked exactly once.
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_agent(self):
-        """Test that agent level is removed when agent_id is in disable_agent_ids"""
+        """Verify that with ``disable_agent_ids`` containing the agent id the
+        fixed search memory tool is still invoked (its level filtering is
+        now performed inside the service).
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2676,9 +2763,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2691,6 +2777,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2723,7 +2827,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2740,17 +2844,16 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" not in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" in memory_levels
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_user_agent(self):
-        """Test that user_agent level is removed when agent_id is in disable_user_agent_ids"""
+        """Verify that with ``disable_user_agent_ids`` containing the agent id
+        the fixed search memory tool is still invoked (per-level disable
+        checks are now performed inside the service).
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2771,9 +2874,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2786,6 +2888,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2818,7 +2938,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2835,13 +2955,9 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify user_agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" not in memory_levels
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
@@ -4211,8 +4327,9 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=False,
                 version_no=1,
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
-                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4259,8 +4376,9 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
-                enable_planning=ANY,
             )
 
     @pytest.mark.asyncio
@@ -4313,8 +4431,9 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
-                enable_planning=ANY,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)

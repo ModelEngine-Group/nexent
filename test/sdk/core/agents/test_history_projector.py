@@ -6,13 +6,7 @@ units into ContextItem instances for model_context and chat purposes.
 
 import json
 import pytest
-from unittest.mock import MagicMock
 
-from nexent.core.agents.agent_context import ContextManager
-from nexent.core.agents.agent_model import (
-    MemoryComponent,
-    SystemPromptComponent,
-)
 from nexent.core.agents.context.history_projector import HistoryProjector
 from nexent.core.agents.context.context_item import (
     AuthorityTier,
@@ -21,7 +15,6 @@ from nexent.core.agents.context.context_item import (
     RepresentationTier,
 )
 from nexent.core.agents.context.handlers import register_all
-from nexent.core.agents.summary_config import ContextManagerConfig
 
 
 # ---------------------------------------------------------------------------
@@ -441,175 +434,6 @@ class TestChatProjectionCompleteness:
         expected_refs = {"unit:10", "unit:20", "unit:30", "unit:40"}
         assert set(turn.source_refs) == expected_refs
         assert len(turn.source_refs) == len(turn.content["units"])
-
-
-# ===================================================================
-# 7. End-to-End Integration Tests
-# ===================================================================
-
-class MockHistoryProjector:
-    """Mock projector for integration tests — no real DB needed."""
-
-    def __init__(self, items=None, should_fail=False):
-        self._items = items or []
-        self._should_fail = should_fail
-
-    def project(self, conversation_id, message_id=None, purpose="model_context"):
-        if self._should_fail:
-            raise RuntimeError("Simulated projection failure")
-        return self._items
-
-
-class TestEndToEndIntegration:
-    """Full flow: ContextManager + HistoryProjector -> assemble_final_context -> FinalContext."""
-
-    def test_assemble_final_context_with_history_projector(self):
-        """FinalContext.evidence.context_items contains both component-projected
-        AND history-projected items when conversation_id is provided."""
-        history_items = [
-            ContextItem(
-                item_id="chat_turn:1:1",
-                item_type=ContextItemType.HISTORY_TURN,
-                source_refs=["unit:1", "unit:2"],
-                authority_tier=AuthorityTier.AGENT_INFERENCE,
-                minimum_fidelity=RepresentationTier.STRUCTURED,
-                current_representation=RepresentationTier.FULL,
-                content={"user_query": "Hello", "assistant_response": "Hi there"},
-                token_estimate=4,
-                metadata={"message_id": 1, "step_index": 1},
-            ),
-        ]
-        mock_projector = MockHistoryProjector(items=history_items)
-
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=10000,
-            use_context_items=True,
-            history_projector=mock_projector,
-        )
-        manager = ContextManager(config=config)
-
-        manager.register_component(SystemPromptComponent(content="You are helpful"))
-        manager.register_component(
-            MemoryComponent(
-                memories=[{"content": "User prefers Python", "memory_type": "user"}],
-                formatted_content="User preferences: Python",
-            )
-        )
-
-        memory = MagicMock()
-        memory.system_prompt = None
-        memory.steps = []
-
-        final = manager.assemble_final_context(
-            model=None,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-            conversation_id=123,
-        )
-
-        assert final is not None
-        assert len(final.evidence.context_items) > 0
-
-        component_types = {item.item_type for item in final.evidence.context_items}
-        assert ContextItemType.SYSTEM_PROMPT in component_types
-
-        history_turn_items = [
-            item for item in final.evidence.context_items
-            if item.item_id == "chat_turn:1:1"
-        ]
-        assert len(history_turn_items) == 1
-        assert history_turn_items[0].content["user_query"] == "Hello"
-
-    def test_assemble_final_context_without_conversation_id_skips_history(self):
-        """Without conversation_id, only component-projected items appear."""
-        history_items = [
-            ContextItem(
-                item_id="chat_turn:1:1",
-                item_type=ContextItemType.HISTORY_TURN,
-                source_refs=["unit:1"],
-                authority_tier=AuthorityTier.AGENT_INFERENCE,
-                minimum_fidelity=RepresentationTier.STRUCTURED,
-                current_representation=RepresentationTier.FULL,
-                content={"user_query": "Should not appear"},
-                token_estimate=3,
-                metadata={"message_id": 1, "step_index": 1},
-            ),
-        ]
-        mock_projector = MockHistoryProjector(items=history_items)
-
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=10000,
-            use_context_items=True,
-            history_projector=mock_projector,
-        )
-        manager = ContextManager(config=config)
-
-        manager.register_component(SystemPromptComponent(content="You are helpful"))
-
-        memory = MagicMock()
-        memory.system_prompt = None
-        memory.steps = []
-
-        final = manager.assemble_final_context(
-            model=None,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-        )
-
-        assert final is not None
-        assert len(final.evidence.context_items) > 0
-
-        history_turn_items = [
-            item for item in final.evidence.context_items
-            if item.item_id == "chat_turn:1:1"
-        ]
-        assert len(history_turn_items) == 0
-
-        component_types = {item.item_type for item in final.evidence.context_items}
-        assert ContextItemType.SYSTEM_PROMPT in component_types
-
-    def test_assemble_final_context_history_projector_failure_graceful(self):
-        """When history projector raises, assemble_final_context continues
-        with component items only — no crash."""
-        mock_projector = MockHistoryProjector(should_fail=True)
-
-        config = ContextManagerConfig(
-            enabled=True,
-            token_threshold=10000,
-            use_context_items=True,
-            history_projector=mock_projector,
-        )
-        manager = ContextManager(config=config)
-
-        manager.register_component(SystemPromptComponent(content="You are helpful"))
-        manager.register_component(
-            MemoryComponent(
-                memories=[{"content": "Important fact", "memory_type": "user"}],
-                formatted_content="Memory: Important fact",
-            )
-        )
-
-        memory = MagicMock()
-        memory.system_prompt = None
-        memory.steps = []
-
-        final = manager.assemble_final_context(
-            model=None,
-            memory=memory,
-            current_run_start_idx=0,
-            tools=[],
-            conversation_id=123,
-        )
-
-        assert final is not None
-        assert len(final.messages) > 0
-        assert len(final.evidence.context_items) > 0
-        component_types = {item.item_type for item in final.evidence.context_items}
-        assert ContextItemType.SYSTEM_PROMPT in component_types
 
 
 if __name__ == "__main__":

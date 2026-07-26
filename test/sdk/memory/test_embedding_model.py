@@ -183,11 +183,12 @@ class TestEmbeddingClientCache:
         assert mock_init.call_count == 2
         assert c1 is not c2
 
-    def test_model_repo_not_used_in_cache_key(self, mocker):
-        """model_repo does not appear in the cache key — only model_name + dimension.
+    def test_model_repo_used_in_cache_key(self, mocker):
+        """Different model_repo values must produce separate cache entries.
 
-        This matches the design rationale: one tenant has one global embedding
-        model; the model_name is the primary identifier.
+        The cache key is ``(model_repo, model_name, dimension)`` so that
+        tenants using different embedding vendors (e.g. ``openai`` vs.
+        ``local``) get their own client instances.
         """
         mock_init = mocker.patch(
             "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
@@ -212,7 +213,32 @@ class TestEmbeddingClientCache:
             model_repo="other-repo",
         )
 
-        # Should still hit the cache (only one instance created)
+        # Different repos must not collide — one instance per repo.
+        assert mock_init.call_count == 2
+
+    def test_same_model_repo_hits_cache(self, mocker):
+        """Same (model_repo, model_name, dimension) returns the cached client."""
+        mock_init = mocker.patch(
+            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+        )
+        mock_instance = MagicMock()
+        mock_init.return_value = mock_instance
+
+        get_embedding_client(
+            model_name="text-embedding-3-small",
+            dimension=1536,
+            base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            model_repo="openai",
+        )
+        get_embedding_client(
+            model_name="text-embedding-3-small",
+            dimension=1536,
+            base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            model_repo="openai",
+        )
+
         assert mock_init.call_count == 1
 
     def test_reset_clears_cache(self, mocker):

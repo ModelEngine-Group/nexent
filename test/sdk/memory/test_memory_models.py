@@ -198,12 +198,12 @@ class TestMemorySearchResult:
 
     def test_create_search_result(self):
         result = MemorySearchResult(
-            memory_id="mem-1",
+            memory_id=1,
             content="Found content",
             score=0.9,
             layer=MemoryLayer.AGENT,
         )
-        assert result.memory_id == "mem-1"
+        assert result.memory_id == 1
         assert result.score == 0.9
         assert result.source == "internal"
         assert result.is_external is False
@@ -386,7 +386,7 @@ class TestMemorySearchContext:
 
     def test_context_with_results(self):
         result = MemorySearchResult(
-            memory_id="mem-1",
+            memory_id=1,
             content="Found",
             score=0.9,
             layer=MemoryLayer.AGENT,
@@ -405,7 +405,7 @@ class TestMemorySearchContext:
 
     def test_to_prompt_text_with_content(self):
         result = MemorySearchResult(
-            memory_id="mem-1",
+            memory_id=1,
             content="Important fact",
             score=0.9,
             layer=MemoryLayer.AGENT,

@@ -2,7 +2,7 @@
 
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -30,6 +30,7 @@ memory_pkg.__path__ = []
 embedding_model_pkg = types.ModuleType("nexent.memory.embedding_model")
 embedding_model_pkg.EmbeddingModelInfo = MagicMock(name="EmbeddingModelInfo")
 memory_pkg.embedding_model = embedding_model_pkg
+sys.modules["nexent.memory.embedding_model"] = embedding_model_pkg
 
 memory_models = types.ModuleType("nexent.memory.models")
 
@@ -73,6 +74,8 @@ class MemorySearchResult:
         source="internal",
         is_external=False,
         metadata=None,
+        external_id=None,
+        **kwargs,
     ):
         self.memory_id = memory_id
         self.content = content
@@ -81,6 +84,7 @@ class MemorySearchResult:
         self.source = source
         self.is_external = is_external
         self.metadata = metadata or {}
+        self.external_id = external_id
 
 
 memory_models.MemoryLayer = MemoryLayer
@@ -205,12 +209,12 @@ def test_search_returns_full_context_memories(service):
 
     results = []
     import asyncio
-    results = asyncio.get_event_loop().run_until_complete(
+    results = asyncio.new_event_loop().run_until_complete(
         service.search(request, write_hits=False)
     )
 
     assert len(results) == 1
-    assert results[0].memory_id == "1"
+    assert results[0].memory_id == 1
     assert results[0].layer == memory_retrieval_service.MemoryLayer.TENANT
 
 
@@ -219,6 +223,7 @@ def test_search_returns_vector_results(service):
         tenant_id="tn",
         user_id="u1",
         agent_id="a1",
+        conversation_id=None,
         layers=[memory_retrieval_service.MemoryLayer.AGENT],
         query="hello",
         top_k=5,
@@ -227,12 +232,14 @@ def test_search_returns_vector_results(service):
     )
 
     import asyncio
-    results = asyncio.get_event_loop().run_until_complete(
-        service.search(request, write_hits=False)
+    embedding_model_info = MagicMock()
+    embedding_model_info.get_index_name = MagicMock(return_value="test_index")
+    results = asyncio.new_event_loop().run_until_complete(
+        service.search(request, embedding_model_info=embedding_model_info, write_hits=False)
     )
 
     assert len(results) == 1
-    assert results[0].memory_id == "1"
+    assert results[0].memory_id == 1
     assert results[0].layer == memory_retrieval_service.MemoryLayer.AGENT
 
 
@@ -241,6 +248,7 @@ def test_search_filters_by_threshold(service):
         tenant_id="tn",
         user_id="u1",
         agent_id="a1",
+        conversation_id=None,
         layers=[memory_retrieval_service.MemoryLayer.AGENT],
         query="hello",
         top_k=5,
@@ -249,8 +257,10 @@ def test_search_filters_by_threshold(service):
     )
 
     import asyncio
-    results = asyncio.get_event_loop().run_until_complete(
-        service.search(request, write_hits=False)
+    embedding_model_info = MagicMock()
+    embedding_model_info.get_index_name = MagicMock(return_value="test_index")
+    results = asyncio.new_event_loop().run_until_complete(
+        service.search(request, embedding_model_info=embedding_model_info, write_hits=False)
     )
 
     # 0.9 < 0.95 → filtered out
@@ -262,6 +272,7 @@ def test_search_writes_hits(service):
         tenant_id="tn",
         user_id="u1",
         agent_id="a1",
+        conversation_id=None,
         layers=[memory_retrieval_service.MemoryLayer.AGENT],
         query="hello",
         top_k=5,
@@ -270,9 +281,341 @@ def test_search_writes_hits(service):
     )
 
     import asyncio
-    asyncio.get_event_loop().run_until_complete(
-        service.search(request, write_hits=True)
+    embedding_model_info = MagicMock()
+    embedding_model_info.get_index_name = MagicMock(return_value="test_index")
+    asyncio.new_event_loop().run_until_complete(
+        service.search(request, embedding_model_info=embedding_model_info, write_hits=True)
     )
 
-    service._record_hits  # noqa
-    memory_retrieval_service.memory_retrieval_hit_db.insert_retrieval_hits.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_search_uses_default_layers_and_truncates_results(service, monkeypatch):
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        layers=None, query="hello", top_k=1, threshold=0.5
+    )
+    full_result = memory_retrieval_service.MemorySearchResult(memory_id=10)
+    vector_result = memory_retrieval_service.MemorySearchResult(memory_id=11)
+    monkeypatch.setattr(service, "_full_context_search", MagicMock(return_value=[full_result]))
+    monkeypatch.setattr(service, "_vector_search", MagicMock(return_value=[vector_result]))
+
+    results = await service.search(request, write_hits=False)
+
+    assert results == [full_result]
+    service._full_context_search.assert_any_call(request=request, layer="tenant")
+    service._full_context_search.assert_any_call(request=request, layer="user")
+    service._vector_search.assert_called_once()
+
+
+
+
+@pytest.mark.asyncio
+async def test_search_logs_unsupported_layer(service):
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", layers=[object()], query="hello", top_k=5
+    )
+
+    assert await service.search(request, write_hits=False) == []
+
+
+def test_vector_search_handles_invalid_result_memory_id(service, monkeypatch):
+    class InvalidMemoryId:
+        def __int__(self):
+            raise ValueError("invalid result id")
+
+    class Result:
+        memory_id = InvalidMemoryId()
+        content = "text"
+        score = 0.8
+        metadata = {}
+
+    monkeypatch.setattr(
+        memory_retrieval_service,
+        "MemorySearchResult",
+        MagicMock(return_value=Result()),
+    )
+    service.index_service.search_similar.return_value = [
+        {"memory_id": "4", "score": 0.8, "content": "text", "metadata": {}}
+    ]
+    monkeypatch.setattr(
+        memory_retrieval_service.memory_record_db,
+        "get_memory_records_by_ids",
+        MagicMock(return_value=[]),
+    )
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=0.5, query="hello"
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+
+    results = service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    )
+
+    assert len(results) == 1
+    assert results[0].memory_id.__class__ is InvalidMemoryId
+
+
+def test_serialize_record_as_result_defaults_and_handles_invalid_layer():
+    result = memory_retrieval_service._serialize_record_as_result(
+        {"memory_id": 1, "content": "text", "layer": "unknown", "concept_tags": None},
+        score="0.8",
+        is_external=True,
+    )
+
+    assert result.memory_id == 1
+    assert result.score == 0.8
+    assert result.layer == memory_retrieval_service.MemoryLayer.USER
+    assert result.is_external is True
+    assert result.metadata["concept_tags"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_memories_resolves_layers_embedding_and_delegates(service, monkeypatch):
+    embedding_info = MagicMock(model_name="model")
+    monkeypatch.setattr(
+        memory_retrieval_service,
+        "_resolve_tenant_embedding_model_info",
+        MagicMock(return_value=embedding_info),
+    )
+    monkeypatch.setattr(
+        memory_retrieval_service,
+        "_compute_content_embedding",
+        MagicMock(return_value=[0.1, 0.2]),
+    )
+    expected = [memory_retrieval_service.MemorySearchResult(memory_id=1)]
+    search_mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr(service, "search", search_mock)
+
+    results = await service.search_memories(
+        "tn",
+        "u1",
+        "hello",
+        layers=[" AGENT ", "invalid", "USER"],
+        agent_id="a1",
+        conversation_id="c1",
+        top_k=3,
+        threshold=0.7,
+        write_hits=False,
+        hybrid=True,
+        weight_accurate=0.4,
+    )
+
+    assert results == expected
+    search_mock.assert_called_once()
+    request = search_mock.call_args.args[0]
+    assert request.layers == [
+        memory_retrieval_service.MemoryLayer.AGENT,
+        memory_retrieval_service.MemoryLayer.USER,
+    ]
+    assert request.embedding == [0.1, 0.2]
+    assert request.hybrid is True
+    assert request.weight_accurate == 0.4
+
+
+@pytest.mark.asyncio
+async def test_search_memories_skips_embedding_for_empty_query(service, monkeypatch):
+    embedding_info = MagicMock(model_name="model")
+    resolve_mock = MagicMock(return_value=embedding_info)
+    embed_mock = MagicMock(return_value=[0.1])
+    search_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(memory_retrieval_service, "_resolve_tenant_embedding_model_info", resolve_mock)
+    monkeypatch.setattr(memory_retrieval_service, "_compute_content_embedding", embed_mock)
+    monkeypatch.setattr(service, "search", search_mock)
+
+    await service.search_memories("tn", "u1", "", layers=None)
+
+    embed_mock.assert_not_called()
+    assert search_mock.call_args.args[0].layers == [memory_retrieval_service.MemoryLayer.AGENT]
+
+
+def test_vector_search_returns_empty_for_missing_inputs(service):
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=None, threshold=0.5, query="hello"
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+    assert service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    ) == []
+    request.embedding = [0.1]
+    assert service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=None
+    ) == []
+    model_info.get_index_name.return_value = None
+    assert service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    ) == []
+
+
+def test_vector_search_filters_invalid_hits_and_enriches_records(service, monkeypatch):
+    service.index_service.search_similar.return_value = [
+        {"memory_id": "bad", "score": 0.99, "content": "bad"},
+        {"memory_id": "2", "score": 0.4, "content": "below"},
+        {"memory_id": "3", "score": 0.9, "content": "missing", "layer": "invalid"},
+        {"memory_id": "4", "score": 0.8, "content": "enriched", "metadata": {"x": 1}},
+    ]
+    monkeypatch.setattr(
+        memory_retrieval_service.memory_record_db,
+        "get_memory_records_by_ids",
+        MagicMock(
+            return_value=[
+                {"memory_id": 4, "memory_type": "short_term", "status": "active", "concept_tags": ["x"]}
+            ]
+        ),
+    )
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=0.5, query="hello"
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+
+    results = service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    )
+
+    assert [result.memory_id for result in results] == [3, 4]
+    assert results[0].layer == memory_retrieval_service.MemoryLayer.AGENT
+    assert results[1].metadata["memory_type"] == "short_term"
+    assert results[1].metadata["concept_tags"] == ["x"]
+    memory_retrieval_service.memory_record_db.get_memory_records_by_ids.assert_called_once_with(
+        [3, 4], "tn"
+    )
+
+
+def test_vector_search_uses_default_threshold_and_skips_unmatched_record(service, monkeypatch):
+    service.index_service.search_similar.return_value = [
+        {"memory_id": "1", "score": 0.7, "content": "text", "metadata": {}}
+    ]
+    monkeypatch.setattr(
+        memory_retrieval_service.memory_record_db,
+        "get_memory_records_by_ids",
+        MagicMock(return_value=[]),
+    )
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=None, query="hello"
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+
+    results = service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    )
+
+    assert len(results) == 1
+    assert results[0].metadata == {}
+
+
+def test_vector_search_returns_empty_when_index_returns_no_hits(service):
+    service.index_service.search_similar.return_value = []
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=0.5, query="hello"
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+
+    assert service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    ) == []
+
+
+def test_vector_search_hybrid_builds_client(service, monkeypatch):
+    embedding_client = object()
+    get_client = MagicMock(return_value=embedding_client)
+    embedding_module = sys.modules["nexent.memory.embedding_model"]
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=0.5,
+        query="hello", hybrid=True, weight_accurate=0.6,
+    )
+    model_info = MagicMock(
+        model_name="model", dimension=2, base_url="url", api_key="key",
+        model_repo="repo", ssl_verify=True,
+        get_index_name=MagicMock(return_value="index"),
+    )
+
+    service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    )
+
+    assert get_client.call_args.kwargs["model_name"] == "model"
+    assert service.index_service.search_similar.call_args.kwargs["embedding_model"] is embedding_client
+
+
+def test_vector_search_hybrid_client_failure_falls_back(service, monkeypatch):
+    get_client = MagicMock(side_effect=RuntimeError("client failure"))
+    embedding_module = sys.modules["nexent.memory.embedding_model"]
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        embedding=[0.1], threshold=0.5,
+        query="hello", hybrid=True,
+    )
+    model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+
+    results = service._vector_search(
+        request=request, layer="agent", top_k=5, embedding_model_info=model_info
+    )
+
+    assert results
+    assert service.index_service.search_similar.call_args.kwargs["embedding_model"] is None
+
+
+def test_record_hits_skips_invalid_ids_and_handles_insert_failure(service, monkeypatch):
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
+        query="hello"
+    )
+    results = [
+        memory_retrieval_service.MemorySearchResult(memory_id=0),
+        memory_retrieval_service.MemorySearchResult(memory_id="bad"),
+        memory_retrieval_service.MemorySearchResult(memory_id=5, score=0.9),
+    ]
+    insert_mock = MagicMock(side_effect=RuntimeError("write failure"))
+    monkeypatch.setattr(
+        memory_retrieval_service.memory_retrieval_hit_db,
+        "insert_retrieval_hits",
+        insert_mock,
+    )
+
+    service._record_hits(request=request, results=results)
+
+    insert_mock.assert_called_once()
+    payload = insert_mock.call_args.args[0]
+    assert len(payload) == 1
+    assert payload[0]["memory_id"] == 5
+    assert len(payload[0]["query_hash"]) == 64
+    assert payload[0]["day"] == memory_retrieval_service._iso_day(payload[0]["occurred_at"])
+
+
+def test_record_hits_does_nothing_when_no_valid_results(service, monkeypatch):
+    insert_mock = MagicMock()
+    monkeypatch.setattr(
+        memory_retrieval_service.memory_retrieval_hit_db,
+        "insert_retrieval_hits",
+        insert_mock,
+    )
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn", user_id="u1", query="hello"
+    )
+
+    service._record_hits(
+        request=request,
+        results=[memory_retrieval_service.MemorySearchResult(memory_id=None)],
+    )
+
+    insert_mock.assert_not_called()
+
+
+def test_service_accessors_cache_and_reset(monkeypatch):
+    first = object()
+    constructor = MagicMock(return_value=first)
+    monkeypatch.setattr(memory_retrieval_service, "MemoryRetrievalService", constructor)
+    memory_retrieval_service.reset_memory_retrieval_service()
+
+    assert memory_retrieval_service.get_memory_retrieval_service() is first
+    assert memory_retrieval_service.get_memory_retrieval_service() is first
+    constructor.assert_called_once_with()
+    memory_retrieval_service.reset_memory_retrieval_service()
