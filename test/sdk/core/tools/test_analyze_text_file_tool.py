@@ -21,16 +21,9 @@ terminal_stub = types.ModuleType("sdk.nexent.core.tools.terminal_tool")
 terminal_stub.TerminalTool = MagicMock()
 sys.modules.setdefault("sdk.nexent.core.tools.terminal_tool", terminal_stub)
 
-class _ProcessType:
-    OTHER = "OTHER"
-    CARD = "CARD"
-    SEARCH_CONTENT = "SEARCH_CONTENT"
-    PICTURE_WEB = "PICTURE_WEB"
-
-ProcessType = _ProcessType
-
 import sdk.nexent.core.tools.analyze_text_file_tool as module
 from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool
+from sdk.nexent.core.utils.observer import ProcessType
 
 
 class _NoopLoadSaveObjectManager:
@@ -275,9 +268,9 @@ class TestAnalyzeTextFileTool:
         assert tool.detect_file_type(b"%PDF-1.7") == ".pdf"
 
         for marker, expected in [
-            ("word/document.xml", "docx"),
-            ("xl/workbook.xml", "xlsx"),
-            ("ppt/presentation.xml", "pptx"),
+            ("word/document.xml", ".docx"),
+            ("xl/workbook.xml", ".xlsx"),
+            ("ppt/presentation.xml", ".pptx"),
         ]:
             stream = io.BytesIO()
             with zipfile.ZipFile(stream, "w") as zf:
