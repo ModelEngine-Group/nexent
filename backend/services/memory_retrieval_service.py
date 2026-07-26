@@ -125,6 +125,11 @@ class MemoryRetrievalService:
                 )
             elif MemoryRetrievalPolicy.uses_vector_search(layer):
                 results.extend(
+                    # _vector_search中可选混合检索，
+                    # accurate_search（BM25）      → 取 top_k
+                    # semantic_search（kNN）       → 取 top_k
+                    # 合并、融合分数、排序，再按排序截断topk
+                    # 传给 _vector_search() 的 hybrid 结果已经是“融合分数降序的 top_k”
                     self._vector_search(
                         request=request,
                         layer=layer.value,
@@ -137,7 +142,7 @@ class MemoryRetrievalService:
 
         if write_hits and results:
             self._record_hits(request=request, results=results)
-
+        # 多layer合并（长期记忆+短期），截断默认 top_k=5
         return results[:top_k]
 
     async def search_memories(

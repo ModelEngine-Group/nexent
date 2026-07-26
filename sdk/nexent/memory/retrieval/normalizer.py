@@ -37,6 +37,7 @@ class Normalizer:
         *,
         created_at_for_id: Optional[dict[int, datetime]] = None,
     ) -> List["PipelineMemoryRecord"]:
+        # 将内外部记忆同一格式为PipelineMemoryRecord，方便送入后续处理
         """Normalize all retrieval results into PipelineMemoryRecord instances."""
         candidates: List["PipelineMemoryRecord"] = []
 

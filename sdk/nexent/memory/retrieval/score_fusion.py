@@ -24,7 +24,13 @@ class ScoreFusion:
         self.w_external = w_external
 
     def fuse(self, candidates: List[PipelineMemoryRecord]) -> List[PipelineMemoryRecord]:
-        """Apply source-weight fusion to the candidate list.
+        """
+        对candidates中每个记忆按来源打分，不排序
+        Agent 短期：fused_score = 1.0 × 原始分
+        外部记忆：fused_score = 0.8 × 原始分
+        ！！！！之后环节的处理都是基于上个环节的分数，修改record.fused_score
+
+        Apply source-weight fusion to the candidate list.
 
         For each candidate, sets source_weight based on its source and
         computes fused_score = source_weight * retrieval_score.

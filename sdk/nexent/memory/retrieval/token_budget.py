@@ -12,7 +12,13 @@ logger = logging.getLogger("memory_retrieval.token_budget")
 
 
 class TokenBudgetSelector:
-    """Select records greedily by fused score until the token budget is exhausted."""
+    """
+    按照fused_score 降序遍历，累计 token，超过总预算就停止。
+    例如预算为 80 tokens：
+        A: 30 tokens，保留
+        C: 25 tokens，保留
+        下一条：40 tokens，累计 95 > 80，停止
+    Select records greedily by fused score until the token budget is exhausted."""
 
     def __init__(self, token_budget: int = 2000):
         """Initialize the budget selector."""
@@ -29,7 +35,7 @@ class TokenBudgetSelector:
         """
         if not candidates or self.token_budget <= 0:
             return []
-
+        # 按照fused_score 降序
         sorted_records = sorted(candidates, key=lambda r: r.fused_score or 0, reverse=True)
 
         selected: List[PipelineMemoryRecord] = []

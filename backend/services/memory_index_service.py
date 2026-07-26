@@ -117,7 +117,9 @@ class MemoryIndexService:
         embedding: Optional[List[float]],
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
     ) -> bool:
-        """Upsert a single memory record into its target index.
+        """
+        将一条 PG memory record 变成 ES chunk 并 upsert。
+        Upsert a single memory record into its target index.
 
         Args:
             record: Serialized memory record (must include ``memory_id``,
@@ -244,14 +246,15 @@ class MemoryIndexService:
                     "embedding_model; falling back to kNN path.",
                 )
             else:
+                # Agent 短期记忆的“混合检索”实现
                 return self._hybrid_search_similar(
                     index_name=index_name,
                     query_text=query_text,
-                    embedding=embedding,
+                    embedding=embedding,    # 问题的向量
                     embedding_model=embedding_model,
-                    isolation_filter=isolation_filter,
+                    isolation_filter=isolation_filter, # 强制过滤 tenant、user、可选 agent/conversation，以及 layer=agent，防止召回其他人的记忆。
                     top_k=top_k,
-                    weight_accurate=weight_accurate,
+                    weight_accurate=weight_accurate, # BM25 的权重，默认 0.3；剩余语义向量部分约为 0.7；
                 )
 
         return self._knn_search_similar(
@@ -368,6 +371,7 @@ class MemoryIndexService:
         )
 
         try:
+            # 调用混合检索
             raw = vdb_core.hybrid_search(
                 index_names=[index_name],
                 query_text=query_text,

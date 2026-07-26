@@ -21,7 +21,9 @@ class TemporalDecayer:
         self.half_life_days = half_life_days
 
     def apply_decay(self, candidates: List[PipelineMemoryRecord]) -> List[PipelineMemoryRecord]:
-        """Apply exponential time-decay to eligible candidates.
+        """
+        基于fuse score，按照来源和时间乘以半衰系数，不排序
+        Apply exponential time-decay to eligible candidates.
 
         Only agent short-term memory is decayed.
         Tenant/user long-term and external items are returned unchanged.

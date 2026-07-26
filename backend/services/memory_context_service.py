@@ -130,7 +130,12 @@ class MemoryContextService:
         external_results: Optional[List[ExternalMemoryItem]] = None,
         created_at_for_id: Optional[Dict[int, Any]] = None,
     ) -> MemorySearchContext:
-        """Return a populated MemorySearchContext for the agent.
+        """
+        新记忆系统把“检索结果”转换成“可注入 Agent 上下文的记忆分组”的入口
+        ！！！这个函数会自己调用检索记忆，并通过pipeline处理结果返回MemorySearchContext
+        不同于llm主动调用search工具（当SearchMemoryTool 注入了 MemoryContextService时也是走这里）
+
+        Return a populated MemorySearchContext for the agent.
 
         Full-context layers (tenant/user) are always loaded verbatim.
         Agent short-term memory is retrieved via vector search and, when
@@ -150,6 +155,7 @@ class MemoryContextService:
             external_results: Optional external provider hits from Phase 3.
             created_at_for_id: Optional mapping of memory_id -> create_time.
         """
+        # layers 未指定时，默认同时查tenant 长期记忆；user 长期记忆；agent 短期记忆。
         if layers:
             target_layers: List[MemoryLayer] = []
             for value in layers:
@@ -166,7 +172,7 @@ class MemoryContextService:
                 MemoryRetrievalPolicy.FULL_CONTEXT_LAYERS
                 | MemoryRetrievalPolicy.VECTOR_SEARCH_LAYERS
             )
-
+        # 若调用方已给 embedding，直接使用；否则根据 tenant 找 embedding 模型，再将当前 query 转为向量。
         resolved_model_info, resolved_embedding = _prepare_search_embedding(
             query=query,
             embedding=embedding,
@@ -191,7 +197,14 @@ class MemoryContextService:
             embedding_model_info=resolved_model_info,
             write_hits=bool(query),
         )
-
+        # 若 pipeline_enabled=True 且有结果，调用 #3459 的 pipeline对检索结果处理，转为MemorySearchContext
+        """
+        class MemorySearchContext(BaseModel):
+            tenant_long_term: List[MemorySearchResult] = Field(default_factory=list)
+            user_long_term: List[MemorySearchResult] = Field(default_factory=list)
+            agent_short_term: List[MemorySearchResult] = Field(default_factory=list)
+            external: List[MemorySearchResult] = Field(default_factory=list)
+        """
         if self.pipeline_enabled and results:
             pipeline_result = self.pipeline.run(
                 internal_results=results,

@@ -56,10 +56,12 @@ class MMRDeduplicator:
         candidates: List[PipelineMemoryRecord],
         query: Optional[str] = None,
     ) -> List[PipelineMemoryRecord]:
+        # 避免塞进多条高度重复的内容，这里可以优化为按召回记忆的向量相似度算mmr
+        # ！！！前几步都是更新分数，mmr这里开始截断和丢弃相似记忆，开始减少
         """Run MMR deduplication over the candidate list."""
         if not candidates:
             return []
-
+        # 按照fused_score从大到小排序并选出前mmr_candidate_top_k个记忆
         sorted_candidates = sorted(candidates, key=lambda r: r.fused_score or 0, reverse=True)
         pool = sorted_candidates[: self.mmr_candidate_top_k]
 
