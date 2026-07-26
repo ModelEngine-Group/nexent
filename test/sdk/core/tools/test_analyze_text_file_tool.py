@@ -322,6 +322,34 @@ class TestAnalyzeTextFileTool:
         assert results[1]["search_type"] == tool.name
 
 
+
+    def test_forward_impl_skips_non_bytes_entries(self, tool):
+        tool.process_text_file = MagicMock(return_value="text")
+        tool.analyze_file = MagicMock(return_value=("answer", 0.0))
+
+        result = tool._forward_impl([b"ok", "not-bytes", 123], "question")
+
+        assert result == ["answer"]
+        tool.process_text_file.assert_called_once_with("file_1.txt", b"ok")
+        tool.analyze_file.assert_called_once()
+
+    def test_detect_file_type_falls_back_for_unknown_ole_and_zip(self, tool, monkeypatch):
+        class FakeOle:
+            def __init__(self, _):
+                pass
+
+            def exists(self, stream_name):
+                return False
+
+        monkeypatch.setattr(module.olefile, "OleFileIO", FakeOle)
+        assert tool.detect_file_type(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1data") == ".txt"
+
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as zf:
+            zf.writestr("readme.txt", "hello")
+        assert tool.detect_file_type(stream.getvalue()) == ".txt"
+
+
 class TestAnalyzeTextFileToolValidateUrlAccess:
     """Test cases for validate_url_access parameter in AnalyzeTextFileTool."""
 

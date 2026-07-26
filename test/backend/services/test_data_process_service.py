@@ -2193,6 +2193,53 @@ class TestDataProcessService(unittest.TestCase):
         mock_build_s3_url.assert_called_once_with("images/2.png")
         mock_load_image.assert_called_once()
         
+
+    @patch.object(DataProcessService, 'load_image', new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.DataProcessCore')
+    @patch('backend.services.data_process_service.upload_fileobj')
+    def test_process_images_skips_small_or_failed_and_handles_errors(
+        self, mock_upload_fileobj, mock_data_process_core, mock_load_image
+    ):
+        """Cover small image skip, upload failure, and exception branches."""
+        small_img = MagicMock(width=100, height=100, mode='RGB')
+        large_img = MagicMock(width=300, height=300, mode='RGB')
+        mock_load_image.side_effect = [None, small_img, large_img, large_img, Exception("boom")]
+
+        mock_processor = MagicMock()
+        mock_data_process_core.return_value = mock_processor
+        mock_processor.file_process.return_value = (
+            [{"content": "only-text"}],
+            [
+                {"image_bytes": b"a", "image_format": "png", "position": {"page_number": 1, "coordinates": {}}},
+                {"image_bytes": b"b", "image_format": "png", "position": {"page_number": 2, "coordinates": {}}},
+                {"image_bytes": b"c", "image_format": "png", "position": {"page_number": 3, "coordinates": {}}},
+                {"image_bytes": b"d", "image_format": "png", "position": {"page_number": 4, "coordinates": {}}},
+                {"image_bytes": b"e", "image_format": "png", "position": {"page_number": 5, "coordinates": {}}},
+            ],
+        )
+        mock_upload_fileobj.side_effect = [
+            {"success": False, "error": "denied"},
+            {"success": False},
+        ]
+
+        result = asyncio.run(
+            self.service.process_uploaded_text_file(b"file-bytes", "doc.pdf", "basic")
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["text"], "only-text")
+        self.assertEqual(result["images_info"], [[], []])
+        self.assertEqual(result["image_chunks_count"], 5)
+        self.assertEqual(result["text_chunks_count"], 1)
+        self.assertEqual(mock_upload_fileobj.call_count, 2)
+
+    def test_extract_text_chunks_helper(self):
+        full_text, chunk_texts = self.service._extract_text_chunks(
+            [{"content": "a"}, {"metadata": {}}, {"content": "b"}]
+        )
+        self.assertEqual(full_text, "a\nb\n")
+        self.assertEqual(chunk_texts, ["a", "b"])
+
     def test_convert_celery_states_to_custom(self):
         """
         Minimal branch coverage for convert_celery_states_to_custom.
