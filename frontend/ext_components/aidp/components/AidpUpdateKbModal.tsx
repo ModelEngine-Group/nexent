@@ -1,10 +1,14 @@
-import React, { useEffect } from "react";
+"use client";
+
+import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Modal, Form, Input, message } from "antd";
+import { Modal, Form, Input, Select, message } from "antd";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface AidpUpdateKbModalProps {
   open: boolean;
@@ -23,12 +27,35 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
 
-  // Pre-fill form when opening
+  // Mirror the create-modal wiring: the authorization context exposes
+  // ``user.tenantId``, which we feed into ``useGroupList`` to enumerate
+  // the tenant's groups for the access-group picker below.
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId ?? null;
+  const { data: groupListData } = useGroupList(tenantId);
+  const groupOptions = useMemo(
+    () =>
+      (groupListData?.groups ?? []).map((g) => ({
+        value: g.group_id,
+        label: g.group_name,
+      })),
+    [groupListData]
+  );
+
+  const ingroupPermission = Form.useWatch("ingroup_permission", form);
+
+  // Pre-fill form when opening. ``group_ids`` may be null/undefined on rows
+  // that predate the column — normalize to an empty array so the Select
+  // (mode="multiple") receives a value shape it accepts.
   useEffect(() => {
     if (open && knowledgeBase) {
       form.setFieldsValue({
         name: knowledgeBase.kds_name,
         description: knowledgeBase.description || "",
+        ingroup_permission: knowledgeBase.ingroup_permission || "READ_ONLY",
+        group_ids: Array.isArray(knowledgeBase.group_ids)
+          ? knowledgeBase.group_ids
+          : [],
       });
     }
   }, [open, knowledgeBase, form]);
@@ -40,10 +67,44 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       const values = await form.validateFields();
       setLoading(true);
 
+      // Update AIDP-side metadata (name + description).
       await aidpKnowledgeService.updateKb(knowledgeBase.kds_id, {
         name: values.name.trim(),
         description: values.description?.trim() || "",
       });
+
+      // Update Nexent-side permissions only when something actually
+      // changed. Skipping the PATCH call when values match the original
+      // row avoids an unnecessary DB write and sidesteps backend
+      // validation for rows where the user hasn't touched permissions.
+      const newPermission = values.ingroup_permission;
+      const newGroupIds: number[] = Array.isArray(values.group_ids)
+        ? values.group_ids
+        : [];
+      const originalPermission =
+        knowledgeBase.ingroup_permission || "READ_ONLY";
+      const originalGroupIds: number[] = Array.isArray(
+        knowledgeBase.group_ids
+      )
+        ? knowledgeBase.group_ids
+        : [];
+      const normalizedNewGroupIds =
+        newPermission === "PRIVATE" ? [] : newGroupIds;
+      const permissionChanged =
+        newPermission !== originalPermission ||
+        normalizedNewGroupIds.length !== originalGroupIds.length ||
+        [...normalizedNewGroupIds]
+          .sort((a, b) => a - b)
+          .some(
+            (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
+          );
+
+      if (permissionChanged) {
+        await aidpKnowledgeService.setPermission(knowledgeBase.kds_id, {
+          ingroup_permission: newPermission,
+          group_ids: normalizedNewGroupIds,
+        });
+      }
 
       message.success(t("aidpKnowledge.updateKbSuccess"));
       form.resetFields();
@@ -92,6 +153,71 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           <Input.TextArea
             rows={3}
             placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
+          />
+        </Form.Item>
+        <Form.Item
+          name="ingroup_permission"
+          label={t("aidpKnowledge.createIngroupPermission")}
+          rules={[
+            {
+              required: true,
+              message: t(
+                "aidpKnowledge.createIngroupPermissionRequired"
+              ),
+            },
+          ]}
+        >
+          <Select
+            options={[
+              {
+                value: "EDIT",
+                label: t(
+                  "aidpKnowledge.createIngroupPermissionEdit"
+                ),
+              },
+              {
+                value: "READ_ONLY",
+                label: t(
+                  "aidpKnowledge.createIngroupPermissionRead"
+                ),
+              },
+              {
+                value: "PRIVATE",
+                label: t(
+                  "aidpKnowledge.createIngroupPermissionPrivate"
+                ),
+              },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item
+          name="group_ids"
+          label={t("aidpKnowledge.createAccessGroups")}
+          required={ingroupPermission !== "PRIVATE"}
+          dependencies={["ingroup_permission"]}
+          rules={[
+            ({ getFieldValue }) => ({
+              validator(_rule, value) {
+                const level =
+                  getFieldValue("ingroup_permission") || "READ_ONLY";
+                if (level === "PRIVATE") return Promise.resolve();
+                if (Array.isArray(value) && value.length > 0) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(
+                  new Error(
+                    t("aidpKnowledge.createAccessGroupsRequired")
+                  )
+                );
+              },
+            }),
+          ]}
+        >
+          <Select
+            mode="multiple"
+            placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
+            disabled={ingroupPermission === "PRIVATE"}
+            options={groupOptions}
           />
         </Form.Item>
       </Form>
