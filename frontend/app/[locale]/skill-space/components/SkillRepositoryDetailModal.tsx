@@ -55,7 +55,7 @@ export function SkillRepositoryDetailModal({
         <div className="flex min-h-[260px] flex-col items-center justify-center gap-3">
           <Empty description={t("skillRepository.detail.loadError")} />
           <Button type="primary" onClick={onRetry}>
-            {t("skillRepository.common.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : detail ? (

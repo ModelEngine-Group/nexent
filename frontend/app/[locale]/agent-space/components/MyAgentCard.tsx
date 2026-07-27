@@ -111,7 +111,7 @@ export function MyAgentCard({
     key: "delete",
     danger: true,
     icon: <Trash2 className="size-3.5" aria-hidden />,
-    label: t("agentRepository.mine.menu.delete"),
+    label: t("common.delete"),
     disabled: isDeleting,
     onClick: onDelete,
   });

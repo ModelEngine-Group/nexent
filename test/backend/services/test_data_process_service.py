@@ -576,11 +576,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_task())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.DataProcessService._get_active_and_reserved_tasks')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_active):
         """
         Async implementation of get_all_tasks testing.
 
@@ -593,14 +593,10 @@ class TestDataProcessService(unittest.TestCase):
         5. The combined task list is returned with all task details
         """
         # Setup mocks
-        mock_inspector = MagicMock()
-        mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1'}, {'id': 'task2'}]
-        }
-        mock_inspector.reserved.return_value = {
-            'worker1': [{'id': 'task3'}]
-        }
-        mock_get_inspector.return_value = mock_inspector
+        mock_get_active.return_value = (
+            {'worker1': [{'id': 'task1'}, {'id': 'task2'}]},
+            {'worker1': [{'id': 'task3'}]},
+        )
 
         mock_get_redis_task_ids.return_value = ['task2', 'task4', 'task5']
 
@@ -620,15 +616,14 @@ class TestDataProcessService(unittest.TestCase):
         # Get all tasks with filtering (excludes task5 which has no index_name and task_name)
         result = await self.service.get_all_tasks(filter=True)
 
-        # Verify result (task5 has no index_name and task_name, so it's filtered out)
-        # Only task1 and task2 have valid index_name + task_name
-        self.assertEqual(len(result), 2)
+        # task1-task4 have index_name + task_name; task5 is filtered out
+        self.assertEqual(len(result), 4)
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
 
-        # Verify result should include all 3 unique tasks
-        self.assertEqual(len(result), 3)
+        # All unique task IDs from Celery + Redis
+        self.assertEqual(len(result), 5)
 
     def test_get_all_tasks(self):
         """
@@ -640,11 +635,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_all_tasks())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.DataProcessService._get_active_and_reserved_tasks')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_active):
         """
         Test get_all_tasks when Redis query fails.
 
@@ -652,14 +647,10 @@ class TestDataProcessService(unittest.TestCase):
         and continues to process tasks from other sources.
         """
         # Setup mocks
-        mock_inspector = MagicMock()
-        mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1'}, {'id': 'task2'}]
-        }
-        mock_inspector.reserved.return_value = {
-            'worker1': [{'id': 'task3'}]
-        }
-        mock_get_inspector.return_value = mock_inspector
+        mock_get_active.return_value = (
+            {'worker1': [{'id': 'task1'}, {'id': 'task2'}]},
+            {'worker1': [{'id': 'task3'}]},
+        )
 
         # Mock Redis to raise an exception
         mock_get_redis_task_ids.side_effect = Exception(
@@ -2437,26 +2428,161 @@ class TestDataProcessService(unittest.TestCase):
                 )
             )
 
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['task-1'])
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
     @patch('backend.services.data_process_service.get_task_info')
     def test_get_all_tasks_handles_string_kwargs_and_bad_json(self, mock_get_task_info, _mock_ids):
         """Cover runtime kwargs normalization fallback branches."""
         async def _run():
-            mock_inspector = MagicMock()
-            mock_inspector.active.return_value = {
-                "w1": [{
-                    "id": "task-1",
-                    "name": "data_process.tasks.process",
-                    "kwargs": "{bad-json"
-                }]
-            }
-            mock_inspector.reserved.return_value = {}
-            self.service._inspector = mock_inspector
-            self.service._inspector_last_time = time.time()
-            # get_task_info returns empty task_name, but runtime meta should backfill it
-            mock_get_task_info.return_value = {"id": "task-1", "task_name": "", "index_name": ""}
-            rows = await self.service.get_all_tasks(filter=False)
-            self.assertEqual(len(rows), 1)
+            with patch.object(
+                self.service,
+                '_get_active_and_reserved_tasks',
+                new=AsyncMock(return_value=(
+                    {
+                        "w1": [{
+                            "id": "task-1",
+                            "name": "data_process.tasks.process",
+                            "kwargs": "{bad-json"
+                        }]
+                    },
+                    {
+                        "w1": [{
+                            "id": "task-2",
+                            "name": "data_process.tasks.forward",
+                            "kwargs": ["not-a-dict"],
+                        }]
+                    },
+                )),
+            ):
+                async def _task_info(task_id):
+                    return {
+                        "id": task_id,
+                        "task_name": "",
+                        "index_name": "",
+                        "path_or_url": "",
+                        "original_filename": "",
+                    }
+
+                mock_get_task_info.side_effect = _task_info
+                rows = await self.service.get_all_tasks(filter=False)
+                self.assertEqual(len(rows), 2)
+                by_id = {row["id"]: row for row in rows}
+                self.assertEqual(by_id["task-1"]["task_name"], "process")
+                self.assertEqual(by_id["task-2"]["task_name"], "forward")
+
+        asyncio.run(_run())
+
+    @patch('backend.services.data_process_service.celery_app')
+    def test_inspect_active_and_reserved_sync_normalizes_non_dict(self, mock_celery_app):
+        """Non-dict active/reserved replies are coerced to empty maps."""
+        inspector = MagicMock()
+        inspector.active.return_value = ["not-a-dict"]
+        inspector.reserved.return_value = ["also-not-a-dict"]
+        mock_celery_app.control.inspect.return_value = inspector
+        mock_celery_app.conf.broker_url = "redis://mock"
+        mock_celery_app.conf.result_backend = "redis://mock"
+
+        active, reserved = self.service._inspect_active_and_reserved_sync()
+        self.assertEqual(active, {})
+        self.assertEqual(reserved, {})
+
+    @patch('backend.services.data_process_service.celery_app')
+    def test_inspect_active_and_reserved_sync_returns_dicts(self, mock_celery_app):
+        inspector = MagicMock()
+        inspector.active.return_value = {"w1": [{"id": "a1"}]}
+        inspector.reserved.return_value = {"w1": [{"id": "r1"}]}
+        mock_celery_app.control.inspect.return_value = inspector
+        mock_celery_app.conf.broker_url = "redis://mock"
+        mock_celery_app.conf.result_backend = "redis://mock"
+
+        active, reserved = self.service._inspect_active_and_reserved_sync()
+        self.assertEqual(active, {"w1": [{"id": "a1"}]})
+        self.assertEqual(reserved, {"w1": [{"id": "r1"}]})
+
+    def test_get_active_and_reserved_tasks_uses_fresh_cache(self):
+        async def _run():
+            cached = ({"w": []}, {"w": []})
+            self.service._inspect_result_cache = cached
+            self.service._inspect_result_cache_time = time.time()
+            with patch.object(
+                self.service, '_inspect_active_and_reserved_sync'
+            ) as mock_inspect:
+                result = await self.service._get_active_and_reserved_tasks()
+                self.assertEqual(result, cached)
+                mock_inspect.assert_not_called()
+
+        asyncio.run(_run())
+
+    def test_get_active_and_reserved_tasks_cache_after_lock_wait(self):
+        """Second coroutine should reuse cache filled while waiting on the lock."""
+        async def _run():
+            self.service._inspect_result_cache = None
+            self.service._inspect_result_cache_time = 0.0
+            filled = ({"w": [{"id": "t1"}]}, {})
+
+            real_lock = self.service._inspect_async_lock
+
+            class _LockProxy:
+                def __init__(self):
+                    self.entered = False
+
+                async def __aenter__(self):
+                    # Simulate another coroutine filling the cache before we inspect.
+                    self.entered = True
+                    self.service_ref._inspect_result_cache = filled
+                    self.service_ref._inspect_result_cache_time = time.time()
+                    await real_lock.__aenter__()
+                    return self
+
+                async def __aexit__(self, *args):
+                    return await real_lock.__aexit__(*args)
+
+            proxy = _LockProxy()
+            proxy.service_ref = self.service
+            self.service._inspect_async_lock = proxy
+
+            with patch.object(
+                self.service, '_inspect_active_and_reserved_sync'
+            ) as mock_inspect:
+                result = await self.service._get_active_and_reserved_tasks()
+                self.assertEqual(result, filled)
+                mock_inspect.assert_not_called()
+
+        asyncio.run(_run())
+
+    def test_get_active_and_reserved_tasks_inspector_failure_caches_empty(self):
+        async def _run():
+            self.service._inspect_result_cache = None
+            self.service._inspect_result_cache_time = 0.0
+            with patch.object(
+                self.service,
+                '_inspect_active_and_reserved_sync',
+                side_effect=RuntimeError("pidbox timeout"),
+            ):
+                active, reserved = await self.service._get_active_and_reserved_tasks()
+                self.assertEqual(active, {})
+                self.assertEqual(reserved, {})
+                self.assertEqual(self.service._inspect_result_cache, ({}, {}))
+
+        asyncio.run(_run())
+
+    def test_get_active_and_reserved_tasks_warns_when_slow(self):
+        async def _run():
+            self.service._inspect_result_cache = None
+            self.service._inspect_result_cache_time = 0.0
+            self.service._inspect_warn_threshold = -1.0
+            with patch.object(
+                self.service,
+                '_inspect_active_and_reserved_sync',
+                return_value=({"w": [{"id": "a"}]}, {"w": [{"id": "r"}]}),
+            ), patch('backend.services.data_process_service.logger') as mock_logger:
+                active, reserved = await self.service._get_active_and_reserved_tasks()
+                self.assertIn("w", active)
+                self.assertIn("w", reserved)
+                self.assertTrue(mock_logger.warning.called)
+                self.assertEqual(
+                    self.service._inspect_result_cache,
+                    ({"w": [{"id": "a"}]}, {"w": [{"id": "r"}]}),
+                )
 
         asyncio.run(_run())
 
