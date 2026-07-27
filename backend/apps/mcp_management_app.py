@@ -218,6 +218,7 @@ async def publish_community_mcp_service_api(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            content=payload.content,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -264,6 +265,7 @@ async def update_community_mcp_service_legacy_api(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            content=payload.content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -326,6 +328,7 @@ async def approve_community_mcp_service_api(
             tenant_id=tenant_id,
             user_id=user_id,
             market_id=payload.review_id,
+            content=payload.content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -355,6 +358,7 @@ async def reject_community_mcp_service_api(
             tenant_id=tenant_id,
             user_id=user_id,
             market_id=payload.review_id,
+            content=payload.content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -396,6 +400,7 @@ async def create_community_mcp_service_api(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            content=payload.content,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -443,6 +448,7 @@ async def update_community_mcp_service_api(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            content=payload.content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -507,6 +513,7 @@ async def change_community_mcp_status_api(
             user_id=user_id,
             market_id=market_id,
             new_status=payload.status,
+            content=payload.content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:

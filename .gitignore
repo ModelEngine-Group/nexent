@@ -63,7 +63,6 @@ model-assets/
 openspec/
 logs/
 
-.agents/
 .devspace/
 devspace.yaml
 deploy/k8s/helm/**/*.tgz
@@ -85,3 +84,7 @@ _doc/
 /deploy/env/.env.bak
 
 agent_repository_frontend
+
+.tokensave
+
+.playwright-mcp/

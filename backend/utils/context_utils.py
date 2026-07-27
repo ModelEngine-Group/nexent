@@ -336,6 +336,8 @@ def build_context_inputs(
     external_a2a_agents: Optional[Dict[str, Any]] = None,
     memory_list: Optional[List[Any]] = None,
     memory_search_query: Optional[str] = None,
+    memory_tool_policy: Optional[str] = None,
+    long_term_memory_prompt: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     include_tools: bool = True,
@@ -369,6 +371,17 @@ def build_context_inputs(
         add_system("header", _build_header_text(
             app_name, app_description, user_id, language
         ), 100, "tenant")
+
+    if memory_tool_policy:
+        add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
+
+    if include_memory and long_term_memory_prompt:
+        add_system(
+            "long_term_memory",
+            long_term_memory_prompt,
+            90,
+            "retrieved",
+        )
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):

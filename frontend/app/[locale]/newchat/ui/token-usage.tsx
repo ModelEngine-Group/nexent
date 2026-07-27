@@ -148,9 +148,11 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
   if (steps.length === 0) return null;
 
   const latestStep = steps[steps.length - 1];
+  const contextWindowTokens = latestStep.contextWindowTokens;
   const tokenThreshold = latestStep.tokenThreshold;
+  const maxTokens = contextWindowTokens ?? tokenThreshold;
 
-  if (tokenThreshold === null) return null;
+  if (maxTokens === null) return null;
 
   const stepCount = steps.length;
 
@@ -160,7 +162,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
     0
   );
 
-  const usagePercent = Math.round((totalTokensUsed / tokenThreshold) * 100);
+  const usagePercent = Math.round((totalTokensUsed / maxTokens) * 100);
 
   return (
     <div className="relative">
@@ -208,22 +210,22 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
             <div className="mb-1.5 flex justify-between text-xs">
               <span className="text-muted-foreground">上下文使用</span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} / {tokenThreshold.toLocaleString()}
+                {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}
               </span>
             </div>
             <div className="flex h-3 overflow-hidden rounded-full bg-muted">
               {steps.map((step, index) => {
                 const stepTotal = step.stepInputTokens + step.stepOutputTokens;
-                const stepPercent = (stepTotal / tokenThreshold) * 100;
-                const inputPercent = (step.stepInputTokens / tokenThreshold) * 100;
-                const outputPercent = (step.stepOutputTokens / tokenThreshold) * 100;
+                const stepPercent = (stepTotal / maxTokens) * 100;
+                const inputPercent = (step.stepInputTokens / maxTokens) * 100;
+                const outputPercent = (step.stepOutputTokens / maxTokens) * 100;
 
                 return (
                   <div
                     key={step.stepNumber}
                     className="group relative"
                     style={{
-                      width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / tokenThreshold) * 100, 0) : 0))}%`,
+                      width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / maxTokens) * 100, 0) : 0))}%`,
                     }}
                     title={`Step ${step.stepNumber}: ${step.stepInputTokens} in + ${step.stepOutputTokens} out`}
                   >
@@ -276,7 +278,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
                 <span className="font-medium">总计</span>
               </span>
               <span className="font-medium text-foreground">
-                {totalTokensUsed.toLocaleString()} / {tokenThreshold.toLocaleString()}
+                {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}
               </span>
             </div>
           </div>

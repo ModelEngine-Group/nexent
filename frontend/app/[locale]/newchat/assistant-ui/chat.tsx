@@ -3,6 +3,7 @@
 import type { FC } from "react";
 import { useCallback } from "react";
 import { Thread } from "./thread";
+import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
 
@@ -12,6 +13,8 @@ export interface ChatProps {
   selectedAgent: Agent | null;
   onAgentSelected?: (agent: Agent) => void;
   onBack: () => void;
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
 }
 
 const AgentsLoadingState: FC = () => (
@@ -29,6 +32,8 @@ export const Chat: FC<ChatProps> = ({
   selectedAgent,
   onAgentSelected,
   onBack,
+  chatMode,
+  onChatModeChange,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -48,5 +53,13 @@ export const Chat: FC<ChatProps> = ({
     );
   }
 
-  return <Thread agent={selectedAgent} generatedTitle={generatedTitle} onBack={onBack} />;
+  return (
+    <Thread
+      agent={selectedAgent}
+      generatedTitle={generatedTitle}
+      onBack={onBack}
+      chatMode={chatMode}
+      onChatModeChange={onChatModeChange}
+    />
+  );
 };

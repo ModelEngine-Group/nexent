@@ -1,4 +1,5 @@
 ﻿import json
+import asyncio
 import threading
 import logging
 from typing import Any, Dict, List, Optional
@@ -25,7 +26,6 @@ from nexent.core.models.capacity_budget import (
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
-from nexent.memory.memory_service import search_memory_in_levels
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -54,6 +54,7 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
@@ -62,6 +63,42 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+def _create_fixed_search_memory_tool():
+    """Create the internal search tool lazily to keep import boundaries stable."""
+    from nexent.core.tools.search_memory_tool import SearchMemoryTool
+
+    return SearchMemoryTool()
+
+
+def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
+    """Render tenant and user long-term memories as a system prompt block."""
+    sections = []
+    section_specs = (
+        (
+            "tenant_long_term",
+            "### 租户长期记忆" if language == "zh" else "### Tenant Long-term Memory",
+        ),
+        (
+            "user_long_term",
+            "### 用户长期记忆" if language == "zh" else "### User Long-term Memory",
+        ),
+    )
+    for attribute, heading in section_specs:
+        entries = []
+        for item in getattr(search_context, attribute, ()) or ():
+            content = (
+                item.get("content", "")
+                if isinstance(item, dict)
+                else getattr(item, "content", "")
+            )
+            normalized = str(content or "").strip()
+            if normalized:
+                entries.append(f"- {normalized}")
+        if entries:
+            sections.append("\n".join((heading, *entries)))
+    return "\n\n".join(sections)
 
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
@@ -709,6 +746,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
     request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
 ):
@@ -737,6 +775,7 @@ async def create_agent_config(
             version_no=sub_agent_version_no,
             override_model_id=None,
             tool_params=normalized_tool_params,
+            conversation_id=conversation_id,
         )
         managed_agents.append(sub_agent_config)
 
@@ -750,10 +789,12 @@ async def create_agent_config(
         version_no=version_no,
         tool_params=normalized_tool_params,
     )
+    memory_tool_names = {"store_memory", "search_memory"}
+    tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
 
-    # Append parallel_executor as a system-managed tool (always available,
-    # like store_memory / search_memory).  Description and inputs are read
-    # from the Tool class so they stay in sync with the SDK definition.
+    # Append parallel_executor as an always-available system-managed tool.
+    # Memory handling is wired separately below: only store_memory is exposed
+    # to the model, while search_memory runs once during preparation.
     tool_list.append(ToolConfig(
         class_name=ParallelExecutorTool.__name__,
         name=ParallelExecutorTool.name,
@@ -778,63 +819,136 @@ async def create_agent_config(
     app_description = tenant_config_manager.get_app_config(
         'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
 
-    # Get memory list
-    memory_context = build_memory_context(user_id, tenant_id, agent_id, skip_query=not allow_memory_search)
-    memory_list = []
-    if allow_memory_search and memory_context.user_config.memory_switch:
-        logger.debug("Retrieving memory list...")
-        memory_levels = ["tenant", "agent", "user", "user_agent"]
-        if memory_context.user_config.agent_share_option == "never":
-            memory_levels.remove("agent")
-        if memory_context.agent_id in memory_context.user_config.disable_agent_ids:
-            memory_levels.remove("agent")
-        if memory_context.agent_id in memory_context.user_config.disable_user_agent_ids:
-            memory_levels.remove("user_agent")
-
-        try:
-            search_res = await search_memory_in_levels(
-                query_text=last_user_query,
-                memory_config=memory_context.memory_config,
-                tenant_id=memory_context.tenant_id,
-                user_id=memory_context.user_id,
-                agent_id=memory_context.agent_id,
-                memory_levels=memory_levels,
-            )
-            memory_list = search_res.get("results", [])
-            logger.debug(f"Retrieved memory list: {memory_list}")
-        except Exception as e:
-            # Bubble up to streaming layer so it can emit <MEM_FAILED> and fall back
-            raise Exception(f"Failed to retrieve memory list: {e}")
+    # Memory list population: in the new Memory system this is performed by
+    # the backend's ``memory_context_service`` via the
+    # ``MemoryService.search_memory`` facade. The legacy
+    # ``search_memory_in_levels`` multi-level fan-out has been removed; the
+    # streaming layer and tool wiring below remain in place.
+    memory_list: list = []
+    long_term_memory_prompt = ""
+    pre_run_tool_events: list[dict[str, Any]] = []
+    memory_context = build_memory_context(
+        user_id, tenant_id, agent_id, skip_query=not allow_memory_search
+    )
 
     # Append active memory tools if memory is enabled
-    if memory_context.user_config.memory_switch and memory_context.memory_config:
+    if memory_context.user_config.memory_switch:
         try:
+            from services.memory_record_service import (
+                _resolve_tenant_embedding_model_info,
+            )
+
+            embedding_configured = (
+                _resolve_tenant_embedding_model_info(
+                    str(memory_context.tenant_id or "")
+                )
+                is not None
+            )
             memory_metadata = {
-                "memory_config": memory_context.memory_config,
                 "memory_user_config": memory_context.user_config,
                 "tenant_id": memory_context.tenant_id,
                 "user_id": memory_context.user_id,
                 "agent_id": memory_context.agent_id,
+                "conversation_id": (
+                    str(conversation_id) if conversation_id is not None else ""
+                ),
+                "embedding_configured": embedding_configured,
             }
 
-            memory_tool_names = {"store_memory", "search_memory"}
-            tool_list = [t for t in tool_list if t.name not in memory_tool_names]
+            # Wire the SDK ``MemoryService`` facade to the
+            # backend services via the adapter. The facade handles policy
+            # enforcement, embedding lookup, and idempotency on its own
+            # and dispatches persistence/retrieval to
+            # ``services.memory_record_service`` /
+            # ``services.memory_retrieval_service``.
+            try:
+                from services.memory_backend_adapter import build_memory_service_for_agent
+                memory_metadata["memory_service"] = (
+                    build_memory_service_for_agent(
+                        tenant_id=memory_context.tenant_id,
+                        user_id=memory_context.user_id,
+                        agent_id=str(memory_context.agent_id or ""),
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to build MemoryService for agent: %s. "
+                    "Memory tools will fall back to legacy path.", exc
+                )
+
+            # Hand the internal fixed SearchMemoryTool a backend
+            # ``MemoryContextService`` so the pre-run search executes
+            # through the retrieval pipeline (normalize / fusion /
+            # decay / MMR / token-budget selection) instead of
+            # bypassing it. The service is reused for prompt injection,
+            # so a single instance per agent is sufficient.
+            try:
+                from services.memory_context_service import get_memory_context_service
+
+                memory_metadata["memory_context_service"] = (
+                    get_memory_context_service()
+                )
+                logger.debug(
+                    "MemoryContextService attached to memory tools "
+                    "for agent_id=%s", memory_context.agent_id
+                )
+                long_term_search_context = await memory_metadata[
+                    "memory_context_service"
+                ].build_context(
+                    tenant_id=str(memory_context.tenant_id or ""),
+                    user_id=str(memory_context.user_id or ""),
+                    agent_id=str(memory_context.agent_id or "") or None,
+                    conversation_id=(
+                        str(conversation_id)
+                        if conversation_id is not None
+                        else None
+                    ),
+                    query=None,
+                    layers=["tenant", "user"],
+                )
+                long_term_memory_prompt = _format_long_term_memory_prompt(
+                    long_term_search_context,
+                    language,
+                )
+                logger.info(
+                    "event=long_term_memory_prompt_loaded tenant_id=%s "
+                    "user_id=%s agent_id=%s context_char_count=%d",
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    len(long_term_memory_prompt),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to attach MemoryContextService to memory "
+                    "tools: %s. Fixed search_memory will fall back to "
+                    "the legacy MemoryService path.", exc
+                )
 
             store_tool_config = ToolConfig(
                 class_name="StoreMemoryTool",
                 name="store_memory",
                 description=(
-                    "Save important information to long-term memory for future recall. "
-                    "Use this when the user shares personal preferences, facts about themselves, "
-                    "project context, or instructions that should persist across conversations. "
-                    "Do NOT store transient information like temporary calculations, information "
-                    "already in the knowledge base, or data the user explicitly says to forget."
+                    "Store one model-selected and summarized short-term memory extracted only "
+                    "from the conversation between the user and the current agent. Eligible "
+                    "information is limited to user preferences, task goals, action plans and "
+                    "latest progress, or reflections on user feedback and errors. Consider the "
+                    "user question, tool or code execution results, and the final answer. Do not "
+                    "store whole conversations, transient calculations, unverified guesses, "
+                    "duplicates, secrets, or information the user asks to forget. Before every "
+                    "final answer, assess whether an eligible memory was added or updated; if so, "
+                    "calling this tool is mandatory."
                 ),
                 inputs=json.dumps({
                     "content": {
                         "type": "string",
-                        "description": "The information to remember",
-                        "description_zh": "需要记住的信息"
+                        "description": (
+                            "One concise, reusable short-term memory entry already judged, "
+                            "summarized, and deduplicated by the model"
+                        ),
+                        "description_zh": (
+                            "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                        )
                     }
                 }, ensure_ascii=False),
                 output_type="string",
@@ -845,40 +959,75 @@ async def create_agent_config(
             )
             tool_list.append(store_tool_config)
 
-            search_tool_config = ToolConfig(
-                class_name="SearchMemoryTool",
-                name="search_memory",
-                description=(
-                    "Search long-term memory for relevant information from previous interactions. "
-                    "Use this when you need context about the user's preferences, past decisions, "
-                    "or previously discussed topics that aren't in the current conversation. "
-                    "The system already provides some memory context automatically -- use this tool "
-                    "when you need to search for specific information not already available."
-                ),
-                inputs=json.dumps({
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language query describing what to search for",
-                        "description_zh": "描述要搜索内容的自然语言查询"
-                    },
-                    "top_k": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return",
-                        "description_zh": "返回结果的最大数量",
-                        "default": 5,
-                        "nullable": True
-                    }
-                }, ensure_ascii=False),
-                output_type="string",
-                params={},
-                source="local",
-                usage=None,
-                metadata=memory_metadata,
+            fixed_search_tool = _create_fixed_search_memory_tool()
+            fixed_search_tool.memory_service = memory_metadata.get("memory_service")
+            fixed_search_tool.memory_context_service = memory_metadata.get(
+                "memory_context_service"
             )
-            tool_list.append(search_tool_config)
-            logger.debug("Active memory tools appended to agent tool list")
+            fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
+            fixed_search_tool.user_id = str(memory_context.user_id or "")
+            fixed_search_tool.agent_id = str(memory_context.agent_id or "")
+            fixed_search_tool.conversation_id = (
+                str(conversation_id) if conversation_id is not None else ""
+            )
+            fixed_search_tool.embedding_configured = embedding_configured
+            fixed_search_result = await asyncio.to_thread(
+                fixed_search_tool.forward,
+                last_user_query or "",
+                5,
+            )
+            pre_run_tool_events.extend([
+                {
+                    "type": "tool",
+                    "content": "",
+                    "tool_name": "search_memory",
+                    "tool_arguments": {
+                        "query": last_user_query or "",
+                        "top_k": 5,
+                    },
+                },
+                {
+                    "type": "execution_logs",
+                    "content": fixed_search_result,
+                },
+            ])
+            if fixed_search_result.startswith("Found "):
+                memory_list.append({
+                    "memory": fixed_search_result,
+                    "memory_level": "retrieved",
+                })
+
+            loaded_memory_tools = [store_tool_config.name]
+            logger.info(
+                "event=memory_tools_loaded tenant_id=%s user_id=%s agent_id=%s "
+                "conversation_id=%s tool_names=%s fixed_search_enabled=true "
+                "pipeline_enabled=%s",
+                tenant_id,
+                user_id,
+                agent_id,
+                conversation_id,
+                loaded_memory_tools,
+                "memory_context_service" in memory_metadata,
+            )
         except Exception as e:
-            logger.warning(f"Failed to append active memory tools: {e}")
+            logger.warning(
+                "event=memory_tools_load_failed tenant_id=%s user_id=%s "
+                "agent_id=%s conversation_id=%s error_type=%s",
+                tenant_id,
+                user_id,
+                agent_id,
+                conversation_id,
+                type(e).__name__,
+            )
+    else:
+        logger.info(
+            "event=memory_tools_skipped tenant_id=%s user_id=%s agent_id=%s "
+            "conversation_id=%s reason=memory_disabled",
+            tenant_id,
+            user_id,
+            agent_id,
+            conversation_id,
+        )
 
     # Build knowledge base summary
     knowledge_base_summary = ""
@@ -920,6 +1069,17 @@ async def create_agent_config(
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
+    memory_tool_policy = build_memory_tool_policy(
+        language,
+        (tool.name for tool in available_tools),
+    )
+    logger.info(
+        "event=memory_tool_policy_context enabled=%s item_id=%s "
+        "policy_char_count=%s",
+        bool(memory_tool_policy),
+        "system:memory_tool_policy" if memory_tool_policy else None,
+        len(memory_tool_policy),
+    )
 
     render_kwargs = {
         "duty": duty_prompt,
@@ -1000,6 +1160,8 @@ async def create_agent_config(
         external_a2a_agents=render_kwargs["external_a2a_agents"],
         memory_list=memory_list,
         memory_search_query=last_user_query,
+        memory_tool_policy=memory_tool_policy,
+        long_term_memory_prompt=long_term_memory_prompt,
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
     )
@@ -1060,6 +1222,7 @@ async def create_agent_config(
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_items=context_items,
+        pre_run_tool_events=pre_run_tool_events,
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
@@ -1528,6 +1691,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
 ):
@@ -1558,6 +1722,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "conversation_id": conversation_id,
         "enable_planning": enable_planning,
     }
     if override_model_id is not None:

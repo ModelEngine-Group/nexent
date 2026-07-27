@@ -657,7 +657,6 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/agent/automations",
     "/api/conversation/",
     "/api/share/",
-    "/api/memory/",
     "/api/file/storage",
     "/api/file/preprocess",
   ];

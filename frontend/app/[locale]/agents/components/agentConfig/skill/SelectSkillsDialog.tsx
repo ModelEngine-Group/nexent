@@ -108,6 +108,15 @@ export default function SelectSkillsDialog({
     () => filteredGroups.find((group) => group.key === activeTab),
     [activeTab, filteredGroups]
   );
+  const allVisibleSkillsSelected = useMemo(
+    () =>
+      activeGroup !== undefined &&
+      activeGroup.skills.length > 0 &&
+      activeGroup.skills.every((skill) =>
+        selectedSkillIds.has(Number(skill.skill_id))
+      ),
+    [activeGroup, selectedSkillIds]
+  );
 
   const skillMetadataModifiable = useMemo(
     () =>
@@ -195,6 +204,40 @@ export default function SelectSkillsDialog({
     },
     [isReadOnly, skillInstanceMap, updateSkills]
   );
+
+  const selectAllVisibleSkills = useCallback(() => {
+    if (isReadOnly || !activeGroup) return;
+
+    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkillIds = new Set(
+      currentSkills.map((skill) => Number(skill.skill_id))
+    );
+    const skillsToAdd = activeGroup.skills
+      .filter((skill) => !currentSkillIds.has(Number(skill.skill_id)))
+      .map((skill) => ({
+        ...skill,
+        config_values:
+          skillInstanceMap[skill.skill_id] || skill.config_values || {},
+      }));
+
+    if (skillsToAdd.length > 0) {
+      updateSkills([...currentSkills, ...skillsToAdd]);
+    }
+  }, [activeGroup, isReadOnly, skillInstanceMap, updateSkills]);
+
+  const deselectAllVisibleSkills = useCallback(() => {
+    if (isReadOnly || !activeGroup) return;
+
+    const visibleSkillIds = new Set(
+      activeGroup.skills.map((skill) => Number(skill.skill_id))
+    );
+    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    updateSkills(
+      currentSkills.filter(
+        (skill) => !visibleSkillIds.has(Number(skill.skill_id))
+      )
+    );
+  }, [activeGroup, isReadOnly, updateSkills]);
 
   const openSkillInfo = useCallback(
     (skill: Skill, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -311,6 +354,20 @@ export default function SelectSkillsDialog({
             allTags.length === 0 ? t("skillPool.noTagsAssigned") : undefined
           }
         />
+        <Button
+          onClick={
+            allVisibleSkillsSelected
+              ? deselectAllVisibleSkills
+              : selectAllVisibleSkills
+          }
+          disabled={
+            isReadOnly || !activeGroup || activeGroup.skills.length === 0
+          }
+        >
+          {t(
+            allVisibleSkillsSelected ? "common.deselectAll" : "common.selectAll"
+          )}
+        </Button>
       </div>
       <div className="flex h-[55vh] min-h-[340px] max-h-[55vh] gap-3 overflow-hidden">
         {activeGroup ? (

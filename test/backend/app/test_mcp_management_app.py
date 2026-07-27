@@ -246,7 +246,7 @@ class TestCommunityReviewApprove:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
         mock_approve.assert_called_once_with(
-            tenant_id="tid", user_id="uid", market_id=1,
+            tenant_id="tid", user_id="uid", market_id=1, content=None,
         )
 
     @patch('apps.mcp_management_app.get_current_user_info')

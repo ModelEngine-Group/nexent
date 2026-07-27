@@ -237,15 +237,11 @@ export function MineAgentsView({
         payload,
       });
       message.success(
-        t("agentRepository.mine.applySuccess", {
-          name:
-            applyModalAgent.name?.trim() ||
-            t("agentRepository.card.untitled"),
-        })
+        t("repository.mine.applySuccess")
       );
       closeApplyModal();
     } catch {
-      message.error(t("agentRepository.mine.applyError"));
+      message.error(t("repository.mine.applyError"));
     } finally {
       setApplyingAgentId(null);
     }
@@ -357,24 +353,24 @@ export function MineAgentsView({
       });
       message.success(
         wasShared
-          ? t("agentRepository.mine.takeDownSuccess")
-          : t("agentRepository.mine.cancelApplySuccess")
+          ? t("repository.mine.takeDownSuccess")
+          : t("repository.mine.cancelApplySuccess")
       );
       closeReviewModal();
     } catch {
       message.error(
         wasShared
-          ? t("agentRepository.mine.takeDownError")
-          : t("agentRepository.mine.cancelApplyError")
+          ? t("repository.mine.takeDownError")
+          : t("repository.mine.cancelApplyError")
       );
       throw new Error("Update repository status failed");
     }
   };
 
   const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "agentRepository.mine.filter.all",
-    created: "agentRepository.mine.filter.created",
-    others: "agentRepository.mine.filter.others",
+    all: "repository.mine.filter.all",
+    created: "repository.mine.filter.created",
+    others: "repository.mine.filter.others",
   };
 
   const hasActiveFilter = ownership !== "all" || normalizedQuery.length > 0;
@@ -450,7 +446,7 @@ export function MineAgentsView({
             {t("agentRepository.mine.loadError")}
           </p>
           <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : showFilteredEmpty ? (
@@ -506,7 +502,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-label={t("agentRepository.mine.pagination.prev")}
+                aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </Button>
@@ -517,7 +513,7 @@ export function MineAgentsView({
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
                     onClick={() => onPageChange(pageNumber)}
-                    aria-label={t("agentRepository.mine.pagination.page", {
+                    aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
                     aria-current={pageNumber === page ? "page" : undefined}
@@ -531,7 +527,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-label={t("agentRepository.mine.pagination.next")}
+                aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
               </Button>
