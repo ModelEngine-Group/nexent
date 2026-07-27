@@ -43,32 +43,32 @@ export default function SpacePage() {
     invalidate();
   };
 
-  const onImportAgent = () => {
-    openImportWizardWithFile({
-      onSuccess: (agentData) => {
-        setImportWizardData(agentData);
-        setImportWizardVisible(true);
-        setIsImporting(false);
-      },
-      onParseError: (msg) => {
-        message.error(t(msg));
-        setIsImporting(false);
-      },
-      onFileNotFound: (msg) => {
-        message.error(msg);
-        setIsImporting(false);
-      },
-      onValidationError: (msg) => {
-        message.error(t(msg));
-        setIsImporting(false);
-      },
-      onGenericError: (error) => {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
-        setIsImporting(false);
-      },
-    });
+  const onImportAgent = async () => {
     setIsImporting(true);
+
+    try {
+      await openImportWizardWithFile({
+        onSuccess: (agentData) => {
+          setImportWizardData(agentData);
+          setImportWizardVisible(true);
+        },
+        onParseError: (msg) => {
+          message.error(t(msg));
+        },
+        onFileNotFound: (msg) => {
+          message.error(msg);
+        },
+        onValidationError: (msg) => {
+          message.error(t(msg));
+        },
+        onGenericError: (error) => {
+          log.error("Failed to read import file:", error);
+          message.error(t("businessLogic.config.error.agentImportFailed"));
+        },
+      });
+    } finally {
+      setIsImporting(false);
+    }
   };
 
 
@@ -149,7 +149,7 @@ export default function SpacePage() {
 
                   {/* Import agent - bottom half */}
                   <button
-                    onClick={onImportAgent}
+                    onClick={() => void onImportAgent()}
                     disabled={isImporting}
                     className="flex-1 border-2 border-dashed border-green-300 dark:border-green-600 rounded-lg hover:border-green-500 dark:hover:border-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 transition-all duration-300 flex flex-col items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
                   >
