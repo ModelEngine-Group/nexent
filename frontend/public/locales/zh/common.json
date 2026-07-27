@@ -3793,6 +3793,7 @@
   "dreaming.schedule.saveFailed": "保存计划失败",
   "dreaming.schedule.nextFire": "下次执行：{{time}}",
   "dreaming.schedule.disabledHint": "自动 Dreaming 当前已关闭",
+  "dreaming.schedule.selectAgentHint": "请先创建或选择一个智能体，再配置自动 Dreaming。",
   "dreaming.schedule.weekday.0": "星期日",
   "dreaming.schedule.weekday.1": "星期一",
   "dreaming.schedule.weekday.2": "星期二",

@@ -3793,6 +3793,7 @@
   "dreaming.schedule.saveFailed": "Failed to save the schedule",
   "dreaming.schedule.nextFire": "Next run: {{time}}",
   "dreaming.schedule.disabledHint": "Automatic Dreaming is off",
+  "dreaming.schedule.selectAgentHint": "Create or select an agent before configuring automatic Dreaming.",
   "dreaming.schedule.weekday.0": "Sunday",
   "dreaming.schedule.weekday.1": "Monday",
   "dreaming.schedule.weekday.2": "Tuesday",

@@ -142,6 +142,15 @@ export function DreamingPanel() {
     [audits]
   );
   const latestRun = audits[0];
+  const displayedSchedule: DreamingSchedule = schedule || {
+    agent_id: agentId || "",
+    enabled: false,
+    rule_type: "CRON",
+    timezone: "Asia/Shanghai",
+    cron_expr: "0 3 * * *",
+    interval_seconds: null,
+    fire_count: 0,
+  };
   const selectedIsSelf = !targetUserId || targetUserId === user?.id;
   const canEditTarget = selectedIsSelf || hasPermission("DREAMING:EDIT_TENANT");
   const queueDelayed =
@@ -291,96 +300,102 @@ export function DreamingPanel() {
         </div>
       </Card>
 
-      {agentId && schedule && (
-        <Card
-          title={
-            <Space>
-              <Clock className="size-4" />
-              {t("dreaming.schedule.title")}
-            </Space>
-          }
-          extra={
-            <Button
-              icon={<Save className="size-4" />}
-              loading={savingSchedule}
-              disabled={!canEditTarget}
-              onClick={saveSchedule}
-            >
-              {t("dreaming.schedule.save")}
-            </Button>
-          }
-        >
-          <Space wrap size="large">
-            <Space>
-              <Typography.Text>
-                {t("dreaming.schedule.enabled")}
-              </Typography.Text>
-              <Switch
-                checked={schedule.enabled}
-                disabled={!canEditTarget}
-                onChange={(enabled) => setSchedule({ ...schedule, enabled })}
-              />
-            </Space>
-            <Select
-              aria-label={t("dreaming.schedule.frequency")}
-              value={scheduleMode}
-              disabled={!canEditTarget}
-              style={{ width: 150 }}
-              onChange={setScheduleMode}
-              options={[
-                { value: "daily", label: t("dreaming.schedule.daily") },
-                { value: "weekly", label: t("dreaming.schedule.weekly") },
-                { value: "interval", label: t("dreaming.schedule.interval") },
-              ]}
-            />
-            {scheduleMode === "weekly" && (
-              <Select
-                value={scheduleWeekday}
-                disabled={!canEditTarget}
-                style={{ width: 130 }}
-                onChange={setScheduleWeekday}
-                options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
-                  value,
-                  label: t(`dreaming.schedule.weekday.${value}`),
-                }))}
-              />
-            )}
-            {scheduleMode !== "interval" ? (
-              <TimePicker
-                value={dayjs(`2000-01-01T${scheduleTime}:00`)}
-                format="HH:mm"
-                minuteStep={5}
-                disabled={!canEditTarget}
-                onChange={(value) =>
-                  value && setScheduleTime(value.format("HH:mm"))
-                }
-              />
-            ) : (
-              <Space>
-                <InputNumber
-                  min={1}
-                  max={720}
-                  value={intervalHours}
-                  disabled={!canEditTarget}
-                  onChange={(value) => setIntervalHours(value || 1)}
-                />
-                <Typography.Text>
-                  {t("dreaming.schedule.hours")}
-                </Typography.Text>
-              </Space>
-            )}
+      <Card
+        title={
+          <Space>
+            <Clock className="size-4" />
+            {t("dreaming.schedule.title")}
           </Space>
-          <div className="mt-3">
-            <Typography.Text type="secondary">
-              {schedule.next_fire_at
-                ? t("dreaming.schedule.nextFire", {
-                    time: new Date(schedule.next_fire_at).toLocaleString(),
-                  })
-                : t("dreaming.schedule.disabledHint")}
-            </Typography.Text>
-          </div>
-        </Card>
-      )}
+        }
+        extra={
+          <Button
+            icon={<Save className="size-4" />}
+            loading={savingSchedule}
+            disabled={!agentId || !schedule || !canEditTarget}
+            onClick={saveSchedule}
+          >
+            {t("dreaming.schedule.save")}
+          </Button>
+        }
+      >
+        {!agentId && (
+          <Alert
+            className="mb-4"
+            type="info"
+            showIcon
+            message={t("dreaming.schedule.selectAgentHint")}
+          />
+        )}
+        <Space wrap size="large">
+          <Space>
+            <Typography.Text>{t("dreaming.schedule.enabled")}</Typography.Text>
+            <Switch
+              checked={displayedSchedule.enabled}
+              disabled={!agentId || !schedule || !canEditTarget}
+              onChange={(enabled) =>
+                setSchedule({ ...displayedSchedule, enabled })
+              }
+            />
+          </Space>
+          <Select
+            aria-label={t("dreaming.schedule.frequency")}
+            value={scheduleMode}
+            disabled={!agentId || !schedule || !canEditTarget}
+            style={{ width: 150 }}
+            onChange={setScheduleMode}
+            options={[
+              { value: "daily", label: t("dreaming.schedule.daily") },
+              { value: "weekly", label: t("dreaming.schedule.weekly") },
+              { value: "interval", label: t("dreaming.schedule.interval") },
+            ]}
+          />
+          {scheduleMode === "weekly" && (
+            <Select
+              value={scheduleWeekday}
+              disabled={!agentId || !schedule || !canEditTarget}
+              style={{ width: 130 }}
+              onChange={setScheduleWeekday}
+              options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
+                value,
+                label: t(`dreaming.schedule.weekday.${value}`),
+              }))}
+            />
+          )}
+          {scheduleMode !== "interval" ? (
+            <TimePicker
+              value={dayjs(`2000-01-01T${scheduleTime}:00`)}
+              format="HH:mm"
+              minuteStep={5}
+              disabled={!agentId || !schedule || !canEditTarget}
+              onChange={(value) =>
+                value && setScheduleTime(value.format("HH:mm"))
+              }
+            />
+          ) : (
+            <Space>
+              <InputNumber
+                min={1}
+                max={720}
+                value={intervalHours}
+                disabled={!agentId || !schedule || !canEditTarget}
+                onChange={(value) => setIntervalHours(value || 1)}
+              />
+              <Typography.Text>{t("dreaming.schedule.hours")}</Typography.Text>
+            </Space>
+          )}
+        </Space>
+        <div className="mt-3">
+          <Typography.Text type="secondary">
+            {displayedSchedule.next_fire_at
+              ? t("dreaming.schedule.nextFire", {
+                  time: new Date(
+                    displayedSchedule.next_fire_at
+                  ).toLocaleString(),
+                })
+              : t("dreaming.schedule.disabledHint")}
+          </Typography.Text>
+        </div>
+      </Card>
 
       {activeRun && (
         <Alert
