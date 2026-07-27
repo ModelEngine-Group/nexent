@@ -558,3 +558,397 @@ class TestListModels:
             response = client.get("/aidp-mgmt/models", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         mock_models.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _auth edge cases (lines 128-129, 131)
+# ---------------------------------------------------------------------------
+
+
+class TestAuthEdgeCases:
+    def test_unauthorized_error_from_get_current_user_id_returns_401(self, monkeypatch):
+        """get_current_user_id raises UnauthorizedError -> _auth catches and returns 401."""
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from consts.exceptions import UnauthorizedError
+
+        monkeypatch.setattr(
+            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            lambda *_a, **_kw: (_ for _ in ()).throw(
+                UnauthorizedError("invalid token")
+            ),
+        )
+        client = _client()
+        response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    def test_empty_tenant_id_returns_401(self, monkeypatch):
+        """get_current_user_id returns empty tenant -> _auth returns 401."""
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        monkeypatch.setattr(
+            aidp_mgmt_app.auth_utils_module, "get_current_user_id",
+            lambda *_a, **_kw: ("user-1", ""),
+        )
+        client = _client()
+        response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# ---------------------------------------------------------------------------
+# _infer_is_multimodal and _raise_aidp_conflict helpers
+# ---------------------------------------------------------------------------
+
+
+class TestHelperFunctions:
+    def test_infer_is_multimodal_with_non_dict(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        assert aidp_mgmt_app._infer_is_multimodal("not a dict") is False
+        assert aidp_mgmt_app._infer_is_multimodal(None) is False
+        assert aidp_mgmt_app._infer_is_multimodal(42) is False
+
+    def test_infer_is_multimodal_caption_enable_variants(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        assert aidp_mgmt_app._infer_is_multimodal({"caption_enable": 1}) is True
+        assert aidp_mgmt_app._infer_is_multimodal({"caption_enable": "1"}) is True
+        assert aidp_mgmt_app._infer_is_multimodal({"caption_enable": True}) is True
+        assert aidp_mgmt_app._infer_is_multimodal({"caption_enable": 0}) is False
+        assert aidp_mgmt_app._infer_is_multimodal({}) is False
+
+    def test_raise_aidp_conflict_translates_to_http_409(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from fastapi import HTTPException
+        from sqlalchemy.exc import IntegrityError
+
+        with pytest.raises(HTTPException) as exc_info:
+            aidp_mgmt_app._raise_aidp_conflict(
+                IntegrityError("INSERT", {}, Exception("dup"))
+            )
+        assert exc_info.value.status_code == HTTPStatus.CONFLICT
+
+    def test_serialize_permission_returns_dict(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        decision = MagicMock()
+        decision.permission = "EDIT"
+        decision.matched_group_ids = (1, 2)
+        decision.is_management_role = True
+
+        result = aidp_mgmt_app._serialize_permission(decision)
+        assert result == {
+            "permission": "EDIT",
+            "matched_group_ids": [1, 2],
+            "is_management_role": True,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Count endpoint (lines 279-281)
+# ---------------------------------------------------------------------------
+
+
+class TestCountEndpoint:
+    def test_count_knowledge_bases_returns_total(self):
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=5):
+            response = client.get("/aidp-mgmt/knowledge-bases/count", headers=_bearer())
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["total_count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# List KB - detail fetch success with ACTIVE status (line 230)
+# ---------------------------------------------------------------------------
+
+
+class TestListKbsActiveStatus:
+    def test_list_marks_kb_active_when_detail_fetch_succeeds(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=1), \
+             patch.object(aidp_permission_service, "get_accessible_kbs", return_value=[
+                 {
+                     "kb_id": "kb-1", "owner_user_id": USER_ID, "tenant_id": TENANT_ID,
+                     "ingroup_permission": "EDIT", "group_ids": [],
+                     "resource_status": "ACTIVE", "permission": "EDIT",
+                 }
+             ]), \
+             patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
+                          return_value={"kds_name": "name", "description": "desc", "document_count": 3,
+                                        "chunk_count": 10, "embedding_model": "model"}):
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"][0]["resource_status"] == "ACTIVE"
+        assert body["value"][0]["kds_name"] == "name"
+
+
+# ---------------------------------------------------------------------------
+# Create KB - edge cases (lines 294, 307-313, 322-326, 333, 363, 368-373)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateKnowledgeBaseEdgeCases:
+    def test_create_rejects_invalid_ingroup_permission(self):
+        client = _client()
+        response = client.post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json={"name": "KB", "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
+        )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+
+    def test_create_with_aidp_group_validation_error(self):
+        """_validate_group_ids_strict raises AidpGroupValidationError -> 400. Covers line 307-311."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.consts.aidp_exceptions import AidpGroupValidationError
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"kds_id": "kb-new"}), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=AidpGroupValidationError(invalid_ids=[999], tenant_id="t")):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "EDIT", "group_ids": [999]},
+            )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+
+    def test_create_private_skips_group_validation(self):
+        """PRIVATE permission: group validation skipped, valid_group_ids=[] (line 313)."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"kds_id": "kb-priv"}) as mock_create, \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1) as mock_perm, \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "Private KB", "ingroup_permission": "PRIVATE"},
+            )
+        assert response.status_code == HTTPStatus.OK
+        # No group validation was called
+        perm_kwargs = mock_perm.call_args.kwargs
+        assert perm_kwargs["group_ids"] == []
+
+    def test_create_app_exception_from_aidp_reraised(self):
+        """AppException from create_aidp_kb_impl is re-raised directly (line 323)."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    side_effect=AppException(ErrorCode.AIDP_AUTH_ERROR, "unauthorized")), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        # AIDP_AUTH_ERROR maps to 502
+        assert response.status_code == 502
+
+    def test_create_integrity_error_on_permission_insert(self):
+        """IntegrityError during create_permission -> _raise_aidp_conflict -> 409 (line 363)."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+        from sqlalchemy.exc import IntegrityError
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"kds_id": "kb-dup"}), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission",
+                          side_effect=IntegrityError("INSERT", {}, Exception("dup"))):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        assert response.status_code == HTTPStatus.CONFLICT
+
+    def test_create_generic_exception_from_aidp(self):
+        """Generic exception from create_aidp_kb_impl -> AppException with AIDP_SERVICE_ERROR (502)."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    side_effect=RuntimeError("AIDP exploded")), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        # AIDP_SERVICE_ERROR maps to 502 in ERROR_CODE_HTTP_STATUS
+        assert response.status_code == 502
+
+    def test_create_no_kds_id_from_aidp(self):
+        """AIDP returns response without kds_id -> AppException AIDP_SERVICE_ERROR (502)."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"name": "kb"}), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        # AIDP_SERVICE_ERROR maps to 502
+        assert response.status_code == 502
+
+    def test_create_rollback_success_returns_500(self):
+        """DB fails -> AIDP rollback succeeds -> 500 returned (HTTPException from handler)."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        delete_mock = MagicMock(return_value=True)
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"kds_id": "kb-new"}), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission",
+                          side_effect=RuntimeError("db down")), \
+             patch.object(aidp_mgmt_app, "delete_aidp_kb_impl", delete_mock):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        delete_mock.assert_called_once()
+
+    def test_create_rollback_failure_marks_orphaned(self):
+        """DB fails -> AIDP rollback also fails -> ORPHANED status + 500."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value={"kds_id": "kb-new"}), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission",
+                          side_effect=RuntimeError("db down")), \
+             patch.object(aidp_mgmt_app, "delete_aidp_kb_impl",
+                          side_effect=RuntimeError("rollback failed")), \
+             patch.object(aidp_permission_service, "update_resource_status") as mock_status:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        mock_status.assert_called_once()
+        assert mock_status.call_args.kwargs["status"] == "ORPHANED"
+
+
+# ---------------------------------------------------------------------------
+# Get KB - AppException fetch failure (lines 403-410)
+# ---------------------------------------------------------------------------
+
+
+class TestGetKbFetchFailure:
+    def test_get_kb_marks_unavailable_on_aidp_error(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
+             patch.object(aidp_permission_service, "update_resource_status") as mock_status:
+            response = client.get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer())
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["resource_status"] == "UNAVAILABLE"
+        mock_status.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# List documents - count API failure fallback (lines 488-493, 504)
+# ---------------------------------------------------------------------------
+
+
+class TestListDocumentsCountFailure:
+    def test_list_docs_falls_back_when_count_api_fails(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": [{"a": 1}, {"a": 2}]}), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "count failed")):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        # Falls back to page count
+        assert body["total_count"] == 2
+        assert body["total_reliable"] is False
+
+
+# ---------------------------------------------------------------------------
+# Set permission - edge cases (lines 519, 535)
+# ---------------------------------------------------------------------------
+
+
+class TestSetPermissionEdgeCases:
+    def test_set_permission_rejects_unsupported_value(self):
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")):
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "INVALID_VAL", "group_ids": [1]},
+            )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+
+    def test_set_permission_group_validation_error(self):
+        """_validate_group_ids_strict raises AidpGroupValidationError -> 400."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.consts.aidp_exceptions import AidpGroupValidationError
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=AidpGroupValidationError(invalid_ids=[999], tenant_id="t")):
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "EDIT", "group_ids": [999]},
+            )
+        assert response.status_code == HTTPStatus.BAD_REQUEST

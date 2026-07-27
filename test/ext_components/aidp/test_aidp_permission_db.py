@@ -375,3 +375,75 @@ class TestGroupIdNormalization:
     def test_normalize_group_ids_rejects_non_integer(self, aidp_permission_db):
         with pytest.raises(ValueError):
             aidp_permission_db._normalize_group_ids([1, "abc"])
+
+
+# ---------------------------------------------------------------------------
+# list_all_permissions_by_tenant tests (lines 95-105)
+# ---------------------------------------------------------------------------
+
+
+class TestListAllPermissionsByTenant:
+    def test_returns_all_active_rows_without_pagination(self, aidp_permission_db, fake_session):
+        rows = [
+            {"id": 1, "kb_id": "kb-1", "tenant_id": "tenant-a", "delete_flag": "N"},
+            {"id": 2, "kb_id": "kb-2", "tenant_id": "tenant-a", "delete_flag": "N"},
+        ]
+        fake_session.execute_result.scalars.return_value.all.return_value = [
+            _row(r) for r in rows
+        ]
+
+        result = aidp_permission_db.list_all_permissions_by_tenant("tenant-a")
+
+        assert len(result) == 2
+        assert result[0]["kb_id"] == "kb-1"
+        assert result[1]["kb_id"] == "kb-2"
+        assert len(fake_session.executed) == 1
+
+    def test_rejects_empty_tenant_id(self, aidp_permission_db, fake_session):
+        with pytest.raises(ValueError):
+            aidp_permission_db.list_all_permissions_by_tenant("")
+        assert fake_session.executed == []
+
+
+# ---------------------------------------------------------------------------
+# Argument validation gaps (lines 169, 215, 260)
+# ---------------------------------------------------------------------------
+
+
+class TestArgumentValidation:
+    def test_create_permission_requires_all_three_ids(self, aidp_permission_db, fake_session):
+        with pytest.raises(ValueError, match="kb_id, owner_user_id and tenant_id"):
+            aidp_permission_db.create_permission(
+                kb_id="", owner_user_id="u", tenant_id="t"
+            )
+        with pytest.raises(ValueError, match="kb_id, owner_user_id and tenant_id"):
+            aidp_permission_db.create_permission(
+                kb_id="kb", owner_user_id="", tenant_id="t"
+            )
+        with pytest.raises(ValueError, match="kb_id, owner_user_id and tenant_id"):
+            aidp_permission_db.create_permission(
+                kb_id="kb", owner_user_id="u", tenant_id=""
+            )
+        assert fake_session.executed == []
+
+    def test_update_permission_requires_kb_and_tenant(self, aidp_permission_db, fake_session):
+        with pytest.raises(ValueError, match="kb_id and tenant_id"):
+            aidp_permission_db.update_permission(kb_id="", tenant_id="t")
+        with pytest.raises(ValueError, match="kb_id and tenant_id"):
+            aidp_permission_db.update_permission(kb_id="kb", tenant_id="")
+        assert fake_session.executed == []
+
+    def test_soft_delete_permission_requires_kb_and_tenant(self, aidp_permission_db, fake_session):
+        with pytest.raises(ValueError, match="kb_id and tenant_id"):
+            aidp_permission_db.soft_delete_permission(kb_id="", tenant_id="t")
+        with pytest.raises(ValueError, match="kb_id and tenant_id"):
+            aidp_permission_db.soft_delete_permission(kb_id="kb", tenant_id="")
+        assert fake_session.executed == []
+
+    def test_update_permission_rowcount_zero_returns_false(self, aidp_permission_db, fake_session):
+        """When no active row matches, rowcount=0 and function returns False."""
+        fake_session.execute_result.rowcount = 0
+        ok = aidp_permission_db.update_permission(
+            kb_id="kb-1", tenant_id="tenant-a", ingroup_permission="EDIT",
+        )
+        assert ok is False

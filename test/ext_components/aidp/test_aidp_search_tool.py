@@ -680,3 +680,225 @@ class TestAidpSearchToolWhitelist:
 
         aidp_tool.set_allowed_kds(None)
         assert aidp_tool._filter_by_whitelist(["kb-99"]) == ["kb-99"]
+
+
+# ---------------------------------------------------------------------------
+# _execute_request retry logic (502/503/504 transient retries)
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteRequestRetry:
+    """Covers the transient HTTP retry logic in _execute_request
+    (502 / 503 / 504 with exponential backoff)."""
+
+    def _make_response(self, status_code, json_data=None):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.reason_phrase = "Error"
+        resp.request = httpx.Request("POST", "http://test")
+        if json_data is not None:
+            resp.json.return_value = json_data
+            resp.raise_for_status.return_value = None
+        else:
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                message=f"{status_code}",
+                request=resp.request,
+                response=resp,
+            )
+        return resp
+
+    def test_retry_503_then_success(self, aidp_tool, monkeypatch):
+        """First call returns 503, second returns 200. Should retry and succeed."""
+        resp_503 = self._make_response(503)
+        resp_ok = self._make_response(200, json_data={"result": [{"id": "c1", "chunk_type": "text",
+                                                                   "title": "", "text": "ok",
+                                                                   "file_url": "", "score": 0.9,
+                                                                   "pages": [], "metadata": {}}]})
+        aidp_tool._mock_http_client.post.side_effect = [resp_503, resp_ok]
+        monkeypatch.setattr(aidp_tool._mock_http_client, "__class__", MagicMock.__class__)
+
+        # Skip actual sleep
+        import time as _time
+        monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+        records = aidp_tool._execute_request("query", ["kb1"])
+        assert len(records) == 1
+        assert aidp_tool._mock_http_client.post.call_count == 2
+
+    def test_retry_503_all_attempts_exhausted_raises_503_specific(self, aidp_tool, monkeypatch):
+        """All 3 attempts return 503. Should raise AidpSearchError with 503-specific message."""
+        resp_503 = self._make_response(503)
+        aidp_tool._mock_http_client.post.return_value = resp_503
+
+        import time as _time
+        monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+        with pytest.raises(Exception) as exc_info:
+            aidp_tool._execute_request("query", ["kb1"])
+        assert "temporarily unavailable" in str(exc_info.value).lower() or "503" in str(exc_info.value)
+        assert aidp_tool._mock_http_client.post.call_count == 3
+
+    def test_retry_502_all_attempts_exhausted_raises_generic(self, aidp_tool, monkeypatch):
+        """All 3 attempts return 502. Should raise AidpSearchError with generic transient message."""
+        resp_502 = self._make_response(502)
+        aidp_tool._mock_http_client.post.return_value = resp_502
+
+        import time as _time
+        monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+        with pytest.raises(Exception) as exc_info:
+            aidp_tool._execute_request("query", ["kb1"])
+        assert "502" in str(exc_info.value)
+        assert aidp_tool._mock_http_client.post.call_count == 3
+
+    def test_no_retry_on_400(self, aidp_tool):
+        """400 is not a retryable status. Should raise immediately after one call."""
+        resp_400 = self._make_response(400)
+        aidp_tool._mock_http_client.post.return_value = resp_400
+
+        with pytest.raises(httpx.HTTPStatusError):
+            aidp_tool._execute_request("query", ["kb1"])
+        assert aidp_tool._mock_http_client.post.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _resolve_field_default with FieldInfo
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Init with empty tenant_id (line 183)
+# ---------------------------------------------------------------------------
+
+
+class TestInitEmptyTenantId:
+    def test_empty_tenant_id_raises(self, aidp_module, mock_observer):
+        with pytest.raises(ValueError, match="tenant_id is required"):
+            aidp_module.AidpSearchTool(
+                server_url="https://aidp.example.com",
+                api_key="jwt-token",
+                tenant_id="",
+                kds_list='["kb1"]',
+                observer=mock_observer,
+            )
+
+    def test_non_string_tenant_id_raises(self, aidp_module, mock_observer):
+        with pytest.raises(ValueError, match="tenant_id is required"):
+            aidp_module.AidpSearchTool(
+                server_url="https://aidp.example.com",
+                api_key="jwt-token",
+                tenant_id=123,
+                kds_list='["kb1"]',
+                observer=mock_observer,
+            )
+
+
+# ---------------------------------------------------------------------------
+# forward() without observer (hits _emit_running_prompt and _emit_results
+# early-return paths, lines 259, 319)
+# ---------------------------------------------------------------------------
+
+
+class TestForwardWithoutObserver:
+    def test_forward_no_observer_succeeds(self, aidp_module):
+        """Tool with observer=None exercises the early-return paths
+        in _emit_running_prompt and _emit_results."""
+        mock_client = MagicMock()
+        aidp_module.http_client_manager.get_sync_client.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "chunk-1", "chunk_type": "text", "title": "Doc",
+                    "text": "ok", "file_url": "", "score": 0.9,
+                    "pages": [], "metadata": {},
+                }
+            ]
+        )
+        mock_client.post.return_value = mock_response
+
+        tool = aidp_module.AidpSearchTool(
+            server_url="https://aidp.example.com",
+            api_key="jwt-token",
+            tenant_id="aidp",
+            kds_list='["kb1"]',
+            observer=None,
+        )
+        tool._http_client = mock_client
+        result = tool.forward("no observer query")
+        parsed = json.loads(result)
+        assert len(parsed) == 1
+
+
+class TestResolveFieldDefault:
+    """Covers _resolve_field_default when value is a FieldInfo instance."""
+
+    def test_field_info_with_ellipsis_returns_fallback(self, aidp_module):
+        from pydantic.fields import FieldInfo
+        fi = FieldInfo()
+        # Pydantic v2 uses PydanticUndefined for defaults, but the source
+        # code checks ``value.default is ...``. Create a FieldInfo whose
+        # .default is literally Ellipsis to exercise that branch.
+        object.__setattr__(fi, "default", ...)
+        result = aidp_module._resolve_field_default(fi, "fallback_value")
+        assert result == "fallback_value"
+
+    def test_field_info_with_explicit_default_returns_it(self, aidp_module):
+        from pydantic.fields import FieldInfo
+        fi = FieldInfo()
+        object.__setattr__(fi, "default", "custom_default")
+        result = aidp_module._resolve_field_default(fi, "fallback_value")
+        assert result == "custom_default"
+
+    def test_none_value_returns_fallback(self, aidp_module):
+        assert aidp_module._resolve_field_default(None, 42) == 42
+
+    def test_non_none_value_returns_it(self, aidp_module):
+        assert aidp_module._resolve_field_default("hello", 42) == "hello"
+
+
+# ---------------------------------------------------------------------------
+# _parse_kds_list with non-string input (pre-parsed list)
+# ---------------------------------------------------------------------------
+
+
+class TestParseKdsListNonString:
+    def test_list_input_bypasses_json_parse(self, aidp_module):
+        result = aidp_module._parse_kds_list(["kb1", "kb2"])
+        assert result == ["kb1", "kb2"]
+
+    def test_too_many_kds_raises(self, aidp_module):
+        with pytest.raises(ValueError, match="1-10"):
+            aidp_module._parse_kds_list(["kb"] * 11)
+
+    def test_empty_list_raises(self, aidp_module):
+        with pytest.raises(ValueError, match="1-10"):
+            aidp_module._parse_kds_list([])
+
+
+# ---------------------------------------------------------------------------
+# _build_retrieve_payload with reranking disabled
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRetrievePayload:
+    def test_reranking_disabled_omits_reranking_mode(self, aidp_module, mock_observer):
+        mock_client = MagicMock()
+        aidp_module.http_client_manager.get_sync_client.return_value = mock_client
+
+        tool = aidp_module.AidpSearchTool(
+            server_url="https://aidp.example.com",
+            api_key="jwt-token",
+            tenant_id="aidp",
+            kds_list='["kb1"]',
+            reranking_enable=False,
+            observer=mock_observer,
+        )
+        payload = tool._build_retrieve_payload("q", ["kb1"])
+        assert "reranking_mode" not in payload
+
+    def test_reranking_enabled_includes_reranking_mode(self, aidp_tool):
+        payload = aidp_tool._build_retrieve_payload("q", ["kb1"])
+        assert payload["reranking_mode"] == "high_accuracy"

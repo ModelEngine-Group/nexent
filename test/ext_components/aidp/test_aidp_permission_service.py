@@ -349,3 +349,155 @@ class TestGetAccessibleKbs:
         monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
 
         assert svc.count_accessible_kbs("u", "t") == 1
+
+
+# ---------------------------------------------------------------------------
+# _parse_group_ids gap coverage (lines 100-108)
+# ---------------------------------------------------------------------------
+
+
+class TestParseGroupIds:
+    def test_none_returns_empty(self):
+        assert svc._parse_group_ids(None) == []
+
+    def test_empty_string_returns_empty(self):
+        assert svc._parse_group_ids("") == []
+
+    def test_comma_separated_string(self):
+        assert svc._parse_group_ids("1, 2, 3") == [1, 2, 3]
+
+    def test_list_of_ints(self):
+        assert svc._parse_group_ids([10, 20]) == [10, 20]
+
+    def test_generator_yields_list(self):
+        gen = (x for x in [5, 6])
+        assert svc._parse_group_ids(gen) == [5, 6]
+
+    def test_unsupported_type_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unsupported group_ids payload"):
+            svc._parse_group_ids(12345)
+
+
+# ---------------------------------------------------------------------------
+# Direct DB passthrough helpers (lines 241-254)
+# ---------------------------------------------------------------------------
+
+
+class TestDbPassthroughHelpers:
+    def test_create_permission_delegates_to_db(self, monkeypatch):
+        mock_create = MagicMock(return_value=42)
+        monkeypatch.setattr(svc.aidp_permission_db, "create_permission", mock_create)
+        result = svc.create_permission(kb_id="kb-1", owner_user_id="u", tenant_id="t")
+        assert result == 42
+        mock_create.assert_called_once()
+
+    def test_update_permission_delegates_to_db(self, monkeypatch):
+        mock_update = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "update_permission", mock_update)
+        result = svc.update_permission(kb_id="kb-1", tenant_id="t", ingroup_permission="EDIT")
+        assert result is True
+        mock_update.assert_called_once()
+
+    def test_soft_delete_permission_delegates_to_db(self, monkeypatch):
+        mock_delete = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "soft_delete_permission", mock_delete)
+        result = svc.soft_delete_permission(kb_id="kb-1", tenant_id="t")
+        assert result is True
+        mock_delete.assert_called_once()
+
+    def test_update_resource_status_delegates_to_db(self, monkeypatch):
+        mock_status = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "update_resource_status", mock_status)
+        result = svc.update_resource_status(kb_id="kb-1", tenant_id="t", status="ACTIVE")
+        assert result is True
+        mock_status.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _get_user_role / _get_user_groups direct calls (lines 129, 133)
+# ---------------------------------------------------------------------------
+
+
+class TestUserLookupHelpers:
+    def test_get_user_role_calls_db(self, monkeypatch):
+        mock_role = MagicMock(return_value="ADMIN")
+        monkeypatch.setattr(svc.user_tenant_db_module, "get_user_role_by_tenant", mock_role)
+        result = svc._get_user_role("user-1", "tenant-a")
+        assert result == "ADMIN"
+        mock_role.assert_called_once_with("user-1", "tenant-a")
+
+    def test_get_user_groups_calls_db(self, monkeypatch):
+        mock_groups = MagicMock(return_value=[1, 2, 3])
+        monkeypatch.setattr(svc.group_db_module, "query_group_ids_by_user_in_tenant", mock_groups)
+        result = svc._get_user_groups("user-1", "tenant-a")
+        assert result == [1, 2, 3]
+        mock_groups.assert_called_once_with("user-1", "tenant-a")
+
+
+# ---------------------------------------------------------------------------
+# _decision_meets ValueError (line 233)
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionMeets:
+    def test_unsupported_required_raises_value_error(self):
+        decision = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission="EDIT", is_management_role=False, matched_group_ids=(),
+        )
+        with pytest.raises(ValueError, match="Unsupported required permission"):
+            svc._decision_meets(decision, required="INVALID")
+
+    def test_read_requires_read_only_or_higher(self):
+        decision_ro = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission="READ_ONLY", is_management_role=False, matched_group_ids=(),
+        )
+        decision_none = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission=None, is_management_role=False, matched_group_ids=(),
+        )
+        assert svc._decision_meets(decision_ro, "READ") is True
+        assert svc._decision_meets(decision_none, "READ") is False
+
+
+# ---------------------------------------------------------------------------
+# filter_accessible_kds gap coverage (lines 337, 348-349)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterAccessibleKdsGaps:
+    def test_empty_kds_ids_returns_empty(self, monkeypatch):
+        # Early exit: empty kds_ids
+        assert svc.filter_accessible_kds([], "u", "t") == []
+
+    def test_management_role_allows_all_records(self, monkeypatch):
+        record = {"kb_id": "kb-priv", "owner_user_id": "other",
+                  "ingroup_permission": "PRIVATE", "group_ids": [99]}
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id",
+                            lambda *, kb_id, tenant_id: record)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
+        result = svc.filter_accessible_kds(["kb-priv"], "admin-user", "t")
+        assert result == ["kb-priv"]
+
+    def test_owner_allows_own_record(self, monkeypatch):
+        record = {"kb_id": "kb-own", "owner_user_id": "owner-u",
+                  "ingroup_permission": "PRIVATE", "group_ids": [99]}
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id",
+                            lambda *, kb_id, tenant_id: record)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+        result = svc.filter_accessible_kds(["kb-own"], "owner-u", "t")
+        assert result == ["kb-own"]
+
+
+# ---------------------------------------------------------------------------
+# require_permission ValueError for unsupported required (line 395)
+# ---------------------------------------------------------------------------
+
+
+class TestRequirePermissionInvalidRequired:
+    def test_unsupported_required_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unsupported required permission"):
+            svc.require_permission("kb-1", "u", "t", required="INVALID")
