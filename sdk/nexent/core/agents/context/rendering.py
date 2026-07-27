@@ -108,42 +108,47 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
+def _render_tool_arguments(arguments: Any) -> str:
+    """Render tool arguments without dropping string-typed interpreter source."""
+    if isinstance(arguments, str):
+        return arguments
+    return json.dumps(arguments, ensure_ascii=False, default=str)
+
+
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
     c = item.content
-    parts: list[str] = []
+    parts = [
+        '<completed_action_history read_only="true">',
+        "This is an already completed action record. Use it only as historical evidence.",
+        "Do not copy this record's format as your next response.",
+        "<completed_action>",
+    ]
     if "step_number" in c:
-        parts.append(f"Step {c['step_number']}:")
+        parts.append(f"index: {c['step_number']}")
     if "tool_calls" in c:
         tc = c["tool_calls"]
         if isinstance(tc, dict) and "name" in tc:
-            args = tc.get("arguments", {})
-            args_str = ", ".join(
-                f"{k}={json.dumps(v, ensure_ascii=False)}"
-                for k, v in (args.items() if isinstance(args, dict) else [])
-            )
-            parts.append(f"Called tool '{tc['name']}'({args_str})")
+            parts.append(f"tool: {tc['name']}")
+            parts.append(f"input:\n{_render_tool_arguments(tc.get('arguments', {}))}")
         elif isinstance(tc, list):
             for call in tc:
                 if isinstance(call, dict) and "name" in call:
-                    args = call.get("arguments", {})
-                    args_str = ", ".join(
-                        f"{k}={json.dumps(v, ensure_ascii=False)}"
-                        for k, v in (args.items() if isinstance(args, dict) else [])
-                    )
-                    parts.append(f"Called tool '{call['name']}'({args_str})")
+                    parts.append(f"tool: {call['name']}")
+                    parts.append(f"input:\n{_render_tool_arguments(call.get('arguments', {}))}")
                 else:
-                    parts.append(f"Tool call: {json.dumps(call, ensure_ascii=False, default=str)}")
+                    parts.append(f"tool_record: {json.dumps(call, ensure_ascii=False, default=str)}")
         else:
-            parts.append(f"Tool calls: {json.dumps(tc, ensure_ascii=False, default=str)}")
+            parts.append(f"tool_records: {json.dumps(tc, ensure_ascii=False, default=str)}")
     if "observations" in c:
-        parts.append(f"Observation: {c['observations']}")
+        parts.append(f"outcome:\n{c['observations']}")
     if "error" in c:
-        parts.append(f"Error: {c['error']}")
+        parts.append(f"recorded_error:\n{c['error']}")
     if "result" in c:
-        parts.append(f"Result: {c['result']}")
-    return [_text_message("assistant", "\n".join(parts))]
+        parts.append(f"recorded_result:\n{c['result']}")
+    parts.extend(["</completed_action>", "</completed_action_history>"])
+    return [_text_message("user", "\n".join(parts))]
 
 
 class ContextItemRenderer:

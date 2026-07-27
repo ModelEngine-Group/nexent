@@ -296,10 +296,12 @@ def test_renderer_current_action_without_raw_messages():
         {"step_number": 1, "result": "done"},
     )
     message = ContextItemRenderer().render([action])[0]
-    assert message["role"] == "assistant"
+    assert message["role"] == "user"
     text = message["content"][0]["text"]
-    assert "Step 1:" in text
-    assert "Result: done" in text
+    assert '<completed_action_history read_only="true">' in text
+    assert "index: 1" in text
+    assert "recorded_result:\ndone" in text
+    assert "Step 1:" not in text
     assert not text.lstrip().startswith("{")
 
 
@@ -317,10 +319,12 @@ def test_renderer_current_action_compact_with_tool_calls():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "Step 3:" in text
-    assert "Called tool 'search'" in text
-    assert "Observation: found 5 results" in text
-    assert "Result: answer is 42" in text
+    assert "index: 3" in text
+    assert "tool: search" in text
+    assert '"q": "foo"' in text
+    assert "outcome:\nfound 5 results" in text
+    assert "recorded_result:\nanswer is 42" in text
+    assert "Called tool" not in text
     assert not text.lstrip().startswith("{")
 
 
@@ -336,7 +340,31 @@ def test_renderer_current_action_compact_with_single_tool_call_dict():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "Called tool 'execute'" in text
+    assert "tool: execute" in text
+    assert '"code": "print(1)"' in text
+
+
+def test_renderer_current_action_preserves_string_tool_arguments():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 2,
+            "tool_calls": [{
+                "name": "python_interpreter",
+                "arguments": "result = search(query='GAIA')\nprint(result)",
+            }],
+            "observations": "evidence",
+        },
+    )
+
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+
+    assert message["role"] == "user"
+    assert "tool: python_interpreter" in text
+    assert "result = search(query='GAIA')\nprint(result)" in text
+    assert "python_interpreter'()" not in text
 
 
 def test_renderer_summary_legacy_dict_renders_markdown():
@@ -410,7 +438,7 @@ def test_renderer_current_action_compact_non_standard_tool_calls():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "Tool calls:" in text
+    assert "tool_records:" in text
 
 
 def test_renderer_current_action_compact_list_tool_call_non_dict():
@@ -425,7 +453,7 @@ def test_renderer_current_action_compact_list_tool_call_non_dict():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "Tool call:" in text
+    assert "tool_record:" in text
 
 
 def test_context_manager_management_and_diagnostic_helpers():
