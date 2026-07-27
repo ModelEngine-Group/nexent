@@ -302,18 +302,43 @@ class NexentAgent:
                                        validate_url_access=validate_url_access,
                                        **params)
             elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                metadata = tool_config.metadata or {}
                 tools_obj = tool_class()
+                if tool_config.description is not None:
+                    tools_obj.description = tool_config.description
+                if tool_config.inputs is not None:
+                    tools_obj.inputs = json.loads(tool_config.inputs)
+                if tool_config.output_type is not None:
+                    tools_obj.output_type = tool_config.output_type
                 tools_obj.observer = self.observer
-                tools_obj.memory_config = tool_config.metadata.get(
-                    "memory_config", {}) if tool_config.metadata else {}
-                tools_obj.tenant_id = tool_config.metadata.get(
-                    "tenant_id", "") if tool_config.metadata else ""
-                tools_obj.user_id = tool_config.metadata.get(
-                    "user_id", "") if tool_config.metadata else ""
-                tools_obj.agent_id = tool_config.metadata.get(
-                    "agent_id", "") if tool_config.metadata else ""
-                tools_obj.memory_user_config = tool_config.metadata.get(
-                    "memory_user_config", None) if tool_config.metadata else None
+                tools_obj.memory_config = metadata.get(
+                    "memory_config", {}) if metadata else {}
+                tools_obj.tenant_id = metadata.get(
+                    "tenant_id", "") if metadata else ""
+                tools_obj.user_id = metadata.get(
+                    "user_id", "") if metadata else ""
+                tools_obj.agent_id = metadata.get(
+                    "agent_id", "") if metadata else ""
+                raw_conversation_id = (
+                    metadata.get("conversation_id", "") if metadata else ""
+                )
+                tools_obj.conversation_id = (
+                    str(raw_conversation_id)
+                    if raw_conversation_id not in (None, "")
+                    else ""
+                )
+                tools_obj.memory_user_config = metadata.get(
+                    "memory_user_config", None) if metadata else None
+                tools_obj.memory_service = metadata.get(
+                    "memory_service", None) if metadata else None
+                tools_obj.embedding_configured = metadata.get(
+                    "embedding_configured", True
+                ) if metadata else True
+                if class_name == "SearchMemoryTool":
+                    tools_obj.memory_context_service = metadata.get(
+                        "memory_context_service", None) if metadata else None
+                else:
+                    tools_obj.memory_context_service = None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

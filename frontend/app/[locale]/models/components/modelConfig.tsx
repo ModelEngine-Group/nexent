@@ -19,6 +19,7 @@ import {
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
+import { loadMemoryConfig } from "@/services/memoryService";
 import { CapacityCoverage, ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
@@ -844,12 +845,20 @@ export const ModelConfigSection = forwardRef<
       const currentValue = selectedModels[category]?.[option] || "";
       // Only prompt when modifying from a non-empty value to a different value
       if (currentValue && currentValue !== displayName) {
+        const memoryEnabled =
+          option === MODEL_TYPES.EMBEDDING
+            ? (await loadMemoryConfig()).memoryEnabled
+            : false;
         confirm({
           title: t("embedding.modifyWarningModal.title"),
           content: (
             <div className="py-2">
               <div className="text-sm leading-6">
-                {t("embedding.modifyWarningModal.content")}
+                {t(
+                  memoryEnabled
+                    ? "embedding.memoryModelSwitchWarningModal.content"
+                    : "embedding.modifyWarningModal.content"
+                )}
               </div>
             </div>
           ),

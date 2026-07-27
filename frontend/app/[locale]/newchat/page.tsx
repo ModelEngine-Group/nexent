@@ -40,10 +40,21 @@ function useLocalChatRuntime(): AssistantRuntime {
 
 export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [requestedThreadId, setRequestedThreadId] = useState<
+    string | undefined
+  >(undefined);
+
+  useEffect(() => {
+    const conversationId = new URLSearchParams(window.location.search).get(
+      "conversation_id",
+    );
+    setRequestedThreadId(conversationId || undefined);
+  }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
     runtimeHook: () => useLocalChatRuntime(),
     adapter: conversationThreadListAdapter,
+    threadId: requestedThreadId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();

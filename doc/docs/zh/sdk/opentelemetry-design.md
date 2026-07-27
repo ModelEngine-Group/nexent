@@ -521,11 +521,8 @@ flowchart TD
   API --> HTTP[FastAPI HTTP span: 可配置隐藏]
   API --> Bind[绑定 AgentRunMetadata]
   Bind --> Mem[解析 memory 开关]
-  Mem --> Strategy{with_memory / no_memory}
-  Strategy -->|with_memory| G1[generate_stream_with_memory]
-  Strategy -->|no_memory| G2[generate_stream_no_memory]
-  G1 --> AR[agent_run async generator]
-  G2 --> AR
+  Mem --> GS[generate_stream enable_memory=true/false]
+  GS --> AR[agent_run async generator]
   AR --> Thread[agent_run_thread]
   Thread --> NX[NexentAgent / CoreAgent]
   NX --> A0[agent.run span: AGENT]

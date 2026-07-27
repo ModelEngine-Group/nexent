@@ -4652,6 +4652,7 @@ class TestCreateLocalToolMemory:
                 "tenant_id": "tenant_123",
                 "user_id": "user_456",
                 "agent_id": "agent_789",
+                "conversation_id": 101,
                 "memory_user_config": {"version": "v1"}
             }
         )
@@ -4670,10 +4671,15 @@ class TestCreateLocalToolMemory:
             assert result.user_id == "user_456"
             # Verify agent_id was set
             assert result.agent_id == "agent_789"
+            # Verify conversation_id was set for short-term memory isolation
+            assert result.conversation_id == "101"
             # Verify memory_user_config was set
             assert result.memory_user_config == {"version": "v1"}
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
+            assert result.description == "desc"
+            assert result.inputs == {}
+            assert result.output_type == "string"
         finally:
             if original_value is not None:
                 nexent_agent.__dict__["StoreMemoryTool"] = original_value
@@ -4698,7 +4704,8 @@ class TestCreateLocalToolMemory:
                 "memory_config": {"type": "vector"},
                 "tenant_id": "tenant_abc",
                 "user_id": "user_def",
-                "agent_id": "agent_ghi"
+                "agent_id": "agent_ghi",
+                "conversation_id": "conversation_jkl",
             }
         )
 
@@ -4712,6 +4719,7 @@ class TestCreateLocalToolMemory:
             assert result.memory_config == {"type": "vector"}
             # Verify tenant_id was set
             assert result.tenant_id == "tenant_abc"
+            assert result.conversation_id == "conversation_jkl"
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
         finally:
@@ -4748,6 +4756,7 @@ class TestCreateLocalToolMemory:
             assert result.tenant_id == ""
             assert result.user_id == ""
             assert result.agent_id == ""
+            assert result.conversation_id == ""
             assert result.memory_user_config is None
         finally:
             if original_value is not None:
