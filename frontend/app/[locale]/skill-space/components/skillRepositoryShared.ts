@@ -6,10 +6,10 @@ import type {
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export const STATUS_LABEL_KEYS: Record<SkillRepositoryListingStatus, string> = {
-  not_shared: "skillRepository.status.notShared",
-  pending_review: "skillRepository.status.pendingReview",
-  rejected: "skillRepository.status.rejected",
-  shared: "skillRepository.status.shared",
+  not_shared: "repository.status.notListed",
+  pending_review: "repository.status.reviewing",
+  rejected: "repository.status.rejected",
+  shared: "repository.status.listed",
 };
 
 export const STATUS_COLORS: Record<SkillRepositoryListingStatus, string> = {

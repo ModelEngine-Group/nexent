@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { defaultComponents } from "./markdown-text";
 import {
   Collapsible,
@@ -251,6 +252,7 @@ function ReasoningText({ className, ...props }: React.ComponentProps<"div">) {
 const StreamingMarkdownSegment = memo(({ content }: { content: string }) => (
   <ReactMarkdown
     className="aui-md prose prose-sm max-w-none text-sm leading-relaxed text-muted-foreground/90 dark:prose-invert"
+    remarkPlugins={[remarkGfm]}
     components={{
       p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
       a: ({ children, href }) => (
@@ -275,6 +277,32 @@ const StreamingMarkdownSegment = memo(({ content }: { content: string }) => (
         <ol className="marker:text-muted-foreground my-3 ms-5 list-decimal [&>li]:mt-1">
           {children}
         </ol>
+      ),
+      table: ({ children }) => (
+        <div className="my-3 overflow-x-auto">
+          <table className="w-full border-separate border-spacing-0">{children}</table>
+        </div>
+      ),
+      th: ({ children, align }) => (
+        <th
+          align={align}
+          className="bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right"
+        >
+          {children}
+        </th>
+      ),
+      td: ({ children, align }) => (
+        <td
+          align={align}
+          className="border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right"
+        >
+          {children}
+        </td>
+      ),
+      tr: ({ children }) => (
+        <tr className="m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg">
+          {children}
+        </tr>
       ),
       li: ({ children }) => <li className="leading-relaxed">{children}</li>,
       strong: ({ children }) => <strong className="font-semibold">{children}</strong>,

@@ -1550,14 +1550,16 @@ create_default_super_admin_user() {
     echo "   ⚠️  Warning: Could not determine if user exists. Proceeding with creation..."
   fi
 
-  # Prompt for password
   local password
-  password="$(prompt_super_admin_password)"
-  local prompt_result=$?
-
-  if [ $prompt_result -ne 0 ] || [ -z "$password" ]; then
-    echo "   ❌ Failed to get password from user."
-    return 1
+  local display_password="true"
+  if deployment_should_prompt_super_admin_password; then
+    password="$(prompt_super_admin_password)" || {
+      echo "   ❌ Failed to get password from user."
+      return 1
+    }
+    display_password="false"
+  else
+    password="$(deployment_super_admin_password)"
   fi
 
   # Export necessary environment variables for the script
@@ -1569,7 +1571,7 @@ create_default_super_admin_user() {
   export DEPLOYMENT_MODE
 
   # Execute the script with password as argument
-  if bash "$script_path" "$password"; then
+  if bash "$script_path" "$password" "$display_password"; then
     unset password
     return 0
   else

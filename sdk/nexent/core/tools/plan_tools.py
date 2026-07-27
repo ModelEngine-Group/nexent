@@ -219,6 +219,7 @@ class UpdatePlanStepTool(Tool):
 
     category = ToolCategory.PLANNING.value
     tool_sign = ToolSign.PLAN_OPERATION.value
+    emit_tool_event = False
 
     def __init__(
         self,

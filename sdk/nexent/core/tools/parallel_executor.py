@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextvars
 from typing import Any, Dict
 
 from smolagents.tools import Tool
@@ -130,7 +131,8 @@ def _parallel_executor(*tasks, timeout: int = 120, max_workers: int = 4):
                     f"{type(func).__name__}"
                 )
                 continue
-            future_to_idx[pool.submit(func, **kwargs)] = idx
+            task_context = contextvars.copy_context()
+            future_to_idx[pool.submit(task_context.run, func, **kwargs)] = idx
 
         # Iterate directly over futures so that per-task timeout is effective.
         # as_completed would wait for each future to finish before yielding,

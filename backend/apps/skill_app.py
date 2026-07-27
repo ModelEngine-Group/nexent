@@ -712,7 +712,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
         url=quick_config.get("base_url", ""),
         temperature=0.1,
         top_p=0.95,
-        ssl_verify=True,
+        ssl_verify=quick_config.get("ssl_verify", False),
         model_factory=model_factory,
         prompt_cache=resolve_prompt_cache_profile(model_factory),
     )
