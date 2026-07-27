@@ -45,7 +45,7 @@ POST /agent/nl2agent/run
 
 - 当前租户默认 LLM。
 - NL2Agent 职责提示词。
-- NL2Agent 专用平台工具。
+- NL2Agent 运行时 LangChain 工具。
 - 当前请求携带的对话历史和附件。
 - 从鉴权上下文获得的用户、租户和语言。
 
@@ -62,6 +62,8 @@ build_nl2agent_run_info（薄包装：构建内存态 AgentConfig）
 ```
 
 `create_agent_run_info` 增加一个可选参数 `prebuilt_agent_config`：传入时仅跳过版本号解析和数据库版 `create_agent_config` 加载，附件拼接、租户模型列表构建、history 转换和 `AgentRunInfo` 组装均原样复用。流式输出复用现有 `is_debug` 路径（`_stream_agent_chunks`），使用运行期生成的临时会话 ID；不修改 `run_agent_stream` 本身——其会话自动创建、resume 探测和标题生成正是 NL2Agent 明确排除的能力。运行仍以临时 ID 注册到 `agent_run_manager`，现有停止能力对 NL2Agent 继续可用。
+
+两个 NL2Agent 工具都是进程内 LangChain `StructuredTool` 对象，通过闭包持有后端服务和请求安全上下文。当前 SDK 不会把 `source="langchain"` 工具通过 host bridge 接入 Docker 或 WASM 执行器，因此 NL2Agent 包装层明确设置 `sandbox_config=None`，使用现有本地执行器。本设计不支持远程沙箱执行；后续若需支持，必须由 SDK 为 LangChain 工具增加 host-tool 能力，或将这些工具迁移到 MCP。
 
 NL2Agent 不通过数据库版 `create_agent_config` 加载配置，不出现在普通智能体选择器中，也不需要数据库生成的智能体 ID。
 
@@ -105,7 +107,7 @@ flowchart TD
 
 最终确认卡生成后，当前流程进入 `awaiting_confirmation` 状态。前端停止接受新的需求输入，用户只能确认创建或退出当前流程。
 
-## 4. 提示词与平台工具
+## 4. 提示词与运行时工具
 
 ### 4.1 职责提示词
 
@@ -117,24 +119,73 @@ NL2Agent 的职责提示词使用一致的分阶段指令：
 - 工具返回的 Observation 用于告知搜索结果、卡片生成结果及下一步允许的行为。
 - 模型不得生成或覆盖用户 ID、租户 ID、授权信息、卡片 ID 和工具凭据。
 
-### 4.2 专用工具
+### 4.2 运行时工具构建
 
-临时 NL2Agent 仅绑定两个平台工具：
+临时 NL2Agent 仅绑定两个运行时工具：
 
 ```text
 search_installed_mcp_tools
 present_creation_confirmation_card
 ```
 
-工具通过 `ToolConfig.metadata` 接收服务端注入的用户、租户、语言、`MessageObserver` 和受控回调。模型不能自行提供或覆盖这些安全上下文。
+后端在每次 `/agent/nl2agent/run` 请求中通过 `StructuredTool.from_function` 创建这两个工具。每个处理函数都是闭包，绑定鉴权得到的 `tenant_id`、`user_id`、语言、`MessageObserver`、后端服务函数和同一个单次运行共享状态对象。这些值均不进入模型可见的参数 Schema，因此模型不能提交或覆盖安全上下文、结果数量、回调、卡片 ID 或凭据。
 
-注入采用通用的 SDK 约定而非逐工具特判：每个平台工具实现 `bind_runtime(metadata, observer)` 方法，自行从 `ToolConfig.metadata` 提取依赖、完成校验，缺失必需项时抛出异常。`create_local_tool` 仅在通用分支通过一次 `hasattr` 检查调用该钩子；新增平台工具不得在 `create_local_tool` 或后端工具服务中增加工具专属分支。确认卡前置条件所需的单次运行共享状态由服务端构造为同一个对象，放入两个工具的 metadata，二者通过 `bind_runtime` 拿到同一引用。
+每个 `StructuredTool` 都以 `source="langchain"` 直接附加到预构建的 `AgentConfig`。后端先构造 `ToolConfig`，再把 `BaseTool` 对象赋给 `metadata`，与现有 LangChain 加载约定保持一致；SDK 继续通过既有 `Tool.from_langchain` 适配器完成转换。运行时工具不写入 `ag_tool_info_t` 或 `ag_tool_instance_t`，不通过 `backend/tool_collection/langchain` 静态扫描，也不出现在公共工具选择器和公共工具验证接口中。本设计不修改 SDK，不增加 `bind_runtime` 钩子、`is_internal` 标记、MCP 注册或工具列表刷新。
 
-平台工具标记 `is_internal = True`：不进入用户可见的本地工具扫描，公共工具验证端点统一拒绝执行，仅通过 NL2Agent 运行时和自动化测试触达。
+单次运行工厂采用以下形式：
 
-`search_installed_mcp_tools` 接收当前生成的 `GeneratedAgentDraft`，服务端注入的回调从草稿字段构造检索文本并执行租户范围内的查询；推荐卡由工具自身通过 `ProcessType.CARD` 发送。
+```python
+search_tool = build_search_installed_mcp_tools(
+    tenant_id=tenant_id,
+    user_id=user_id,
+    language=language,
+    observer=observer,
+    runtime_state=runtime_state,
+    search_fn=search_installed_mcp_tools_for_tenant,
+)
+search_config = ToolConfig(
+    class_name="search_installed_mcp_tools",
+    name="search_installed_mcp_tools",
+    source="langchain",
+    params={},
+)
+search_config.metadata = search_tool
+```
 
-`present_creation_confirmation_card` 接收当前完整草稿，通过 `ProcessType.CARD` 发送最终确认卡。它不从模型接收搜索标识：两个平台工具共享本次运行的运行期状态，确认工具直接读取 `search_installed_mcp_tools` 在同一次运行内记录的最新搜索结果（`draft_revision` 和推荐集合）。若本次运行内没有已完成的搜索，调用被拒绝并返回错误 Observation，要求模型先搜索。
+`search_installed_mcp_tools` 只向模型暴露一个参数 `draft: GeneratedAgentDraft`。其同步 Python 处理函数先校验草稿，再且仅再调用一次 `search_installed_mcp_tools_for_tenant(tenant_id=bound_tenant_id, draft=draft, limit=5)`。它不调用 LLM、MCP 服务、智能体或任何其他工具。成功后，处理函数把服务端生成的 `draft_revision` 和推荐集合写入单次运行共享状态，通过 `MessageObserver` 和 `ProcessType.CARD` 发送推荐卡，并返回紧凑 JSON Observation，其中包含修订号、结果数量、推荐列表和允许的下一步动作。
+
+工具名中的 `mcp` 表示被搜索的目录记录类型，不表示该工具自身使用 MCP 协议。成功 Observation 使用以下固定结构：
+
+```python
+class InstalledMcpToolRecommendation(BaseModel):
+    tool_id: int
+    name: str
+    origin_name: str | None
+    description: str
+    source: Literal["mcp"]
+    usage: str
+    labels: list[str]
+    score: float
+
+
+class SearchInstalledMcpToolsObservation(BaseModel):
+    status: Literal["success"]
+    draft_revision: UUID
+    recommendation_count: int
+    recommendations: list[InstalledMcpToolRecommendation]
+    next_action: Literal["continue_clarifying_or_present_confirmation"]
+
+
+class SearchInstalledMcpToolsErrorObservation(BaseModel):
+    status: Literal["error"]
+    code: Literal["tool_search_failed"]
+    retryable: Literal[True]
+    next_action: Literal["retry_tool_search"]
+```
+
+空结果属于成功完成的搜索：处理函数发送空推荐卡、保存空推荐集合，并允许后续不绑定工具完成确认。数据库或排序失败时，处理函数发送 `failed` 推荐卡，返回不包含内部异常细节的可重试错误 Observation，且不把搜索标记为已完成；因此确认工具会继续拒绝当前运行，直到后续搜索成功。
+
+`present_creation_confirmation_card` 使用同一套运行时 LangChain 工厂模式构建。它接收当前完整草稿，从共享闭包状态读取最近一次成功搜索结果，并通过 `ProcessType.CARD` 发送最终确认卡。它不接收模型提供的搜索标识。若本次运行尚未完成搜索，则返回错误 Observation，要求模型先调用 `search_installed_mcp_tools`。
 
 ## 5. 临时智能体草稿
 
@@ -185,7 +236,11 @@ source == "mcp"
 is_available == true
 ```
 
+检索范围有意保持为仅 MCP 工具。本地工具和静态发现的 LangChain 工具可能需要按智能体配置模型、知识库、密钥或其他初始化参数，而当前推荐和确认流程只选择 `tool_id`，没有配置步骤；若推荐这些工具，NL2Agent 可能创建出无法运行的草稿。
+
 模型和前端不能访问 MCP Token、请求头、密钥或连接凭据。
+
+后端搜索函数从 `query_all_tools(tenant_id)` 获取候选项；该查询已经强制租户归属并排除软删除记录，随后再应用上述 `source` 和可用性过滤。运行时搜索工具从不持久化，因此不会出现在候选结果中。搜索文档和返回结果只复制安全的展示元数据，排除 `params`、请求头、Token 和其他可执行配置。
 
 ### 6.2 检索字段
 
@@ -194,9 +249,10 @@ is_available == true
 - `name`
 - `origin_name`
 - `description`
-- 本地化描述
 - `labels`
 - `usage`
+
+匹配前，所有值先转换为字符串，执行 Unicode 规范化、转小写、去除首尾空白并合并连续空白。缺失的可选字段按空字符串处理，标签按原列表顺序以空格连接。
 
 服务端从临时草稿的 `display_name`、`description`、`duty_prompt`、`constraint_prompt` 和 `few_shots_prompt` 构造检索文本，不接收模型单独提供的任意检索范围或租户条件。
 
@@ -211,6 +267,8 @@ score = max(
 ) / 100
 ```
 
+本功能把 `rapidfuzz>=3.0.0` 声明为后端直接依赖，而不依赖其他包的传递依赖。排序完全确定，不调用模型或外部服务。
+
 固定规则：
 
 | 规则 | 值 |
@@ -219,6 +277,8 @@ score = max(
 | 最大推荐数量 | `5` |
 | 默认选中阈值 | `0.65` |
 | 同分排序 | `tool_id` 升序 |
+
+低于最低分数的候选项直接丢弃；其余结果先按分数降序、再按 `tool_id` 升序排列，截取前五项，并在工具 Observation 和卡片载荷中把分数保留四位小数。
 
 评分阈值为初始值，待真实使用数据调参。
 
@@ -238,7 +298,7 @@ score = max(
 
 ### 7.1 卡片信封
 
-两个平台工具通过现有 `ProcessType.CARD` 输出：
+两个运行时工具通过现有 `ProcessType.CARD` 输出：
 
 ```ts
 type NL2AgentCardEnvelope<T> = {
@@ -359,7 +419,9 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - `card_id` 的幂等范围为当前租户和当前用户，不能跨身份复用。
 - NL2Agent 不持久化运行历史，因此任何页面状态都不能作为最终授权依据。
 - “确认卡前必须搜索”的前置条件仅在单次运行内强制，属于产品质量约束；安全完全依赖确认接口对草稿和全部提交工具 ID 的重新校验。
-- `is_internal` 平台工具不持久化、不出现在用户可见的工具选择器中，也不能通过公共工具验证端点执行。
+- 运行时 LangChain 工具仅在预构建的 NL2Agent 配置内创建，不持久化、不参与扫描，也不能通过公共工具选择器或验证接口触达。
+- 绑定的租户和用户上下文不进入模型可见参数；搜索服务独立强制租户条件。
+- 由于当前 SDK 不会把 LangChain 工具通过 host bridge 接入远程沙箱，NL2Agent 使用本地执行器；远程沙箱支持需要单独的 SDK 或 MCP 设计。
 - 目标智能体创建后遵循现有智能体编辑、发布、权限和版本管理规则。
 
 ## 10. 测试计划
@@ -370,9 +432,13 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 临时运行不查询 NL2Agent 数据库记录，也不保存 conversation、message 或历史摘要。
 - 请求中的 `history` 正确转换为 SDK `AgentHistory`，且不从数据库补充历史。
 - 临时运行不启用记忆检索、历史恢复或 SSE resume。
-- 两个专用工具只能使用服务端注入的安全上下文。
+- 两个运行时工具只向模型暴露草稿数据，并使用闭包绑定的服务端安全上下文。
+- 生成的 `ToolConfig` 使用 `source="langchain"`，携带内存态 `BaseTool` 对象，不创建或更新工具目录记录。
 - 工具搜索仅返回当前租户已安装且可用的 MCP 工具。
-- 检索字段、评分阈值、Top 5、默认选择和同分排序保持稳定。
+- 搜索处理函数只调用一次租户范围内的 Python 搜索函数，绝不调用其他工具、智能体、LLM 或 MCP 端点。
+- 搜索规范化、检索字段、评分阈值、Top 5、分数取整、默认选择和同分排序保持确定性。
+- 成功 Observation 与卡片载荷使用相同顺序的推荐 DTO，且不暴露可执行工具配置。
+- 空结果视为成功搜索；后端失败时发送失败卡片，且不满足确认前置条件。
 - 最终确认工具在本次运行内没有已完成工具搜索时拒绝生成卡片，并通过错误 Observation 要求模型先搜索。
 - 确认接口正确校验草稿、工具权限、正整数 ID 和稳定去重。
 - 伪造、跨租户、非 MCP 和不可用工具均被拒绝。
@@ -408,6 +474,7 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 模型负责语义澄清、阶段判断、草稿生成和工具调用顺序。
 - 服务端负责临时运行配置、安全上下文、搜索范围、数据校验、事务和幂等。
 - 前端负责当前页面内的对话历史、草稿修订、卡片状态和工具选择。
-- 工具搜索是生成最终确认卡的必要前置步骤，通过两个平台工具共享的单次运行状态强制；跨请求场景下作为提示词层规则维持，安全边界始终是确认接口的重新校验。
+- 工具搜索是生成最终确认卡的必要前置步骤，通过两个运行时工具共享的单次运行状态强制；跨请求场景下作为提示词层规则维持，安全边界始终是确认接口的重新校验。
+- 两个 NL2Agent 工具均为后端创建、非持久化的 LangChain `StructuredTool`，SDK 保持不变。
 - 用户确认是唯一触发目标智能体数据库写入的动作。
 - 中英文设计文档保持同一份行为规范。

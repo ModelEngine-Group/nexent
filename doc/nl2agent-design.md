@@ -45,7 +45,7 @@ The server constructs `AgentConfig` and `AgentRunInfo` in memory from:
 
 - The current tenant's default LLM.
 - The NL2Agent duty prompt.
-- The NL2Agent platform tools.
+- The NL2Agent runtime LangChain tools.
 - The conversation history and attachments in the current request.
 - The user, tenant, and language resolved from the authentication context.
 
@@ -62,6 +62,8 @@ build_nl2agent_run_info (thin wrapper: builds the in-memory AgentConfig)
 ```
 
 `create_agent_run_info` gains one optional `prebuilt_agent_config` parameter; when provided it skips only the version lookup and the database-backed `create_agent_config` load, while attachment merging, tenant model list construction, history conversion, and `AgentRunInfo` assembly are all reused unchanged. Streaming reuses the existing `is_debug` path (`_stream_agent_chunks`) with a runtime-generated temporary conversation ID; `run_agent_stream` itself is not modified, since its conversation auto-creation, resume detection, and title generation are exactly what NL2Agent excludes. The run stays registered in `agent_run_manager` under the temporary ID so the existing stop capability keeps working.
+
+The two NL2Agent tools are process-local LangChain `StructuredTool` objects that close over backend services and request security context. The current SDK does not host-bridge `source="langchain"` tools into Docker or WASM executors, so the NL2Agent wrapper explicitly sets `sandbox_config=None` and uses the existing local executor. Supporting remote sandbox execution is out of scope for this design and would require either SDK host-tool support for LangChain tools or moving these tools behind MCP.
 
 NL2Agent does not load configuration through the database-backed `create_agent_config`, does not appear in the ordinary agent selector, and does not require a database-generated agent ID.
 
@@ -105,7 +107,7 @@ Tool search may happen before requirement collection is complete, and search res
 
 After the final confirmation card is emitted, the flow enters `awaiting_confirmation`. The frontend stops accepting new requirement input, and the user may only confirm creation or leave the flow.
 
-## 4. Prompt and Platform Tools
+## 4. Prompt and Runtime Tools
 
 ### 4.1 Duty Prompt
 
@@ -117,24 +119,73 @@ The NL2Agent duty prompt uses consistent stage-specific instructions:
 - Tool Observations tell the model the search result, card generation result, and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
 
-### 4.2 Platform Tools
+### 4.2 Runtime Tool Construction
 
-The ephemeral NL2Agent binds only two platform tools:
+The ephemeral NL2Agent binds only two runtime tools:
 
 ```text
 search_installed_mcp_tools
 present_creation_confirmation_card
 ```
 
-The tools receive the server-injected user, tenant, language, `MessageObserver`, and controlled callbacks through `ToolConfig.metadata`. The model cannot supply or override this security context.
+The backend creates both tools for every `/agent/nl2agent/run` request with `StructuredTool.from_function`. Each handler is a closure over the authenticated `tenant_id`, `user_id`, language, `MessageObserver`, backend service functions, and one shared per-run state object. None of these values appears in the model-visible argument schema, so the model cannot supply or override security context, result limits, callbacks, card IDs, or credentials.
 
-Injection follows a generic SDK convention instead of per-tool branches: each platform tool implements `bind_runtime(metadata, observer)`, which pulls its dependencies from `ToolConfig.metadata`, validates them, and raises if required entries are missing. `create_local_tool` invokes this hook through a single `hasattr` check in its generic branch; adding a platform tool must not add tool-specific branches to `create_local_tool` or to backend tool services. The per-run shared state used by the confirmation-card precondition is one object the server places into both tools' metadata, so both receive the same reference through `bind_runtime`.
+Each `StructuredTool` is attached directly to the prebuilt `AgentConfig` with `source="langchain"`. The backend constructs the `ToolConfig` first and then assigns the `BaseTool` object to `metadata`, matching the existing LangChain loader convention; the SDK's existing `Tool.from_langchain` adapter performs the conversion. The runtime tools are not written to `ag_tool_info_t` or `ag_tool_instance_t`, are not discovered from `backend/tool_collection/langchain`, and never appear in the public tool picker or public tool-validation endpoint. No SDK changes, `bind_runtime` hook, `is_internal` marker, MCP registration, or tool-list refresh are introduced.
 
-Platform tools are marked `is_internal = True`. They are excluded from the user-facing local tool scan and rejected uniformly by the public tool validation endpoint; they are exercised only through the NL2Agent runtime and automated tests.
+The per-run factory follows this shape:
 
-`search_installed_mcp_tools` accepts the current `GeneratedAgentDraft`. The backend-injected callback builds search text from the draft fields and performs the tenant-scoped query; the tool itself emits the recommendation card through `ProcessType.CARD`.
+```python
+search_tool = build_search_installed_mcp_tools(
+    tenant_id=tenant_id,
+    user_id=user_id,
+    language=language,
+    observer=observer,
+    runtime_state=runtime_state,
+    search_fn=search_installed_mcp_tools_for_tenant,
+)
+search_config = ToolConfig(
+    class_name="search_installed_mcp_tools",
+    name="search_installed_mcp_tools",
+    source="langchain",
+    params={},
+)
+search_config.metadata = search_tool
+```
 
-`present_creation_confirmation_card` accepts the complete current draft and emits the final confirmation card through `ProcessType.CARD`. It takes no search identifier from the model: the two platform tools share per-run runtime state, and the confirmation tool reads the latest search result (`draft_revision` and recommendation set) recorded by `search_installed_mcp_tools` in the same run. If no search has completed in the current run, the call is rejected with an error Observation directing the model to search first.
+`search_installed_mcp_tools` exposes exactly one model-visible argument, `draft: GeneratedAgentDraft`. Its synchronous Python handler validates the draft and calls `search_installed_mcp_tools_for_tenant(tenant_id=bound_tenant_id, draft=draft, limit=5)` exactly once. It does not call an LLM, MCP server, agent, or any other tool. On success it records the server-generated `draft_revision` and recommendation set in shared runtime state, emits the recommendation card through `MessageObserver` and `ProcessType.CARD`, and returns a compact JSON Observation containing the revision, count, recommendations, and allowed next action.
+
+The `mcp` segment in the tool name describes the catalog records being searched, not the tool's implementation transport. The successful Observation has this fixed shape:
+
+```python
+class InstalledMcpToolRecommendation(BaseModel):
+    tool_id: int
+    name: str
+    origin_name: str | None
+    description: str
+    source: Literal["mcp"]
+    usage: str
+    labels: list[str]
+    score: float
+
+
+class SearchInstalledMcpToolsObservation(BaseModel):
+    status: Literal["success"]
+    draft_revision: UUID
+    recommendation_count: int
+    recommendations: list[InstalledMcpToolRecommendation]
+    next_action: Literal["continue_clarifying_or_present_confirmation"]
+
+
+class SearchInstalledMcpToolsErrorObservation(BaseModel):
+    status: Literal["error"]
+    code: Literal["tool_search_failed"]
+    retryable: Literal[True]
+    next_action: Literal["retry_tool_search"]
+```
+
+An empty result is a successful completed search: the handler emits an empty recommendation card, stores an empty recommendation set, and permits later confirmation without tool bindings. A database or ranking failure emits a `failed` recommendation card, returns a retryable error Observation without internal exception details, and does not mark search as completed; the confirmation tool therefore continues to reject the run until a later search succeeds.
+
+`present_creation_confirmation_card` is built through the same runtime LangChain factory pattern. It accepts the complete current draft, reads the latest successful search result from the shared closure state, and emits the final card through `ProcessType.CARD`. It takes no search identifier from the model. If no search has completed in the current run, it returns an error Observation directing the model to call `search_installed_mcp_tools` first.
 
 ## 5. Ephemeral Agent Draft
 
@@ -185,7 +236,11 @@ source == "mcp"
 is_available == true
 ```
 
+The scope intentionally remains MCP-only. Local and statically discovered LangChain tools may require per-agent model, knowledge-base, secret, or other initialization parameters, while the current recommendation and confirmation flow selects only `tool_id` values and has no configuration step. Recommending those tools would allow NL2Agent to create a draft that cannot run.
+
 The model and frontend cannot access MCP tokens, request headers, secrets, or connection credentials.
+
+The backend search function obtains candidates from `query_all_tools(tenant_id)`, which already enforces tenant ownership and excludes soft-deleted rows, and then applies the `source` and availability filters above. The runtime search tool itself is absent from this query because it is never persisted. Only safe display metadata is copied into search documents and results; `params`, headers, tokens, and other executable configuration are excluded.
 
 ### 6.2 Search Fields
 
@@ -194,9 +249,10 @@ The searchable tool document contains:
 - `name`
 - `origin_name`
 - `description`
-- Localized descriptions
 - `labels`
 - `usage`
+
+Before matching, values are converted to strings, Unicode-normalized, lowercased, stripped, and whitespace-collapsed. Missing optional fields contribute an empty string. Labels retain their list order and are joined with spaces.
 
 The server builds search text from the ephemeral draft's `display_name`, `description`, `duty_prompt`, `constraint_prompt`, and `few_shots_prompt`. The model cannot provide an arbitrary search scope or tenant condition separately.
 
@@ -211,6 +267,8 @@ score = max(
 ) / 100
 ```
 
+`rapidfuzz>=3.0.0` is a direct backend dependency for this feature rather than an implicit transitive dependency. Ranking is entirely deterministic and invokes no model or external service.
+
 Fixed rules:
 
 | Rule | Value |
@@ -219,6 +277,8 @@ Fixed rules:
 | Maximum recommendation count | `5` |
 | Default selection threshold | `0.65` |
 | Tie-break order | Ascending `tool_id` |
+
+Candidates below the minimum score are discarded. The remaining candidates are sorted by descending score and then ascending `tool_id`, truncated to five, and their scores are rounded to four decimal places for the tool Observation and card payload.
 
 The score thresholds are initial values and are expected to be tuned with real usage data.
 
@@ -238,7 +298,7 @@ When no tool matches, the tool emits an empty-state recommendation card, and cre
 
 ### 7.1 Card Envelope
 
-Both platform tools emit through the existing `ProcessType.CARD`:
+Both runtime tools emit through the existing `ProcessType.CARD`:
 
 ```ts
 type NL2AgentCardEnvelope<T> = {
@@ -359,7 +419,9 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - A `card_id` is idempotent only within the current tenant and user scope and cannot be reused across identities.
 - NL2Agent does not persist runtime history, so frontend page state is never an authorization source.
 - The search-before-confirmation-card precondition is enforced per run for product quality only; security relies entirely on the confirmation API revalidating the draft and every submitted tool ID.
-- `is_internal` platform tools are not persisted, not listed in the user-facing tool picker, and not executable through the public tool validation endpoint.
+- Runtime LangChain tools are created only inside the prebuilt NL2Agent configuration, are not persisted or discovered, and are unreachable through the public tool picker and validation endpoint.
+- Bound tenant and user context never appears in model-visible tool arguments; the search service independently applies the tenant condition.
+- NL2Agent uses the local executor because the current SDK does not host-bridge LangChain tools into remote sandboxes; remote sandbox support requires a separate SDK or MCP design.
 - After creation, the target agent follows the existing editing, publishing, permission, and version-management rules.
 
 ## 10. Test Plan
@@ -370,9 +432,13 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - The ephemeral run neither queries an NL2Agent database record nor saves conversations, messages, or history summaries.
 - Request `history` is converted correctly to SDK `AgentHistory` without database history augmentation.
 - The ephemeral run does not enable memory search, history recovery, or SSE resume.
-- Both platform tools can use only server-injected security context.
+- Both runtime tools expose only draft data to the model and use closure-bound server security context.
+- The generated `ToolConfig` entries use `source="langchain"`, carry in-memory `BaseTool` objects, and do not create or update tool catalog rows.
 - Tool search returns only installed and available MCP tools from the current tenant.
-- Search fields, score threshold, Top 5 limit, default selection, and tie-break order remain deterministic.
+- The search handler calls the tenant-scoped Python search function exactly once and never invokes another tool, agent, LLM, or MCP endpoint.
+- Search normalization, fields, score threshold, Top 5 limit, score rounding, default selection, and tie-break order remain deterministic.
+- Successful Observations and card payloads contain the same ordered recommendation DTOs and expose no executable tool configuration.
+- Empty search results count as successful searches, while backend failures emit a failed card and do not satisfy the confirmation precondition.
 - The confirmation tool rejects calls when no tool search has completed in the current run, and its error Observation instructs the model to search first.
 - The confirmation API validates the draft, tool permissions, positive IDs, and stable deduplication.
 - Forged, cross-tenant, non-MCP, and unavailable tools are rejected.
@@ -408,6 +474,7 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - The model owns semantic clarification, stage decisions, draft generation, and tool call ordering.
 - The server owns ephemeral runtime configuration, security context, search scope, validation, transactions, and idempotency.
 - The frontend owns current-page conversation history, draft revisions, card state, and tool selection.
-- Tool search is a required precondition for the final confirmation card, enforced through shared per-run tool state; across requests it is maintained as a prompt-level rule, and the confirmation API's revalidation remains the security boundary.
+- Tool search is a required precondition for the final confirmation card, enforced through shared per-run runtime state; across requests it is maintained as a prompt-level rule, and the confirmation API's revalidation remains the security boundary.
+- Both NL2Agent tools are backend-created, non-persistent LangChain `StructuredTool` instances; the SDK remains unchanged.
 - User confirmation is the only action that writes the target agent to the database.
 - The Chinese and English design documents define identical behavior.
