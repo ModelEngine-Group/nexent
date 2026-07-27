@@ -1354,9 +1354,6 @@ class KnowledgeBaseService {
       headers: getAuthHeaders(),
     });
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || data.message || "Failed to load frequency options");
-    }
     return data.options || [];
   }
 
