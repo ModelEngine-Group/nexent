@@ -30,15 +30,20 @@ export const loadLocaleMessages = async (locale: string) => {
       resources[localePath].common = common;
     }
 
-    const responseCustom = await fetch(`/locales/${localePath}/custom.json`);
-    const commonCustom = await responseCustom.json();
-    if (resourcesCustom[localePath]) {
-      resourcesCustom[localePath].custom = commonCustom;
-      resourcesCustom[localePath].replacemenKeyArr = Object.entries(commonCustom).map(([key, value]) => {
-        const item = { pattern: key, str: value };
-        return item;
-      }) as any;
+    const customLang = ['zh', 'en'];
+    for (const index in customLang) {
+      const lang = customLang[index] as 'zh' | 'en';
+      const responseCustom = await fetch(`/locales/${lang}/custom.json`);
+      const commonCustom = await responseCustom.json();
+      if (resourcesCustom[lang]) {
+        resourcesCustom[lang].custom = commonCustom;
+        resourcesCustom[lang].replacemenKeyArr = Object.entries(commonCustom).map(([key, value]) => {
+          const item = { pattern: key, str: value };
+          return item;
+        }) as any;
+      }
     }
+
     return { resourcesCustom, resources };
   } catch (error) {
     console.log(`Failed to load locale ${locale}:`, error)

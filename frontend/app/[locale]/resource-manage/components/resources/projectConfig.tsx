@@ -31,7 +31,7 @@ export default function ProjectConfigTab() {
     {
       key: 'pageDescription',
       label: t('project.config.page.description'),
-      max: 100,
+      max: 150,
     }
   ];
 
@@ -150,6 +150,7 @@ export default function ProjectConfigTab() {
                       name={["configZh", item.key]}
                       label={ item.label }
                       rules={[
+                        { required: true, message: t("businessLogic.config.template.contentRequired") },
                         { max: item.max, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.max }) }
                       ]}
                     >
@@ -159,8 +160,9 @@ export default function ProjectConfigTab() {
                 <Col span={12}>
                     <Form.Item
                       name={["configEn", item.key]}
-                      label={ ' ' }
+                      label={ `${item.label}-English` }
                       rules={[
+                        { required: true, message: t("businessLogic.config.template.contentRequired") },
                         { max: item.max, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.max }) }
                       ]}
                     >
