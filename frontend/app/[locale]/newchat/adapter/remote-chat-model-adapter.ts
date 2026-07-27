@@ -5,8 +5,8 @@ import type {
   ChatModelRunOptions,
   ChatModelRunResult,
   CompleteAttachment,
+  ThreadMessage,
 } from "@assistant-ui/react";
-import type { ThreadMessage } from "@assistant-ui/core";
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
