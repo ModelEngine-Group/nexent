@@ -56,10 +56,11 @@ class MockFastMCP:
         instance = cls(name=name)
         return instance
 
-    def mount(self, name, server):
+    def mount(self, server, prefix=None, tool_names=None):
         """Mount another server"""
         mock_mounted = MagicMock()
-        mock_mounted.prefix = name if isinstance(name, str) else getattr(name, 'name', 'unknown')
+        mock_mounted.prefix = prefix
+        mock_mounted.tool_names = tool_names
         self._mounted_servers.append(mock_mounted)
         if hasattr(self._tool_manager, '_mounted_servers'):
             self._tool_manager._mounted_servers.append(mock_mounted)
@@ -111,6 +112,9 @@ stub_local_mcp = types.ModuleType("tool_collection.mcp.local_mcp_service")
 mock_local_service = MagicMock()
 mock_local_service.name = "local_mcp"
 stub_local_mcp.local_mcp_service = mock_local_service
+stub_local_mcp.LOCAL_MCP_TOOL_NAME_OVERRIDES = {
+    "search_installed_mcp_tools": "search_installed_mcp_tools"
+}
 sys.modules['tool_collection'] = types.ModuleType("tool_collection")
 sys.modules['tool_collection.mcp'] = types.ModuleType("tool_collection.mcp")
 sys.modules['tool_collection.mcp.local_mcp_service'] = stub_local_mcp
