@@ -66,7 +66,7 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     """Safe structured error returned to the agent."""
 
     status: Literal["error"] = "error"
-    code: Literal["invalid_draft", "tool_search_failed"]
+    code: Literal["invalid_draft", "invalid_keywords", "tool_search_failed"]
     retryable: Literal[True] = True
 
 

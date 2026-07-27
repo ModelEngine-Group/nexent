@@ -18,17 +18,6 @@ from tool_collection.mcp.local_mcp_service import (
 )
 
 
-def _draft_payload() -> dict:
-    return {
-        "name": "weather_assistant",
-        "display_name": "Weather Assistant",
-        "description": "Search weather forecasts",
-        "duty_prompt": "Find and summarize weather forecasts",
-        "constraint_prompt": "Only use available forecast information",
-        "few_shots_prompt": None,
-    }
-
-
 @pytest.mark.asyncio
 async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
     mocker.patch.object(
@@ -100,10 +89,22 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         side_effect=score_by_document,
     )
 
-    result = json.loads(await search_installed_mcp_tools.fn(_draft_payload()))
+    result = json.loads(
+        await search_installed_mcp_tools.fn(
+            [" Weather ", "forecast", "WEATHER"]
+        )
+    )
 
     get_current_user_id.assert_called_once_with("Bearer tenant-token")
     query_all_tools.assert_called_once_with(tenant_id="tenant-a")
+    assert {
+        call.args[0]
+        for call in nl2agent_service.fuzz.WRatio.call_args_list
+    } == {"weather forecast"}
+    assert {
+        call.args[0]
+        for call in nl2agent_service.fuzz.token_set_ratio.call_args_list
+    } == {"weather forecast"}
     assert result["status"] == "success"
     assert result["recommendation_count"] == 2
     assert [item["tool_id"] for item in result["recommendations"]] == [7, 12]
@@ -133,14 +134,15 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
 
 @pytest.mark.asyncio
 async def test_mcp_search_returns_sanitized_contract_errors(mocker):
-    invalid_result = json.loads(
-        await search_installed_mcp_tools.fn({"name": "incomplete"})
-    )
-    assert invalid_result == {
-        "status": "error",
-        "code": "invalid_draft",
-        "retryable": True,
-    }
+    for keywords in ([], ["   "]):
+        invalid_result = json.loads(
+            await search_installed_mcp_tools.fn(keywords)
+        )
+        assert invalid_result == {
+            "status": "error",
+            "code": "invalid_keywords",
+            "retryable": True,
+        }
 
     mocker.patch.object(
         local_mcp_service_module,
@@ -154,11 +156,11 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     )
     mocker.patch.object(
         nl2agent_service,
-        "search_installed_mcp_tools_for_tenant",
+        "search_installed_mcp_tools_by_query",
         side_effect=RuntimeError("private database details"),
     )
 
-    result_text = await search_installed_mcp_tools.fn(_draft_payload())
+    result_text = await search_installed_mcp_tools.fn(["private", "weather"])
 
     assert json.loads(result_text) == {
         "status": "error",
@@ -185,9 +187,10 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     }
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
     assert tool.name == SEARCH_INSTALLED_MCP_TOOLS_NAME
-    assert set(tool.parameters["properties"]) == {"draft"}
-    assert tool.parameters["properties"]["draft"]["type"] == "object"
-    assert tool.parameters["required"] == ["draft"]
+    assert set(tool.parameters["properties"]) == {"keywords"}
+    assert tool.parameters["properties"]["keywords"]["type"] == "array"
+    assert tool.parameters["properties"]["keywords"]["items"]["type"] == "string"
+    assert tool.parameters["required"] == ["keywords"]
     assert tool.meta["nexent_internal"] is True
 
 

@@ -90,7 +90,21 @@ def search_installed_mcp_tools_for_tenant(
 ) -> list[InstalledMcpToolRecommendation]:
     """Return the best installed MCP tool matches for one tenant."""
 
-    query = _build_draft_query(draft)
+    return search_installed_mcp_tools_by_query(
+        tenant_id=tenant_id,
+        query_text=_build_draft_query(draft),
+        limit=limit,
+    )
+
+
+def search_installed_mcp_tools_by_query(
+    tenant_id: str,
+    query_text: str,
+    limit: int = MAX_RECOMMENDATIONS,
+) -> list[InstalledMcpToolRecommendation]:
+    """Return the best installed MCP tool matches for normalized query text."""
+
+    query = _normalize_search_text(query_text)
     scored_tools: list[tuple[float, int, dict[str, Any]]] = []
 
     for tool in query_all_tools(tenant_id=tenant_id):
