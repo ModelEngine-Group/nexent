@@ -104,6 +104,11 @@ export function extractObjectNameFromUrl(url: string): string | null {
  * @param url Original image URL (can be MinIO URL or local path)
  * @returns Backend API URL for the image
  */
+export async function fetchImageBlob(url: string): Promise<Blob> {
+  const response = await fetch(convertImageUrlToApiUrl(url));
+  return response.blob();
+}
+
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
 

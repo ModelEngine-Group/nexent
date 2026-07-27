@@ -153,6 +153,7 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
