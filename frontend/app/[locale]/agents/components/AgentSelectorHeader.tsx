@@ -671,6 +671,7 @@ export default function AgentSelectorHeader({
                 </div>
               )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
+              classNames={{ root: "agent-selector-dropdown" }}
               styles={{
                 root: {
                   width: 'calc(100% - 32px)',
