@@ -13,6 +13,7 @@ import {
 import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { uploadMcpImage } from "@/services/mcpService";
@@ -107,7 +108,11 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
           : undefined;
 
-        const result = await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+        const result = await uploadMcpImage(
+          file, draft.containerPort, trimmedName, envVars,
+          undefined, draft.groupIds?.join(","), draft.ingroupPermission,
+          draft.sharedFields ? JSON.stringify(draft.sharedFields) : undefined,
+        );
         if (!result.success) {
           throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
         }
@@ -152,6 +157,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
+      queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
       await refreshToolListWithToast({
         message,
         t,

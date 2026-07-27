@@ -542,15 +542,15 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
         mock_query_groups.return_value = [4]  # user is in group 4, not group 2
         mock_health.return_value = ["tool1"]
 
-        await add_mcp_service(
-            tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', server_url='https://srv/mcp',
-            tags=[], authorization_token=None,
-            custom_headers=None, container_config=None, registry_json=None,
-            enabled=False, config_json=None, market_id=None,
-        )
-        # Should not raise - installation allowed
-        mock_create.assert_called_once()
+        with self.assertRaises(MCPNameIllegal):
+            await add_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', server_url='https://srv/mcp',
+                tags=[], authorization_token=None,
+                custom_headers=None, container_config=None, registry_json=None,
+                enabled=False, config_json=None, market_id=None,
+            )
+        mock_create.assert_not_called()
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
@@ -1915,3 +1915,97 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# ============================================================================
+# add_mcp_service - skip_health_check tests
+# ============================================================================
+
+class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
+    """Test add_mcp_service with skip_health_check parameter."""
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_skip_true_skips_health_check(self, mock_check_name, mock_health_check, mock_create):
+        """skip_health_check=True → health check is NOT called."""
+        mock_check_name.return_value = False
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='community', server_url='http://localhost:8080/mcp',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=False, config_json=None, market_id=1,
+            skip_health_check=True,
+        )
+
+        mock_health_check.assert_not_called()
+        mock_create.assert_called_once()
+        call_data = mock_create.call_args[1]['mcp_data']
+        self.assertEqual(call_data['mcp_name'], 'test-svc')
+        self.assertEqual(call_data['mcp_server'], 'http://localhost:8080/mcp')
+        self.assertEqual(call_data['market_id'], 1)
+        self.assertIsNone(call_data['status'])
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_skip_false_runs_health_check(self, mock_check_name, mock_health_check, mock_create):
+        """skip_health_check=False (default) → health check IS called."""
+        mock_check_name.return_value = False
+        mock_health_check.return_value = ["tool1"]
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='local', server_url='https://srv/mcp',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=False, config_json=None, market_id=None,
+            skip_health_check=False,
+        )
+
+        mock_health_check.assert_called_once()
+        mock_create.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_skip_true_with_enabled(self, mock_check_name, mock_health_check, mock_create):
+        """skip_health_check=True + enabled=True → status=True without health check."""
+        mock_check_name.return_value = False
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='community', server_url='http://localhost:8080/mcp',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=True, config_json=None, market_id=1,
+            skip_health_check=True,
+        )
+
+        mock_health_check.assert_not_called()
+        mock_create.assert_called_once()
+        call_data = mock_create.call_args[1]['mcp_data']
+        self.assertTrue(call_data['status'])  # enabled=True → status=True
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_skip_true_with_container_port(self, mock_check_name, mock_health_check, mock_create):
+        """skip_health_check=True + container_port is stored."""
+        mock_check_name.return_value = False
+
+        await add_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='community', server_url='http://localhost:8080/mcp',
+            tags=[], authorization_token=None,
+            custom_headers=None, container_config=None, registry_json=None,
+            enabled=True, config_json=None, market_id=1,
+            container_port=8080,
+            skip_health_check=True,
+        )
+
+        mock_create.assert_called_once()
+        call_data = mock_create.call_args[1]['mcp_data']
+        self.assertEqual(call_data['container_port'], 8080)

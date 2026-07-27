@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Segmented } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -23,10 +23,20 @@ export default function AddMcpServiceModal({
   const { t } = useTranslation("common");
   const [tab, setTab] = useState<McpSource>(initialTab);
   const { enableUploadImage } = useMcpServerList({ enabled: open });
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [initialTab, open]);
+
+  const handleClose = useCallback(() => {
+    if (submittingRef.current) return;
+    onClose();
+  }, [onClose]);
+
+  const setSubmitting = useCallback((v: boolean) => {
+    submittingRef.current = v;
+  }, []);
 
   if (!open) return null;
 
@@ -39,10 +49,11 @@ export default function AddMcpServiceModal({
     <Modal
       open
       footer={null}
-      closable
+      closable={!submittingRef.current}
       centered
       width={modalWidth}
-      onCancel={onClose}
+      onCancel={handleClose}
+      maskClosable={!submittingRef.current}
       wrapClassName="[&_.ant-modal]:transition-[width] [&_.ant-modal]:duration-300 [&_.ant-modal]:ease-in-out"
       styles={{
         mask: { background: "rgba(4, 4, 4, 0.6)", backdropFilter: "blur(2px)" },
@@ -83,6 +94,7 @@ export default function AddMcpServiceModal({
             active={tab === McpSource.LOCAL}
             enableUploadImage={enableUploadImage}
             onAdded={onClose}
+            onSubmittingChange={setSubmitting}
           />
           <AddMcpServiceRegistrySection
             active={tab === McpSource.REGISTRY}

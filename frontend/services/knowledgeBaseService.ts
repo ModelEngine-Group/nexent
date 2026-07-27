@@ -1398,6 +1398,26 @@ class KnowledgeBaseService {
     }
   }
 
+  async fetchSummaryFrequencyOptions(): Promise<{ value: string; label: string }[]> {
+    const response = await fetch("/api/indices/summary_frequency_options", {
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    return data.options || [];
+  }
+
+  async updateKnowledgeBaseQuota(indexName: string, limitBytes: number | null): Promise<void> {
+    const response = await fetch(API_ENDPOINTS.knowledgeBase.updateIndex(indexName), {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ quota_limit_bytes: limitBytes }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || data.message || "Failed to update quota");
+    }
+  }
+
   // Update auto-summary frequency for a knowledge base
   async updateSummaryFrequency(
     indexName: string,

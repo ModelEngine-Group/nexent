@@ -295,7 +295,7 @@ class TestCheckMcpMarketNameExists:
         session.first = lambda: MagicMock()
         mock_session.return_value = session
 
-        assert check_mcp_market_name_exists("existing") is True
+        assert check_mcp_market_name_exists("existing", "tid") is True
 
     @patch('backend.database.market_mcp_db.get_db_session')
     def test_name_not_exists(self, mock_session):
@@ -303,7 +303,7 @@ class TestCheckMcpMarketNameExists:
         session.first = lambda: None
         mock_session.return_value = session
 
-        assert check_mcp_market_name_exists("new") is False
+        assert check_mcp_market_name_exists("new", "tid") is False
 
 
 class TestUpdateMcpMarketRecord:

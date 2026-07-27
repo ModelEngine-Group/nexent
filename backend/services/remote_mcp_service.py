@@ -299,6 +299,9 @@ async def add_remote_mcp_server_list(
     custom_headers: dict | None = None,
     source: str | None = "local",
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ):
     """Add a remote MCP server to the list.
 
@@ -339,6 +342,9 @@ async def add_remote_mcp_server_list(
         "source": source,
         "container_port": container_port,
         "registry_json": {"_toolNames": tool_names},
+        "group_ids": group_ids,
+        "ingroup_permission": ingroup_permission,
+        "shared_fields": shared_fields,
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -395,6 +401,7 @@ async def add_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    skip_health_check: bool = False,
 ) -> None:
     """Add an MCP service record.
 
@@ -424,28 +431,8 @@ async def add_mcp_service(
     resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
     if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-        # If the name exists but the existing MCP has group restrictions that make it
-        # invisible to this user, allow the installation anyway.
-        from database.remote_mcp_db import get_mcp_records_by_tenant
-        existing = [r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name]
-        if existing:
-            existing_rec = existing[0]
-            existing_group_ids = (existing_rec.get("group_ids") or "").strip()
-            if existing_group_ids:
-                created_by = str(existing_rec.get("created_by") or existing_rec.get("user_id") or "")
-                if created_by != user_id:
-                    from database.group_db import query_group_ids_by_user
-                    user_grps = [str(g) for g in (query_group_ids_by_user(user_id) or [])]
-                    allowed = [g.strip() for g in existing_group_ids.split(",") if g.strip()]
-                    if any(g in allowed for g in user_grps):
-                        logger.error(f"MCP name already exists: {name}")
-                        raise MCPNameIllegal("MCP name already exists")
-                else:
-                    logger.error(f"MCP name already exists: {name}")
-                    raise MCPNameIllegal("MCP name already exists")
-            else:
-                logger.error(f"MCP name already exists: {name}")
-                raise MCPNameIllegal("MCP name already exists")
+        logger.error(f"MCP name already exists: {name}")
+        raise MCPNameIllegal("MCP name already exists")
 
     resolved_registry_json = registry_json or {}
     if server_url:
@@ -482,9 +469,10 @@ async def add_mcp_service(
                 resolved_registry_json["_toolNames"] = api_tools
         else:
             headers = _build_mcp_headers(authorization_token, custom_headers)
-            tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
-            if tool_names:
-                resolved_registry_json["_toolNames"] = tool_names
+            if not skip_health_check:
+                tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+                if tool_names:
+                    resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
@@ -1423,6 +1411,9 @@ async def upload_and_start_mcp_image(
     port: int,
     service_name: str | None = None,
     env_vars: str | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1499,7 +1490,10 @@ async def upload_and_start_mcp_image(
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
         authorization_token=authorization_token,
-        container_port=port
+        container_port=port,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
     return {

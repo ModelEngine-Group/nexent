@@ -5,8 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Modal, Table, Select, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useQueryClient } from "@tanstack/react-query";
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import { updateToolLabels } from "@/services/mcpService";
 import log from "@/lib/logger";
 
 interface LabelManagementModalProps {
@@ -74,11 +73,7 @@ export default function LabelManagementModal({
 
       // Persist to backend, then synchronously update cache so parent sees fresh data
       try {
-        await fetch(API_ENDPOINTS.tool.labels, {
-          method: "PUT",
-          headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ tool_id: parseInt(toolId), labels: newLabels }),
-        });
+        await updateToolLabels(toolId, newLabels);
         // Synchronous cache update — no timing gaps, no refetch race
         queryClient.setQueryData(["tools"], (old: any[]) => {
           if (!old) return old;

@@ -47,7 +47,6 @@ import {
   useKnowledgeBaseConfigChangeHandler,
   ToolKbType,
 } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
-import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import log from "@/lib/logger";
