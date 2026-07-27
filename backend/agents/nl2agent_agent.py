@@ -75,6 +75,15 @@ Pass exactly one `keywords` array with this shape:
 {"keywords": ["capability keyword", "another capability"]}
 ```
 Use 1 to 10 unique, non-empty strings. Each string must be at most 100 characters. Do not add fields.""",
+            f"""## Tool Call Format
+When calling `{tool_name}`, output the executable action in this format:
+Thought: Briefly explain why the search is needed.
+Code:
+<code>
+result = {tool_name}(keywords=["capability keyword", "another capability"])
+print(result)
+</code>
+Executable code must use the `<code>...</code>` tags. Never use a Markdown fenced code block with a `python` language marker for an executable action. The JSON block above documents the keyword schema only; it is not an executable action format.""",
             f"""## Constraints
 - `{tool_name}` is the only available business tool. Do not call any other tool or agent.
 - Do not create, update, publish, or claim to have persisted an agent.
@@ -98,6 +107,15 @@ After a successful search, state that the installed tool search completed and su
 {"keywords": ["能力关键词", "另一个能力关键词"]}
 ```
 数组必须包含 1 到 10 个不重复的非空字符串，每项不得超过 100 个字符。不得添加其他字段。""",
+            f"""## 工具调用格式
+调用 `{tool_name}` 时，必须按以下格式输出可执行动作：
+Thought: 简要说明为什么需要搜索。
+Code:
+<code>
+result = {tool_name}(keywords=["能力关键词", "另一个能力关键词"])
+print(result)
+</code>
+可执行代码必须使用 `<code>...</code>` 标签，禁止使用带 `python` 语言标记的 Markdown 围栏代码块。上面的 JSON 代码块仅用于说明关键词结构，不是可执行动作格式。""",
             f"""## 约束
 - `{tool_name}` 是唯一可用的业务工具，不得调用其他工具或智能体。
 - 不得创建、更新、发布智能体，也不得声称已经持久化智能体。
