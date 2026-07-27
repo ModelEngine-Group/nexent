@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FC, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type FC, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   useAuiState,
@@ -8,6 +8,7 @@ import {
   useRemoteThreadListRuntime,
   type AssistantRuntime,
 } from "@assistant-ui/react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
@@ -38,7 +39,72 @@ function useLocalChatRuntime(): AssistantRuntime {
   });
 }
 
+const NL2AGENT_DISPLAY: Agent = {
+  id: "__nl2agent_runtime__",
+  name: "NL2Agent",
+  display_name: "NL2Agent",
+  description:
+    "Describe the agent you want to build and search installed MCP tools.",
+  model: "main_model",
+  max_step: 5,
+  provide_run_summary: false,
+  tools: [],
+};
+
 export default function Home() {
+  return (
+    <Suspense fallback={<ChatLoadingState />}>
+      <ChatModeRouter />
+    </Suspense>
+  );
+}
+
+const ChatLoadingState: FC = () => (
+  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+    Loading conversation...
+  </div>
+);
+
+const ChatModeRouter: FC = () => {
+  const searchParams = useSearchParams();
+  return searchParams.get("mode") === "nl2agent" ? (
+    <NL2AgentHome />
+  ) : (
+    <PersistentChatHome />
+  );
+};
+
+const NL2AgentHome: FC = () => {
+  const runtime = useLocalChatRuntime();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  useEffect(() => {
+    runtime.thread.composer.setRunConfig({
+      custom: { runtimeMode: "nl2agent" },
+    });
+  }, [runtime]);
+
+  const handleBack = useCallback(() => {
+    router.replace(pathname);
+  }, [pathname, router]);
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <TooltipProvider>
+        <div className="h-full w-full">
+          <Chat
+            selectedAgent={NL2AGENT_DISPLAY}
+            isLoadingAgents={false}
+            onBack={handleBack}
+          />
+        </div>
+      </TooltipProvider>
+    </AssistantRuntimeProvider>
+  );
+};
+
+const PersistentChatHome: FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -87,7 +153,7 @@ export default function Home() {
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-}
+};
 
 /**
  * Inner component that has access to the AuiState via useAuiState hook.

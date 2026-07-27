@@ -3,7 +3,11 @@ Unit tests for backend.apps.agent_app module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
-from apps.agent_app import agent_config_router, agent_runtime_router
+from apps.agent_app import (
+    agent_config_router,
+    agent_runtime_router,
+    nl2agent_run_api,
+)
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -19,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
+from consts.model import NL2AgentRunRequest
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -190,6 +195,47 @@ async def test_agent_run_api(mocker, mock_auth_header):
     content = response.content.decode()
     assert "data: chunk1" in content
     assert "data: chunk2" in content
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_streams_without_persistent_ids(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+
+    async def mock_stream():
+        yield 'data: {"type":"final_answer","content":"done"}\n\n'
+
+    create_stream = mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        return_value=mock_stream(),
+    )
+
+    response = await nl2agent_run_api(
+        nl2agent_request=NL2AgentRunRequest(
+            query="Build a weather agent",
+            history=[],
+            minio_files=[],
+        ),
+        http_request=MagicMock(),
+        authorization=mock_auth_header["Authorization"],
+    )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert response.status_code == 200
+    assert response.media_type == "text/event-stream"
+    assert "final_answer" in "".join(chunks)
+    request = create_stream.call_args.kwargs["request"]
+    assert request.query == "Build a weather agent"
+    assert not hasattr(request, "agent_id")
+    assert not hasattr(request, "conversation_id")
+    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
+    assert create_stream.call_args.kwargs["language"] == "en"
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):

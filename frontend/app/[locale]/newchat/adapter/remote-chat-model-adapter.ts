@@ -29,6 +29,15 @@ interface SseChunk {
   depth?: number;
 }
 
+interface NexentRunConfig {
+  threadId?: string;
+  onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
+  resume?: boolean;
+  agentId?: number | string;
+  enablePlan?: boolean;
+  runtimeMode?: "nl2agent";
+}
+
 // assistant-ui valid part types referenced by this adapter
 type AssistantPartType = "text" | "reasoning" | "tool-call" | "source";
 
@@ -825,19 +834,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // It also injects `onServerConversationId` so we can report back the id
     // the backend auto-creates (via the `conversation_id` response header)
     // when this is the first message in a brand-new thread.
-    const customThreadId = runConfig?.custom as
-      | {
-          threadId?: string;
-          onServerConversationId?: (
-            serverId: string,
-            initialQuestion?: string,
-          ) => void;
-          resume?: boolean;
-        }
-      | undefined;
-    const serverThreadId = customThreadId?.threadId;
-    const onServerConversationId = customThreadId?.onServerConversationId;
-    const isResume = customThreadId?.resume === true;
+    const custom = runConfig?.custom as NexentRunConfig | undefined;
+    const isNl2Agent = custom?.runtimeMode === "nl2agent";
+    const serverThreadId = custom?.threadId;
+    const onServerConversationId = custom?.onServerConversationId;
+    const isResume = !isNl2Agent && custom?.resume === true;
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -891,15 +892,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (hasServerConversationId) {
+    if (!isNl2Agent && hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
-    const custom = runConfig?.custom as
-      | { agentId?: number | string; enablePlan?: boolean; resume?: boolean }
-      | undefined;
-    if (custom?.agentId !== undefined && custom.agentId !== null) {
+    if (
+      !isNl2Agent &&
+      custom?.agentId !== undefined &&
+      custom.agentId !== null
+    ) {
       const numericAgentId =
         typeof custom.agentId === "string"
           ? Number(custom.agentId)
@@ -912,7 +914,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (modelName) {
+    if (!isNl2Agent && modelName) {
       requestBody.model_id = Number(modelName);
     }
 
@@ -932,6 +934,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
+          runtime_mode: isNl2Agent ? "nl2agent" : undefined,
         },
         abortSignal,
         (conversationId) => {

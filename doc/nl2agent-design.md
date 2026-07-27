@@ -1,5 +1,16 @@
 # NL2Agent Ephemeral Agent Design
 
+## 0. Current Implementation Phase
+
+The minimum verifiable implementation currently provides only these capabilities:
+
+- Reuse the ordinary chat UI through `/newchat?mode=nl2agent` and its existing stream rendering.
+- Construct NL2Agent in backend memory for every request without saving an agent or conversation.
+- Bind only `search_installed_mcp_tools` and display its structured JSON in the existing tool Result area.
+- Do not implement recommendation cards, a final confirmation card, the confirmation API, or target-agent creation.
+
+The post-search flow in Section 3, Sections 7 through 9, and their full acceptance cases describe the later target design rather than currently implemented behavior.
+
 ## 1. Design Goals
 
 NL2Agent is an ephemeral ReAct agent started from the dedicated "Create Agent" entry point. It clarifies user requirements through natural-language conversation, recommends MCP tools installed for the current tenant, and creates an editable agent draft after final user confirmation.
@@ -18,7 +29,7 @@ Core principles:
 
 ### 2.1 Entry Point
 
-The frontend calls a dedicated endpoint from the "Create Agent" flow:
+The frontend calls the ephemeral endpoint from the existing `/newchat?mode=nl2agent` page:
 
 ```http
 POST /agent/nl2agent/run
@@ -51,19 +62,20 @@ The server constructs `AgentConfig` and `AgentRunInfo` in memory from:
 
 The ephemeral configuration uses `__nl2agent_runtime__` as a runtime-only name. It is not persisted and is not reserved as a normal agent name.
 
-The runtime maximally reuses the existing run chain instead of building a parallel one:
+The runtime constructs the SDK run object directly and does not enter the ordinary agent database or conversation path:
 
 ```text
 build_nl2agent_run_info (thin wrapper: builds the in-memory AgentConfig)
-  -> create_agent_run_info(prebuilt_agent_config=...)   # existing function, reused
+  -> AgentRunInfo
+  -> agent_run
   -> agent_run_thread
   -> NexentAgent.create_single_agent
   -> CoreAgent ReAct loop
 ```
 
-`create_agent_run_info` gains one optional `prebuilt_agent_config` parameter; when provided it skips only the version lookup and the database-backed `create_agent_config` load, while attachment merging, tenant model list construction, history conversion, and `AgentRunInfo` assembly are all reused unchanged. Streaming reuses the existing `is_debug` path (`_stream_agent_chunks`) with a runtime-generated temporary conversation ID; `run_agent_stream` itself is not modified, since its conversation auto-creation, resume detection, and title generation are exactly what NL2Agent excludes. The run stays registered in `agent_run_manager` under the temporary ID so the existing stop capability keeps working.
+NL2Agent does not modify `create_agent_run_info` or `run_agent_stream`. Its wrapper reuses tenant default-model construction and attachment-description assembly, then creates `AgentRunInfo` directly. Observer JSON from `agent_run` is wrapped in the SSE format already parsed by the frontend. When the browser cancels the request, the stream generator sets the run-scoped `stop_event`.
 
-The two NL2Agent tools are process-local LangChain `StructuredTool` objects that close over backend services and request security context. The current SDK does not host-bridge `source="langchain"` tools into Docker or WASM executors, so the NL2Agent wrapper explicitly sets `sandbox_config=None` and uses the existing local executor. Supporting remote sandbox execution is out of scope for this design and would require either SDK host-tool support for LangChain tools or moving these tools behind MCP.
+The current MVP search tool is a process-local LangChain `StructuredTool` that closes over the tenant ID and backend search function. The current SDK does not host-bridge `source="langchain"` tools into Docker or WASM executors, so the NL2Agent wrapper explicitly sets `sandbox_config=None` and uses the existing local executor. Supporting remote sandbox execution is out of scope for this design and would require either SDK host-tool support for LangChain tools or moving these tools behind MCP.
 
 NL2Agent does not load configuration through the database-backed `create_agent_config`, does not appear in the ordinary agent selector, and does not require a database-generated agent ID.
 
@@ -111,24 +123,25 @@ After the final confirmation card is emitted, the flow enters `awaiting_confirma
 
 ### 4.1 Duty Prompt
 
-The NL2Agent duty prompt uses consistent stage-specific instructions:
+NL2Agent has no standalone YAML file, database prompt record, or prompt-loader entry. Whenever the ephemeral `AgentConfig` is built, the backend assembles role, workflow, draft schema, constraints, and final-response sections from the authenticated language, runtime tool name, and result limit. It injects this text through `AgentConfig.instructions` into the SDK's default CodeAgent system prompt.
+
+The duty prompt uses consistent stage-specific instructions:
 
 - `clarify`: Learn the agent's goals, usage scenario, inputs, outputs, constraints, and success criteria through free-form conversation. Do not require a fixed structure or emit a requirements confirmation card.
 - `tool_search`: Once there is enough information to identify required capabilities, generate a complete `GeneratedAgentDraft` and call `search_installed_mcp_tools`. Do not search without a draft.
-- `ready_to_create`: Once the draft is sufficiently complete and a tool search has completed in the current run, call `present_creation_confirmation_card`. If no search has run yet in the current run — even if an earlier turn already searched — call `search_installed_mcp_tools` first. Do not claim completion in plain text.
+- `ready_to_create` (later phase): Once the draft is sufficiently complete and a tool search has completed in the current run, call `present_creation_confirmation_card`. The current MVP explicitly prohibits entering this phase or claiming that an agent was created.
 - Tool Observations tell the model the search result, card generation result, and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
 
 ### 4.2 Runtime Tool Construction
 
-The ephemeral NL2Agent binds only two runtime tools:
+The current MVP binds only one runtime tool:
 
 ```text
 search_installed_mcp_tools
-present_creation_confirmation_card
 ```
 
-The backend creates both tools for every `/agent/nl2agent/run` request with `StructuredTool.from_function`. Each handler is a closure over the authenticated `tenant_id`, `user_id`, language, `MessageObserver`, backend service functions, and one shared per-run state object. None of these values appears in the model-visible argument schema, so the model cannot supply or override security context, result limits, callbacks, card IDs, or credentials.
+The backend creates the search tool for every `/agent/nl2agent/run` request with `StructuredTool.from_function`. Its handler closes over the authenticated `tenant_id` and backend search function. These values do not appear in the model-visible argument schema, so the model cannot supply or override tenant scope or the result limit.
 
 Each `StructuredTool` is attached directly to the prebuilt `AgentConfig` with `source="langchain"`. The backend constructs the `ToolConfig` first and then assigns the `BaseTool` object to `metadata`, matching the existing LangChain loader convention; the SDK's existing `Tool.from_langchain` adapter performs the conversion. The runtime tools are not written to `ag_tool_info_t` or `ag_tool_instance_t`, are not discovered from `backend/tool_collection/langchain`, and never appear in the public tool picker or public tool-validation endpoint. No SDK changes, `bind_runtime` hook, `is_internal` marker, MCP registration, or tool-list refresh are introduced.
 
@@ -137,10 +150,7 @@ The per-run factory follows this shape:
 ```python
 search_tool = build_search_installed_mcp_tools(
     tenant_id=tenant_id,
-    user_id=user_id,
     language=language,
-    observer=observer,
-    runtime_state=runtime_state,
     search_fn=search_installed_mcp_tools_for_tenant,
 )
 search_config = ToolConfig(
@@ -152,7 +162,7 @@ search_config = ToolConfig(
 search_config.metadata = search_tool
 ```
 
-`search_installed_mcp_tools` exposes exactly one model-visible argument, `draft: GeneratedAgentDraft`. Its synchronous Python handler validates the draft and calls `search_installed_mcp_tools_for_tenant(tenant_id=bound_tenant_id, draft=draft, limit=5)` exactly once. It does not call an LLM, MCP server, agent, or any other tool. On success it records the server-generated `draft_revision` and recommendation set in shared runtime state, emits the recommendation card through `MessageObserver` and `ProcessType.CARD`, and returns a compact JSON Observation containing the revision, count, recommendations, and allowed next action.
+`search_installed_mcp_tools` exposes one model-visible `draft` JSON object. The current `smolagents` converter cannot consume a nested Pydantic `$ref`, so the LangChain `args_schema` declares `draft` as an object and the handler applies strict `GeneratedAgentDraft.model_validate()` validation at entry. It then calls the tenant-scoped Python search function exactly once and never calls an LLM, MCP server, agent, or another tool.
 
 The `mcp` segment in the tool name describes the catalog records being searched, not the tool's implementation transport. The successful Observation has this fixed shape:
 
@@ -170,22 +180,19 @@ class InstalledMcpToolRecommendation(BaseModel):
 
 class SearchInstalledMcpToolsObservation(BaseModel):
     status: Literal["success"]
-    draft_revision: UUID
     recommendation_count: int
     recommendations: list[InstalledMcpToolRecommendation]
-    next_action: Literal["continue_clarifying_or_present_confirmation"]
 
 
 class SearchInstalledMcpToolsErrorObservation(BaseModel):
     status: Literal["error"]
-    code: Literal["tool_search_failed"]
+    code: Literal["invalid_draft", "tool_search_failed"]
     retryable: Literal[True]
-    next_action: Literal["retry_tool_search"]
 ```
 
-An empty result is a successful completed search: the handler emits an empty recommendation card, stores an empty recommendation set, and permits later confirmation without tool bindings. A database or ranking failure emits a `failed` recommendation card, returns a retryable error Observation without internal exception details, and does not mark search as completed; the confirmation tool therefore continues to reject the run until a later search succeeds.
+An empty result is a successful completed search. Draft validation, database, or ranking failures return retryable error Observations without internal exception details. The existing `execution_logs` mapping displays this structured JSON in ToolFallback's Result area.
 
-`present_creation_confirmation_card` is built through the same runtime LangChain factory pattern. It accepts the complete current draft, reads the latest successful search result from the shared closure state, and emits the final card through `ProcessType.CARD`. It takes no search identifier from the model. If no search has completed in the current run, it returns an error Observation directing the model to call `search_installed_mcp_tools` first.
+`present_creation_confirmation_card` and shared per-run card state are deferred to the later card phase.
 
 ## 5. Ephemeral Agent Draft
 
@@ -342,11 +349,12 @@ The card exposes only a confirmation button. The frontend dynamically displays t
 
 Verified against the current frontend (`@assistant-ui/react ^0.14.20`, new chat under `app/[locale]/newchat/`): the shared streaming adapter (`newchat/adapter/remote-chat-model-adapter.ts`) currently maps `card` chunks to `null` (skipped), and the message renderer (`thread.tsx`) supports data parts only through the generic `dataRendererUI` path; the installed version has no `by_name` component registry.
 
-NL2Agent therefore integrates as follows:
+The current MVP integrates as follows:
 
-- The Create Agent page uses its own adapter instance that extends the shared adapter with exactly one additional mapping: `card` chunks are parsed as `NL2AgentCardEnvelope` and emitted as data parts `{type: "data", name: envelope.name, data: envelope}`. The shared adapter used by the ordinary chat is left unchanged, so its existing card-skipping behavior is unaffected.
-- Card components are dispatched on `envelope.name` inside the NL2Agent page's data part renderer, following the existing `dataRendererUI` mechanism: `nl2agent_tool_recommendations_card` renders `McpToolRecommendationCard` and `nl2agent_creation_confirmation_card` renders `AgentCreationConfirmationCard`.
-- The Create Agent entry currently routes to the agent management page; the NL2Agent conversation page is a new page hosted in that flow, reusing the newchat thread components.
+- `/newchat?mode=nl2agent` uses a local assistant-ui runtime and an in-memory NL2Agent display object without loading the remote conversation list.
+- The shared streaming adapter switches to `/api/agent/nl2agent/run` through `runConfig.custom.runtimeMode` and omits `agent_id`, `conversation_id`, model overrides, resume, and title callbacks.
+- Existing `tool` and `execution_logs` mappings display the structured JSON in ToolFallback; no `card` chunk parsing or card component registration is added.
+- Ordinary `/newchat` continues to use its existing remote conversation runtime unchanged.
 
 NL2Agent has no historical conversation adapter. Existing non-NL2Agent text, reasoning, tool-call, source, and card rendering remains unchanged.
 

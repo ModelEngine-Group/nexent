@@ -1,5 +1,16 @@
 # NL2Agent 临时智能体设计方案
 
+## 0. 当前实现阶段
+
+当前最小可验证版本只实现以下能力：
+
+- 通过 `/newchat?mode=nl2agent` 复用普通聊天界面和流式消息渲染。
+- 每次请求在后端内存中临时构建 NL2Agent，不保存智能体或会话。
+- 仅绑定 `search_installed_mcp_tools`，并在现有工具 Result 区域展示结构化 JSON。
+- 不实现推荐卡、最终确认卡、确认接口或目标智能体创建。
+
+本文第 3 节中搜索之后的流程、第 7 至 9 节以及对应的完整验收项描述后续目标设计，不代表当前版本已经实现。
+
 ## 1. 设计目标
 
 NL2Agent 是通过“创建智能体”专用入口启动的临时 ReAct 智能体，负责通过自然语言对话明确用户需求、推荐当前租户已安装的 MCP 工具，并在用户最终确认后创建可编辑的智能体草稿。
@@ -18,7 +29,7 @@ NL2Agent 是通过“创建智能体”专用入口启动的临时 ReAct 智能�
 
 ### 2.1 调用入口
 
-前端在“创建智能体”流程中调用专用接口：
+前端通过现有 `/newchat?mode=nl2agent` 页面调用临时运行接口：
 
 ```http
 POST /agent/nl2agent/run
@@ -51,19 +62,20 @@ POST /agent/nl2agent/run
 
 临时配置使用 `__nl2agent_runtime__` 作为仅供运行期识别的名称。该名称不写入数据库，也不作为系统保留的普通智能体名称。
 
-运行链路最大化复用现有实现，不另建平行链路：
+运行链路直接组装 SDK 运行对象，不进入普通智能体的数据库配置和会话链路：
 
 ```text
 build_nl2agent_run_info（薄包装：构建内存态 AgentConfig）
-  -> create_agent_run_info(prebuilt_agent_config=...)   # 复用现有函数
+  -> AgentRunInfo
+  -> agent_run
   -> agent_run_thread
   -> NexentAgent.create_single_agent
   -> CoreAgent ReAct loop
 ```
 
-`create_agent_run_info` 增加一个可选参数 `prebuilt_agent_config`：传入时仅跳过版本号解析和数据库版 `create_agent_config` 加载，附件拼接、租户模型列表构建、history 转换和 `AgentRunInfo` 组装均原样复用。流式输出复用现有 `is_debug` 路径（`_stream_agent_chunks`），使用运行期生成的临时会话 ID；不修改 `run_agent_stream` 本身——其会话自动创建、resume 探测和标题生成正是 NL2Agent 明确排除的能力。运行仍以临时 ID 注册到 `agent_run_manager`，现有停止能力对 NL2Agent 继续可用。
+NL2Agent 不修改 `create_agent_run_info` 或 `run_agent_stream`。包装层只复用租户默认模型构建和附件描述拼接，然后直接创建 `AgentRunInfo`；`agent_run` 产生的 observer JSON 被包装成现有前端可解析的 SSE。浏览器取消请求时，流生成器设置本次运行的 `stop_event`。
 
-两个 NL2Agent 工具都是进程内 LangChain `StructuredTool` 对象，通过闭包持有后端服务和请求安全上下文。当前 SDK 不会把 `source="langchain"` 工具通过 host bridge 接入 Docker 或 WASM 执行器，因此 NL2Agent 包装层明确设置 `sandbox_config=None`，使用现有本地执行器。本设计不支持远程沙箱执行；后续若需支持，必须由 SDK 为 LangChain 工具增加 host-tool 能力，或将这些工具迁移到 MCP。
+当前 MVP 的搜索工具是进程内 LangChain `StructuredTool` 对象，通过闭包持有租户 ID 和后端搜索函数。当前 SDK 不会把 `source="langchain"` 工具通过 host bridge 接入 Docker 或 WASM 执行器，因此 NL2Agent 包装层明确设置 `sandbox_config=None`，使用现有本地执行器。本设计不支持远程沙箱执行；后续若需支持，必须由 SDK 为 LangChain 工具增加 host-tool 能力，或将这些工具迁移到 MCP。
 
 NL2Agent 不通过数据库版 `create_agent_config` 加载配置，不出现在普通智能体选择器中，也不需要数据库生成的智能体 ID。
 
@@ -111,24 +123,25 @@ flowchart TD
 
 ### 4.1 职责提示词
 
-NL2Agent 的职责提示词使用一致的分阶段指令：
+NL2Agent 不使用独立 YAML、数据库提示词记录或提示词加载器。每次构建临时 `AgentConfig` 时，后端根据鉴权语言、工具名和最大结果数即时拼接角色、工作流、草稿结构、约束和最终回答规则，并通过 `AgentConfig.instructions` 注入 SDK 默认 CodeAgent system prompt。
+
+职责提示词使用一致的分阶段指令：
 
 - `clarify`：通过自由对话了解智能体目标、使用场景、输入、输出、约束和成功标准。不得要求用户填写固定结构，也不得生成需求确认卡。
 - `tool_search`：当信息足以判断所需能力时，生成完整的 `GeneratedAgentDraft`，然后调用 `search_installed_mcp_tools`。不得在没有草稿的情况下搜索。
-- `ready_to_create`：当草稿已经足够完整且本次运行内已完成工具搜索时，调用 `present_creation_confirmation_card`。若本次运行尚未搜索——即使更早的轮次搜索过——必须先调用 `search_installed_mcp_tools`。不得仅通过文本宣称创建完成。
+- `ready_to_create`（后续阶段）：当草稿已经足够完整且本次运行内已完成工具搜索时，调用 `present_creation_confirmation_card`。当前 MVP 明确禁止进入该阶段或声称已经创建智能体。
 - 工具返回的 Observation 用于告知搜索结果、卡片生成结果及下一步允许的行为。
 - 模型不得生成或覆盖用户 ID、租户 ID、授权信息、卡片 ID 和工具凭据。
 
 ### 4.2 运行时工具构建
 
-临时 NL2Agent 仅绑定两个运行时工具：
+当前 MVP 仅绑定一个运行时工具：
 
 ```text
 search_installed_mcp_tools
-present_creation_confirmation_card
 ```
 
-后端在每次 `/agent/nl2agent/run` 请求中通过 `StructuredTool.from_function` 创建这两个工具。每个处理函数都是闭包，绑定鉴权得到的 `tenant_id`、`user_id`、语言、`MessageObserver`、后端服务函数和同一个单次运行共享状态对象。这些值均不进入模型可见的参数 Schema，因此模型不能提交或覆盖安全上下文、结果数量、回调、卡片 ID 或凭据。
+后端在每次 `/agent/nl2agent/run` 请求中通过 `StructuredTool.from_function` 创建搜索工具。处理函数通过闭包绑定鉴权得到的 `tenant_id` 和后端搜索函数；这些值不进入模型可见的参数 Schema，因此模型不能提交或覆盖租户范围和结果数量。
 
 每个 `StructuredTool` 都以 `source="langchain"` 直接附加到预构建的 `AgentConfig`。后端先构造 `ToolConfig`，再把 `BaseTool` 对象赋给 `metadata`，与现有 LangChain 加载约定保持一致；SDK 继续通过既有 `Tool.from_langchain` 适配器完成转换。运行时工具不写入 `ag_tool_info_t` 或 `ag_tool_instance_t`，不通过 `backend/tool_collection/langchain` 静态扫描，也不出现在公共工具选择器和公共工具验证接口中。本设计不修改 SDK，不增加 `bind_runtime` 钩子、`is_internal` 标记、MCP 注册或工具列表刷新。
 
@@ -137,10 +150,7 @@ present_creation_confirmation_card
 ```python
 search_tool = build_search_installed_mcp_tools(
     tenant_id=tenant_id,
-    user_id=user_id,
     language=language,
-    observer=observer,
-    runtime_state=runtime_state,
     search_fn=search_installed_mcp_tools_for_tenant,
 )
 search_config = ToolConfig(
@@ -152,7 +162,7 @@ search_config = ToolConfig(
 search_config.metadata = search_tool
 ```
 
-`search_installed_mcp_tools` 只向模型暴露一个参数 `draft: GeneratedAgentDraft`。其同步 Python 处理函数先校验草稿，再且仅再调用一次 `search_installed_mcp_tools_for_tenant(tenant_id=bound_tenant_id, draft=draft, limit=5)`。它不调用 LLM、MCP 服务、智能体或任何其他工具。成功后，处理函数把服务端生成的 `draft_revision` 和推荐集合写入单次运行共享状态，通过 `MessageObserver` 和 `ProcessType.CARD` 发送推荐卡，并返回紧凑 JSON Observation，其中包含修订号、结果数量、推荐列表和允许的下一步动作。
+`search_installed_mcp_tools` 只向模型暴露一个 `draft` JSON object。当前 `smolagents` 无法转换嵌套 Pydantic `$ref`，因此 LangChain `args_schema` 把 `draft` 声明为 object，处理函数入口再使用 `GeneratedAgentDraft.model_validate()` 严格校验。随后它只调用一次租户范围内的 Python 搜索函数，不调用 LLM、MCP 服务、智能体或任何其他工具。
 
 工具名中的 `mcp` 表示被搜索的目录记录类型，不表示该工具自身使用 MCP 协议。成功 Observation 使用以下固定结构：
 
@@ -170,22 +180,19 @@ class InstalledMcpToolRecommendation(BaseModel):
 
 class SearchInstalledMcpToolsObservation(BaseModel):
     status: Literal["success"]
-    draft_revision: UUID
     recommendation_count: int
     recommendations: list[InstalledMcpToolRecommendation]
-    next_action: Literal["continue_clarifying_or_present_confirmation"]
 
 
 class SearchInstalledMcpToolsErrorObservation(BaseModel):
     status: Literal["error"]
-    code: Literal["tool_search_failed"]
+    code: Literal["invalid_draft", "tool_search_failed"]
     retryable: Literal[True]
-    next_action: Literal["retry_tool_search"]
 ```
 
-空结果属于成功完成的搜索：处理函数发送空推荐卡、保存空推荐集合，并允许后续不绑定工具完成确认。数据库或排序失败时，处理函数发送 `failed` 推荐卡，返回不包含内部异常细节的可重试错误 Observation，且不把搜索标记为已完成；因此确认工具会继续拒绝当前运行，直到后续搜索成功。
+空结果属于成功完成的搜索。草稿校验、数据库或排序失败时，处理函数返回不包含内部异常细节的可重试错误 Observation。结构化 JSON 由现有 `execution_logs` 映射显示在 ToolFallback Result 中。
 
-`present_creation_confirmation_card` 使用同一套运行时 LangChain 工厂模式构建。它接收当前完整草稿，从共享闭包状态读取最近一次成功搜索结果，并通过 `ProcessType.CARD` 发送最终确认卡。它不接收模型提供的搜索标识。若本次运行尚未完成搜索，则返回错误 Observation，要求模型先调用 `search_installed_mcp_tools`。
+`present_creation_confirmation_card` 和单次运行共享状态留待后续卡片阶段实现。
 
 ## 5. 临时智能体草稿
 
@@ -342,11 +349,12 @@ type NL2AgentCardEnvelope<T> = {
 
 已对照当前前端验证（`@assistant-ui/react ^0.14.20`，新聊天位于 `app/[locale]/newchat/`）：共享流式适配器（`newchat/adapter/remote-chat-model-adapter.ts`）目前将 `card` 块映射为 `null`（直接跳过），消息渲染器（`thread.tsx`）仅通过通用 `dataRendererUI` 路径支持 data part，当前安装版本没有 `by_name` 组件注册机制。
 
-因此 NL2Agent 按以下方式集成：
+当前 MVP 按以下方式集成：
 
-- 创建智能体页面使用自己的适配器实例，在共享适配器基础上仅扩展一条映射：将 `card` 块解析为 `NL2AgentCardEnvelope`，输出为 data part `{type: "data", name: envelope.name, data: envelope}`。普通聊天使用的共享适配器保持不变，其现有的跳过 card 行为不受影响。
-- 卡片组件在 NL2Agent 页面的 data part 渲染器内按 `envelope.name` 分发，沿用现有 `dataRendererUI` 机制：`nl2agent_tool_recommendations_card` 渲染 `McpToolRecommendationCard`，`nl2agent_creation_confirmation_card` 渲染 `AgentCreationConfirmationCard`。
-- 创建智能体入口目前仅跳转到智能体管理页；NL2Agent 对话页是该流程中新建的页面，复用 newchat 的 thread 组件。
+- `/newchat?mode=nl2agent` 使用本地 assistant-ui runtime 和内存态 NL2Agent 展示对象，不加载远程会话列表。
+- 共享流式适配器根据 `runConfig.custom.runtimeMode` 切换到 `/api/agent/nl2agent/run`，并省略 `agent_id`、`conversation_id`、模型覆盖、resume 和标题回调。
+- 现有 `tool` 与 `execution_logs` 映射将结构化 JSON 显示在 ToolFallback 中，不解析 `card` 块，也不注册卡片组件。
+- 普通 `/newchat` 继续使用原有远程会话 runtime，行为不变。
 
 NL2Agent 不提供历史会话适配器。现有非 NL2Agent 的 text、reasoning、tool-call、source 和 card 渲染保持不变。
 
