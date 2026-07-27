@@ -8,10 +8,9 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pydantic import model_validator
-from nexent.scheduler import (
-    ScheduleMode,
-    ScheduleRuleType,
-    ScheduleSpec,
+from nexent.scheduler import ScheduleMode, ScheduleRuleType
+from services.agent_automation.models import ScheduleTrigger
+from services.agent_automation.schedule_engine import (
     compute_next_fire_at,
     is_valid_cron_expression,
 )
@@ -32,21 +31,19 @@ from services.memory_dreaming_service import (
 from utils.auth_utils import get_current_user_id
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
+USER_DREAMING_SCOPE = "__user__"
 
 
 class DreamingRunRequest(BaseModel):
-    agent_id: str = Field(..., min_length=1)
     target_user_id: Optional[str] = None
 
 
 class DreamingVersionSwitchRequest(BaseModel):
-    agent_id: str = Field(..., min_length=1)
     expected_active_version_id: int = Field(..., ge=1)
     target_user_id: Optional[str] = None
 
 
 class DreamingScheduleRequest(BaseModel):
-    agent_id: str = Field(..., min_length=1)
     enabled: bool
     rule_type: Literal["CRON", "INTERVAL"] = "CRON"
     timezone: str = "Asia/Shanghai"
@@ -118,16 +115,16 @@ def get_dreaming_parameters(
 
 @router.get("/schedule")
 def get_dreaming_schedule(
-    agent_id: Annotated[str, Query(min_length=1)],
+    agent_id: Annotated[Optional[str], Query()] = None,
     authorization: Annotated[Optional[str], Header()] = None,
     target_user_id: Annotated[Optional[str], Query()] = None,
 ):
     user_id, tenant_id = _resolve_target_user(
         authorization, target_user_id, tenant_capability="VIEW_TENANT"
     )
-    schedule = memory_dreaming_db.get_schedule(tenant_id, user_id, agent_id)
+    schedule = memory_dreaming_db.get_schedule(tenant_id, user_id, USER_DREAMING_SCOPE)
     return schedule or {
-        "agent_id": agent_id,
+        "agent_id": USER_DREAMING_SCOPE,
         "enabled": False,
         "rule_type": "CRON",
         "timezone": "Asia/Shanghai",
@@ -151,7 +148,7 @@ def put_dreaming_schedule(
     actor_user_id, _ = get_current_user_id(authorization)
     now = datetime.now(timezone.utc)
     start_at = payload.start_at or now
-    spec = ScheduleSpec(
+    spec = ScheduleTrigger(
         mode=ScheduleMode.RECURRING,
         rule_type=ScheduleRuleType(payload.rule_type),
         timezone=payload.timezone,
@@ -163,7 +160,7 @@ def put_dreaming_schedule(
     return memory_dreaming_db.upsert_schedule(
         tenant_id,
         user_id,
-        payload.agent_id,
+        USER_DREAMING_SCOPE,
         enabled=payload.enabled,
         rule_type=payload.rule_type,
         timezone_name=payload.timezone,
@@ -197,7 +194,7 @@ def run_dreaming(
         run_id = memory_dreaming_db.create_audit(
             tenant_id,
             user_id,
-            payload.agent_id,
+            USER_DREAMING_SCOPE,
             trigger_source="manual",
             status="queued",
         )
@@ -224,7 +221,7 @@ def list_dreaming_audits(
     return get_memory_dreaming_service().list_audits(
         tenant_id,
         user_id,
-        agent_id=agent_id,
+        agent_id=USER_DREAMING_SCOPE,
         run_id=run_id,
         limit=limit,
     )
@@ -232,7 +229,7 @@ def list_dreaming_audits(
 
 @router.get("/versions")
 def list_dreaming_versions(
-    agent_id: Annotated[str, Query(min_length=1)],
+    agent_id: Annotated[Optional[str], Query()] = None,
     authorization: Annotated[Optional[str], Header()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     target_user_id: Annotated[Optional[str], Query()] = None,
@@ -243,7 +240,7 @@ def list_dreaming_versions(
         tenant_capability="VIEW_TENANT",
     )
     return get_memory_dreaming_service().list_versions(
-        tenant_id, user_id, agent_id=agent_id, limit=limit
+        tenant_id, user_id, agent_id=USER_DREAMING_SCOPE, limit=limit
     )
 
 
@@ -263,7 +260,7 @@ def activate_dreaming_version(
         version = get_memory_dreaming_service().activate_version(
             tenant_id,
             user_id,
-            agent_id=payload.agent_id,
+            agent_id=USER_DREAMING_SCOPE,
             version_id=version_id,
             actor_user_id=actor_user_id,
             expected_active_version_id=payload.expected_active_version_id,

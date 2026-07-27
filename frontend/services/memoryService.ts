@@ -59,6 +59,7 @@ async function requestJson(
 // ---------------------------------------------------------------------------
 export interface MemoryConfig {
   memoryEnabled: boolean;
+  dreamingEnabled: boolean;
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
@@ -97,6 +98,7 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
+      dreamingEnabled: (cfg.DREAMING_SWITCH ?? "Y") === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
@@ -106,11 +108,27 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
     // fall back to defaults
     return {
       memoryEnabled: true,
+      dreamingEnabled: true,
       shareOption: "always",
       disableAgentIds: [],
       disableUserAgentIds: [],
     };
   }
+}
+
+export async function setDreamingConfig(
+  enabled: boolean,
+  deleteHistory = false
+): Promise<boolean> {
+  const res = await requestJson(
+    `${API_ENDPOINTS.memory.config.load.replace("/load", "/dreaming")}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ enabled, delete_history: deleteHistory }),
+    }
+  );
+  return !!res?.success;
 }
 
 export async function setMemorySwitch(enabled: boolean): Promise<boolean> {
@@ -529,10 +547,9 @@ export async function fetchDreamingParameters(): Promise<DreamingParameters> {
 }
 
 export async function fetchDreamingSchedule(
-  agentId: string,
   targetUserId?: string
 ): Promise<DreamingSchedule> {
-  const params = new URLSearchParams({ agent_id: agentId });
+  const params = new URLSearchParams();
   if (targetUserId) params.set("target_user_id", targetUserId);
   return requestJson(
     `${API_ENDPOINTS.memory.dreaming.schedule}?${params.toString()}`,
@@ -555,19 +572,16 @@ export async function runDreaming(agentId: string, targetUserId?: string) {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      agent_id: agentId,
       ...(targetUserId ? { target_user_id: targetUserId } : {}),
     }),
   }) as Promise<{ run_id: number; task_id: string; status: "queued" }>;
 }
 
 export async function fetchDreamingAudits(
-  agentId: string,
   limit = 20,
   targetUserId?: string
 ): Promise<DreamingAudit[]> {
   const params = new URLSearchParams({
-    agent_id: agentId,
     limit: String(limit),
   });
   if (targetUserId) params.set("target_user_id", targetUserId);
@@ -578,12 +592,10 @@ export async function fetchDreamingAudits(
 }
 
 export async function fetchDreamingVersions(
-  agentId: string,
   limit = 20,
   targetUserId?: string
 ): Promise<DreamingVersion[]> {
   const params = new URLSearchParams({
-    agent_id: agentId,
     limit: String(limit),
   });
   if (targetUserId) params.set("target_user_id", targetUserId);
@@ -603,7 +615,6 @@ export async function activateDreamingVersion(
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      agent_id: agentId,
       expected_active_version_id: expectedActiveVersionId,
       ...(targetUserId ? { target_user_id: targetUserId } : {}),
     }),

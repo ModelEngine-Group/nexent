@@ -7,9 +7,8 @@ from pydantic import ValidationError
 from apps import memory_dreaming_app
 
 
-def test_ac009_missing_agent_id_is_rejected():
-    with pytest.raises(ValidationError):
-        memory_dreaming_app.DreamingRunRequest()
+def test_ac009_user_scope_does_not_require_agent_id():
+    assert memory_dreaming_app.DreamingRunRequest().target_user_id is None
 
 
 def test_ac011_parameters_show_effective_read_only_configuration(monkeypatch):
@@ -48,7 +47,7 @@ def test_ac009_run_uses_authenticated_scope(monkeypatch):
     create_audit.assert_called_once_with(
         "tenant-1",
         "user-1",
-        "agent-1",
+        "__user__",
         trigger_source="manual",
         status="queued",
     )
@@ -73,7 +72,7 @@ def test_ac009_audit_uses_authenticated_scope(monkeypatch):
     )
     assert result == [{"run_id": 2}]
     service.list_audits.assert_called_once_with(
-        "tenant-2", "user-2", agent_id="agent-2", run_id=2, limit=100
+        "tenant-2", "user-2", agent_id="__user__", run_id=2, limit=100
     )
 
 
@@ -125,12 +124,12 @@ def test_ac026_version_history_and_switch_use_authenticated_scope(monkeypatch):
     assert versions[0]["version_id"] == 2
     assert switched["version_id"] == 1
     service.list_versions.assert_called_once_with(
-        "tenant-1", "user-1", agent_id="agent-1", limit=20
+        "tenant-1", "user-1", agent_id="__user__", limit=20
     )
     service.activate_version.assert_called_once_with(
         "tenant-1",
         "user-1",
-        agent_id="agent-1",
+        agent_id="__user__",
         version_id=1,
         actor_user_id="user-1",
         expected_active_version_id=2,
@@ -211,7 +210,7 @@ def test_ac016_admin_can_target_same_tenant_only(monkeypatch):
         target_user_id="same",
     )
     service.list_versions.assert_called_once_with(
-        "tenant-1", "same", agent_id="agent-1", limit=100
+        "tenant-1", "same", agent_id="__user__", limit=100
     )
     with pytest.raises(HTTPException) as exc:
         memory_dreaming_app.list_dreaming_versions(

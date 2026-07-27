@@ -28,6 +28,7 @@ from nexent.memory.dreaming import (
 from services.memory_record_service import get_memory_record_service
 
 logger = logging.getLogger("memory_dreaming_service")
+USER_DREAMING_SCOPE = "__user__"
 
 
 def _utcnow() -> datetime:
@@ -53,7 +54,7 @@ class MemoryDreamingService:
         stats = memory_retrieval_hit_db.aggregate_dreaming_stats(
             tenant_id,
             user_id,
-            agent_id,
+            None if agent_id == USER_DREAMING_SCOPE else agent_id,
             since=_utcnow() - timedelta(days=max(1, window_days)),
         )
         by_id = {int(item["memory_id"]): item for item in stats}
@@ -85,7 +86,7 @@ class MemoryDreamingService:
         records = memory_record_db.list_memory_records(
             tenant_id,
             user_id=user_id,
-            agent_id=agent_id,
+            agent_id=None if agent_id == USER_DREAMING_SCOPE else agent_id,
             layer="agent",
             memory_type="short_term",
             status="active",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import Integer, func
 
@@ -189,7 +189,7 @@ def aggregate_memory_stats(
 def aggregate_dreaming_stats(
     tenant_id: str,
     user_id: str,
-    agent_id: str,
+    agent_id: Optional[str],
     *,
     since: datetime,
 ) -> List[Dict[str, Any]]:
@@ -197,7 +197,10 @@ def aggregate_dreaming_stats(
     hits = list_hits_for_user(tenant_id, user_id, since=since, limit=10000)
     grouped: Dict[int, Dict[str, Any]] = {}
     for hit in hits:
-        if str(hit.get("agent_id")) != str(agent_id) or hit.get("memory_id") is None:
+        if (
+            (agent_id is not None and str(hit.get("agent_id")) != str(agent_id))
+            or hit.get("memory_id") is None
+        ):
             continue
         memory_id = int(hit["memory_id"])
         entry = grouped.setdefault(

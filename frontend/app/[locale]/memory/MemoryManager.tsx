@@ -41,6 +41,7 @@ import { Can } from "@/components/permission/Can";
 import { DreamingPanel } from "./DreamingPanel";
 import {
   loadMemoryConfig,
+  setDreamingConfig,
   setMemorySwitch,
   type MemoryConfig,
 } from "@/services/memoryService";
@@ -98,6 +99,7 @@ const statusMap: Record<MemoryStatus, { label: string; color: string }> = {
 
 const defaultConfig: MemoryConfig = {
   memoryEnabled: true,
+  dreamingEnabled: true,
   shareOption: "always",
   disableAgentIds: [],
   disableUserAgentIds: [],
@@ -267,6 +269,40 @@ export function MemoryManager() {
       setConfig((current) => ({ ...current, memoryEnabled: previous }));
       message.error(t("useMemory.setMemorySwitchError"));
     }
+  };
+
+  const persistDreamingEnabled = async (
+    enabled: boolean,
+    deleteHistory = false
+  ) => {
+    setSavingConfig(true);
+    try {
+      const saved = await setDreamingConfig(enabled, deleteHistory);
+      if (!saved) throw new Error("save failed");
+      setConfig((current) => ({ ...current, dreamingEnabled: enabled }));
+      message.success(enabled ? "Dreaming 已启用" : "Dreaming 已关闭");
+    } catch {
+      message.error("更新 Dreaming 配置失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const updateDreamingEnabled = (enabled: boolean) => {
+    if (enabled) {
+      void persistDreamingEnabled(true);
+      return;
+    }
+    Modal.confirm({
+      title: "关闭 Dreaming",
+      content:
+        "是否同时删除历史 Dreaming 版本、运行记录和 Dreaming 生成的长期记忆？原始会话记忆不会被删除。",
+      okText: "删除历史并关闭",
+      okButtonProps: { danger: true },
+      cancelText: "保留历史并关闭",
+      onOk: () => persistDreamingEnabled(false, true),
+      onCancel: () => persistDreamingEnabled(false, false),
+    });
   };
 
   const openCreate = () => {
@@ -484,6 +520,24 @@ export function MemoryManager() {
           />
         </Flex>
       </Card>
+      <Card className="memory-config-card" loading={configLoading}>
+        <Flex align="center" justify="space-between" gap={24}>
+          <Flex align="center" gap={12}>
+            <Brain size={20} />
+            <div>
+              <Text strong>启用 Dreaming</Text>
+              <Text type="secondary" className="memory-setting-description">
+                允许系统跨智能体整理当前用户的短期记忆
+              </Text>
+            </div>
+          </Flex>
+          <Switch
+            checked={config.dreamingEnabled}
+            loading={savingConfig}
+            onChange={updateDreamingEnabled}
+          />
+        </Flex>
+      </Card>
     </div>
   );
 
@@ -658,7 +712,7 @@ export function MemoryManager() {
                 Dreaming
               </span>
             ),
-            disabled: !config.memoryEnabled,
+            disabled: !config.memoryEnabled || !config.dreamingEnabled,
           },
         ]}
       />

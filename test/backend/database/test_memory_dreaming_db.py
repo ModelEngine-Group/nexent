@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -146,7 +146,7 @@ def test_create_audit_queued_status(monkeypatch):
 def test_get_active_version_returns_dict(monkeypatch):
     session = _mock_session(monkeypatch)
     row = _make_version_row(version_id=5, is_active=True)
-    session.query.return_value.filter.return_value.first.return_value = row
+    session.query.return_value.filter.return_value.order_by.return_value.first.return_value = row
 
     result = memory_dreaming_db.get_active_version("t", "u", "a")
 
@@ -157,7 +157,7 @@ def test_get_active_version_returns_dict(monkeypatch):
 
 def test_get_active_version_returns_none(monkeypatch):
     session = _mock_session(monkeypatch)
-    session.query.return_value.filter.return_value.first.return_value = None
+    session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
 
     result = memory_dreaming_db.get_active_version("t", "u", "a")
 
@@ -204,7 +204,6 @@ def test_create_and_activate_version_creates_new(monkeypatch):
     # First query: check for existing → None
     # Second query: get max version_no → 3
     query_mock = MagicMock()
-    filter_mock = MagicMock()
 
     call_count = [0]
 
@@ -248,7 +247,7 @@ def test_create_and_activate_version_creates_new(monkeypatch):
 
     session.add.side_effect = capture_add
 
-    result = memory_dreaming_db.create_and_activate_version(
+    memory_dreaming_db.create_and_activate_version(
         tenant_id="t",
         user_id="u",
         agent_id="a",

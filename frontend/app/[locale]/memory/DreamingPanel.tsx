@@ -28,7 +28,6 @@ import {
   activateDreamingVersion,
   DreamingAudit,
   DreamingVersion,
-  fetchDreamingAgents,
   fetchDreamingAudits,
   fetchDreamingParameters,
   fetchDreamingSchedule,
@@ -53,10 +52,7 @@ export function DreamingPanel() {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const { user, hasPermission } = useAuthorizationContext();
-  const [agents, setAgents] = useState<Array<{ value: string; label: string }>>(
-    []
-  );
-  const [agentId, setAgentId] = useState<string>();
+  const agentId = "__user__";
   const [tenantUsers, setTenantUsers] = useState<TenantUser[]>([]);
   const [targetUserId, setTargetUserId] = useState<string>();
   const [audits, setAudits] = useState<DreamingAudit[]>([]);
@@ -73,36 +69,33 @@ export function DreamingPanel() {
   const [intervalHours, setIntervalHours] = useState(24);
   const [savingSchedule, setSavingSchedule] = useState(false);
 
-  const refresh = useCallback(
-    async (selectedAgent: string) => {
-      const target =
-        targetUserId && targetUserId !== user?.id ? targetUserId : undefined;
-      const [nextAudits, nextVersions, nextSchedule] = await Promise.all([
-        fetchDreamingAudits(selectedAgent, 20, target),
-        fetchDreamingVersions(selectedAgent, 20, target),
-        fetchDreamingSchedule(selectedAgent, target),
-      ]);
-      setAudits(nextAudits);
-      setVersions(nextVersions);
-      setSchedule(nextSchedule);
-      if (nextSchedule.rule_type === "INTERVAL") {
-        setScheduleMode("interval");
-        setIntervalHours((nextSchedule.interval_seconds || 86400) / 3600);
+  const refresh = useCallback(async () => {
+    const target =
+      targetUserId && targetUserId !== user?.id ? targetUserId : undefined;
+    const [nextAudits, nextVersions, nextSchedule] = await Promise.all([
+      fetchDreamingAudits(20, target),
+      fetchDreamingVersions(20, target),
+      fetchDreamingSchedule(target),
+    ]);
+    setAudits(nextAudits);
+    setVersions(nextVersions);
+    setSchedule(nextSchedule);
+    if (nextSchedule.rule_type === "INTERVAL") {
+      setScheduleMode("interval");
+      setIntervalHours((nextSchedule.interval_seconds || 86400) / 3600);
+    } else {
+      const parts = (nextSchedule.cron_expr || "0 3 * * *").split(" ");
+      setScheduleTime(
+        `${parts[1].padStart(2, "0")}:${parts[0].padStart(2, "0")}`
+      );
+      if (parts[4] !== "*") {
+        setScheduleMode("weekly");
+        setScheduleWeekday(Number(parts[4]));
       } else {
-        const parts = (nextSchedule.cron_expr || "0 3 * * *").split(" ");
-        setScheduleTime(
-          `${parts[1].padStart(2, "0")}:${parts[0].padStart(2, "0")}`
-        );
-        if (parts[4] !== "*") {
-          setScheduleMode("weekly");
-          setScheduleWeekday(Number(parts[4]));
-        } else {
-          setScheduleMode("daily");
-        }
+        setScheduleMode("daily");
       }
-    },
-    [targetUserId, user?.id]
-  );
+    }
+  }, [targetUserId, user?.id]);
 
   useEffect(() => {
     if (user?.id && !targetUserId) setTargetUserId(user.id);
@@ -119,11 +112,9 @@ export function DreamingPanel() {
   }, [hasPermission, message, t, user?.tenantId]);
 
   useEffect(() => {
-    Promise.all([fetchDreamingAgents(), fetchDreamingParameters()])
-      .then(([options, effectiveParameters]) => {
-        setAgents(options);
+    fetchDreamingParameters()
+      .then((effectiveParameters) => {
         setParameters(effectiveParameters);
-        if (options.length) setAgentId(options[0].value);
       })
       .catch(() => message.error(t("dreaming.error.loadAgents")))
       .finally(() => setLoading(false));
@@ -132,7 +123,7 @@ export function DreamingPanel() {
   useEffect(() => {
     if (!agentId) return;
     setLoading(true);
-    refresh(agentId)
+    refresh()
       .catch(() => message.error(t("dreaming.error.loadStatus")))
       .finally(() => setLoading(false));
   }, [agentId, message, refresh, t]);
@@ -158,8 +149,8 @@ export function DreamingPanel() {
     !!activeRun.started_at &&
     Date.now() - new Date(activeRun.started_at).getTime() > 60_000;
   useEffect(() => {
-    if (!agentId || !activeRun) return;
-    const timer = window.setInterval(() => refresh(agentId), 2000);
+    if (!activeRun) return;
+    const timer = window.setInterval(() => refresh(), 2000);
     return () => window.clearInterval(timer);
   }, [activeRun, agentId, refresh]);
 
@@ -169,7 +160,7 @@ export function DreamingPanel() {
     try {
       await runDreaming(agentId, selectedIsSelf ? undefined : targetUserId);
       message.success(t("dreaming.run.queued"));
-      await refresh(agentId);
+      await refresh();
     } catch {
       message.error(t("dreaming.error.trigger"));
     } finally {
@@ -221,7 +212,7 @@ export function DreamingPanel() {
       message.success(
         t("dreaming.version.switched", { version: version.version_no })
       );
-      await refresh(agentId);
+      await refresh();
     } catch {
       message.error(t("dreaming.error.activate"));
     }
@@ -280,13 +271,6 @@ export function DreamingPanel() {
                 placeholder={t("dreaming.user.placeholder")}
               />
             )}
-            <Select
-              style={{ minWidth: 220 }}
-              options={agents}
-              value={agentId}
-              onChange={setAgentId}
-              placeholder={t("dreaming.agent.placeholder")}
-            />
             <Button
               type="primary"
               icon={<Play className="size-4" />}
@@ -311,27 +295,19 @@ export function DreamingPanel() {
           <Button
             icon={<Save className="size-4" />}
             loading={savingSchedule}
-            disabled={!agentId || !schedule || !canEditTarget}
+            disabled={!schedule || !canEditTarget}
             onClick={saveSchedule}
           >
             {t("dreaming.schedule.save")}
           </Button>
         }
       >
-        {!agentId && (
-          <Alert
-            className="mb-4"
-            type="info"
-            showIcon
-            message={t("dreaming.schedule.selectAgentHint")}
-          />
-        )}
         <Space wrap size="large">
           <Space>
             <Typography.Text>{t("dreaming.schedule.enabled")}</Typography.Text>
             <Switch
               checked={displayedSchedule.enabled}
-              disabled={!agentId || !schedule || !canEditTarget}
+              disabled={!schedule || !canEditTarget}
               onChange={(enabled) =>
                 setSchedule({ ...displayedSchedule, enabled })
               }
@@ -340,7 +316,7 @@ export function DreamingPanel() {
           <Select
             aria-label={t("dreaming.schedule.frequency")}
             value={scheduleMode}
-            disabled={!agentId || !schedule || !canEditTarget}
+            disabled={!schedule || !canEditTarget}
             style={{ width: 150 }}
             onChange={setScheduleMode}
             options={[
@@ -352,7 +328,7 @@ export function DreamingPanel() {
           {scheduleMode === "weekly" && (
             <Select
               value={scheduleWeekday}
-              disabled={!agentId || !schedule || !canEditTarget}
+              disabled={!schedule || !canEditTarget}
               style={{ width: 130 }}
               onChange={setScheduleWeekday}
               options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
@@ -366,7 +342,7 @@ export function DreamingPanel() {
               value={dayjs(`2000-01-01T${scheduleTime}:00`)}
               format="HH:mm"
               minuteStep={5}
-              disabled={!agentId || !schedule || !canEditTarget}
+              disabled={!schedule || !canEditTarget}
               onChange={(value) =>
                 value && setScheduleTime(value.format("HH:mm"))
               }
@@ -377,7 +353,7 @@ export function DreamingPanel() {
                 min={1}
                 max={720}
                 value={intervalHours}
-                disabled={!agentId || !schedule || !canEditTarget}
+                disabled={!schedule || !canEditTarget}
                 onChange={(value) => setIntervalHours(value || 1)}
               />
               <Typography.Text>{t("dreaming.schedule.hours")}</Typography.Text>

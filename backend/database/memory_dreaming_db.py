@@ -15,13 +15,11 @@ from .db_models import (
     MemoryDreamingAudit,
     MemoryDreamingSchedule,
     MemoryDreamingVersion,
+    MemoryRecord,
 )
-from nexent.scheduler import (
-    ScheduleMode,
-    ScheduleRuleType,
-    ScheduleSpec,
-    compute_next_fire_at,
-)
+from nexent.scheduler import ScheduleMode, ScheduleRuleType
+from services.agent_automation.models import ScheduleTrigger
+from services.agent_automation.schedule_engine import compute_next_fire_at
 
 
 def advisory_lock_key(tenant_id: str, user_id: str, agent_id: str) -> int:
@@ -159,7 +157,7 @@ def upsert_schedule(
 
 
 def _next_schedule_fire(row: MemoryDreamingSchedule, after: datetime) -> Optional[datetime]:
-    spec = ScheduleSpec(
+    spec = ScheduleTrigger(
         mode=ScheduleMode.RECURRING,
         rule_type=ScheduleRuleType(row.rule_type),
         timezone=row.timezone,
@@ -229,10 +227,11 @@ def get_active_version(
             .filter(
                 MemoryDreamingVersion.tenant_id == tenant_id,
                 MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
+                MemoryDreamingVersion.agent_id.in_((agent_id, "__user__")),
                 MemoryDreamingVersion.is_active.is_(True),
                 MemoryDreamingVersion.delete_flag == "N",
             )
+            .order_by((MemoryDreamingVersion.agent_id == "__user__").desc())
             .first()
         )
         return _version_to_dict(row) if row else None
@@ -609,3 +608,30 @@ def recover_stale() -> int:
     with get_db_session() as session:
         result = session.execute(sql)
         return result.rowcount or 0
+
+
+def delete_user_dreaming_history(tenant_id: str, user_id: str) -> None:
+    with get_db_session() as session:
+        for model in (
+            MemoryDreamingSchedule,
+            MemoryDreamingAudit,
+            MemoryDreamingVersion,
+            MemoryDreamingActivationAudit,
+        ):
+            session.query(model).filter(
+                model.tenant_id == tenant_id,
+                model.user_id == user_id,
+                model.delete_flag == "N",
+            ).update(
+                {"delete_flag": "Y", "updated_by": user_id},
+                synchronize_session=False,
+            )
+        session.query(MemoryRecord).filter(
+            MemoryRecord.tenant_id == tenant_id,
+            MemoryRecord.user_id == user_id,
+            MemoryRecord.created_by == "dreaming",
+            MemoryRecord.delete_flag == "N",
+        ).update(
+            {"delete_flag": "Y", "updated_by": user_id},
+            synchronize_session=False,
+        )
