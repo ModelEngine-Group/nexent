@@ -949,13 +949,31 @@ def test_action_like_non_executable_output_is_not_a_final_answer(output):
 @pytest.mark.parametrize(
     "output",
     [
+        None,
+        42,
+        "",
+        "   ",
         "The answer is 42.",
         "I could not find enough evidence to answer.",
         '{"answer":"42"}',
+        "{not valid json",
+        "```json```",
+        '["not an action record"]',
     ],
 )
 def test_plain_answer_does_not_look_like_invalid_action(output):
     assert core_agent_module._looks_like_invalid_action_output(output) is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "```<RUN>print('missing closing fence')",
+        '[{"action":"search","arguments":{"q":"GAIA"}}]',
+    ],
+)
+def test_additional_action_protocol_variants_are_invalid(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
 
 
 # ----------------------------------------------------------------------------

@@ -305,6 +305,17 @@ def test_renderer_current_action_without_raw_messages():
     assert not text.lstrip().startswith("{")
 
 
+def test_renderer_current_action_preserves_raw_messages():
+    messages = [{"role": "assistant", "content": [{"type": "text", "text": "raw action"}]}]
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {"messages": messages},
+    )
+
+    assert ContextItemRenderer().render([action]) == messages
+
+
 def test_renderer_current_action_compact_with_tool_calls():
     action = _direct_item(
         "action",
@@ -365,6 +376,23 @@ def test_renderer_current_action_preserves_string_tool_arguments():
     assert "tool: python_interpreter" in text
     assert "result = search(query='GAIA')\nprint(result)" in text
     assert "python_interpreter'()" not in text
+
+
+def test_renderer_current_action_without_step_number():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "tool_calls": [{"name": "search", "arguments": {"q": "GAIA"}}],
+            "result": "done",
+        },
+    )
+
+    text = ContextItemRenderer().render([action])[0]["content"][0]["text"]
+
+    assert "index:" not in text
+    assert "tool: search" in text
+    assert "recorded_result:\ndone" in text
 
 
 def test_renderer_summary_legacy_dict_renders_markdown():
