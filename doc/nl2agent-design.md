@@ -51,14 +51,17 @@ The server constructs `AgentConfig` and `AgentRunInfo` in memory from:
 
 The ephemeral configuration uses `__nl2agent_runtime__` as a runtime-only name. It is not persisted and is not reserved as a normal agent name.
 
-The runtime reuses the existing SDK chain:
+The runtime maximally reuses the existing run chain instead of building a parallel one:
 
 ```text
-build_nl2agent_run_info
+build_nl2agent_run_info (thin wrapper: builds the in-memory AgentConfig)
+  -> create_agent_run_info(prebuilt_agent_config=...)   # existing function, reused
   -> agent_run_thread
   -> NexentAgent.create_single_agent
   -> CoreAgent ReAct loop
 ```
+
+`create_agent_run_info` gains one optional `prebuilt_agent_config` parameter; when provided it skips only the version lookup and the database-backed `create_agent_config` load, while attachment merging, tenant model list construction, history conversion, and `AgentRunInfo` assembly are all reused unchanged. Streaming reuses the existing `is_debug` path (`_stream_agent_chunks`) with a runtime-generated temporary conversation ID; `run_agent_stream` itself is not modified, since its conversation auto-creation, resume detection, and title generation are exactly what NL2Agent excludes. The run stays registered in `agent_run_manager` under the temporary ID so the existing stop capability keeps working.
 
 NL2Agent does not load configuration through the database-backed `create_agent_config`, does not appear in the ordinary agent selector, and does not require a database-generated agent ID.
 
@@ -98,7 +101,7 @@ The model uses two independent readiness thresholds:
 1. It may search for tools once the available information is sufficient to identify required capabilities and search terms.
 2. It may present the final confirmation card once the available information is sufficient to generate a usable agent configuration.
 
-Tool search may happen before requirement collection is complete. Search results may inform later clarification, but the final confirmation card requires at least one completed tool search.
+Tool search may happen before requirement collection is complete, and search results may inform later clarification. The final confirmation card requires a completed tool search **within the same run**: the ephemeral runtime keeps no state across requests, so `present_creation_confirmation_card` can only verify searches performed in the current ReAct run. If the model attempts to present the confirmation card in a run with no prior search, the tool returns an error Observation instructing it to call `search_installed_mcp_tools` first. This also guarantees the confirmation card is always based on a fresh search over the latest draft. The precondition is a product-quality guard, not a security control; authorization is enforced independently by the confirmation API's revalidation.
 
 After the final confirmation card is emitted, the flow enters `awaiting_confirmation`. The frontend stops accepting new requirement input, and the user may only confirm creation or leave the flow.
 
@@ -110,7 +113,7 @@ The NL2Agent duty prompt uses consistent stage-specific instructions:
 
 - `clarify`: Learn the agent's goals, usage scenario, inputs, outputs, constraints, and success criteria through free-form conversation. Do not require a fixed structure or emit a requirements confirmation card.
 - `tool_search`: Once there is enough information to identify required capabilities, generate a complete `GeneratedAgentDraft` and call `search_installed_mcp_tools`. Do not search without a draft.
-- `ready_to_create`: Once the draft is sufficiently complete and at least one tool search has finished, call `present_creation_confirmation_card`. Do not claim completion in plain text.
+- `ready_to_create`: Once the draft is sufficiently complete and a tool search has completed in the current run, call `present_creation_confirmation_card`. If no search has run yet in the current run — even if an earlier turn already searched — call `search_installed_mcp_tools` first. Do not claim completion in plain text.
 - Tool Observations tell the model the search result, card generation result, and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
 
@@ -125,9 +128,13 @@ present_creation_confirmation_card
 
 The tools receive the server-injected user, tenant, language, `MessageObserver`, and controlled callbacks through `ToolConfig.metadata`. The model cannot supply or override this security context.
 
-`search_installed_mcp_tools` accepts the current `GeneratedAgentDraft`. The server builds search text from the draft fields and emits a tool recommendation card directly through `ProcessType.CARD`.
+Injection follows a generic SDK convention instead of per-tool branches: each platform tool implements `bind_runtime(metadata, observer)`, which pulls its dependencies from `ToolConfig.metadata`, validates them, and raises if required entries are missing. `create_local_tool` invokes this hook through a single `hasattr` check in its generic branch; adding a platform tool must not add tool-specific branches to `create_local_tool` or to backend tool services. The per-run shared state used by the confirmation-card precondition is one object the server places into both tools' metadata, so both receive the same reference through `bind_runtime`.
 
-`present_creation_confirmation_card` accepts the complete current draft and the identifier of the most recent valid tool search, then emits the final confirmation card through `ProcessType.CARD`. The call is rejected if there is no valid tool search.
+Platform tools are marked `is_internal = True`. They are excluded from the user-facing local tool scan and rejected uniformly by the public tool validation endpoint; they are exercised only through the NL2Agent runtime and automated tests.
+
+`search_installed_mcp_tools` accepts the current `GeneratedAgentDraft`. The backend-injected callback builds search text from the draft fields and performs the tenant-scoped query; the tool itself emits the recommendation card through `ProcessType.CARD`.
+
+`present_creation_confirmation_card` accepts the complete current draft and emits the final confirmation card through `ProcessType.CARD`. It takes no search identifier from the model: the two platform tools share per-run runtime state, and the confirmation tool reads the latest search result (`draft_revision` and recommendation set) recorded by `search_installed_mcp_tools` in the same run. If no search has completed in the current run, the call is rejected with an error Observation directing the model to search first.
 
 ## 5. Ephemeral Agent Draft
 
@@ -213,15 +220,18 @@ Fixed rules:
 | Default selection threshold | `0.65` |
 | Tie-break order | Ascending `tool_id` |
 
-When no tool matches, the server emits an empty-state tool card and allows creation without tool bindings.
+The score thresholds are initial values and are expected to be tuned with real usage data.
+
+When no tool matches, the tool emits an empty-state recommendation card, and creation without tool bindings remains allowed.
 
 ### 6.4 Draft Revisions and Tool Selection
 
 - Each new draft generated for a search receives a new `draft_revision`.
 - The tool recommendation card selects tools scoring at least `0.65` by default.
 - Users may select or clear tools on the latest recommendation card.
-- A new tool search marks older recommendation cards and confirmation cards based on older revisions as `superseded`.
+- When a new recommendation card arrives, the frontend marks all older recommendation cards and confirmation cards as `superseded`.
 - A new recommendation card uses its new default selection set and does not inherit selections from an older revision.
+- Because the confirmation card is always produced in the same run as a completed search, its `draft_revision` always equals the latest recommendation card's revision; no cross-revision matching is needed.
 - The final confirmation card always reads the latest selection state from the tool card with the same `draft_revision`.
 
 ## 7. SSE Cards and Frontend State
@@ -270,31 +280,13 @@ The card exposes only a confirmation button. The frontend dynamically displays t
 
 ### 7.4 assistant-ui Mapping
 
-The streaming adapter converts NL2Agent `card` events to:
+Verified against the current frontend (`@assistant-ui/react ^0.14.20`, new chat under `app/[locale]/newchat/`): the shared streaming adapter (`newchat/adapter/remote-chat-model-adapter.ts`) currently maps `card` chunks to `null` (skipped), and the message renderer (`thread.tsx`) supports data parts only through the generic `dataRendererUI` path; the installed version has no `by_name` component registry.
 
-```ts
-{
-  type: "data",
-  name: envelope.name,
-  data: envelope,
-}
-```
+NL2Agent therefore integrates as follows:
 
-Component mapping:
-
-```tsx
-<MessagePrimitive.Parts
-  components={{
-    Text: DirectiveText,
-    data: {
-      by_name: {
-        nl2agent_tool_recommendations_card: McpToolRecommendationCard,
-        nl2agent_creation_confirmation_card: AgentCreationConfirmationCard,
-      },
-    },
-  }}
-/>
-```
+- The Create Agent page uses its own adapter instance that extends the shared adapter with exactly one additional mapping: `card` chunks are parsed as `NL2AgentCardEnvelope` and emitted as data parts `{type: "data", name: envelope.name, data: envelope}`. The shared adapter used by the ordinary chat is left unchanged, so its existing card-skipping behavior is unaffected.
+- Card components are dispatched on `envelope.name` inside the NL2Agent page's data part renderer, following the existing `dataRendererUI` mechanism: `nl2agent_tool_recommendations_card` renders `McpToolRecommendationCard` and `nl2agent_creation_confirmation_card` renders `AgentCreationConfirmationCard`.
+- The Create Agent entry currently routes to the agent management page; the NL2Agent conversation page is a new page hosted in that flow, reusing the newchat thread components.
 
 NL2Agent has no historical conversation adapter. Existing non-NL2Agent text, reasoning, tool-call, source, and card rendering remains unchanged.
 
@@ -339,9 +331,9 @@ Server behavior:
 1. Resolve the current user and tenant from the authentication context.
 2. Revalidate the complete draft, agent name, and field lengths.
 3. Revalidate that every tool belongs to the current tenant, has `source="mcp"`, and is still available.
-4. Look up an existing creation result using tenant, user, and `card_id` as the idempotency key.
-5. Create the target agent draft at `version_no=0` and write tool bindings in one transaction.
-6. Persist the mapping from the idempotency key to `target_agent_id`.
+4. Idempotency is Redis-based and introduces no new database table. The key is derived from tenant, user, and `card_id`. If the key already holds a `target_agent_id`, return it directly; if the key is held as an in-progress lock, reject with a retryable conflict.
+5. Acquire the in-progress lock via `SET NX` with a TTL, then create the target agent draft at `version_no=0` and write tool bindings in one database transaction.
+6. After commit, write `target_agent_id` into the idempotency key with a bounded TTL that covers realistic retry windows (for example 24 hours); on failure, release the lock.
 7. Return the target agent ID and draft configuration URL.
 
 Success response:
@@ -355,7 +347,7 @@ Success response:
 
 After a successful response, the frontend marks the confirmation card as `confirmed`, tells the user that all relevant information has been written to the agent draft, and directs the user to inspect the draft.
 
-Repeated submissions with the same idempotency key return the existing draft. Validation or transaction failures must not retain a partial agent, tool bindings, or a successful idempotency record. The card becomes `failed`, and transient failures may be retried.
+Repeated submissions with the same idempotency key return the existing draft within the idempotency TTL; beyond the TTL, the frontend's `confirmed` card state prevents resubmission. Validation or transaction failures must not retain a partial agent or tool bindings, and must release the in-progress lock without recording a success. The card becomes `failed`, and transient failures may be retried.
 
 ## 9. Security and Consistency
 
@@ -363,9 +355,11 @@ Repeated submissions with the same idempotency key return the existing draft. Va
 - The submitted draft is user-controlled configuration and still undergoes all standard agent validation rules.
 - Submitted tool IDs have no authorization authority and must be revalidated for tenant, source, and availability.
 - The model and frontend cannot submit or read MCP credentials.
-- Agent draft creation, tool bindings, and the idempotency result share one transaction boundary.
+- Agent draft creation and tool bindings share one database transaction; the idempotency record is Redis-based, with an in-progress lock preventing concurrent duplicates. No new database table is introduced for idempotency.
 - A `card_id` is idempotent only within the current tenant and user scope and cannot be reused across identities.
 - NL2Agent does not persist runtime history, so frontend page state is never an authorization source.
+- The search-before-confirmation-card precondition is enforced per run for product quality only; security relies entirely on the confirmation API revalidating the draft and every submitted tool ID.
+- `is_internal` platform tools are not persisted, not listed in the user-facing tool picker, and not executable through the public tool validation endpoint.
 - After creation, the target agent follows the existing editing, publishing, permission, and version-management rules.
 
 ## 10. Test Plan
@@ -379,11 +373,11 @@ Repeated submissions with the same idempotency key return the existing draft. Va
 - Both platform tools can use only server-injected security context.
 - Tool search returns only installed and available MCP tools from the current tenant.
 - Search fields, score threshold, Top 5 limit, default selection, and tie-break order remain deterministic.
-- The confirmation tool rejects calls without a valid completed tool search.
+- The confirmation tool rejects calls when no tool search has completed in the current run, and its error Observation instructs the model to search first.
 - The confirmation API validates the draft, tool permissions, positive IDs, and stable deduplication.
 - Forged, cross-tenant, non-MCP, and unavailable tools are rejected.
-- Agent creation, tool bindings, and idempotency results are atomic.
-- Retrying after a network timeout returns the same `target_agent_id`.
+- Agent creation and tool bindings are atomic; concurrent duplicate confirmations are blocked by the idempotency lock.
+- Retrying after a network timeout within the idempotency TTL returns the same `target_agent_id`.
 
 ### 10.2 Frontend
 
@@ -414,6 +408,6 @@ Repeated submissions with the same idempotency key return the existing draft. Va
 - The model owns semantic clarification, stage decisions, draft generation, and tool call ordering.
 - The server owns ephemeral runtime configuration, security context, search scope, validation, transactions, and idempotency.
 - The frontend owns current-page conversation history, draft revisions, card state, and tool selection.
-- Tool search is a required precondition for the final confirmation card.
+- Tool search is a required precondition for the final confirmation card, enforced through shared per-run tool state; across requests it is maintained as a prompt-level rule, and the confirmation API's revalidation remains the security boundary.
 - User confirmation is the only action that writes the target agent to the database.
 - The Chinese and English design documents define identical behavior.
