@@ -11,13 +11,21 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
-All state is in-memory. Run with:
+Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
+(next to this file). On restart the mock loads the file, so KBs created by
+tests or frontend sessions survive across restarts without re-creation
+(which was otherwise the cause of spurious 404s in list endpoints against
+stale Nexent permission rows). ``POST /_reset`` clears the file and
+rebuilds the seed data. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
+import json
 import logging
+import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -48,6 +56,14 @@ EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
+
+# Directory for persisted runtime state. Lives next to this file so the mock
+# is self-contained (no absolute paths) and stays out of version control via
+# ``.gitignore``. Only KB + document state is persisted; failure-injection
+# counters deliberately stay in-memory so each restart starts with a clean
+# failure plan.
+_STATE_DIR = Path(__file__).with_suffix("").with_name("_state")
+_STATE_FILE = _STATE_DIR / "knowledge_bases.json"
 
 # =============================================================================
 # In-memory state
@@ -118,7 +134,65 @@ def _seed_initial_data() -> None:
     ]
 
 
-_seed_initial_data()
+def _save_state() -> None:
+    """Atomically persist _KNOWLEDGE_BASES and _DOCUMENTS_BY_KB to disk.
+
+    Writes to a temporary file and then renames it into place, so a crash
+    mid-write cannot corrupt the existing state file. Silently no-ops the
+    documents/chunky side of a KB when its document list is missing — only
+    KB + document metadata are serialized, not file upload payloads.
+    """
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "knowledge_bases": _KNOWLEDGE_BASES,
+        "documents_by_kb": _DOCUMENTS_BY_KB,
+    }
+    tmp_path = _STATE_FILE.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp_path, _STATE_FILE)
+    except OSError as exc:
+        logger.warning("STATE SAVE FAILED  %s: %s", _STATE_FILE, exc)
+
+
+def _load_state() -> None:
+    """Hydrate runtime state from the persisted JSON file, or seed it fresh.
+
+    On the very first run (no file present) populates seed data and writes
+    it out so the next restart sees the same 25 KBs. If the file exists but
+    is unreadable or not valid JSON, logs a warning and falls back to seeds
+    — this keeps the mock usable after accidental file corruption.
+    """
+    if _STATE_FILE.exists():
+        try:
+            with open(_STATE_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            kb_data = payload.get("knowledge_bases", {})
+            doc_data = payload.get("documents_by_kb", {})
+            if not isinstance(kb_data, dict) or not isinstance(doc_data, dict):
+                raise ValueError("state file payload is not {dict, dict}")
+            _KNOWLEDGE_BASES.update(kb_data)
+            _DOCUMENTS_BY_KB.update(doc_data)
+            logger.info(
+                "STATE LOAD  restored %d KBs from %s",
+                len(_KNOWLEDGE_BASES), _STATE_FILE,
+            )
+            return
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            logger.warning(
+                "STATE LOAD FAILED  %s unreadable (%s); falling back to seeds",
+                _STATE_FILE, exc,
+            )
+
+    _seed_initial_data()
+    _save_state()
+    logger.info(
+        "STATE INIT  seeded %d KBs -> %s", len(_KNOWLEDGE_BASES), _STATE_FILE,
+    )
+
+
+_load_state()
 
 
 # =============================================================================
@@ -340,6 +414,7 @@ def create_knowledge_base(
     _DOCUMENTS_BY_KB[kds_id] = []
 
     logger.info("CREATE  kds_id=%s name=%r", kds_id, body.name)
+    _save_state()
     return JSONResponse(content=new_kb)
 
 
@@ -383,6 +458,7 @@ def update_knowledge_base(
     kb["update_time"] = int(time.time())
 
     logger.info("UPDATE  kds_id=%s name=%r description=%r", kds_id, body.name, body.description)
+    _save_state()
     return JSONResponse(content=kb)
 
 
@@ -401,6 +477,7 @@ def delete_knowledge_base(
     _DOCUMENTS_BY_KB.pop(kds_id, None)
 
     logger.info("DELETE  kds_id=%s", kds_id)
+    _save_state()
     return JSONResponse(content={"success": True})
 
 
@@ -441,6 +518,7 @@ async def upload_documents(
             failed.append({"name": f.filename or "unknown", "error": str(e)})
             logger.warning("UPLOAD FAIL  kds_id=%s file=%s error=%s", kds_id, f.filename, e)
 
+    _save_state()
     return JSONResponse(content={
         "success_count": len(success_docs),
         "failed_count": len(failed),
@@ -709,11 +787,17 @@ def health() -> Dict[str, Any]:
 
 @app.post("/_reset")
 def reset_state() -> Dict[str, str]:
-    """Reset in-memory state back to seeds (useful between test runs)."""
+    """Reset in-memory state back to seeds (useful between test runs).
+
+    Also deletes the persisted state file so the on-disk record matches the
+    in-memory one; otherwise the next restart would resurrect the pre-reset
+    data and nullify the effect of ``POST /_reset``.
+    """
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
     _seed_initial_data()
-    logger.info("RESET  state restored to seeds")
+    _save_state()
+    logger.info("RESET  state restored to seeds, persisted to %s", _STATE_FILE)
     return {"status": "reset"}
 
 

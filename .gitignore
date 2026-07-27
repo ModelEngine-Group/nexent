@@ -76,6 +76,7 @@ sdk/benchmark/.env
 .venv
 
 .pytest-tmp
+test/ext_components/aidp/mock_servers/_state/
 doc/mermaid
 _doc/
 
