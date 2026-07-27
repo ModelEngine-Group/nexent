@@ -996,7 +996,13 @@ class ElasticSearchCore(VectorDatabaseCore):
 
     # ---- SEARCH OPERATIONS ----
 
-    def accurate_search(self, index_names: List[str], query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def accurate_search(
+        self,
+        index_names: List[str],
+        query_text: str,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Search for documents using fuzzy text matching across multiple indices.
 
@@ -1004,6 +1010,10 @@ class ElasticSearchCore(VectorDatabaseCore):
             index_names: Name of the index to search in
             query_text: The text query to search for
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause (e.g. ``{"bool": {"must": [...]}}``).
+                When ``None`` (the default), no extra filter is applied and the
+                legacy behaviour is preserved. When supplied, it is AND-ed with
+                the score-bearing query as an extra ``bool.filter`` clause.
 
         Returns:
             List of search results with scores and document content
@@ -1018,6 +1028,17 @@ class ElasticSearchCore(VectorDatabaseCore):
             "size": top_k,
             "_source": {"excludes": ["embedding"]},
         }
+
+        # Inject an additional AND-filter (memory index isolation, etc.).
+        # When ``filter`` is None we keep the original behaviour bit-for-bit.
+        if filter is not None:
+            extra_filter = filter if isinstance(filter, list) else [filter]
+            search_query["query"] = {
+                "bool": {
+                    "must": [search_query["query"]],
+                    "filter": extra_filter,
+                }
+            }
 
         # Execute the search across multiple indices
         raw_results = self.exec_query(index_pattern, search_query)
@@ -1039,7 +1060,12 @@ class ElasticSearchCore(VectorDatabaseCore):
         return results
 
     def semantic_search(
-        self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
+        self,
+        index_names: List[str],
+        query_text: str,
+        embedding_model: BaseEmbedding,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for similar documents using vector similarity across multiple indices.
@@ -1049,6 +1075,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause applied during kNN
+                candidate selection. When ``None`` (the default), no extra
+                filter is applied and the legacy behaviour is preserved.
 
         Returns:
             List of search results with scores and document content
@@ -1060,6 +1089,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
+        knn_filter = filter if isinstance(filter, dict) else None
         if embedding_model.model_type == "multimodal":
             search_text_query = {
                 "knn": {
@@ -1067,6 +1097,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
@@ -1077,6 +1108,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         "query_vector": query_embedding,
                         "k": top_k,
                         "num_candidates": top_k * 2,
+                        **({"filter": knn_filter} if knn_filter else {}),
                     },
                 "size": top_k,
                 "_source": {"excludes": ["multi_embedding"]},
@@ -1089,12 +1121,13 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
             }
             raw_results = self.exec_query(index_pattern, search_query)
- 
+
         return raw_results
 
     def hybrid_search(
@@ -1104,6 +1137,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         embedding_model: BaseEmbedding,
         top_k: int = 5,
         weight_accurate: float = 0.3,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search method, combining accurate matching and semantic search results across multiple indices.
@@ -1114,15 +1148,18 @@ class ElasticSearchCore(VectorDatabaseCore):
             embedding_model: The embedding model to use
             top_k: Number of results to return
             weight_accurate: The weight of the accurate matching score (0-1), the semantic search weight is 1-weight_accurate
+            filter: Optional Elasticsearch filter clause applied to both the
+                accurate and semantic sub-queries. When ``None`` (the default),
+                no extra filter is applied and legacy behaviour is preserved.
 
         Returns:
             List of search results sorted by combined score
         """
         # Get results from both searches
         accurate_results = self.accurate_search(
-            index_names, query_text, top_k=top_k)
+            index_names, query_text, top_k=top_k, filter=filter)
         semantic_results = self.semantic_search(
-            index_names, query_text, embedding_model=embedding_model, top_k=top_k)
+            index_names, query_text, embedding_model=embedding_model, top_k=top_k, filter=filter)
 
         # Create a mapping from document ID to results
         combined_results = {}

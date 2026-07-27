@@ -130,6 +130,7 @@ export interface CommunityMcpCard {
   name: string;
   version?: string;
   description: string;
+  content?: string;
   status: string;
   createdAt: string;
   updatedAt?: string;
@@ -155,6 +156,7 @@ export interface CommunityMcpCard {
   sharedFields?: Record<string, boolean>;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  containerPort?: number;
 }
 
 export interface McpServiceItem {
@@ -204,6 +206,7 @@ export interface AddMcpServicePayload {
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
+  container_port?: number;
   config_json?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
@@ -212,6 +215,7 @@ export interface AddMcpServicePayload {
   group_ids?: string;
   ingroup_permission?: string;
   shared_fields?: Record<string, boolean>;
+  skip_health_check?: boolean;
 }
 
 export interface UpdateMcpServicePayload {

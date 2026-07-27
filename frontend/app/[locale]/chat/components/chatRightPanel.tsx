@@ -5,9 +5,9 @@ import { ExternalLink, Database, X, Server } from "lucide-react";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { formatDate, formatUrl } from "@/lib/utils";
 import {
-  convertImageUrlToApiUrl,
   extractObjectNameFromUrl,
   storageService,
+  fetchImageBlob,
 } from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
@@ -386,18 +386,7 @@ export function ChatRightPanel({
       }));
 
       try {
-        // Convert image URL to backend API URL
-        const apiUrl = convertImageUrlToApiUrl(imageUrl);
-
-        // Use backend API to get the image
-        const response = await fetch(apiUrl);
-
-        if (!response.ok) {
-          throw new Error(`Failed to load image: ${response.statusText}`);
-        }
-
-        // Get image as blob and convert to base64
-        const blob = await response.blob();
+        const blob = await fetchImageBlob(imageUrl);
         const reader = new FileReader();
 
         reader.onloadend = () => {

@@ -134,4 +134,10 @@ class SiliconModelProvider(AbstractModelProvider):
 
             return model_list
         except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
-            return _classify_provider_error("SiliconFlow", exception=e)
+            status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None) else None
+            return _classify_provider_error(
+                "SiliconFlow",
+                status_code=status_code,
+                error_message=str(e),
+                exception=e,
+            )

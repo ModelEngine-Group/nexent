@@ -22,6 +22,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
     cp -r .next/static ../frontend-dist/.next/static && \
     cp -r public ../frontend-dist/ && \
     cp server.js ../frontend-dist/server.js && \
+    cp build-config.js ../frontend-dist/build-config.js && \
     mkdir -p ../frontend-dist/node_modules/next/dist/compiled && \
     cp -r node_modules/next/dist/compiled/. ../frontend-dist/node_modules/next/dist/compiled/ && \
     mkdir -p ../frontend-dist/node_modules && \
@@ -32,6 +33,16 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
         node_modules/follow-redirects \
         node_modules/http-proxy \
         node_modules/requires-port \
+        node_modules/multiparty \
+        node_modules/safe-buffer \
+        node_modules/http-errors \
+        node_modules/depd \
+        node_modules/uid-safe \
+        node_modules/random-bytes \
+        node_modules/inherits \
+        node_modules/statuses \
+        node_modules/toidentifier \
+        node_modules/setprototypeof \
         ../frontend-dist/node_modules/ && \
     rm -rf ../frontend-dist/.next/cache
 

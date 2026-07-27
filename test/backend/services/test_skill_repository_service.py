@@ -22,6 +22,7 @@ _MOCKED_MODULE_NAMES = [
     "database.skill_db",
     "database.user_tenant_db",
     "services.skill_service",
+    "services.notification_service",
     "utils.str_utils",
 ]
 _ORIGINAL_MODULES = {
@@ -155,10 +156,24 @@ class _SkillServiceMock:
             )
         return skills
 
+    def list_visible_skill_permission_summaries(
+        self,
+        *,
+        tenant_id=None,
+        user_id,
+    ):
+        return self.list_visible_skills(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
 sys.modules["services.skill_service"] = _skill_service_module_mock
+
+_notification_service_mock = MagicMock()
+sys.modules["services.notification_service"] = _notification_service_mock
 
 import consts.exceptions as exceptions_module
 
@@ -187,6 +202,19 @@ if not _has_duplicate_names:
     exceptions_module.SkillDuplicateError = SkillDuplicateError
 
 from backend.services import skill_repository_service as srs
+
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_SKILL_REPOSITORY,
+)
+
+
+@pytest.fixture(autouse=True)
+def reset_notification_mocks():
+    srs.create_repository_review_notification.reset_mock()
+    srs.create_repository_pending_review_notification.reset_mock()
+    srs.deactivate_notifications.reset_mock()
+    yield
 
 
 def teardown_module():
@@ -220,7 +248,11 @@ def setup_function():
     }
 
 
-def _repository_record(status="not_shared", publisher_user_id="user-1"):
+def _repository_record(
+    status="not_shared",
+    publisher_user_id="user-1",
+    created_by="user-1",
+):
     return {
         "skill_repository_id": 1,
         "skill_id": 10,
@@ -236,7 +268,7 @@ def _repository_record(status="not_shared", publisher_user_id="user-1"):
         "skill_info_json": {
             "content": "content",
             "tags": ["tag"],
-            "created_by": "user-1",
+            "created_by": created_by,
         },
         "create_time": None,
         "update_time": None,
@@ -245,20 +277,33 @@ def _repository_record(status="not_shared", publisher_user_id="user-1"):
 
 def test_create_skill_repository_listing_inserts_new_record():
     _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = None
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="pending_review")
-    )
+    record = _repository_record(status="pending_review")
+    record["content"] = "please review"
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = record
 
     result = srs.create_skill_repository_listing_impl(
         skill_id=10,
         tenant_id="tenant-1",
         user_id="user-1",
-        card_fields={"icon": "skill", "tags": ["tag"]},
+        card_fields={"icon": "skill", "tags": ["tag"], "content": "please review"},
     )
 
     assert result["skill_repository_id"] == 1
     assert result["is_updated"] is False
+    assert result["content"] == "please review"
     _skill_repo_db_mock.insert_skill_repository_record.assert_called_once()
+    srs.create_repository_pending_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        tenant_id="tenant-1",
+        unique_id=1,
+        details={
+            "name": "Skill A",
+            "skill_repository_id": 1,
+            "skill_id": 10,
+            "content": "please review",
+        },
+        created_by="user-1",
+    )
 
 
 def test_create_skill_repository_listing_updates_existing_record():
@@ -324,9 +369,104 @@ def test_update_status_admin_approves_pending_review():
         "user_role": "ADMIN",
         "user_email": "admin@example.com",
     }
+    shared = _repository_record(status="shared")
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
         _repository_record(status="pending_review"),
-        _repository_record(status="shared"),
+        shared,
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="shared",
+        user_id="admin-1",
+        tenant_id="tenant-1",
+        content="looks good",
+    )
+
+    assert result["status"] == "shared"
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
+    call_kwargs = _skill_repo_db_mock.update_skill_repository_status_by_id.call_args.kwargs
+    assert call_kwargs["content"] == "looks good"
+    _skill_repo_db_mock.reset_skill_repository_status.assert_called_once_with(
+        repository_id=1,
+        skill_id=10,
+        status="shared",
+        publisher_tenant_id="tenant-1",
+    )
+    srs.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        review_status="shared",
+        receiver_user_id="user-1",
+        details={
+            "name": "Skill A",
+            "skill_repository_id": 1,
+            "skill_id": 10,
+            "content": "looks good",
+        },
+        tenant_id="tenant-1",
+        unique_id=1,
+        created_by="admin-1",
+    )
+    srs.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        unique_id=1,
+        updated_by="admin-1",
+    )
+
+
+def test_update_status_admin_rejects_pending_review():
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "ADMIN",
+        "user_email": "admin@example.com",
+    }
+    rejected = _repository_record(status="rejected")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(status="pending_review"),
+        rejected,
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="rejected",
+        user_id="admin-1",
+        tenant_id="tenant-1",
+        content="needs fixes",
+    )
+
+    assert result["status"] == "rejected"
+    srs.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        review_status="rejected",
+        receiver_user_id="user-1",
+        details={
+            "name": "Skill A",
+            "skill_repository_id": 1,
+            "skill_id": 10,
+            "content": "needs fixes",
+        },
+        tenant_id="tenant-1",
+        unique_id=1,
+        created_by="admin-1",
+    )
+    srs.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+        unique_id=1,
+        updated_by="admin-1",
+    )
+
+
+def test_update_status_admin_approves_without_content():
+    """Approve without review note omits content from notification details."""
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": "ADMIN",
+        "user_email": "admin@example.com",
+    }
+    shared = _repository_record(status="shared")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(status="pending_review"),
+        shared,
     ]
 
     result = srs.update_skill_repository_status_impl(
@@ -337,13 +477,9 @@ def test_update_status_admin_approves_pending_review():
     )
 
     assert result["status"] == "shared"
-    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
-    _skill_repo_db_mock.reset_skill_repository_status.assert_called_once_with(
-        repository_id=1,
-        skill_id=10,
-        status="shared",
-        publisher_tenant_id="tenant-1",
-    )
+    details = srs.create_repository_review_notification.call_args.kwargs["details"]
+    assert "content" not in details
+    srs.deactivate_notifications.assert_called_once()
 
 
 def test_update_status_dev_cannot_approve_review():
@@ -362,7 +498,11 @@ def test_update_status_dev_cannot_approve_review():
 
 def test_update_status_dev_cannot_update_other_users_listing():
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="shared", publisher_user_id="someone-else")
+        _repository_record(
+            status="shared",
+            publisher_user_id="someone-else",
+            created_by="someone-else",
+        )
     )
 
     with pytest.raises(ForbiddenError):
@@ -372,6 +512,32 @@ def test_update_status_dev_cannot_update_other_users_listing():
             user_id="user-1",
             tenant_id="tenant-1",
         )
+
+
+@pytest.mark.parametrize("initial_status", ["pending_review", "shared"])
+def test_update_status_skill_creator_can_update_admin_listing(initial_status):
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(
+            status=initial_status,
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+        _repository_record(
+            status="not_shared",
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="not_shared",
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result["status"] == "not_shared"
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
 
 
 def test_install_skill_from_repository_success_increments_downloads():
@@ -507,6 +673,31 @@ def test_mine_ownership_uses_creator_not_edit_permission():
     assert others_result["items"][0]["permission"] == "EDIT"
     assert created_result["items"][0]["can_publish"] is True
     assert others_result["items"][0]["can_publish"] is False
+
+
+def test_count_my_editable_skills_uses_lightweight_visible_summaries():
+    list_visible = MagicMock(return_value=[
+        {"skill_id": 1, "created_by": "user-1"},
+        {"skill_id": 2, "created_by": "user-2"},
+    ])
+
+    class CountSkillService:
+        def __init__(self, tenant_id=None):
+            self.tenant_id = tenant_id
+
+        list_visible_skill_permission_summaries = list_visible
+
+    with patch.object(srs, "SkillService", CountSkillService):
+        result = srs.count_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    assert result == {"counts": {"all": 2, "created": 1, "others": 1}}
+    list_visible.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
 
 
 def test_list_repository_listings_validates_status():
@@ -735,6 +926,7 @@ def test_mapping_and_filter_helpers_cover_edge_branches():
     }) == {
         "skill_repository_id": 9,
         "status": "shared",
+        "content": None,
         "create_time": created_at.isoformat(),
     }
     assert srs._matches_ownership(
@@ -933,6 +1125,7 @@ def test_mine_list_attaches_repository_info_and_skips_empty_repository_rows():
     assert result["items"][0]["repository_info"] == [{
         "skill_repository_id": 1,
         "status": "shared",
+        "content": None,
         "create_time": None,
     }]
 

@@ -787,6 +787,9 @@ class SkillRepositoryListingCreateRequest(BaseModel):
     downloads: int = Field(0, ge=0, description="Initial download count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+    content: Optional[str] = Field(
+        None, description="Listing note when submitting for review"
+    )
 
 
 class SkillRepositoryInstallRequest(BaseModel):
@@ -1422,6 +1425,7 @@ class AddMcpServiceRequest(BaseModel):
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
+    container_port: Optional[int] = Field(None, ge=1, le=65535, description="Container host port")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
@@ -1429,6 +1433,7 @@ class AddMcpServiceRequest(BaseModel):
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    skip_health_check: Optional[bool] = Field(None, description="Skip MCP protocol health check (for community URL fallback)")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
@@ -1466,7 +1471,7 @@ class UpdateMcpServiceRequest(BaseModel):
     mcp_id: int = Field(..., gt=0, description="MCP record ID")
     name: str = Field(..., min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
-    server_url: str = Field(..., min_length=1, description="New MCP server URL")
+    server_url: Optional[str] = Field(None, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
@@ -1477,7 +1482,7 @@ class UpdateMcpServiceRequest(BaseModel):
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
-    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
+    @field_validator("name", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1581,6 +1586,15 @@ class CommunityReviewListRequest(CommunityListRequest):
 class CommunityReviewActionRequest(BaseModel):
     """Request model for approving or rejecting an MCP community submission"""
     review_id: int = Field(..., gt=0, description="Review record ID")
+    content: Optional[str] = Field(None, description="Review opinion on approve/reject")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _strip_review_content(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class CommunityPublishRequest(BaseModel):
@@ -1595,8 +1609,9 @@ class CommunityPublishRequest(BaseModel):
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    content: Optional[str] = Field(None, description="Listing note on submit")
 
-    @field_validator("name", "description", "mcp_server", mode="before")
+    @field_validator("name", "description", "mcp_server", "content", mode="before")
     @classmethod
     def _strip_publish_optional_text(cls, value: Any):
         if isinstance(value, str):
@@ -1621,8 +1636,9 @@ class CommunityUpdateRequest(BaseModel):
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    content: Optional[str] = Field(None, description="Listing note on resubmit")
 
-    @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
+    @field_validator("name", "description", "mcp_server", "transport_type", "content", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1634,6 +1650,15 @@ class CommunityUpdateRequest(BaseModel):
 class CommunityStatusUpdateRequest(BaseModel):
     """Request model for changing MCP market listing status (PATCH)."""
     status: str = Field(..., description="New status: shared / rejected / not_shared / pending_review")
+    content: Optional[str] = Field(None, description="Review opinion or resubmit listing note")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _strip_status_content(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class DeleteMcpServiceRequest(BaseModel):

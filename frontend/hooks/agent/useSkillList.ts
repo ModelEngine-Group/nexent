@@ -31,8 +31,8 @@ export function useSkillList(options?: {
     enabled: options?.enabled ?? true,
   });
 
-  const skills = query.data ?? [];
-  const availableSkills = skills;
+  const skills = query.data;
+  const availableSkills = useMemo(() => skills ?? [], [skills]);
 
   const groupedSkills = useMemo(() => {
     const groups: SkillGroup[] = [];

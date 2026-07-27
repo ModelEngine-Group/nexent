@@ -8,6 +8,8 @@ import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
 
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
@@ -78,6 +80,21 @@ export default function SelectToolsDialog({
   const { confirm } = useConfirmModal();
 
   const { availableTools } = useToolList({ enabled: open });
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { serverList: rawServers } = useMcpServerList({ enabled: open, tenantId });
+  const allMcpServerNames = useMemo(
+    () => new Set(rawServers.map((s) => s.service_name)),
+    [rawServers],
+  );
+  const visibleMcpNames = useMemo(
+    () => new Set(
+      rawServers
+        .filter((s) => !s.permission || s.permission === "EDIT" || s.permission === "READ_ONLY" || s.group_ids)
+        .map((s) => s.service_name),
+    ),
+    [rawServers],
+  );
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
 
@@ -113,8 +130,12 @@ export default function SelectToolsDialog({
       const sourceTools = availableTools.filter(
         (t: any) => t.source === tab.sourceValue
       );
+      // For MCP tools: show API-added (not in server list) or from visible servers
+      const filteredTools = tab.key === "mcp"
+        ? sourceTools.filter((t: any) => !allMcpServerNames.has(t.usage) || visibleMcpNames.has(t.usage))
+        : sourceTools;
       const catMap = new Map<string, any[]>();
-      for (const tool of sourceTools) {
+      for (const tool of filteredTools) {
         // MCP tools are grouped by server name (usage); local/langchain by category
         const cat =
           tab.key === "mcp"
@@ -135,7 +156,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools]);
+  }, [availableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {

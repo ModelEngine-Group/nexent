@@ -769,6 +769,174 @@ class MemoryUserConfig(TableBase):
     config_value = Column(String(10000), doc="the value of the config")
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 Memory System tables
+# ---------------------------------------------------------------------------
+
+# Identifier lengths used by memory_records_t and memory_retrieval_hits_t.
+# memory_id is auto-incremented by PostgreSQL (serial4) on insert; callers do
+# not supply a value. ES mirrors it as `str(memory_id)` in the document `_id`.
+class MemoryRecord(TableBase):
+    """Internal memory records persisted in PostgreSQL.
+
+    This is the authoritative store for tenant/user/agent memory. Tenant and
+    user long-term memories live here exclusively; agent short-term memory
+    additionally mirrors the content into Elasticsearch (managed by
+    ``services.memory_index_service``).
+
+    The isolation contract from ``memory_design.md`` is enforced by the
+    database access layer, not by the schema:
+    - tenant layer:    tenant_id
+    - user layer:      tenant_id + user_id
+    - agent layer:     tenant_id + user_id + agent_id (+ conversation_id)
+    """
+
+    __tablename__ = "memory_records_t"
+    __table_args__ = (
+        Index("idx_memory_records_tenant", "tenant_id"),
+        Index("idx_memory_records_user", "tenant_id", "user_id"),
+        Index(
+            "idx_memory_records_agent",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "conversation_id",
+        ),
+        Index(
+            "idx_memory_records_idempotency",
+            "tenant_id",
+            "idempotency_key",
+        ),
+        Index(
+            "idx_memory_records_status",
+            "tenant_id",
+            "user_id",
+            "layer",
+            "status",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    memory_id = Column(Integer, primary_key=True, nullable=False, autoincrement=True,
+                        doc="Auto-incremented memory primary key (serial4).")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID (isolation key).")
+    user_id = Column(String(100), nullable=False,
+                     doc="User ID (isolation key for user/agent layers).")
+    agent_id = Column(String(100), nullable=True,
+                      doc="Agent ID (isolation key for agent short-term layer).")
+    conversation_id = Column(String(100), nullable=True,
+                             doc="Conversation ID (further isolation key for agent).")
+
+    layer = Column(String(30), nullable=False,
+                   doc="Memory layer: tenant | user | agent.")
+    memory_type = Column(String(30), nullable=True,
+                         doc="Memory type: long_term | short_term.")
+    status = Column(String(30), nullable=False, default="active",
+                    doc="Status: active | archived | disabled.")
+
+    content = Column(Text, nullable=False, doc="Memory content.")
+    concept_tags = Column(ARRAY(Text), nullable=True,
+                          doc="Optional concept tags from Dreaming REM phase.")
+
+    es_index_name = Column(String(255), nullable=True,
+                           doc="Elasticsearch index for agent short-term memory "
+                               "(mem_{model_name}_{dimension}); null for PG-only layers.")
+
+    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(),
+                         doc="Creation timestamp.")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(),
+                         onupdate=func.now(),
+                         doc="Last update timestamp.")
+    created_by = Column(String(100), nullable=True, doc="Creator user id.")
+    updated_by = Column(String(100), nullable=True, doc="Last updater user id.")
+    delete_flag = Column(String(1), nullable=False, default="N",
+                         doc="Soft-delete flag (Y/N).")
+
+    idempotency_key = Column(String(128), nullable=False,
+                             doc="Idempotency key for write deduplication.")
+
+    recall_count = Column(Integer, nullable=False, default=0,
+                          doc="Total recall hit count.")
+    daily_count = Column(Integer, nullable=False, default=0,
+                         doc="Recall hit count for the most recent active day.")
+    grounded_count = Column(Integer, nullable=False, default=0,
+                            doc="Count of grounded (verified) recalls.")
+    last_recalled_at = Column(TIMESTAMP(timezone=False), nullable=True,
+                              doc="Most recent recall timestamp.")
+    query_hashes = Column(ARRAY(Text), nullable=True,
+                          doc="Hashes of queries that recalled this memory.")
+    recall_days = Column(ARRAY(Text), nullable=True,
+                         doc="ISO date strings of recall days.")
+
+    light_hits = Column(Integer, nullable=False, default=0,
+                        doc="Light Sleep phase hit count.")
+    rem_hits = Column(Integer, nullable=False, default=0,
+                      doc="REM Sleep phase hit count.")
+    last_light_at = Column(TIMESTAMP(timezone=False), nullable=True,
+                           doc="Last Light Sleep timestamp.")
+    last_rem_at = Column(TIMESTAMP(timezone=False), nullable=True,
+                         doc="Last REM Sleep timestamp.")
+
+
+class MemoryRetrievalHit(TableBase):
+    """Per-hit memory retrieval log row, sourced by ``search_memory`` tools.
+
+    Phase 2 only writes rows from internal PG-backed recalls. Dreaming
+    aggregates these rows in batch to update ``memory_records_t`` statistics.
+    """
+
+    __tablename__ = "memory_retrieval_hits_t"
+    __table_args__ = (
+        Index("idx_memory_retrieval_hits_memory", "memory_id", "occurred_at"),
+        Index(
+            "idx_memory_retrieval_hits_tenant_user_agent",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "day",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    hit_id = Column(Integer, primary_key=True, nullable=False, autoincrement=True,
+                    doc="Hit primary key (serial4).")
+    tenant_id = Column(String(100), nullable=True, doc="Tenant ID.")
+    user_id = Column(String(100), nullable=True, doc="User ID.")
+    agent_id = Column(String(100), nullable=True, doc="Agent ID.")
+    conversation_id = Column(String(100), nullable=True,
+                             doc="Conversation ID.")
+    memory_id = Column(Integer, nullable=True,
+                       doc="Recalled memory id (null on miss rows).")
+    query_text = Column(Text, nullable=True,
+                        doc="Original search query text.")
+    query_hash = Column(String(128), nullable=True,
+                        doc="Stable hash of the query text.")
+    retrieval_score = Column(Numeric(38, 18), nullable=True,
+                             doc="Similarity score reported by the backend.")
+    source = Column(String(100), nullable=False, default="nexent",
+                    doc="Hit origin: nexent | external_provider.")
+    occurred_at = Column(TIMESTAMP(timezone=False), nullable=False,
+                         server_default=func.now(),
+                         doc="Time the hit was recorded.")
+    day = Column(String(100), nullable=True,
+                 doc="ISO date string (occurred_at::date).")
+    grounded = Column(Boolean, nullable=False, default=False,
+                      doc="Whether the hit was verified/grounded.")
+    create_time = Column(TIMESTAMP(timezone=False), nullable=True,
+                         server_default=func.now(),
+                         doc="Row creation time.")
+    update_time = Column(TIMESTAMP(timezone=False), nullable=True,
+                         server_default=func.now(),
+                         doc="Row last update time.")
+    created_by = Column(String(100), nullable=True,
+                        doc="User that created the row.")
+    updated_by = Column(String(100), nullable=True,
+                        doc="User that last updated the row.")
+    delete_flag = Column(String(1), nullable=False, default="N",
+                         doc="Soft delete flag (N = active, Y = deleted).")
+
+
 class McpRecord(TableBase):
     """
     MCP (Model Context Protocol) records table
@@ -873,6 +1041,7 @@ class McpMarketRecord(TableBase):
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+    content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
     download_count = Column(Integer, default=0, doc="Cumulative download/install count")
     review_status = Column(String(30), default="not_shared",
                            doc="Listing status: not_shared / pending_review / rejected / shared")
@@ -1110,6 +1279,7 @@ class SkillRepository(TableBase):
     skill_zip_base64 = Column(Text, nullable=False, doc="Frozen skill ZIP payload encoded as base64")
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared / pending_review / rejected / shared")
+    content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
 
 
 class UserTokenInfo(TableBase):
@@ -1204,12 +1374,31 @@ class SkillInfo(TableBase):
     Skill information table - stores skill metadata and content.
     """
     __tablename__ = "ag_skill_info_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "uq_skill_info_tenant_name_active",
+            "tenant_id",
+            "skill_name",
+            unique=True,
+            postgresql_where=text(
+                "tenant_id IS NOT NULL AND delete_flag = 'N'"
+            ),
+        ),
+        Index(
+            "uq_skill_info_global_name_active",
+            "skill_name",
+            unique=True,
+            postgresql_where=text(
+                "tenant_id IS NULL AND delete_flag = 'N'"
+            ),
+        ),
+        {"schema": SCHEMA},
+    )
 
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False,
-                        unique=True, doc="Unique skill name")
+                        doc="Skill name, unique among active skills within its tenant scope")
     tenant_id = Column(String(100), nullable=True,
                        doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")

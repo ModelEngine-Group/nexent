@@ -124,3 +124,15 @@ ALTER TABLE nexent.ag_agent_repository_t
 
 COMMENT ON COLUMN nexent.ag_agent_repository_t.content IS
     'Listing note on submit or review opinion on approve/reject';
+
+ALTER TABLE nexent.ag_skill_repository_t
+    ADD COLUMN IF NOT EXISTS content TEXT;
+
+COMMENT ON COLUMN nexent.ag_skill_repository_t.content IS
+    'Listing note on submit or review opinion on approve/reject';
+
+ALTER TABLE nexent.mcp_market_record_t
+    ADD COLUMN IF NOT EXISTS content TEXT;
+
+COMMENT ON COLUMN nexent.mcp_market_record_t.content IS
+    'Listing note on submit or review opinion on approve/reject';

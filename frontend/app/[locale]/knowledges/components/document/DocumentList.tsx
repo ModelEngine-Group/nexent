@@ -39,10 +39,7 @@ import {
   LAYOUT,
   DOCUMENT_STATUS,
 } from "@/const/knowledgeBase";
-import {
-  SUMMARY_FREQUENCY_OPTIONS_API,
-  FrequencyOption,
-} from "@/const/scheduler";
+import { FrequencyOption } from "@/const/scheduler";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
@@ -381,9 +378,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       const loadFrequencyOptions = async () => {
         if (showDetail && frequencyOptions.length === 0) {
           try {
-            const response = await fetch(SUMMARY_FREQUENCY_OPTIONS_API);
-            const data = await response.json();
-            setFrequencyOptions(data.options || []);
+            const options = await knowledgeBaseService.fetchSummaryFrequencyOptions();
+            setFrequencyOptions(options);
           } catch (error) {
             log.error("Failed to load frequency options:", error);
             // Fallback to default options if API fails

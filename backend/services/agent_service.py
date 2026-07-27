@@ -5,7 +5,6 @@ import io
 import json
 import logging
 import os
-import uuid
 import zipfile
 from collections import deque
 from typing import Any, Callable, Optional, Dict, List
@@ -15,7 +14,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.agents.context_input import ContextInput
 from nexent.core.agents.context import ContextItemInput
-from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -23,7 +21,7 @@ from agents.create_agent_info import create_agent_run_info, create_tool_config_l
 from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
-from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
+from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
@@ -63,7 +61,12 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_by_model_id_ignore_delete, get_model_id_by_display_name, get_valid_model_ids
+from database.model_management_db import (
+    get_model_by_model_id,
+    get_model_by_model_id_ignore_delete,
+    get_model_id_by_display_name,
+    get_valid_model_ids,
+)
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -71,7 +74,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
+    query_tool_instances_by_id,
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -116,7 +119,6 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
-from utils.memory_utils import build_memory_config
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -1002,8 +1004,18 @@ async def _stream_agent_chunks(
         yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
+    async def _iter_run_chunks():
+        for event in getattr(
+            agent_run_info.agent_config,
+            "pre_run_tool_events",
+            (),
+        ):
+            yield json.dumps(event, ensure_ascii=False)
+        async for agent_chunk in agent_run(agent_run_info):
+            yield agent_chunk
+
     try:
-        async for chunk in agent_run(agent_run_info):
+        async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
             chunk_content: str = ""
             try:
@@ -1391,57 +1403,12 @@ async def _stream_agent_chunks(
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
-        async def _add_memory_background():
-            try:
-                # Skip if memory recording is disabled
-                if not getattr(memory_ctx.user_config, "memory_switch", False):
-                    return
-                # Use the captured final answer during streaming; observer queue was drained
-                final_answer_local = captured_final_answer
-                if not final_answer_local:
-                    return
-
-                # Determine allowed memory levels
-                levels_local = {"agent", "user_agent"}
-                if memory_ctx.user_config.agent_share_option == "never":
-                    levels_local.discard("agent")
-                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_agent_ids", []):
-                    levels_local.discard("agent")
-                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_user_agent_ids", []):
-                    levels_local.discard("user_agent")
-                if not levels_local:
-                    return
-
-                mem_messages_local = [
-                    {"role": MESSAGE_ROLE["USER"],
-                        "content": agent_run_info.query},
-                    {"role": MESSAGE_ROLE["ASSISTANT"],
-                        "content": final_answer_local},
-                ]
-
-                add_result_local = await add_memory_in_levels(
-                    messages=mem_messages_local,
-                    memory_config=memory_ctx.memory_config,
-                    tenant_id=memory_ctx.tenant_id,
-                    user_id=memory_ctx.user_id,
-                    agent_id=memory_ctx.agent_id,
-                    memory_levels=list(levels_local),
-                )
-                items_local = add_result_local.get("results", [])
-                logger.info(f"Memory addition completed: {items_local}")
-            except Exception as bg_e:
-                logger.error(
-                    f"Unexpected error during background memory addition: {bg_e}")
-
-        try:
-            # Create and store the background task to avoid warnings
-            background_task = asyncio.create_task(_add_memory_background())
-            # Add done callback to handle any exceptions that might occur
-            background_task.add_done_callback(
-                lambda t: t.exception() if t.exception() else None)
-        except Exception as schedule_err:
-            logger.error(
-                f"Failed to schedule background memory addition: {schedule_err}")
+        # Memory recording is now handled by the agent-side ``StoreMemoryTool``
+        # (which delegates to the new ``MemoryService`` facade). The legacy
+        # background ``add_memory_in_levels`` call has been removed because
+        # its dual-level ``agent``/``user_agent`` semantics no longer map to
+        # the new layered architecture (agents may only write to
+        # ``agent.short_term``).
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):
@@ -1961,61 +1928,9 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
-
-        # Clean up all memory data related to the agent
-        await clear_agent_memory(agent_id, tenant_id, user_id)
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
-
-
-async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
-    """
-    Purge specified agent's memory data
-
-    Args:
-        agent_id: Agent ID
-        tenant_id: Tenant ID
-        user_id: User ID
-    """
-    try:
-        # Build memory configuration
-        memory_config = build_memory_config(tenant_id)
-
-        # Clean up agent-level memory
-        try:
-            agent_memory_result = await clear_memory(
-                memory_level="agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=str(agent_id)
-            )
-            logger.info(
-                f"Cleared agent memory for agent {agent_id}: {agent_memory_result}")
-        except Exception as e:
-            logger.error(
-                f"Failed to clear agent-level memory for agent {agent_id}: {str(e)}")
-
-        # Clean up user_agent-level memory
-        try:
-            user_agent_memory_result = await clear_memory(
-                memory_level="user_agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=str(agent_id)
-            )
-            logger.info(
-                f"Cleared user_agent memory for agent {agent_id}: {user_agent_memory_result}")
-        except Exception as e:
-            logger.error(
-                f"Failed to clear user_agent-level memory for agent {agent_id}: {str(e)}")
-
-    except Exception as e:
-        logger.error(
-            f"Failed to build memory config for agent {agent_id}: {str(e)}")
-        # Silently fail to maintain agent deletion process
 
 
 async def _export_agent_dict_core(
@@ -2868,6 +2783,7 @@ async def prepare_agent_run(
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
+
     agent_run_info = await create_agent_run_info(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
@@ -2882,6 +2798,7 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        conversation_id=agent_request.conversation_id,
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
     )
@@ -2941,79 +2858,77 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     raise ValueError(f"Unsupported target for save_messages: {target!r}")
 
 
-# Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
-async def generate_stream_with_memory(
+# Helper function for run_agent_stream. ``enable_memory`` controls whether
+# fixed pre-run retrieval and the model-directed store_memory tool are enabled.
+async def generate_stream(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    enable_memory: bool = False,
+    channel: Optional[Any] = None,
 ):
-    # Prepare preprocess task tracking (simulate preprocess flow)
-    task_id = str(uuid.uuid4())
-    conversation_id = agent_request.conversation_id
-    current_task = asyncio.current_task()
-    if current_task:
-        preprocess_manager.register_preprocess_task(
-            task_id, conversation_id, current_task
-        )
+    """Unified streaming entry point.
+
+    Args:
+        agent_request: The agent run payload.
+        user_id: The caller user id.
+        tenant_id: The caller tenant id.
+        language: UI/i18n language (``"zh"`` / ``"en"``).
+        enable_memory: When ``True``, memory retrieval runs once before the
+            model loop and store_memory is loaded for model-directed use. A
+            ``MemoryPreparationException`` triggers a single fallback to the
+            no-memory path so the run still produces output.
+        channel: Optional streaming channel; when ``None`` a fresh channel
+            is created lazily when memory is enabled.
+    """
+    # Poll for cross-pod cancel signal so the outer generator task can be
+    # cancelled when another Pod writes the runtime cancel flag.
+    _outer_task = asyncio.current_task()
     cancel_poll_task = (
-        asyncio.create_task(_cancel_task_on_runtime_signal(conversation_id, user_id, current_task))
-        if current_task
+        asyncio.create_task(
+            _cancel_task_on_runtime_signal(
+                agent_request.conversation_id, user_id, _outer_task
+            )
+        )
+        if _outer_task
         else None
     )
 
-    # Helper to emit memory_search token
-    def _memory_token(message_text: str) -> str:
-        payload = {
-            "type": "memory_search",
-            "content": json.dumps({"message": message_text}, ensure_ascii=False),
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
-    # Placeholder messages handled by frontend for i18n
-    msg_start = MEMORY_SEARCH_START_MSG
-    msg_done = MEMORY_SEARCH_DONE_MSG
-    msg_fail = MEMORY_SEARCH_FAIL_MSG
-
-    # ------------------------------------------------------------------
-    # Note: the actual streaming happens via `_stream_agent_chunks` helper
-    # ------------------------------------------------------------------
-
-    # Create channel for multi-subscriber support
-    channel = await streaming_channel_manager.get_or_create_channel(
-        conversation_id=agent_request.conversation_id,
-        user_id=user_id
-    )
-
-    memory_enabled = False
-    try:
-        memory_context_preview = build_memory_context(
-            user_id, tenant_id, agent_request.agent_id
+    # Lazily open the streaming channel. Recursive fallback below needs to
+    # reuse the same channel so subscribers stay connected.
+    if channel is None and enable_memory:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
         )
-        memory_enabled = bool(memory_context_preview.user_config.memory_switch)
 
-        if memory_enabled:
-            # Emit start token before memory retrieval
-            await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
-            yield f"data: {_memory_token(msg_start)}\n\n"
+    memory_enabled_runtime = False
+    try:
+        if enable_memory:
+            # Resolve the user-level switch for tool loading only.
+            memory_context_preview = build_memory_context(
+                user_id, tenant_id, agent_request.agent_id
+            )
+            memory_enabled_runtime = bool(
+                memory_context_preview.user_config.memory_switch
+            )
 
-        # Prepare run (will execute memory retrieval inside create_agent_run_info)
+        # Prepare the agent with or without memory. The preparation path runs
+        # fixed retrieval before the model loop and exposes only store_memory.
         try:
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
-                allow_memory_search=True,
+                allow_memory_search=memory_enabled_runtime,
             )
         except Exception as prep_err:
-            # Normalize any preparation error to MemoryPreparationException
+            # Normalize any preparation error to MemoryPreparationException so
+            # the memory-enabled path can decide between retry-without-memory
+            # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
-
-        if memory_enabled:
-            # Emit completion token once memory is ready
-            await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
-            yield f"data: {_memory_token(msg_done)}\n\n"
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -3026,17 +2941,24 @@ async def generate_stream_with_memory(
             yield data_chunk
 
     except MemoryPreparationException:
-        # Memory retrieval failure: emit failure token when memory is enabled, and continue without blocking
-        if memory_enabled:
-            await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
-            yield f"data: {_memory_token(msg_fail)}\n\n"
+        if not enable_memory:
+            # No-memory path has no fallback; surface the failure cleanly.
+            logger.error(
+                "Agent run error without memory: %r", None, exc_info=True
+            )
+            await channel.publish(_safe_agent_stream_error_chunk())
+            yield _safe_agent_stream_error_chunk()
+            return
 
         try:
-            # Fallback to the no-memory streaming path, which internally handles
-            async for data_chunk in generate_stream_no_memory(
+            # Single fallback: re-issue this generator with memory turned off
+            # so the actual ``_stream_agent_chunks`` still runs.
+            async for data_chunk in generate_stream(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                language=language,
+                enable_memory=False,
                 channel=channel,
             ):
                 yield data_chunk
@@ -3051,7 +2973,7 @@ async def generate_stream_with_memory(
             return
     except Exception as stream_exc:
         logger.error(
-            "Generate stream with memory error: %r",
+            "Generate stream error: %r",
             stream_exc,
             exc_info=True,
         )
@@ -3061,38 +2983,6 @@ async def generate_stream_with_memory(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
-        # Always unregister preprocess task
-        preprocess_manager.unregister_preprocess_task(task_id)
-
-
-# Helper function for run_agent_stream, used when user memory is disabled (no memory tokens)
-async def generate_stream_no_memory(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-    language: str = LANGUAGE["ZH"],
-    channel: Optional[Any] = None,
-):
-    """Stream agent responses without any memory preprocessing tokens or fallback logic."""
-
-    # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
-    agent_run_info, memory_context = await prepare_agent_run(
-        agent_request=agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-        allow_memory_search=False,
-    )
-
-    async for data_chunk in _stream_agent_chunks(
-        agent_request=agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        agent_run_info=agent_run_info,
-        memory_ctx=memory_context,
-        channel=channel,
-    ):
-        yield data_chunk
 
 
 def _detect_resume_position(
@@ -3461,20 +3351,13 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    if use_memory_stream:
-        stream_gen = generate_stream_with_memory(
-            agent_request,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-            language=language,
-        )
-    else:
-        stream_gen = generate_stream_no_memory(
-            agent_request,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-            language=language,
-        )
+    stream_gen = generate_stream(
+        agent_request,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        language=language,
+        enable_memory=use_memory_stream,
+    )
 
     async def stream_with_agent_context():
         try:
@@ -3557,18 +3440,20 @@ async def run_agent_background(
     ))
 
     if memory_enabled and not agent_request.is_debug:
-        stream_gen = generate_stream_with_memory(
+        stream_gen = generate_stream(
             agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            enable_memory=True,
         )
     else:
-        stream_gen = generate_stream_no_memory(
+        stream_gen = generate_stream(
             agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
+            enable_memory=False,
         )
 
     chunks = 0
@@ -3985,4 +3870,3 @@ def get_sandbox_minio_client() -> Optional[Any]:
         secure=MINIO_SECURE,
     )
     return client
-

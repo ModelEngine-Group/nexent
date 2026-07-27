@@ -60,7 +60,7 @@ export default function McpCommunityDetailModal({
   const serverTypeText = t(getTransportLabelKey(service.transportType));
   const sourceText = t("mcpTools.source.community");
   const reviewTypeText = service.reviewType
-    ? t(`mcpTools.review.type.${service.reviewType}`)
+    ? t(`repository.review.type.${service.reviewType}`)
     : undefined;
 
   return (
@@ -134,7 +134,7 @@ export default function McpCommunityDetailModal({
                 {reviewTypeText ? (
                   <InfoRow
                     icon={<FileText className="h-3.5 w-3.5" />}
-                    label={t("mcpTools.review.typeLabel")}
+                    label={t("repository.review.typeLabel")}
                     value={reviewTypeText}
                   />
                 ) : null}
@@ -142,7 +142,7 @@ export default function McpCommunityDetailModal({
             </section>
 
             {/* Service Config Section */}
-            {(!service.configJson || service.authorizationToken || service.customHeaders) && (
+            {(!service.configJson || service.authorizationToken || service.customHeaders || (service.configJson && typeof service.configJson === "object" && "mcpServers" in service.configJson)) && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
                   <Wrench className="h-4 w-4 text-slate-400" />
@@ -162,6 +162,28 @@ export default function McpCommunityDetailModal({
                             : "bg-slate-100 text-slate-400"
                         }`}>
                           {service.sharedFields?.serverUrl ? "已共享" : "未共享"}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {service.configJson && typeof service.configJson === "object" && "mcpServers" in service.configJson ? (
+                    <div>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">容器配置</label>
+                      <div className="flex items-center justify-between">
+                        <Button
+                          size="small"
+                          onClick={() => setShowConfigJsonModal(true)}
+                          icon={<FileText className="h-3.5 w-3.5" />}
+                        >
+                          {t("mcpTools.detail.viewConfigJson")}
+                        </Button>
+                        <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          service.sharedFields?.containerConfigJson
+                            ? "bg-green-50 text-green-700"
+                            : "bg-slate-100 text-slate-400"
+                        }`}>
+                          {service.sharedFields?.containerConfigJson ? "已共享" : "未共享"}
                         </span>
                       </div>
                     </div>
@@ -235,7 +257,7 @@ export default function McpCommunityDetailModal({
             )}
 
             {/* Tools Section */}
-            {(hasServerJson || hasConfigJson) && (
+            {hasServerJson && (
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
                   <Wrench className="h-4 w-4 text-slate-400" />
@@ -250,16 +272,6 @@ export default function McpCommunityDetailModal({
                       icon={<FileText className="h-3.5 w-3.5" />}
                     >
                       {t("mcpTools.community.viewServerJson")}
-                    </Button>
-                  )}
-                  {hasConfigJson && (
-                    <Button
-                      size="small"
-                      autoInsertSpace={false}
-                      onClick={() => setShowConfigJsonModal(true)}
-                      icon={<FileText className="h-3.5 w-3.5" />}
-                    >
-                      {t("mcpTools.detail.viewConfigJson")}
                     </Button>
                   )}
                 </div>

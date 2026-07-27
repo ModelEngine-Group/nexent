@@ -43,6 +43,49 @@ class _MockToolCollection(MagicMock):
 
 setattr(mock_smolagents, "ToolCollection", _MockToolCollection)
 
+
+def test_log_memory_value_assessment_for_store_attempt(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="167",
+        invocation_count=1,
+        successful_store_count=1,
+        last_outcome="completed",
+    )
+    agent = types.SimpleNamespace(tools={"store_memory": store_tool})
+
+    run_agent._log_memory_value_assessment(agent)
+
+    assert "event=memory_value_assessment" in caplog.text
+    assert "decision=store_attempted" in caplog.text
+    assert "successful_store_count=1" in caplog.text
+    assert "conversation_id=167" in caplog.text
+
+
+def test_log_memory_value_assessment_for_skip_and_unavailable(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="168",
+        invocation_count=0,
+        successful_store_count=0,
+        last_outcome="not_invoked",
+    )
+
+    run_agent._log_memory_value_assessment(
+        types.SimpleNamespace(tools={"store_memory": store_tool})
+    )
+    run_agent._log_memory_value_assessment(types.SimpleNamespace(tools={}))
+
+    assert "decision=skip" in caplog.text
+    assert "last_outcome=not_invoked" in caplog.text
+    assert "decision=unavailable" in caplog.text
+
 # Create dummy smolagents sub-modules to satisfy indirect imports
 for _sub in [
     "agents",
@@ -137,9 +180,9 @@ mock_langchain.tools = mock_langchain_tools
 
 mock_openai_chat_completion_message = MagicMock()
 
-# Mock memory_service to avoid importing mem0
-mock_memory_service = MagicMock()
-mock_memory_service.add_memory_in_levels = MagicMock()
+# Stub for the legacy ``nexent.memory.memory_service`` module has been
+# removed because that module no longer exists; tests that depend on it
+# will be migrated to the new ``MemoryService`` facade in a follow-up.
 
 # Mock nexent.skills module for run_skill_script_tool
 mock_nexent = ModuleType("nexent")
@@ -177,8 +220,6 @@ module_mocks = {
     "openai.types.chat.chat_completion_message_param": MagicMock(),
     # exa_py is imported by sdk.nexent.core.tools – provide dummy to skip real import
     "exa_py": MagicMock(Exa=MagicMock()),
-    # Mock memory_service to avoid importing mem0
-    "sdk.nexent.memory.memory_service": mock_memory_service,
     # Mock nexent.skills for skill tools
     "nexent.skills": mock_nexent.skills,
     "nexent.skills.skill_manager": MagicMock(),

@@ -629,7 +629,6 @@ class TestMemoryContext:
         )
         context = agent_model_module.MemoryContext(
             user_config=user_config,
-            memory_config={"type": "chroma"},
             tenant_id="tenant-123",
             user_id="user-456",
             agent_id="agent-789"
@@ -638,7 +637,6 @@ class TestMemoryContext:
         assert context.user_id == "user-456"
         assert context.agent_id == "agent-789"
         assert context.user_config == user_config
-        assert context.memory_config == {"type": "chroma"}
 
     def test_memory_context_str_method(self):
         """Test MemoryContext __str__ method returns JSON string."""

@@ -150,8 +150,8 @@ def get_mcp_market_record_by_id(market_id: int) -> Dict[str, Any] | None:
         return as_dict(record) if record else None
 
 
-def check_mcp_market_name_exists(mcp_name: str) -> bool:
-    """Check if a shared market record with the given name already exists.
+def check_mcp_market_name_exists(mcp_name: str, tenant_id: str) -> bool:
+    """Check if a shared market record with the given name already exists in this tenant.
 
     Matches the partial unique index uq_mcp_market_name_active:
       WHERE delete_flag = 'N' AND review_status = 'shared'
@@ -159,6 +159,7 @@ def check_mcp_market_name_exists(mcp_name: str) -> bool:
     with get_db_session() as session:
         record = session.query(McpMarketRecord).filter(
             McpMarketRecord.mcp_name == mcp_name,
+            McpMarketRecord.tenant_id == tenant_id,
             McpMarketRecord.delete_flag != "Y",
             McpMarketRecord.review_status == "shared",
         ).first()
@@ -179,6 +180,7 @@ def update_mcp_market_record(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    content: str | None = None,
 ) -> None:
     """Update editable fields on a market record (does not change status)."""
     update_fields: Dict[str, Any] = {"updated_by": user_id}
@@ -202,6 +204,8 @@ def update_mcp_market_record(
         update_fields["ingroup_permission"] = ingroup_permission
     if shared_fields is not None:
         update_fields["shared_fields"] = shared_fields
+    if content is not None:
+        update_fields["content"] = content
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(
@@ -216,11 +220,14 @@ def update_mcp_market_status(
     user_id: str,
     review_status: str,
     submitted_by: str | None = None,
+    content: str | None = None,
 ) -> None:
     """Atomically update the review_status, optionally recording the submitter."""
     update_fields: Dict[str, Any] = {"updated_by": user_id, "review_status": review_status}
     if submitted_by is not None:
         update_fields["submitted_by"] = submitted_by
+    if content is not None:
+        update_fields["content"] = content
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(

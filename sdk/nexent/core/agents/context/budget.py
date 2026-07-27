@@ -1,7 +1,6 @@
 """Small, representation-agnostic helpers for context rendering and summaries."""
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -10,17 +9,13 @@ from typing import Any
 logger = logging.getLogger("agent_context.budget")
 
 def format_summary_output(raw_output: str) -> str | None:
+    """Strip code fences and return cleaned text, or None if empty."""
     cleaned = raw_output.strip()
     if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"^```(?:markdown|md|json)?\s*\n?", "", cleaned)
         cleaned = re.sub(r"\n?```\s*$", "", cleaned)
-    if not cleaned:
-        return None
-    try:
-        return json.dumps(json.loads(cleaned), ensure_ascii=False, indent=2)
-    except json.JSONDecodeError:
-        logger.warning("Summary output is not valid JSON; keeping it transient")
-        return cleaned
+    return cleaned or None
+
 
 def _is_context_length_error(error: Exception) -> bool:
     text = str(error).lower()

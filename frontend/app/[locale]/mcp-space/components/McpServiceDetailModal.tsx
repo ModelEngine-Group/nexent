@@ -85,6 +85,7 @@ export default function McpServiceDetailModal({
             deploymentType: draft.deploymentType,
             configJson: draft.configJson,
             serverUrl: draft.serverUrl,
+            source: draft.source,
           })
         : McpDeploymentType.REMOTE_LINK,
     [draft]
@@ -97,6 +98,7 @@ export default function McpServiceDetailModal({
       deploymentType: draft.deploymentType,
       configJson: draft.configJson,
       serverUrl: draft.serverUrl,
+      source: draft.source,
     });
     setDeploymentType(nextDeploymentType);
     setDraftTags(draft.tags ?? []);
@@ -125,7 +127,6 @@ export default function McpServiceDetailModal({
   const isApi = deploymentType === McpDeploymentType.API;
   const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
   const isUnsupported =
-    deploymentType === McpDeploymentType.LOCAL_IMAGE ||
     deploymentType !== originalDeploymentType;
   const isReadOnly = selectedService?.permission === "READ_ONLY";
   const hasRegistryJson = Boolean(draft.registryJson);
@@ -248,16 +249,12 @@ export default function McpServiceDetailModal({
               </div>
             </div>
 
-            {isLocalImage ? (
+            {isUnsupported ? (
               <Alert
                 type="info"
                 showIcon
                 message={t("mcpTools.addModal.unsupportedTitle")}
-                description={
-                  deploymentType !== originalDeploymentType
-                    ? t("mcpTools.detail.deploymentChangeUnsupported")
-                    : t("mcpTools.addModal.unsupportedDescription")
-                }
+                description={t("mcpTools.detail.deploymentChangeUnsupported")}
               />
             ) : null}
 
@@ -558,8 +555,8 @@ export default function McpServiceDetailModal({
             </div>
           </Form>
 
-          <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
-            <div className="flex gap-2">
+          <div className="flex flex-col gap-y-3 border-t border-slate-100 bg-white px-6 py-4">
+            <div className="flex flex-wrap gap-2">
               {draft.containerId ? (
                 <Button onClick={() => setLogsOpen(true)}>
                   {t("mcpTools.detail.viewContainerLogs")}
@@ -580,7 +577,7 @@ export default function McpServiceDetailModal({
               </Button>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end gap-3">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
               <Button
                 type="primary"

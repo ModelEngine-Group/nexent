@@ -157,10 +157,12 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
     apt-get update && \
     apt-get install -y --no-install-recommends --fix-missing \
-        libreoffice \
         pandoc \
         fontconfig \
-        fonts-noto-cjk && \
+        fonts-noto-cjk \
+        libreoffice \
+        poppler-utils \
+        tesseract-ocr && \
     fc-cache -fv && \
     apt-get autoremove -y && \
     rm -rf /tmp/* /var/tmp/*

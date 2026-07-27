@@ -52,7 +52,7 @@ export function detectProviderError(errorResponse: unknown): ProviderErrorType {
   const error = errorResponse as Record<string, unknown>;
   const errorCode = error._error as string;
   const errorMessage = ((error._message as string) || "").toLowerCase();
-  const httpCode = error.httpCode as number;
+  const httpCode = error._http_code as number;
 
   // Check error code first
   if (errorCode) {
@@ -213,7 +213,7 @@ export function processProviderResponse<T extends Record<string, unknown>>(
       type: errorType,
       message: response[0]._message as string,
       provider,
-      httpCode: response[0].httpCode as number,
+      httpCode: response[0]._http_code as number,
     };
     return {
       models: [],
