@@ -135,10 +135,18 @@ export function selectFile(
     fileInput.type = "file";
     fileInput.accept = accept;
 
+    let isCompleted = false;
+    const complete = (file: File | null) => {
+      if (isCompleted) return;
+      isCompleted = true;
+      resolve(file);
+    };
+
     fileInput.onchange = (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
-      resolve(file || null);
+      complete(file || null);
     };
+    fileInput.oncancel = () => complete(null);
 
     fileInput.click();
   });
