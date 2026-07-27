@@ -8,8 +8,7 @@ import type {
 } from "@assistant-ui/react";
 import type { ThreadMessage } from "@assistant-ui/core";
 
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 
 // Backend SSE chunk format
@@ -917,103 +916,49 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       requestBody.model_id = Number(modelName);
     }
 
-    // Resume is explicit: an existing conversation may also receive a normal
-    // new user turn, so conversation_id alone must never select resume mode.
-    const url = isResume
-      ? `${API_ENDPOINTS.agent.run}?resume=true`
-      : API_ENDPOINTS.agent.run;
+    log.log("[ChatModelAdapter] Sending agent request through conversation service");
 
-    log.log(`[ChatModelAdapter] Sending request to ${url}`);
-
-    let response: Response;
+    let agentResponse: ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
+      agentResponse = await conversationService.runAgent(
+        {
+          ...requestBody,
+          query: String(requestBody.query || ""),
+          history: (requestBody.history || []) as Array<{ role: string; content: string }>,
+          conversation_id: requestBody.conversation_id as number | undefined,
+          minio_files: requestBody.minio_files as any,
+          agent_id: requestBody.agent_id as number | undefined,
+          model_id: requestBody.model_id as number | undefined,
+          is_debug: false,
+          is_resume: isResume,
+          enable_plan: custom?.enablePlan === true,
         },
-        body: JSON.stringify(requestBody),
-        signal: abortSignal,
-      });
+        abortSignal,
+        (conversationId) => {
+          const numericId = Number(conversationId);
+          if (!Number.isNaN(numericId) && numericId > 0 && onServerConversationId) {
+            onServerConversationId(
+              String(numericId),
+              !isResume && !hasServerConversationId ? query : undefined,
+            );
+          }
+        },
+      );
     } catch (error: unknown) {
-      if (error instanceof Error && error.name === "AbortError") {
+      if (error instanceof Error && error.message === "请求已被取消") {
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
       }
-      log.error("[ChatModelAdapter] Fetch error:", error);
+      log.error("[ChatModelAdapter] Agent request failed:", error);
       throw error;
     }
 
-    // Capture the server-issued conversation_id from the response header.
-    //
-    // When the request omits `conversation_id` (i.e. this is the first
-    // message in a brand-new thread) the backend auto-creates a conversation
-    // row and returns the new id via the `conversation_id` response header
-    // (mirrors the northbound `start_streaming_chat` pattern). We forward
-    // that id to the page so it can rebind `threadId` for subsequent runs in
-    // the same thread, preventing the frontend from triggering an extra
-    // `PUT /api/conversation/create` and creating a duplicate empty
-    // conversation.
-    //
-    // The header is also set on the non-streaming resume JSONResponse, so we
-    // pick it up there too without any extra work.
-    const headerConversationId = response.headers.get("conversation_id");
-    if (headerConversationId && onServerConversationId) {
-      const numericHeaderId = Number(headerConversationId);
-      if (
-        !Number.isNaN(numericHeaderId) &&
-        numericHeaderId > 0
-      ) {
-        try {
-          onServerConversationId(
-            String(numericHeaderId),
-            !isResume && !hasServerConversationId ? query : undefined,
-          );
-          log.log(
-            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`,
-          );
-        } catch (cbError) {
-          // Callback failures must never break the stream — log and continue.
-          log.error(
-            "[ChatModelAdapter] onServerConversationId callback threw:",
-            cbError,
-          );
-        }
-      }
-    }
-
-    if (!response.ok) {
-      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.detail || errorData.message || errorMessage;
-      } catch {
-        // Fall back to status text
-      }
-      log.error(`[ChatModelAdapter] HTTP error: ${errorMessage}`);
-      throw new Error(errorMessage);
-    }
-
-    if (!response.body) {
-      log.warn("[ChatModelAdapter] Empty response body");
+    if ("type" in agentResponse) {
+      log.log("[ChatModelAdapter] JSON response (resume finished):", agentResponse.data);
       return;
     }
 
-    // Detect JSON response (resume mode where the agent already finished)
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      try {
-        const data = await response.json();
-        log.log("[ChatModelAdapter] JSON response (resume finished):", data);
-      } catch {
-        // Ignore parse errors; nothing to stream
-      }
-      return;
-    }
-
-    // Stream SSE chunks
-    const reader = response.body.getReader();
+    const reader = agentResponse;
     const decoder = new TextDecoder();
     let buffer = "";
 

@@ -7,6 +7,7 @@ import { BookOpen, PlayCircle, Download, FileSpreadsheet, Upload } from "lucide-
 import { useModelList } from "@/hooks/model/useModelList";
 import { useStartEvaluation } from "@/hooks/evaluation/useStartEvaluation";
 import { evaluationService } from "@/services/evaluationService";
+import { fetchAgentVersionList } from "@/services/agentVersionService";
 import type { AgentEvaluationRun, EvaluationSet } from "@/types/agentEvaluation";
 
 const { Text } = Typography;
@@ -52,10 +53,9 @@ export default function EvaluationConfigCard({
   }, [modelOptions, judgeModelId]);
 
   useEffect(() => {
-    fetch(`/api/agent/${agentId}/versions`)
-      .then((r) => r.json())
+    fetchAgentVersionList(agentId)
       .then((res) => {
-        const versions = (res.items || []).map((v: { version_no: number }) => ({
+        const versions = res.data.items.map((v) => ({
           label: `v${v.version_no}`,
           value: v.version_no,
         }));

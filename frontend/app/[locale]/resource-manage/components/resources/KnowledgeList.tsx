@@ -236,17 +236,7 @@ export default function KnowledgeList({
         editingQuotaValue != null
           ? editingQuotaValue * (editingQuotaUnit === "MB" ? MB : GB)
           : null;
-      // Use PATCH endpoint on the knowledge base
-      const response = await fetch(`/api/indices/${indexName}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ quota_limit_bytes: limitBytes }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to update quota");
-      }
+      await knowledgeBaseService.updateKnowledgeBaseQuota(indexName, limitBytes);
       emitQuotaUsageChanged();
       message.success(t("quota.saveSuccess", "Quota updated"));
       setEditingQuotaKb(null);
