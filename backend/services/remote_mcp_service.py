@@ -431,28 +431,8 @@ async def add_mcp_service(
     resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
     if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-        # If the name exists but the existing MCP has group restrictions that make it
-        # invisible to this user, allow the installation anyway.
-        from database.remote_mcp_db import get_mcp_records_by_tenant
-        existing = [r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name]
-        if existing:
-            existing_rec = existing[0]
-            existing_group_ids = (existing_rec.get("group_ids") or "").strip()
-            if existing_group_ids:
-                created_by = str(existing_rec.get("created_by") or existing_rec.get("user_id") or "")
-                if created_by != user_id:
-                    from database.group_db import query_group_ids_by_user
-                    user_grps = [str(g) for g in (query_group_ids_by_user(user_id) or [])]
-                    allowed = [g.strip() for g in existing_group_ids.split(",") if g.strip()]
-                    if any(g in allowed for g in user_grps):
-                        logger.error(f"MCP name already exists: {name}")
-                        raise MCPNameIllegal("MCP name already exists")
-                else:
-                    logger.error(f"MCP name already exists: {name}")
-                    raise MCPNameIllegal("MCP name already exists")
-            else:
-                logger.error(f"MCP name already exists: {name}")
-                raise MCPNameIllegal("MCP name already exists")
+        logger.error(f"MCP name already exists: {name}")
+        raise MCPNameIllegal("MCP name already exists")
 
     resolved_registry_json = registry_json or {}
     if server_url:
