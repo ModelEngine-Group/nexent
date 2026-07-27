@@ -2,6 +2,7 @@ import pytest
 import threading
 from unittest.mock import Mock, MagicMock
 from backend.agents.agent_run_manager import AgentRunManager, agent_run_manager
+from nexent.core.agents.agent_context import ContextManagerConfig
 
 
 class TestAgentRunManager:
@@ -11,6 +12,57 @@ class TestAgentRunManager:
         self.manager = AgentRunManager()
         # Clear any existing state
         self.manager.agent_runs.clear()
+        self.manager._conversation_context_managers.clear()
+        self.manager._conversation_run_counts.clear()
+        self.manager._context_manager_cache_max_size = 128
+
+    def _complete_run_with_context(self, conversation_id: int):
+        run_info = Mock()
+        self.manager.register_agent_run(conversation_id, run_info, "user1")
+        context_manager = self.manager.get_or_create_context_manager(
+            conversation_id,
+            ContextManagerConfig(enabled=True),
+            max_steps=5,
+        )
+        self.manager.unregister_agent_run(conversation_id, "user1")
+        return context_manager
+
+    def test_context_manager_cache_evicts_least_recently_used_idle_entry(self):
+        self.manager._context_manager_cache_max_size = 2
+        first = self._complete_run_with_context(1)
+        self._complete_run_with_context(2)
+
+        # Reusing conversation 1 makes conversation 2 the LRU entry.
+        self.manager.register_agent_run(1, Mock(), "user1")
+        assert self.manager.get_or_create_context_manager(
+            1, ContextManagerConfig(enabled=True), max_steps=5
+        ) is first
+        self.manager.unregister_agent_run(1, "user1")
+
+        self._complete_run_with_context(3)
+
+        assert list(self.manager._conversation_context_managers) == ["1", "3"]
+        assert "2" not in self.manager._conversation_run_counts
+
+    def test_context_manager_cache_never_evicts_active_conversation(self):
+        self.manager._context_manager_cache_max_size = 1
+        self.manager.register_agent_run(1, Mock(), "user1")
+        active_manager = self.manager.get_or_create_context_manager(
+            1, ContextManagerConfig(enabled=True), max_steps=5
+        )
+
+        self._complete_run_with_context(2)
+
+        assert self.manager._conversation_context_managers["1"] is active_manager
+        assert "2" not in self.manager._conversation_context_managers
+
+        self.manager.unregister_agent_run(1, "user1")
+
+    def test_run_count_is_removed_when_context_manager_is_disabled(self):
+        self.manager.register_agent_run(1, Mock(), "user1")
+        self.manager.unregister_agent_run(1, "user1")
+
+        assert "1" not in self.manager._conversation_run_counts
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -294,4 +346,4 @@ class TestAgentRunManager:
         # Should have the second run info
         retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
         assert retrieved_info == mock_run_info2
-        assert retrieved_info != mock_run_info1 
+        assert retrieved_info != mock_run_info1

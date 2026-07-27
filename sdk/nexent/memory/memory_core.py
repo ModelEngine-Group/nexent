@@ -13,17 +13,46 @@ friendly to multi-process deployments such as Gunicorn or Uvicorn workers.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
 from typing import Any, Dict
 
+from mem0.memory import main as mem0_memory_main
 from mem0.memory.main import AsyncMemory
 
 from .embedder_adaptor import EmbedderAdaptor
 
 
 logger = logging.getLogger("memory_core")
+
+# mem0 0.1.117 creates a new PostHog client in capture_event() for every memory
+# operation and does not close it. Each client owns a consumer thread, so the
+# four-level memory search leaks four threads per agent run even when Nexent
+# passes telemetry.enabled=false. Keep the upstream behavior for callers that
+# explicitly enable telemetry, while making the disabled setting effective.
+_MEM0_TELEMETRY_DISABLED = contextvars.ContextVar(
+    "nexent_mem0_telemetry_disabled",
+    default=False,
+)
+_ORIGINAL_MEM0_CAPTURE_EVENT = mem0_memory_main.capture_event
+
+
+def _capture_mem0_event(event_name, memory_instance, additional_data=None):
+    if (
+        _MEM0_TELEMETRY_DISABLED.get()
+        or getattr(memory_instance, "_nexent_telemetry_disabled", False)
+    ):
+        return None
+    return _ORIGINAL_MEM0_CAPTURE_EVENT(
+        event_name,
+        memory_instance,
+        additional_data,
+    )
+
+
+mem0_memory_main.capture_event = _capture_mem0_event
 
 # In-process cache – {config_hash: Memory}
 _MEMORY_CACHE: dict[str, AsyncMemory] = {}
@@ -113,7 +142,17 @@ async def get_memory_instance(memory_config: Dict[str, Any]) -> AsyncMemory:
 
         logger.debug("Creating new Memory instance...")
         logger.debug("Using config:\n%s", json.dumps(memory_config, indent=2))
-        memory_obj = await AsyncMemory.from_config(memory_config)
+        telemetry_disabled = (
+            memory_config.get("telemetry", {}).get("enabled") is False
+        )
+        telemetry_token = _MEM0_TELEMETRY_DISABLED.set(telemetry_disabled)
+        try:
+            memory_obj = await AsyncMemory.from_config(memory_config)
+        finally:
+            _MEM0_TELEMETRY_DISABLED.reset(telemetry_token)
+
+        if telemetry_disabled:
+            memory_obj._nexent_telemetry_disabled = True
 
         try:
             memory_obj.embedding_model = EmbedderAdaptor(memory_config["embedder"]["config"])

@@ -2215,19 +2215,24 @@ async def prepare_agent_run(
         tool_params=agent_request.tool_params,
     )
 
-    # Mount conversation-level reusable ContextManager if enabled
-    cm_config = getattr(agent_run_info.agent_config,
-                        'context_manager_config', None)
-    if cm_config and cm_config.enabled:
-        cm = agent_run_manager.get_or_create_context_manager(
-            conversation_id=str(agent_request.conversation_id),
-            config=cm_config,
-            max_steps=agent_run_info.agent_config.max_steps
-        )
-        agent_run_info.context_manager = cm
-
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)
+    try:
+        # Register first so an in-flight conversation is protected from idle
+        # cache eviction while its reusable ContextManager is being resolved.
+        cm_config = getattr(agent_run_info.agent_config,
+                            'context_manager_config', None)
+        if cm_config and cm_config.enabled:
+            cm = agent_run_manager.get_or_create_context_manager(
+                conversation_id=str(agent_request.conversation_id),
+                config=cm_config,
+                max_steps=agent_run_info.agent_config.max_steps
+            )
+            agent_run_info.context_manager = cm
+    except Exception:
+        agent_run_manager.unregister_agent_run(
+            agent_request.conversation_id, user_id)
+        raise
     return agent_run_info, memory_context
 
 
