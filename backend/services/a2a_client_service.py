@@ -532,62 +532,19 @@ class A2AClientService:
                 new_description = card.get("description")
                 new_supported_interfaces = card.get("supportedInterfaces", [])
 
-                # Extract new protocol type from the card
-                new_protocol_type = _extract_protocol_type(new_supported_interfaces)
-                current_protocol_type = agent.get("protocol_type")
-
-                # Determine if we need to update agent_url and protocol_type
-                # Update agent_url if it changed in the remote card
-                update_agent_url = new_url is not None and new_url != agent_url
-
-                # Update protocol_type if it changed in the remote card
-                update_protocol_type = new_protocol_type != current_protocol_type
-
-                # When protocol_type changes, we need to find the corresponding interface URL
-                if update_protocol_type:
-                    logger.info(
-                        f"Protocol type changed for agent {external_agent_id}: "
-                        f"{current_protocol_type} -> {new_protocol_type}"
-                    )
-                    # The database function will handle finding the correct interface URL
-                    result = a2a_agent_db.refresh_external_agent_cache(
-                        external_agent_id=external_agent_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        new_raw_card=card,
-                        new_agent_url=new_url if update_agent_url else None,
-                        new_name=new_name,
-                        new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces,
-                        new_protocol_type=new_protocol_type
-                    )
-                elif update_agent_url:
-                    # Only agent_url changed
-                    logger.info(
-                        f"Agent URL changed for agent {external_agent_id}: "
-                        f"{agent_url} -> {new_url}"
-                    )
-                    result = a2a_agent_db.refresh_external_agent_cache(
-                        external_agent_id=external_agent_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        new_raw_card=card,
-                        new_agent_url=new_url,
-                        new_name=new_name,
-                        new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces
-                    )
-                else:
-                    # No changes to agent_url or protocol_type, just update metadata
-                    result = a2a_agent_db.refresh_external_agent_cache(
-                        external_agent_id=external_agent_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        new_raw_card=card,
-                        new_name=new_name,
-                        new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces
-                    )
+                logger.info(
+                    f"Refreshing agent {external_agent_id} card while preserving selected protocol: "
+                    f"{agent.get('protocol_type')}"
+                )
+                result = a2a_agent_db.refresh_external_agent_cache(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    new_raw_card=card,
+                    new_name=new_name,
+                    new_description=new_description,
+                    new_supported_interfaces=new_supported_interfaces
+                )
 
                 # Update availability
                 a2a_agent_db.update_agent_availability(
