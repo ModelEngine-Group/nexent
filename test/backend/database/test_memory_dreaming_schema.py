@@ -5,6 +5,7 @@ from database import memory_retrieval_hit_db
 from database.db_models import (
     MemoryDreamingActivationAudit,
     MemoryDreamingAudit,
+    MemoryDreamingSchedule,
     MemoryDreamingVersion,
     MemoryRecord,
     MemoryRetrievalHit,
@@ -122,6 +123,40 @@ def test_ac012_dreaming_scheduler_is_wired_for_deployment():
     assert "DREAMING_SCHEDULER_POLL_SECONDS" in const_py
     assert "DREAMING_SCHEDULER_ENABLED" in const_py
     assert "dreaming_q" not in const_py.split("QUEUES")[1].split("\n")[0]
+
+
+def test_ac033_schedule_orm_and_sql_contract():
+    columns = MemoryDreamingSchedule.__table__.columns
+    for name in (
+        "schedule_id",
+        "tenant_id",
+        "user_id",
+        "agent_id",
+        "enabled",
+        "rule_type",
+        "timezone",
+        "start_at",
+        "cron_expr",
+        "interval_seconds",
+        "next_fire_at",
+        "last_fire_at",
+        "fire_count",
+    ):
+        assert name in columns
+
+    root = Path(__file__).resolve().parents[3]
+    migration = (
+        root / "deploy/sql/migrations/v2.4.0_0727_add_memory_dreaming_schedule.sql"
+    ).read_text()
+    init_sql = (root / "deploy/sql/init.sql").read_text()
+    for token in (
+        "memory_dreaming_schedule_t",
+        "uq_memory_dreaming_schedule_scope",
+        "idx_memory_dreaming_schedule_due",
+        "interval_seconds >= 3600",
+    ):
+        assert token in migration
+        assert token in init_sql
 
 
 def test_ac002_dreaming_stats_filter_agent_scope(monkeypatch):

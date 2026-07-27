@@ -1,4 +1,4 @@
-"""Persistence and PostgreSQL advisory locking for manual Dreaming runs."""
+"""Persistence, scheduling, and PostgreSQL locking for Dreaming runs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,14 @@ from .client import get_db_session
 from .db_models import (
     MemoryDreamingActivationAudit,
     MemoryDreamingAudit,
+    MemoryDreamingSchedule,
     MemoryDreamingVersion,
+)
+from nexent.scheduler import (
+    ScheduleMode,
+    ScheduleRuleType,
+    ScheduleSpec,
+    compute_next_fire_at,
 )
 
 
@@ -62,6 +69,155 @@ def create_audit(
         session.add(row)
         session.commit()
         return int(row.run_id)
+
+
+def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
+    return {
+        "schedule_id": row.schedule_id,
+        "agent_id": row.agent_id,
+        "enabled": row.enabled,
+        "rule_type": row.rule_type,
+        "timezone": row.timezone,
+        "start_at": row.start_at.isoformat() if row.start_at else None,
+        "cron_expr": row.cron_expr,
+        "interval_seconds": row.interval_seconds,
+        "next_fire_at": (
+            row.next_fire_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.next_fire_at
+            else None
+        ),
+        "last_fire_at": (
+            row.last_fire_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.last_fire_at
+            else None
+        ),
+        "fire_count": row.fire_count,
+    }
+
+
+def get_schedule(
+    tenant_id: str, user_id: str, agent_id: str
+) -> Optional[Dict[str, Any]]:
+    with get_db_session() as session:
+        row = (
+            session.query(MemoryDreamingSchedule)
+            .filter(
+                MemoryDreamingSchedule.tenant_id == tenant_id,
+                MemoryDreamingSchedule.user_id == user_id,
+                MemoryDreamingSchedule.agent_id == agent_id,
+                MemoryDreamingSchedule.delete_flag == "N",
+            )
+            .first()
+        )
+        return _schedule_to_dict(row) if row else None
+
+
+def upsert_schedule(
+    tenant_id: str,
+    user_id: str,
+    agent_id: str,
+    *,
+    enabled: bool,
+    rule_type: str,
+    timezone_name: str,
+    start_at: datetime,
+    cron_expr: Optional[str],
+    interval_seconds: Optional[int],
+    next_fire_at: Optional[datetime],
+    actor_user_id: str,
+) -> Dict[str, Any]:
+    with get_db_session() as session:
+        row = (
+            session.query(MemoryDreamingSchedule)
+            .filter(
+                MemoryDreamingSchedule.tenant_id == tenant_id,
+                MemoryDreamingSchedule.user_id == user_id,
+                MemoryDreamingSchedule.agent_id == agent_id,
+                MemoryDreamingSchedule.delete_flag == "N",
+            )
+            .with_for_update()
+            .first()
+        )
+        if row is None:
+            row = MemoryDreamingSchedule(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                created_by=actor_user_id,
+            )
+            session.add(row)
+        row.enabled = enabled
+        row.rule_type = rule_type
+        row.timezone = timezone_name
+        row.start_at = start_at
+        row.cron_expr = cron_expr
+        row.interval_seconds = interval_seconds
+        row.next_fire_at = next_fire_at if enabled else None
+        row.updated_by = actor_user_id
+        session.flush()
+        return _schedule_to_dict(row)
+
+
+def _next_schedule_fire(row: MemoryDreamingSchedule, after: datetime) -> Optional[datetime]:
+    spec = ScheduleSpec(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType(row.rule_type),
+        timezone=row.timezone,
+        start_at=row.start_at,
+        cron_expr=row.cron_expr,
+        interval_seconds=row.interval_seconds,
+    )
+    value = compute_next_fire_at(
+        spec, after.replace(tzinfo=timezone.utc), row.fire_count + 1
+    )
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value else None
+
+
+def materialize_due_schedules(limit: int = 10) -> int:
+    """Atomically enqueue due schedules and advance them exactly once."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    created = 0
+    with get_db_session() as session:
+        rows = (
+            session.query(MemoryDreamingSchedule)
+            .filter(
+                MemoryDreamingSchedule.enabled.is_(True),
+                MemoryDreamingSchedule.next_fire_at <= now,
+                MemoryDreamingSchedule.delete_flag == "N",
+            )
+            .order_by(MemoryDreamingSchedule.next_fire_at.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+        for row in rows:
+            scheduled_fire_at = row.next_fire_at
+            active = (
+                session.query(MemoryDreamingAudit.run_id)
+                .filter(
+                    MemoryDreamingAudit.tenant_id == row.tenant_id,
+                    MemoryDreamingAudit.user_id == row.user_id,
+                    MemoryDreamingAudit.agent_id == row.agent_id,
+                    MemoryDreamingAudit.status.in_(("queued", "running")),
+                    MemoryDreamingAudit.delete_flag == "N",
+                )
+                .first()
+            )
+            if active is None:
+                session.add(
+                    MemoryDreamingAudit(
+                        tenant_id=row.tenant_id,
+                        user_id=row.user_id,
+                        agent_id=row.agent_id,
+                        trigger_source="schedule",
+                        status="queued",
+                    )
+                )
+                created += 1
+            row.last_fire_at = scheduled_fire_at
+            row.fire_count += 1
+            row.next_fire_at = _next_schedule_fire(row, now)
+    return created
 
 
 def get_active_version(

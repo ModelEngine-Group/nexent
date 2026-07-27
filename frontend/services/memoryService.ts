@@ -475,6 +475,20 @@ export interface DreamingParameters {
   compression_max_attempts: number;
 }
 
+export interface DreamingSchedule {
+  schedule_id?: number;
+  agent_id: string;
+  enabled: boolean;
+  rule_type: "CRON" | "INTERVAL";
+  timezone: string;
+  start_at?: string | null;
+  cron_expr?: string | null;
+  interval_seconds?: number | null;
+  next_fire_at?: string | null;
+  last_fire_at?: string | null;
+  fire_count: number;
+}
+
 export interface DreamingVersion {
   version_id: number;
   version_no: number;
@@ -511,6 +525,28 @@ export async function fetchDreamingAgents() {
 export async function fetchDreamingParameters(): Promise<DreamingParameters> {
   return requestJson(API_ENDPOINTS.memory.dreaming.parameters, {
     headers: getAuthHeaders(),
+  });
+}
+
+export async function fetchDreamingSchedule(
+  agentId: string,
+  targetUserId?: string
+): Promise<DreamingSchedule> {
+  const params = new URLSearchParams({ agent_id: agentId });
+  if (targetUserId) params.set("target_user_id", targetUserId);
+  return requestJson(
+    `${API_ENDPOINTS.memory.dreaming.schedule}?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+}
+
+export async function saveDreamingSchedule(
+  schedule: Omit<DreamingSchedule, "fire_count"> & { target_user_id?: string }
+): Promise<DreamingSchedule> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.schedule, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(schedule),
   });
 }
 

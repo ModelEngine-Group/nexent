@@ -253,3 +253,63 @@ def test_ac016_admin_without_tenant_capability_is_denied(monkeypatch):
         permission_type="DREAMING",
         permission_subtype="VIEW_TENANT",
     )
+
+
+def test_ac033_schedule_defaults_disabled(monkeypatch):
+    monkeypatch.setattr(
+        memory_dreaming_app,
+        "get_current_user_id",
+        lambda _authorization: ("user-1", "tenant-1"),
+    )
+    monkeypatch.setattr(
+        memory_dreaming_app.memory_dreaming_db, "get_schedule", lambda *_args: None
+    )
+
+    result = memory_dreaming_app.get_dreaming_schedule(
+        agent_id="agent-1", authorization="Bearer token"
+    )
+
+    assert result["enabled"] is False
+    assert result["cron_expr"] == "0 3 * * *"
+    assert result["next_fire_at"] is None
+
+
+def test_ac033_schedule_is_validated_and_saved(monkeypatch):
+    monkeypatch.setattr(
+        memory_dreaming_app,
+        "get_current_user_id",
+        lambda _authorization: ("user-1", "tenant-1"),
+    )
+    saved = MagicMock(return_value={"enabled": True, "next_fire_at": "future"})
+    monkeypatch.setattr(
+        memory_dreaming_app.memory_dreaming_db, "upsert_schedule", saved
+    )
+    payload = memory_dreaming_app.DreamingScheduleRequest(
+        agent_id="agent-1",
+        enabled=True,
+        rule_type="CRON",
+        timezone="Asia/Shanghai",
+        cron_expr="30 3 * * *",
+    )
+
+    result = memory_dreaming_app.put_dreaming_schedule(payload, "Bearer token")
+
+    assert result["enabled"] is True
+    kwargs = saved.call_args.kwargs
+    assert kwargs["rule_type"] == "CRON"
+    assert kwargs["next_fire_at"] is not None
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"rule_type": "CRON", "cron_expr": "bad cron"},
+        {"rule_type": "INTERVAL", "interval_seconds": 3599},
+        {"rule_type": "CRON", "cron_expr": "0 3 * * *", "timezone": "Mars/Olympus"},
+    ],
+)
+def test_ac034_invalid_schedule_is_rejected(values):
+    with pytest.raises(ValidationError):
+        memory_dreaming_app.DreamingScheduleRequest(
+            agent_id="agent-1", enabled=True, **values
+        )

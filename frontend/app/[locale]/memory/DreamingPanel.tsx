@@ -7,16 +7,20 @@ import {
   Button,
   Card,
   Empty,
+  InputNumber,
   List,
   Progress,
   Select,
   Space,
   Spin,
+  Switch,
   Tag,
+  TimePicker,
   Timeline,
   Typography,
 } from "antd";
-import { Brain, History, Play, RotateCcw } from "lucide-react";
+import { Brain, Clock, History, Play, RotateCcw, Save } from "lucide-react";
+import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -27,10 +31,15 @@ import {
   fetchDreamingAgents,
   fetchDreamingAudits,
   fetchDreamingParameters,
+  fetchDreamingSchedule,
   fetchDreamingVersions,
   runDreaming,
+  saveDreamingSchedule,
 } from "@/services/memoryService";
-import type { DreamingParameters } from "@/services/memoryService";
+import type {
+  DreamingParameters,
+  DreamingSchedule,
+} from "@/services/memoryService";
 import { getTenantUsers, TenantUser } from "@/services/tenantService";
 
 const phaseProgress: Record<string, number> = {
@@ -55,17 +64,42 @@ export function DreamingPanel() {
   const [parameters, setParameters] = useState<DreamingParameters>();
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
+  const [schedule, setSchedule] = useState<DreamingSchedule>();
+  const [scheduleMode, setScheduleMode] = useState<
+    "daily" | "weekly" | "interval"
+  >("daily");
+  const [scheduleTime, setScheduleTime] = useState("03:00");
+  const [scheduleWeekday, setScheduleWeekday] = useState(1);
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   const refresh = useCallback(
     async (selectedAgent: string) => {
       const target =
         targetUserId && targetUserId !== user?.id ? targetUserId : undefined;
-      const [nextAudits, nextVersions] = await Promise.all([
+      const [nextAudits, nextVersions, nextSchedule] = await Promise.all([
         fetchDreamingAudits(selectedAgent, 20, target),
         fetchDreamingVersions(selectedAgent, 20, target),
+        fetchDreamingSchedule(selectedAgent, target),
       ]);
       setAudits(nextAudits);
       setVersions(nextVersions);
+      setSchedule(nextSchedule);
+      if (nextSchedule.rule_type === "INTERVAL") {
+        setScheduleMode("interval");
+        setIntervalHours((nextSchedule.interval_seconds || 86400) / 3600);
+      } else {
+        const parts = (nextSchedule.cron_expr || "0 3 * * *").split(" ");
+        setScheduleTime(
+          `${parts[1].padStart(2, "0")}:${parts[0].padStart(2, "0")}`
+        );
+        if (parts[4] !== "*") {
+          setScheduleMode("weekly");
+          setScheduleWeekday(Number(parts[4]));
+        } else {
+          setScheduleMode("daily");
+        }
+      }
     },
     [targetUserId, user?.id]
   );
@@ -101,7 +135,7 @@ export function DreamingPanel() {
     refresh(agentId)
       .catch(() => message.error(t("dreaming.error.loadStatus")))
       .finally(() => setLoading(false));
-  }, [agentId, message, refresh]);
+  }, [agentId, message, refresh, t]);
 
   const activeRun = useMemo(
     () => audits.find((run) => ["queued", "running"].includes(run.status)),
@@ -131,6 +165,36 @@ export function DreamingPanel() {
       message.error(t("dreaming.error.trigger"));
     } finally {
       setTriggering(false);
+    }
+  };
+
+  const saveSchedule = async () => {
+    if (!agentId || !schedule) return;
+    const [hour, minute] = scheduleTime.split(":").map(Number);
+    const timezone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
+    setSavingSchedule(true);
+    try {
+      const saved = await saveDreamingSchedule({
+        agent_id: agentId,
+        enabled: schedule.enabled,
+        rule_type: scheduleMode === "interval" ? "INTERVAL" : "CRON",
+        timezone,
+        start_at: new Date().toISOString(),
+        cron_expr:
+          scheduleMode === "interval"
+            ? null
+            : `${minute} ${hour} * * ${scheduleMode === "weekly" ? scheduleWeekday : "*"}`,
+        interval_seconds:
+          scheduleMode === "interval" ? Math.round(intervalHours * 3600) : null,
+        ...(selectedIsSelf ? {} : { target_user_id: targetUserId }),
+      });
+      setSchedule(saved);
+      message.success(t("dreaming.schedule.saved"));
+    } catch {
+      message.error(t("dreaming.schedule.saveFailed"));
+    } finally {
+      setSavingSchedule(false);
     }
   };
 
@@ -226,6 +290,97 @@ export function DreamingPanel() {
           </Space>
         </div>
       </Card>
+
+      {agentId && schedule && (
+        <Card
+          title={
+            <Space>
+              <Clock className="size-4" />
+              {t("dreaming.schedule.title")}
+            </Space>
+          }
+          extra={
+            <Button
+              icon={<Save className="size-4" />}
+              loading={savingSchedule}
+              disabled={!canEditTarget}
+              onClick={saveSchedule}
+            >
+              {t("dreaming.schedule.save")}
+            </Button>
+          }
+        >
+          <Space wrap size="large">
+            <Space>
+              <Typography.Text>
+                {t("dreaming.schedule.enabled")}
+              </Typography.Text>
+              <Switch
+                checked={schedule.enabled}
+                disabled={!canEditTarget}
+                onChange={(enabled) => setSchedule({ ...schedule, enabled })}
+              />
+            </Space>
+            <Select
+              aria-label={t("dreaming.schedule.frequency")}
+              value={scheduleMode}
+              disabled={!canEditTarget}
+              style={{ width: 150 }}
+              onChange={setScheduleMode}
+              options={[
+                { value: "daily", label: t("dreaming.schedule.daily") },
+                { value: "weekly", label: t("dreaming.schedule.weekly") },
+                { value: "interval", label: t("dreaming.schedule.interval") },
+              ]}
+            />
+            {scheduleMode === "weekly" && (
+              <Select
+                value={scheduleWeekday}
+                disabled={!canEditTarget}
+                style={{ width: 130 }}
+                onChange={setScheduleWeekday}
+                options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
+                  value,
+                  label: t(`dreaming.schedule.weekday.${value}`),
+                }))}
+              />
+            )}
+            {scheduleMode !== "interval" ? (
+              <TimePicker
+                value={dayjs(`2000-01-01T${scheduleTime}:00`)}
+                format="HH:mm"
+                minuteStep={5}
+                disabled={!canEditTarget}
+                onChange={(value) =>
+                  value && setScheduleTime(value.format("HH:mm"))
+                }
+              />
+            ) : (
+              <Space>
+                <InputNumber
+                  min={1}
+                  max={720}
+                  value={intervalHours}
+                  disabled={!canEditTarget}
+                  onChange={(value) => setIntervalHours(value || 1)}
+                />
+                <Typography.Text>
+                  {t("dreaming.schedule.hours")}
+                </Typography.Text>
+              </Space>
+            )}
+          </Space>
+          <div className="mt-3">
+            <Typography.Text type="secondary">
+              {schedule.next_fire_at
+                ? t("dreaming.schedule.nextFire", {
+                    time: new Date(schedule.next_fire_at).toLocaleString(),
+                  })
+                : t("dreaming.schedule.disabledHint")}
+            </Typography.Text>
+          </div>
+        </Card>
+      )}
 
       {activeRun && (
         <Alert

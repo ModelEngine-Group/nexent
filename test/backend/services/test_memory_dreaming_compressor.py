@@ -636,3 +636,130 @@ def test_ac049_fact_preservation_guarantee():
         max_chars=10_000,
     )
     assert not any("missing_critical_literals" in f for f in feedback)
+
+
+def test_strip_json_fence_no_newline():
+    assert _strip_json_fence("```json") == "```json"
+
+
+def test_strip_json_fence_none_input():
+    assert _strip_json_fence(None) == ""
+
+
+def test_validate_spans_empty_fact_text():
+    units = [{"unit_id": "u1", "text": "   ", "evidence_ids": ["1"]}]
+    spans = [{"unit_id": "u1", "start": 0, "end": 3}]
+    facts, feedback = TenantDreamingCompressor._validate_spans(spans, "   ", units)
+    assert any("empty_text" in f for f in feedback)
+
+
+def test_require_source_coverage_empty_source():
+    facts = []
+    units = []
+    TenantDreamingCompressor._require_source_coverage(facts, units)
+
+
+def test_lossless_formatter_rejects_non_list_response():
+    class Model:
+        def generate(self, _messages):
+            return SimpleNamespace(content=json.dumps({"facts": "not a list"}))
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.model = Model()
+    facts = [
+        {
+            "fact_id": "f001",
+            "text": "fact one",
+            "unit_ids": ["u1"],
+            "evidence_ids": ["1"],
+        }
+    ]
+    with pytest.raises(ValueError, match="must contain a facts list"):
+        compressor._lossless_formatting(facts, 10, ["1"])
+
+
+def test_lossless_formatter_rejects_duplicate_fact_ids():
+    class Model:
+        def generate(self, _messages):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "facts": [
+                            {"fact_id": "f001", "text": "first"},
+                            {"fact_id": "f001", "text": "duplicate"},
+                        ]
+                    }
+                )
+            )
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.model = Model()
+    facts = [
+        {
+            "fact_id": "f001",
+            "text": "fact one",
+            "unit_ids": ["u1"],
+            "evidence_ids": ["1"],
+        }
+    ]
+    with pytest.raises(ValueError, match="duplicate fact_ids"):
+        compressor._lossless_formatting(facts, 10, ["1"])
+
+
+def test_lossless_formatter_rejects_empty_fact_text():
+    class Model:
+        def generate(self, _messages):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {"facts": [{"fact_id": "f001", "text": "   "}]}
+                )
+            )
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.model = Model()
+    facts = [
+        {
+            "fact_id": "f001",
+            "text": "fact one",
+            "unit_ids": ["u1"],
+            "evidence_ids": ["1"],
+        }
+    ]
+    with pytest.raises(ValueError, match="empty fact"):
+        compressor._lossless_formatting(facts, 10, ["1"])
+
+
+def test_span_validation_rejects_missing_unit_id_with_legacy():
+    spans = [{"start": 0, "end": 5, "unit_ids": ["u1", "u2"]}]
+    units = [{"unit_id": "u1", "text": "Hello", "evidence_ids": ["1"]}]
+    _, feedback = TenantDreamingCompressor._validate_spans(spans, "Hello", units)
+    assert any("invalid_unit" in f or "missing_offsets" in f for f in feedback)
+
+
+def test_fact_coverage_too_low_raises_in_main_path():
+    class Model:
+        def generate(self, messages):
+            return SimpleNamespace(
+                content=json.dumps([{"unit_id": "u1", "start": 0, "end": 5}])
+            )
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.tenant_id = "t"
+    compressor.user_id = "u"
+    compressor.model = Model()
+    compressor.max_compression_input_chars = 40_000
+
+    units = [
+        DreamingMemoryUnit(unit_id="u1", content="Hello world", evidence_ids=["1"]),
+        DreamingMemoryUnit(unit_id="u2", content="Another fact", evidence_ids=["2"]),
+    ]
+
+    with pytest.raises(ValueError, match="Source unit coverage too low"):
+        compressor(
+            DreamingCompressionRequest(
+                raw_content="- Hello world\n- Another fact",
+                units=units,
+                max_chars=10_000,
+                attempt=1,
+            )
+        )

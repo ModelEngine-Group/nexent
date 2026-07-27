@@ -481,6 +481,7 @@ export const API_ENDPOINTS = {
     },
     dreaming: {
       parameters: `${API_BASE_URL}/memory/dreaming/parameters`,
+      schedule: `${API_BASE_URL}/memory/dreaming/schedule`,
       run: `${API_BASE_URL}/memory/dreaming/run`,
       audits: `${API_BASE_URL}/memory/dreaming/audit`,
       versions: `${API_BASE_URL}/memory/dreaming/versions`,

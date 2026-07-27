@@ -20,6 +20,13 @@ logger = logging.getLogger("memory_dreaming.scheduler")
 class DreamingLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
+    @staticmethod
+    def _materialize_and_claim(
+        owner_id: str, limit: int, lease_seconds: float
+    ) -> Dict[str, Any] | None:
+        memory_dreaming_db.materialize_due_schedules(limit)
+        return memory_dreaming_db.claim_queued(owner_id, lease_seconds)
+
     async def recover(self) -> None:
         await asyncio.to_thread(memory_dreaming_db.recover_stale)
 
@@ -30,8 +37,9 @@ class DreamingLeaseStore:
         lease_seconds: float,
     ) -> list[ClaimedJob[Dict[str, Any]]]:
         row = await asyncio.to_thread(
-            memory_dreaming_db.claim_queued,
+            self._materialize_and_claim,
             owner_id,
+            limit,
             lease_seconds,
         )
         if row is None:

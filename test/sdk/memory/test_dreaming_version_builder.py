@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from nexent.memory.dreaming import (
     DreamingCandidate,
     DreamingCompressionOutput,
@@ -280,3 +282,91 @@ def test_ac044_coverage_validation_acceptance():
         compressed_fact_ids=compressed_fact_ids,
     )
     assert not any("fact_coverage" in f for f in feedback)
+
+
+def test_units_from_decisions_negative_source_limit():
+    with pytest.raises(ValueError, match="non-negative"):
+        units_from_decisions([], source_limit=-1)
+
+
+def test_units_from_decisions_zero_source_limit():
+    decisions = select_candidates(
+        [candidate(memory_id=1)],
+        thresholds=DreamingThresholds(
+            min_score=0, min_recall_count=0, min_unique_queries=0
+        ),
+        now=datetime(2026, 7, 23),
+    )
+    result = units_from_decisions(decisions, source_limit=0)
+    assert result == []
+
+
+def test_build_dreaming_version_invalid_max_chars():
+    with pytest.raises(ValueError, match="positive"):
+        build_dreaming_version(parent_units=[], new_units=[], max_chars=0)
+
+
+def test_build_dreaming_version_negative_max_attempts():
+    with pytest.raises(ValueError, match="non-negative"):
+        build_dreaming_version(parent_units=[], new_units=[], max_chars=100, max_attempts=-1)
+
+
+def test_build_dreaming_version_compressor_exception():
+    def failing_compressor(request):
+        raise RuntimeError("model unavailable")
+
+    result = build_dreaming_version(
+        parent_units=[],
+        new_units=[
+            DreamingMemoryUnit(
+                unit_id="new",
+                content="important fact " * 20,
+                evidence_ids=["1"],
+                is_new=True,
+            )
+        ],
+        max_chars=20,
+        compressor=failing_compressor,
+        max_attempts=2,
+    )
+
+    assert result.compression_status == "mechanical_fallback"
+    assert result.compression_audit[0]["outcome"] == "model_error"
+    assert "compressor_error" in result.compression_audit[0]["validation"][0]
+
+
+def test_validate_compression_empty_content():
+    from nexent.memory.dreaming.version_builder import _validate_compression
+
+    output = DreamingCompressionOutput(
+        content="   ",
+        evidence_ids=["1"],
+    )
+    feedback = _validate_compression(
+        output,
+        required_evidence={"1"},
+        required_literals=set(),
+        max_chars=10_000,
+    )
+    assert "content_empty" in feedback
+
+
+def test_truncate_at_sentence_short_text():
+    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
+
+    assert _truncate_at_sentence("short", 100) == "short"
+
+
+def test_truncate_at_sentence_zero_limit():
+    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
+
+    assert _truncate_at_sentence("some text", 0) == ""
+
+
+def test_truncate_at_sentence_word_boundary():
+    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
+
+    text = "This is a long sentence without period marks"
+    result = _truncate_at_sentence(text, 30)
+    assert len(result) <= 30
+    assert result == "This is a long sentence"

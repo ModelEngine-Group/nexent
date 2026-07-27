@@ -938,7 +938,7 @@ class MemoryRetrievalHit(TableBase):
 
 
 class MemoryDreamingAudit(TableBase):
-    """One durable audit row per manual Dreaming run."""
+    """One durable audit row per manual or scheduled Dreaming run."""
 
     __tablename__ = "memory_dreaming_audit_t"
     __table_args__ = (
@@ -974,6 +974,46 @@ class MemoryDreamingAudit(TableBase):
     error = Column(Text)
     lock_owner = Column(String(100), nullable=True)
     lock_until = Column(TIMESTAMP(timezone=False), nullable=True)
+
+
+class MemoryDreamingSchedule(TableBase):
+    """Persistent automatic Dreaming schedule for one user/agent scope."""
+
+    __tablename__ = "memory_dreaming_schedule_t"
+    __table_args__ = (
+        Index(
+            "uq_memory_dreaming_schedule_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            unique=True,
+        ),
+        Index(
+            "idx_memory_dreaming_schedule_due",
+            "enabled",
+            "next_fire_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    schedule_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_schedule_t_schedule_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    rule_type = Column(String(20), nullable=False, default="CRON")
+    timezone = Column(String(100), nullable=False, default="Asia/Shanghai")
+    start_at = Column(TIMESTAMP(timezone=False), nullable=False)
+    cron_expr = Column(String(100))
+    interval_seconds = Column(Integer)
+    next_fire_at = Column(TIMESTAMP(timezone=False))
+    last_fire_at = Column(TIMESTAMP(timezone=False))
+    fire_count = Column(Integer, nullable=False, default=0)
 
 
 class MemoryDreamingVersion(TableBase):
