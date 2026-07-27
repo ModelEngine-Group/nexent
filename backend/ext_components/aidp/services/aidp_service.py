@@ -546,14 +546,12 @@ def create_aidp_kb_impl(
             # the remote service is complaining about. httpx's own
             # HTTPStatusError only carries URL + status, so this body
             # dump is the most valuable diagnostic for 500s and other
-            # non-2xx codes. api_key is printed with only the last 4
-            # chars visible to avoid leaking credentials.
-            safe_api_key = api_key[-4:] if api_key else ""
+            # non-2xx codes. api_key is intentionally omitted to prevent
+            # credential leakage even in masked form.
             logger.warning(
-                "AIDP create KB failed: url=%s status=%d api_key=***%s body=%s",
+                "AIDP create KB failed: url=%s status=%d api_key=*** body=%s",
                 create_url,
                 response.status_code,
-                safe_api_key,
                 response.text[:3000],
             )
 

@@ -23,8 +23,18 @@ import {
 import { InboxOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import type { AidpModelItem } from "@/services/aidpKnowledgeService";
+import type { AidpModelItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+
+/**
+ * Antd's Upload component (Dragger) requires ``originFileObj`` to satisfy
+ * the ``RcFile`` shape (``File`` + ``uid`` + ``lastModifiedDate``). We
+ * store raw ``File`` objects in component state, so we cast at the
+ * render boundary. The structural cast is sufficient because antd does
+ * not read the extra fields — it only requires them to exist for type
+ * compatibility.
+ */
+type RcFileLike = File & { uid: string; lastModifiedDate: Date };
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
@@ -515,7 +525,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           name: f.name,
           size: f.size,
           status: "done" as const,
-          originFileObj: f,
+          originFileObj: f as unknown as RcFileLike,
         }))}
         beforeUpload={(_file, newFiles) => {
           // Only use beforeUpload as the single state updater for file additions.

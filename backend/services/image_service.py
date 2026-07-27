@@ -41,6 +41,10 @@ def _is_aidp_url(decoded_url: str) -> bool:
     Both scheme://host AND the ``/KnowledgeBase/Tenants/`` path prefix must
     match; otherwise we fall through to the generic proxy so an accidental
     base_url typo never leaks the AIDP api key to an unrelated host.
+
+    Security: we must be precise about which URLs we authenticate with the
+    AIDP Bearer token. An attacker could craft a URL that passes this check
+    but fetches a different resource if we were too loose with the checks.
     """
     aidp_base = AIDP_SERVER_URL.rstrip("/")
     if not aidp_base:
@@ -50,9 +54,22 @@ def _is_aidp_url(decoded_url: str) -> bool:
         base_parsed = urlparse(aidp_base)
     except Exception:
         return False
+
+    # Strict host + scheme match
     if (parsed.scheme, parsed.netloc) != (base_parsed.scheme, base_parsed.netloc):
         return False
-    return _AIDP_KB_PATH_PREFIX in parsed.path
+
+    # Strict path validation: must start with the KB path prefix
+    # Use startswith instead of "in" to prevent path traversal via ".."
+    if not parsed.path.startswith(_AIDP_KB_PATH_PREFIX):
+        return False
+
+    # Reject URLs with query params or fragments to prevent redirect
+    # attacks where the server might redirect based on query parameters
+    if parsed.query or parsed.fragment:
+        return False
+
+    return True
 
 
 def _get_aidp_api_key() -> str:

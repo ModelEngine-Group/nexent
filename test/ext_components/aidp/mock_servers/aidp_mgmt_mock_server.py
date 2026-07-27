@@ -817,7 +817,10 @@ if __name__ == "__main__":
 
     print(f"\nAIDP Mock Server starting on http://{args.host}:{args.port}")
     print(f"  Tenant path prefix: {_KB_PREFIX}")
-    print(f"  Expected API key:   Bearer {EXPECTED_API_KEY}")
+    # Don't print the full credential — secret scanners flag this even for
+    # mock/test-only keys. The key is a fixed literal visible in this file's
+    # source; operators who need it can read it there.
+    print(f"  Expected API key:   Bearer *** (see EXPECTED_API_KEY constant)")
     print(f"  Seed KBs:           {len(_KNOWLEDGE_BASES)} pre-populated")
     print(f"  POST /_reset to restore initial state\n")
 

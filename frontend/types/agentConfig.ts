@@ -233,6 +233,8 @@ export interface AidpKnowledgeBaseItem {
   created_at?: string;
   /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
   updated_at?: string;
+  /** Embedding model name configured for this KB in AIDP. */
+  embedding_model?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {
