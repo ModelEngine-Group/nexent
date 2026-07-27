@@ -233,6 +233,10 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     request = create_stream.call_args.kwargs["request"]
     assert request.query == "Build a weather agent"
     assert not hasattr(request, "agent_id")
+    assert (
+        create_stream.call_args.kwargs["authorization"]
+        == mock_auth_header["Authorization"]
+    )
     assert not hasattr(request, "conversation_id")
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"

@@ -121,6 +121,7 @@ async def nl2agent_run_api(
             request=nl2agent_request,
             tenant_id=tenant_id,
             language=language,
+            authorization=authorization,
         )
         return StreamingResponse(stream, media_type="text/event-stream")
     except UnauthorizedError as exc:

@@ -8,6 +8,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.run_agent import agent_run
@@ -19,11 +20,10 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import (
-    GeneratedAgentDraft,
     InstalledMcpToolRecommendation,
-    build_search_installed_mcp_tools,
     create_nl2agent_agent_config,
 )
+from consts.const import LOCAL_MCP_SERVER
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.tool_db import query_all_tools
 
@@ -50,22 +50,6 @@ def _normalize_labels(value: Any) -> list[str]:
     return [str(label) for label in value if label is not None]
 
 
-def _build_draft_query(draft: GeneratedAgentDraft) -> str:
-    return _normalize_search_text(
-        " ".join(
-            part
-            for part in (
-                draft.display_name,
-                draft.description,
-                draft.duty_prompt,
-                draft.constraint_prompt,
-                draft.few_shots_prompt or "",
-            )
-            if part
-        )
-    )
-
-
 def _build_tool_document(tool: dict[str, Any]) -> str:
     labels = " ".join(_normalize_labels(tool.get("labels")))
     return _normalize_search_text(
@@ -80,20 +64,6 @@ def _build_tool_document(tool: dict[str, Any]) -> str:
             )
             if part
         )
-    )
-
-
-def search_installed_mcp_tools_for_tenant(
-    tenant_id: str,
-    draft: GeneratedAgentDraft,
-    limit: int = MAX_RECOMMENDATIONS,
-) -> list[InstalledMcpToolRecommendation]:
-    """Return the best installed MCP tool matches for one tenant."""
-
-    return search_installed_mcp_tools_by_query(
-        tenant_id=tenant_id,
-        query_text=_build_draft_query(draft),
-        limit=limit,
     )
 
 
@@ -165,6 +135,7 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
+    authorization: str | None,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
@@ -174,19 +145,20 @@ async def build_nl2agent_run_info(
         history=request.history,
     )
     model_config_list = await create_model_config_list(tenant_id)
-    search_tool = build_search_installed_mcp_tools(
-        tenant_id=tenant_id,
-        language=language,
-        search_fn=search_installed_mcp_tools_for_tenant,
-    )
-    agent_config = create_nl2agent_agent_config(language, search_tool)
+    agent_config = create_nl2agent_agent_config(language)
+    mcp_config: dict[str, Any] = {
+        "url": urljoin(LOCAL_MCP_SERVER, "sse"),
+        "transport": "sse",
+    }
+    if authorization:
+        mcp_config["headers"] = {"Authorization": authorization}
 
     return AgentRunInfo(
         query=final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=language),
         agent_config=agent_config,
-        mcp_host=None,
+        mcp_host=[mcp_config],
         history=_convert_history(request.history),
         stop_event=threading.Event(),
         enable_planning=False,
@@ -199,10 +171,16 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
+    authorization: str | None,
 ) -> AsyncIterator[str]:
     """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
 
-    run_info = await build_nl2agent_run_info(request, tenant_id, language)
+    run_info = await build_nl2agent_run_info(
+        request=request,
+        tenant_id=tenant_id,
+        language=language,
+        authorization=authorization,
+    )
 
     async def generate() -> AsyncIterator[str]:
         try:

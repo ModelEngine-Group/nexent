@@ -3,23 +3,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.nl2agent_agent import GeneratedAgentDraft
 from consts.model import HistoryItem, NL2AgentRunRequest
 from services.nl2agent_service import (
     build_nl2agent_run_info,
     create_nl2agent_stream,
-    search_installed_mcp_tools_for_tenant,
+    search_installed_mcp_tools_by_query,
 )
-
-
-def _draft() -> GeneratedAgentDraft:
-    return GeneratedAgentDraft(
-        name="weather_assistant",
-        display_name="Weather Assistant",
-        description="Weather forecast search",
-        duty_prompt="Search and summarize weather forecasts",
-        constraint_prompt="Only use available forecast information",
-    )
 
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
@@ -55,7 +44,10 @@ def test_search_filters_catalog_and_returns_safe_metadata(mocker):
         ],
     )
 
-    result = search_installed_mcp_tools_for_tenant("tenant-a", _draft())
+    result = search_installed_mcp_tools_by_query(
+        "tenant-a",
+        "weather forecast search",
+    )
 
     query_tools.assert_called_once_with(tenant_id="tenant-a")
     assert len(result) == 1
@@ -86,7 +78,10 @@ def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
         return_value=80,
     )
 
-    result = search_installed_mcp_tools_for_tenant("tenant-a", _draft())
+    result = search_installed_mcp_tools_by_query(
+        "tenant-a",
+        "weather forecast search",
+    )
 
     assert [item.tool_id for item in result] == [1, 2, 3, 5, 7]
     assert all(item.score == 0.8 for item in result)
@@ -112,7 +107,10 @@ def test_search_filters_scores_below_threshold(mocker):
         return_value=20,
     )
 
-    assert search_installed_mcp_tools_for_tenant("tenant-a", _draft()) == []
+    assert search_installed_mcp_tools_by_query(
+        "tenant-a",
+        "weather forecast search",
+    ) == []
 
 
 @pytest.mark.asyncio
@@ -127,17 +125,32 @@ async def test_build_run_info_is_ephemeral(mocker):
         new_callable=AsyncMock,
         return_value=[],
     )
+    mocker.patch(
+        "services.nl2agent_service.LOCAL_MCP_SERVER",
+        "http://local-mcp:5011",
+    )
     request = NL2AgentRunRequest(
         query="Build a weather agent",
         history=[HistoryItem(role="user", content="Earlier request")],
     )
 
-    run_info = await build_nl2agent_run_info(request, "tenant-a", "en")
+    run_info = await build_nl2agent_run_info(
+        request,
+        "tenant-a",
+        "en",
+        "Bearer tenant-token",
+    )
 
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.history[0].content == "Earlier request"
-    assert run_info.mcp_host is None
+    assert run_info.mcp_host == [
+        {
+            "url": "http://local-mcp:5011/sse",
+            "transport": "sse",
+            "headers": {"Authorization": "Bearer tenant-token"},
+        }
+    ]
     assert run_info.sandbox_config is None
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
@@ -147,7 +160,7 @@ async def test_build_run_info_is_ephemeral(mocker):
 async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
+    build_run_info = mocker.patch(
         "services.nl2agent_service.build_nl2agent_run_info",
         new_callable=AsyncMock,
         return_value=run_info,
@@ -164,9 +177,20 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     )
     request = NL2AgentRunRequest(query="Build a weather agent")
 
-    stream = await create_nl2agent_stream(request, "tenant-a", "en")
+    stream = await create_nl2agent_stream(
+        request,
+        "tenant-a",
+        "en",
+        "Bearer tenant-token",
+    )
     chunks = [chunk async for chunk in stream]
 
+    build_run_info.assert_awaited_once_with(
+        request=request,
+        tenant_id="tenant-a",
+        language="en",
+        authorization="Bearer tenant-token",
+    )
     assert chunks == [
         'data: {"type": "tool", "content": "call"}\n\n',
         'data: {"type": "execution_logs", "content": "result"}\n\n',
