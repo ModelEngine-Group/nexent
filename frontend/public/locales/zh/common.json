@@ -729,6 +729,15 @@
   "toolPool.selectedToolsLabel": "已选择工具",
   "toolPool.noSearchResults": "没有搜索到匹配的工具",
   "toolPool.mcpModelUnavailableTooltip": "工具所选模型不可用",
+
+  "nl2agent.toolRecommendations.title": "推荐工具",
+  "nl2agent.toolRecommendations.count": "匹配到 {{count}} 个已安装的 MCP 工具",
+  "nl2agent.toolRecommendations.match": "匹配度 {{score}}",
+  "nl2agent.toolRecommendations.emptyTitle": "未找到匹配工具",
+  "nl2agent.toolRecommendations.emptyDescription": "可以尝试描述其他能力，或进一步明确智能体需求。",
+  "nl2agent.toolRecommendations.errorTitle": "工具搜索失败",
+  "nl2agent.toolRecommendations.errorDescription": "暂时无法搜索已安装的工具，请调整需求后重试。",
+
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",

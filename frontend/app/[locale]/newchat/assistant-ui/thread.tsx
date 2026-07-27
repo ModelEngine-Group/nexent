@@ -21,6 +21,8 @@ import {
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
+  groupPartByType,
+  makeAssistantDataUI,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -64,6 +66,10 @@ import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import {
+  ToolRecommendations,
+  type ToolRecommendationsData,
+} from "../ui/tool-recommendations";
+import {
   ToolGroupContent,
   ToolGroupRoot,
   ToolGroupTrigger,
@@ -74,6 +80,12 @@ import {
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+
+const ToolRecommendationsDataUI =
+  makeAssistantDataUI<ToolRecommendationsData>({
+    name: "tool_recommendations",
+    render: ToolRecommendations,
+  });
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -168,6 +180,7 @@ export const Thread: FC<ThreadProps> = ({
 
   return (
     <SourcesPanelProvider value={panelContextValue}>
+      <ToolRecommendationsDataUI />
       <ThreadView
         agent={agent}
         onBack={onBack}

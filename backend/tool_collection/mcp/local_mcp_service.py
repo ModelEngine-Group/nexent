@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import unicodedata
@@ -17,9 +18,24 @@ logger = logging.getLogger(__name__)
 LOCAL_MCP_TOOL_NAME_OVERRIDES = {
     SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
 }
+TOOL_RECOMMENDATIONS_ASSISTANT_UI = {
+    "type": "data",
+    "name": "tool_recommendations",
+}
 
 # Create MCP server
 local_mcp_service = FastMCP("local")
+
+
+def _serialize_tool_search_observation(
+    observation: SearchInstalledMcpToolsObservation
+    | SearchInstalledMcpToolsErrorObservation,
+) -> str:
+    """Serialize one search result with generic assistant-ui presentation metadata."""
+
+    payload = observation.model_dump(mode="json")
+    payload["_assistant_ui"] = TOOL_RECOMMENDATIONS_ASSISTANT_UI
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _prepare_search_keywords(keywords: list[str]) -> list[str] | None:
@@ -52,7 +68,9 @@ def _prepare_search_keywords(keywords: list[str]) -> list[str] | None:
     name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
     description=(
         "Search the current tenant's installed and available MCP tools using keywords. "
-        "Returns a structured JSON observation ordered by relevance."
+        "Returns a structured JSON observation ordered by relevance. "
+        "Call the tool as `result = search_installed_mcp_tools(...)`, then use "
+        "`print(result)` to preserve the returned JSON unchanged in execution logs."
     ),
     meta={"nexent_internal": True},
 )
@@ -61,9 +79,9 @@ async def search_installed_mcp_tools(keywords: list[str]) -> str:
 
     prepared_keywords = _prepare_search_keywords(keywords)
     if prepared_keywords is None:
-        return SearchInstalledMcpToolsErrorObservation(
-            code="invalid_keywords"
-        ).model_dump_json()
+        return _serialize_tool_search_observation(
+            SearchInstalledMcpToolsErrorObservation(code="invalid_keywords")
+        )
 
     try:
         # Keep NL2Agent runtime dependencies out of the MCP server startup path.
@@ -77,14 +95,16 @@ async def search_installed_mcp_tools(keywords: list[str]) -> str:
         )
     except Exception:
         logger.exception("Failed to search installed MCP tools from local MCP service")
-        return SearchInstalledMcpToolsErrorObservation(
-            code="tool_search_failed"
-        ).model_dump_json()
+        return _serialize_tool_search_observation(
+            SearchInstalledMcpToolsErrorObservation(code="tool_search_failed")
+        )
 
-    return SearchInstalledMcpToolsObservation(
-        recommendation_count=len(recommendations),
-        recommendations=recommendations,
-    ).model_dump_json()
+    return _serialize_tool_search_observation(
+        SearchInstalledMcpToolsObservation(
+            recommendation_count=len(recommendations),
+            recommendations=recommendations,
+        )
+    )
 
 
 @local_mcp_service.tool(name="test_tool_name",

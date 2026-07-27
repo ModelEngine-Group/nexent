@@ -84,6 +84,20 @@ result = {tool_name}(keywords=["capability keyword", "another capability"])
 print(result)
 </code>
 Executable code must use the `<code>...</code>` tags. Never use a Markdown fenced code block with a `python` language marker for an executable action. The JSON block above documents the keyword schema only; it is not an executable action format.""",
+            f"""## Few-shot Examples
+### Unclear Request
+User: Build an assistant for my team.
+Assistant: What task should the assistant handle, and what result should it produce?
+
+### Clear Request
+User: Build an assistant that checks the weather forecast for a city and summarizes whether to carry an umbrella.
+Assistant:
+Thought: The request is clear enough to search for installed weather and forecast capabilities.
+Code:
+<code>
+result = {tool_name}(keywords=["weather forecast", "city weather", "rain probability"])
+print(result)
+</code>""",
             f"""## Constraints
 - `{tool_name}` is the only available business tool. Do not call any other tool or agent.
 - Do not create, update, publish, or claim to have persisted an agent.
@@ -116,6 +130,20 @@ result = {tool_name}(keywords=["能力关键词", "另一个能力关键词"])
 print(result)
 </code>
 可执行代码必须使用 `<code>...</code>` 标签，禁止使用带 `python` 语言标记的 Markdown 围栏代码块。上面的 JSON 代码块仅用于说明关键词结构，不是可执行动作格式。""",
+            f"""## Few-shot 示例
+### 需求不明确
+用户：帮我的团队创建一个智能体。
+助手：这个智能体需要完成什么任务，并产出什么结果？
+
+### 需求明确
+用户：创建一个智能体，查询指定城市的天气预报，并总结是否需要带伞。
+助手：
+Thought: 需求已经足以搜索已安装的天气和预报能力。
+Code:
+<code>
+result = {tool_name}(keywords=["天气预报", "城市天气", "降雨概率"])
+print(result)
+</code>""",
             f"""## 约束
 - `{tool_name}` 是唯一可用的业务工具，不得调用其他工具或智能体。
 - 不得创建、更新、发布智能体，也不得声称已经持久化智能体。

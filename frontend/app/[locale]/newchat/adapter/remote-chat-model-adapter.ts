@@ -503,7 +503,55 @@ function appendToolCallPart(
 }
 
 /**
+ * Converts assistant-ui presentation metadata from a complete tool result
+ * into a named data part. The metadata is removed from the business data
+ * passed to the renderer.
+ */
+function buildAssistantUiDataPart(content: string): any | null {
+  try {
+    const result = JSON.parse(content) as Record<string, unknown>;
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      Array.isArray(result)
+    ) {
+      return null;
+    }
+
+    const metadata = result._assistant_ui;
+    if (
+      typeof metadata !== "object" ||
+      metadata === null ||
+      Array.isArray(metadata)
+    ) {
+      return null;
+    }
+
+    const { type, name } = metadata as Record<string, unknown>;
+    if (
+      type !== "data" ||
+      typeof name !== "string" ||
+      name.length === 0
+    ) {
+      return null;
+    }
+
+    const data = { ...result };
+    delete data._assistant_ui;
+    return {
+      type: "data" as const,
+      name,
+      data,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Attaches an `execution_logs` chunk to its originating tool call.
+ * Once the associated result is complete JSON, assistant-ui presentation
+ * metadata is also converted into a separate named data part.
  *
  * Matching uses the stable `tool_call_id` emitted at the actual invocation
  * boundary. Legacy payloads without an ID attach to the most recent tool call.
@@ -528,6 +576,10 @@ export function attachExecutionLogsToTool(
   }
 
   targetToolCall.result = (targetToolCall.result ?? "") + chunk.content;
+  const dataPart = buildAssistantUiDataPart(targetToolCall.result);
+  if (dataPart) {
+    contentParts.push(dataPart);
+  }
   return true;
 }
 

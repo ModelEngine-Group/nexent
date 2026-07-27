@@ -756,6 +756,16 @@
   "toolPool.selectedToolsLabel": "Selected Tools",
   "toolPool.noSearchResults": "No tools match your search",
   "toolPool.mcpModelUnavailableTooltip": "Selected model is unavailable",
+
+  "nl2agent.toolRecommendations.title": "Recommended tools",
+  "nl2agent.toolRecommendations.count": "{{count}} matching installed MCP tool",
+  "nl2agent.toolRecommendations.count_other": "{{count}} matching installed MCP tools",
+  "nl2agent.toolRecommendations.match": "{{score}} match",
+  "nl2agent.toolRecommendations.emptyTitle": "No matching tools found",
+  "nl2agent.toolRecommendations.emptyDescription": "Try describing another capability or refining the agent requirements.",
+  "nl2agent.toolRecommendations.errorTitle": "Tool search failed",
+  "nl2agent.toolRecommendations.errorDescription": "The installed tool catalog could not be searched. Refine the request and try again.",
+
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main Agent ID is not set, cannot update tool status",
   "tool.error.configFetchFailed": "Failed to get tool configuration",

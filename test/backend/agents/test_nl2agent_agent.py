@@ -7,14 +7,26 @@ from agents.nl2agent_agent import (
 
 
 @pytest.mark.parametrize(
-    ("language", "expected", "format_rule"),
+    ("language", "expected", "format_rule", "unclear_example", "clear_example"),
     [
-        ("zh", "## 角色", "可执行代码必须使用"),
-        ("en", "## Role", "Executable code must use"),
+        (
+            "zh",
+            "## 角色",
+            "可执行代码必须使用",
+            "### 需求不明确",
+            "### 需求明确",
+        ),
+        (
+            "en",
+            "## Role",
+            "Executable code must use",
+            "### Unclear Request",
+            "### Clear Request",
+        ),
     ],
 )
 def test_build_nl2agent_system_prompt_is_runtime_specific(
-    language, expected, format_rule
+    language, expected, format_rule, unclear_example, clear_example
 ):
     prompt = build_nl2agent_system_prompt(
         language,
@@ -28,9 +40,12 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "keywords" in prompt
     assert "few_shots_prompt" not in prompt
     assert format_rule in prompt
+    assert unclear_example in prompt
+    assert clear_example in prompt
     assert "<code>" in prompt
     assert "</code>" in prompt
     assert 'result = runtime_search(keywords=[' in prompt
+    assert prompt.count("print(result)") >= 2
 
 
 def test_create_nl2agent_agent_config_has_only_runtime_tool():
