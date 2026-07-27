@@ -269,6 +269,20 @@ export default function SkillRepositoryPage() {
     detailRepositoryId != null
   );
 
+  useEffect(() => {
+    const refreshActiveTab = async () => {
+      if (tab === SkillRepositoryTab.REPOSITORY) {
+        await refetchRepository();
+      } else if (tab === SkillRepositoryTab.MINE) {
+        await refetchMine();
+      } else if (tab === SkillRepositoryTab.REVIEW) {
+        await refetchReview();
+      }
+    };
+
+    refreshActiveTab().catch(() => {});
+  }, [tab, refetchRepository, refetchMine, refetchReview]);
+
   const repositoryItems = repositoryData?.items ?? [];
   const repositoryTotal = repositoryData?.pagination?.total ?? 0;
   const mineItems = mineData?.items ?? [];
