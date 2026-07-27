@@ -614,7 +614,7 @@ async function handleProjectConfigApi(pathname, req, res) {
     console.error(err);
     const status = err.httpCode || 400;
     res.writeHead(status, { "Content-Type": "text/plain" });
-    res.end(String(err));
+    res.end("Request failed");
   }
 
   return true;
