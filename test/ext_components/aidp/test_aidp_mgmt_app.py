@@ -57,23 +57,26 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory):
     sys.modules.setdefault(mod.__name__, mod)
 
-backend_pkg = sys.modules.get("backend") or _mod("backend")
-backend_pkg.__path__ = [BACKEND_DIR]
-backend_db_pkg = _mod("backend.database")
-backend_db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-backend_db_client = _mod("backend.database.client")
-backend_db_client.MinioClient = MagicMock()
-backend_db_client.PostgresClient = MagicMock()
-backend_db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
-backend_db_client.get_db_session = MagicMock()
-for mod in (backend_pkg, backend_db_pkg, backend_db_client):
+# Register non-prefixed ``database`` / ``database.client`` stubs so that
+# production modules (which import as ``from database.client import ...``)
+# resolve to these mocks rather than loading real Minio/Postgres clients.
+# Previous ``backend.*``-prefixed keys caused Python to create parallel
+# module objects that broke mock patching.
+_db_pkg = sys.modules.get("database") or _mod("database")
+_db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
+_db_client = sys.modules.get("database.client") or _mod("database.client")
+_db_client.MinioClient = MagicMock()
+_db_client.PostgresClient = MagicMock()
+_db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
+_db_client.get_db_session = MagicMock()
+for mod in (_db_pkg, _db_client):
     sys.modules.setdefault(mod.__name__, mod)
 
 # Production modules under test
-from backend.ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
+from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     aidp_mgmt_router,
 )
-from backend.apps.app_factory import register_exception_handlers  # noqa: E402
+from apps.app_factory import register_exception_handlers  # noqa: E402
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
@@ -87,7 +90,7 @@ TENANT_ID = "tenant-test"
 @pytest.fixture(autouse=True)
 def configure_aidp_constants(monkeypatch):
     """Pin AIDP credentials and auth helper behaviour for every test."""
-    from backend.ext_components.aidp.apps import aidp_mgmt_app
+    from ext_components.aidp.apps import aidp_mgmt_app
 
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_SERVER_URL", SERVER_URL)
     monkeypatch.setattr(aidp_mgmt_app, "AIDP_API_KEY", API_KEY)
@@ -123,7 +126,7 @@ class TestAuthRequired:
         app = _build_app()
         client = TestClient(app)
         # Disable the autouse auth patch by replacing get_current_user_id.
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_mgmt_app
 
         def _raise(*_a, **_kw):
             from fastapi import HTTPException
@@ -140,7 +143,7 @@ class TestAuthRequired:
     def test_missing_auth_for_set_permission_returns_401(self):
         app = _build_app()
         client = TestClient(app)
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_mgmt_app
         from fastapi import HTTPException
 
         def _raise(*_a, **_kw):
@@ -164,8 +167,8 @@ class TestAuthRequired:
 class TestPermissionEnforcement:
     def test_get_kb_without_access_returns_404(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -182,8 +185,8 @@ class TestPermissionEnforcement:
 
     def test_get_kb_with_readonly_returns_metadata(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         decision = MagicMock()
         decision.permission = "READ_ONLY"
@@ -203,8 +206,8 @@ class TestPermissionEnforcement:
 
     def test_update_kb_without_edit_returns_403(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -224,8 +227,8 @@ class TestPermissionEnforcement:
 
     def test_delete_kb_runs_and_soft_deletes(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -246,8 +249,8 @@ class TestPermissionEnforcement:
 
     def test_set_permission_private_clears_groups(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -272,8 +275,8 @@ class TestPermissionEnforcement:
 
     def test_set_permission_requires_groups_when_not_private(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -291,8 +294,8 @@ class TestPermissionEnforcement:
 
     def test_set_permission_rejects_cross_tenant_group(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(
@@ -323,14 +326,14 @@ class TestCreateKnowledgeBase:
         if aidp_result is None:
             aidp_result = {"kds_id": "kb-new", "name": "kb"}
         return patch(
-            "backend.ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+            "ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
             return_value=aidp_result,
         )
 
     def test_create_persists_permission_and_returns_edit(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         with self._patch_create(), \
              patch.object(aidp_permission_service.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
@@ -360,8 +363,8 @@ class TestCreateKnowledgeBase:
 
     def test_create_returns_409_when_active_record_exists(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         with self._patch_create(), \
              patch.object(aidp_permission_service, "_validate_group_ids_strict", side_effect=lambda g, t: list(g)), \
@@ -379,8 +382,8 @@ class TestCreateKnowledgeBase:
 
     def test_create_rolls_back_aidp_when_db_fails(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         delete_mock = MagicMock(return_value=True)
         with self._patch_create(), \
@@ -416,7 +419,7 @@ class TestCreateKnowledgeBase:
 class TestListKnowledgeBases:
     def test_list_returns_empty_when_no_rows(self):
         client = _client()
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=0):
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
@@ -427,8 +430,8 @@ class TestListKnowledgeBases:
 
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "count_accessible_kbs", return_value=1), \
              patch.object(aidp_permission_service, "get_accessible_kbs", return_value=[
@@ -441,7 +444,7 @@ class TestListKnowledgeBases:
              patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
-            from backend.consts.error_code import ErrorCode as _E  # noqa
+            from consts.error_code import ErrorCode as _E  # noqa
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         body = response.json()
@@ -451,8 +454,8 @@ class TestListKnowledgeBases:
 
 # Use a lazy import for AppException at module load to avoid breaking the
 # fastapi exception handler fixture.
-from backend.consts.exceptions import AppException  # noqa: E402
-from backend.consts.error_code import ErrorCode  # noqa: E402
+from consts.exceptions import AppException  # noqa: E402
+from consts.error_code import ErrorCode  # noqa: E402
 
 
 # --- Update KB ------------------------------------------------------------
@@ -461,7 +464,7 @@ from backend.consts.error_code import ErrorCode  # noqa: E402
 class TestUpdateKnowledgeBase:
     def test_update_rejects_empty_payload(self):
         client = _client()
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")):
@@ -474,8 +477,8 @@ class TestUpdateKnowledgeBase:
 
     def test_update_calls_aidp_with_payload(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
@@ -500,8 +503,8 @@ class TestUpdateKnowledgeBase:
 class TestUploadDocuments:
     def test_upload_calls_aidp_with_files(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         files = [
             ("files", ("doc.txt", io.BytesIO(b"hello"), "text/plain")),
@@ -524,8 +527,8 @@ class TestUploadDocuments:
 class TestListDocuments:
     def test_list_documents_uses_count_api(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
-        from backend.ext_components.aidp.services import aidp_permission_service
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -548,7 +551,7 @@ class TestListDocuments:
 class TestListModels:
     def test_list_models_returns_aidp_response(self):
         client = _client()
-        from backend.ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.apps import aidp_mgmt_app
 
         with patch.object(aidp_mgmt_app, "list_aidp_models_impl",
                           return_value={"models": []}) as mock_models:

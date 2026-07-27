@@ -457,3 +457,226 @@ class TestAidpBuildImageUrl:
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/data/picture.png"
             in picture_call.args[2]
         )
+
+
+class TestAidpSearchToolWhitelist:
+    """Tests for the v7.1 whitelist mechanism (_whitelist_installed /
+    _allowed_kds_set / set_allowed_kds / _filter_by_whitelist) and its
+    integration with forward().
+
+    Three semantics of set_allowed_kds:
+      * None  → whitelist NOT installed (legacy / SDK unit-test mode)
+      * []    → whitelist installed, empty (block ALL KBs)
+      * [ids] → whitelist installed, only these KBs allowed
+    """
+
+    # ------------------------------------------------------------------
+    # A. set_allowed_kds three semantics
+    # ------------------------------------------------------------------
+
+    def test_set_allowed_kds_none_means_not_installed(self, aidp_tool):
+        """set_allowed_kds(None) clears the whitelist and marks it as
+        NOT installed, so _filter_by_whitelist becomes a no-op."""
+        aidp_tool.set_allowed_kds(None)
+        assert aidp_tool._whitelist_installed is False
+        assert aidp_tool._allowed_kds_set == set()
+
+    def test_set_allowed_kds_empty_list_means_installed_blocking_all(self, aidp_tool):
+        """set_allowed_kds([]) installs an empty whitelist — semantically
+        'user has access to nothing'."""
+        aidp_tool.set_allowed_kds([])
+        assert aidp_tool._whitelist_installed is True
+        assert aidp_tool._allowed_kds_set == set()
+
+    def test_set_allowed_kds_with_ids_installs_whitelist(self, aidp_tool):
+        """set_allowed_kds(['kb-1', 'kb-2']) installs the whitelist with
+        exactly those ids."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb-2"])
+        assert aidp_tool._whitelist_installed is True
+        assert aidp_tool._allowed_kds_set == {"kb-1", "kb-2"}
+
+    def test_set_allowed_kds_coerces_ids_to_str(self, aidp_tool):
+        """Numeric KB ids are coerced to strings."""
+        aidp_tool.set_allowed_kds([123, 456])
+        assert aidp_tool._allowed_kds_set == {"123", "456"}
+
+    def test_set_allowed_kds_filters_falsy_values(self, aidp_tool):
+        """Empty strings and None inside the list are silently dropped."""
+        aidp_tool.set_allowed_kds(["kb-1", "", None, "kb-2"])
+        assert aidp_tool._allowed_kds_set == {"kb-1", "kb-2"}
+
+    # ------------------------------------------------------------------
+    # B. _filter_by_whitelist behaviour
+    # ------------------------------------------------------------------
+
+    def test_filter_noop_when_whitelist_not_installed(self, aidp_tool):
+        """When the whitelist was never installed, every KB passes through."""
+        # Default state: _whitelist_installed is False
+        result = aidp_tool._filter_by_whitelist(["any-kb", "other-kb"])
+        assert result == ["any-kb", "other-kb"]
+
+    def test_filter_blocks_all_when_whitelist_empty(self, aidp_tool):
+        """Installed empty whitelist blocks every KB."""
+        aidp_tool.set_allowed_kds([])
+        result = aidp_tool._filter_by_whitelist(["kb-1", "kb-2"])
+        assert result == []
+
+    def test_filter_partial_match_preserves_order(self, aidp_tool):
+        """Only whitelisted ids survive, original order is preserved."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb-2"])
+        result = aidp_tool._filter_by_whitelist(["kb-1", "kb-3", "kb-2"])
+        assert result == ["kb-1", "kb-2"]
+
+    def test_filter_no_match_returns_empty(self, aidp_tool):
+        """When none of the input ids are in the whitelist, result is empty."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb-2"])
+        result = aidp_tool._filter_by_whitelist(["kb-99", "kb-100"])
+        assert result == []
+
+    def test_filter_exact_match_returns_all(self, aidp_tool):
+        """When every input id is whitelisted, all pass through in order."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb-2", "kb-3"])
+        result = aidp_tool._filter_by_whitelist(["kb-2", "kb-1"])
+        assert result == ["kb-2", "kb-1"]
+
+    def test_filter_empty_input_returns_empty(self, aidp_tool):
+        """Empty input list yields empty output regardless of whitelist state."""
+        aidp_tool.set_allowed_kds(["kb-1"])
+        assert aidp_tool._filter_by_whitelist([]) == []
+
+    def test_filter_returns_shallow_copy(self, aidp_tool):
+        """_filter_by_whitelist must not return the original list reference
+        when whitelist is not installed (it calls list(kds))."""
+        input_list = ["kb-1"]
+        result = aidp_tool._filter_by_whitelist(input_list)
+        assert result == input_list
+        assert result is not input_list
+
+    # ------------------------------------------------------------------
+    # C. forward() with empty whitelist — block before HTTP call
+    # ------------------------------------------------------------------
+
+    def test_forward_empty_whitelist_raises_without_http_call(self, aidp_tool):
+        """When the whitelist is installed but empty, forward raises
+        AidpSearchError and never touches the AIDP API."""
+        aidp_tool.set_allowed_kds([])
+
+        with pytest.raises(Exception) as exc_info:
+            aidp_tool.forward("some query")
+
+        assert "No accessible knowledge base" in str(exc_info.value)
+        aidp_tool._mock_http_client.post.assert_not_called()
+
+    def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
+        """Even the tool's own configured kds_list is blocked when the
+        whitelist is empty."""
+        # aidp_tool was created with kds_list=["kb1", "kb2"]
+        aidp_tool.set_allowed_kds([])
+
+        with pytest.raises(Exception) as exc_info:
+            aidp_tool.forward("query")
+
+        assert "No accessible knowledge base" in str(exc_info.value)
+        aidp_tool._mock_http_client.post.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # D. forward() with privilege-escalation attempt
+    # ------------------------------------------------------------------
+
+    def test_forward_strips_unauthorized_kds_from_user_input(self, aidp_tool):
+        """When the LLM passes kds_list that includes a non-whitelisted KB,
+        that KB is silently removed and the query proceeds with allowed ones."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb2"])
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "chunk-1",
+                    "chunk_type": "text",
+                    "title": "Doc",
+                    "text": "result",
+                    "file_url": "",
+                    "score": 0.9,
+                    "pages": [],
+                    "metadata": {},
+                }
+            ]
+        )
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        # "kb-99" is not whitelisted and must be stripped
+        aidp_tool.forward("query", kds_list=["kb-1", "kb-99", "kb2"])
+
+        # Verify the HTTP call used only whitelisted KBs
+        call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
+        sent_payload = call_kwargs["json"]
+        assert "kb-99" not in sent_payload["kds_list"]
+        assert "kb-1" in sent_payload["kds_list"]
+        assert "kb2" in sent_payload["kds_list"]
+
+    def test_forward_all_kds_filtered_raises_error(self, aidp_tool):
+        """When every user-supplied KB is stripped by the whitelist,
+        forward raises AidpSearchError instead of calling AIDP."""
+        aidp_tool.set_allowed_kds(["kb-allowed"])
+
+        with pytest.raises(Exception) as exc_info:
+            aidp_tool.forward("query", kds_list=["kb-bad1", "kb-bad2"])
+
+        assert "No accessible knowledge base" in str(exc_info.value)
+        aidp_tool._mock_http_client.post.assert_not_called()
+
+    def test_forward_no_whitelist_passes_all_kds(self, aidp_tool):
+        """When set_allowed_kds was never called, all configured KBs pass."""
+        # Default: _whitelist_installed is False
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response()
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        aidp_tool.forward("query")
+
+        call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
+        sent_payload = call_kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb1", "kb2"]
+
+    # ------------------------------------------------------------------
+    # E. State switching
+    # ------------------------------------------------------------------
+
+    def test_state_transition_install_uninstall_reinstall(self, aidp_tool):
+        """Install → uninstall → reinstall: verify the two flag fields
+        track correctly through each transition."""
+        # Step 1: install with ids
+        aidp_tool.set_allowed_kds(["kb-1"])
+        assert aidp_tool._whitelist_installed is True
+        assert aidp_tool._allowed_kds_set == {"kb-1"}
+
+        # Step 2: uninstall (None)
+        aidp_tool.set_allowed_kds(None)
+        assert aidp_tool._whitelist_installed is False
+        assert aidp_tool._allowed_kds_set == set()
+
+        # Step 3: reinstall as empty
+        aidp_tool.set_allowed_kds([])
+        assert aidp_tool._whitelist_installed is True
+        assert aidp_tool._allowed_kds_set == set()
+
+    def test_state_transition_reinstall_with_different_ids(self, aidp_tool):
+        """Re-installing with a different set replaces the previous one."""
+        aidp_tool.set_allowed_kds(["kb-1", "kb-2"])
+        assert aidp_tool._allowed_kds_set == {"kb-1", "kb-2"}
+
+        aidp_tool.set_allowed_kds(["kb-3"])
+        assert aidp_tool._allowed_kds_set == {"kb-3"}
+        assert aidp_tool._whitelist_installed is True
+
+    def test_filter_after_uninstall_becomes_noop(self, aidp_tool):
+        """After uninstalling the whitelist, _filter_by_whitelist reverts
+        to no-op behaviour."""
+        aidp_tool.set_allowed_kds(["kb-1"])
+        assert aidp_tool._filter_by_whitelist(["kb-99"]) == []
+
+        aidp_tool.set_allowed_kds(None)
+        assert aidp_tool._filter_by_whitelist(["kb-99"]) == ["kb-99"]

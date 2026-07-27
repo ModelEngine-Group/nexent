@@ -84,7 +84,20 @@ async def _fetch_aidp_image(url: str):
     Bearer token from leaking if AIDP responds with a 30x to another
     host. ``trust_env`` is off so proxy environment variables do not
     re-route the internal request.
+
+    Security: this function performs its own defensive URL validation via
+    ``_is_aidp_url`` even though the caller (`proxy_image_impl`) has already
+    checked. CodeQL and future refactors require the check at the point of
+    use to prevent accidental SSRF if the call path changes.
     """
+    # Defensive SSRF guard: re-validate at the point of use. The caller
+    # (proxy_image_impl) already gates on _is_aidp_url, but duplicating
+    # the check here means even a future caller cannot accidentally
+    # send the Bearer token to an arbitrary host.
+    if not _is_aidp_url(url):
+        logger.error("Rejecting non-AIDP URL in AIDP image fetch: %r", url)
+        return {"success": False, "error": "URL does not match configured AIDP host or KB path"}
+
     api_key = _get_aidp_api_key()
     if not api_key:
         logger.error("AIDP_API_KEY is not configured; cannot fetch AIDP image")

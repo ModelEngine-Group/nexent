@@ -10,7 +10,7 @@ import os
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -47,16 +47,16 @@ if "nexent" not in sys.modules:
     sys.modules["nexent.storage.storage_client_factory"] = storage_factory_mod
 
 # Force fresh import of the service under test so per-test patching works.
-sys.modules.pop("backend.ext_components.aidp.services.aidp_permission_service", None)
-sys.modules.pop("backend.ext_components.aidp.database.aidp_permission_db", None)
+sys.modules.pop("ext_components.aidp.services.aidp_permission_service", None)
+sys.modules.pop("ext_components.aidp.database.aidp_permission_db", None)
 
-from backend.ext_components.aidp.services import aidp_permission_service as svc  # noqa: E402
-from backend.ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
+from ext_components.aidp.services import aidp_permission_service as svc  # noqa: E402
+from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbNotFoundError,
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from backend.consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
+from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
 
 
 # --- Helpers --------------------------------------------------------------
@@ -166,32 +166,6 @@ class TestResolvePermission:
 
 
 # --- require_permission ---------------------------------------------------
-
-
-"""Rewrite TestRequirePermission using per-test patch.object to avoid
-cross-file import contamination from the broader AIDP test suite.
-"""
-from unittest.mock import patch
-
-import pytest
-
-from backend.ext_components.aidp.services import aidp_permission_service as svc
-from backend.ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-)
-
-
-"""Rewrite TestRequirePermission with stable patch target _get_permission_record."""
-from unittest.mock import patch
-
-import pytest
-
-from backend.ext_components.aidp.services import aidp_permission_service as svc
-from backend.ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-)
 
 
 class TestRequirePermissionRewritten:
