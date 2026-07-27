@@ -667,6 +667,7 @@ function handleAllApiProxy(pathname, req, res) {
   // 3. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
+    "/api/agent/nl2agent/run",
     "/api/agent/stop",
     "/api/agent/automations",
     "/api/conversation/",
@@ -682,9 +683,11 @@ function handleAllApiProxy(pathname, req, res) {
 
   // 分发代理目标
   if (isRuntime) {
-    const runtimeProxyTimeout = pathname.startsWith("/api/agent/run")
-      ? SSE_PROXY_TIMEOUT_MS
-      : PROXY_TIMEOUT_MS;
+    const runtimeProxyTimeout =
+      pathname.startsWith("/api/agent/run") ||
+      pathname.startsWith("/api/agent/nl2agent/run")
+        ? SSE_PROXY_TIMEOUT_MS
+        : PROXY_TIMEOUT_MS;
     proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
   } else if (isSkillApi) {
     proxy.web(req, res, getRuntimeProxyConfig(PROXY_TIMEOUT_MS));
