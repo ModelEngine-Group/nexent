@@ -752,6 +752,7 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_attaches_bearer_header_and_returns_base64(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "secret-key")
 
         mock_response = AsyncMock()
@@ -782,6 +783,7 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_returns_error_when_api_key_missing(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "")
         result = await image_service_module._fetch_aidp_image(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
