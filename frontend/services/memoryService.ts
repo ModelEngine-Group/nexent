@@ -1,10 +1,10 @@
-import i18next from 'i18next';
+import i18next from "i18next";
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { fetchAllAgents } from "./agentConfigService";
 
 import { MemoryItem, MemoryGroup } from "@/types/memory";
-import { getAuthHeaders } from '@/lib/auth';
+import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
@@ -443,4 +443,133 @@ export async function deleteMemory(
     log.error("deleteMemory error", e);
     throw e;
   }
+}
+
+export interface DreamingAudit {
+  run_id: number;
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  current_phase?: "light" | "rem" | "deep" | "compression" | null;
+  started_at?: string;
+  finished_at?: string;
+  light_count: number;
+  rem_count: number;
+  promoted_count: number;
+  deferred_count: number;
+  error?: string | null;
+  result?: {
+    decisions?: Array<{
+      memory_id: number;
+      score: number;
+      event: "SELECT" | "DEFER";
+      reason: string;
+      evidence_ids?: string[];
+      archive_suggested?: boolean;
+    }>;
+    version?: DreamingVersion | null;
+  } | null;
+}
+
+export interface DreamingParameters {
+  source_limit: number;
+  long_term_max_chars: number;
+  compression_max_attempts: number;
+}
+
+export interface DreamingVersion {
+  version_id: number;
+  version_no: number;
+  parent_version_id?: number | null;
+  run_id: number;
+  is_active: boolean;
+  raw_content: string;
+  published_content: string;
+  source_evidence_ids: string[];
+  config_snapshot: Record<string, unknown>;
+  raw_char_count: number;
+  published_char_count: number;
+  compression_status: string;
+  compression_attempts: number;
+  compression_audit: Array<{
+    attempt: number;
+    outcome: string;
+    validation: string[];
+  }>;
+  omitted_evidence_ids: string[];
+  mechanical_truncation: boolean;
+  created_at?: string;
+}
+
+export async function fetchDreamingAgents() {
+  const response = await fetchAllAgents();
+  const agents = (response as any)?.success ? (response as any).data : [];
+  return (agents || []).map((agent: any) => ({
+    value: String(agent.agent_id),
+    label: agent.display_name || agent.name || String(agent.agent_id),
+  }));
+}
+
+export async function fetchDreamingParameters(): Promise<DreamingParameters> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.parameters, {
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function runDreaming(agentId: string, targetUserId?: string) {
+  return requestJson(API_ENDPOINTS.memory.dreaming.run, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      agent_id: agentId,
+      ...(targetUserId ? { target_user_id: targetUserId } : {}),
+    }),
+  }) as Promise<{ run_id: number; task_id: string; status: "queued" }>;
+}
+
+export async function fetchDreamingAudits(
+  agentId: string,
+  limit = 20,
+  targetUserId?: string
+): Promise<DreamingAudit[]> {
+  const params = new URLSearchParams({
+    agent_id: agentId,
+    limit: String(limit),
+  });
+  if (targetUserId) params.set("target_user_id", targetUserId);
+  return requestJson(
+    `${API_ENDPOINTS.memory.dreaming.audits}?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+}
+
+export async function fetchDreamingVersions(
+  agentId: string,
+  limit = 20,
+  targetUserId?: string
+): Promise<DreamingVersion[]> {
+  const params = new URLSearchParams({
+    agent_id: agentId,
+    limit: String(limit),
+  });
+  if (targetUserId) params.set("target_user_id", targetUserId);
+  return requestJson(
+    `${API_ENDPOINTS.memory.dreaming.versions}?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+}
+
+export async function activateDreamingVersion(
+  agentId: string,
+  versionId: number,
+  expectedActiveVersionId: number,
+  targetUserId?: string
+): Promise<DreamingVersion> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.activate(versionId), {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      agent_id: agentId,
+      expected_active_version_id: expectedActiveVersionId,
+      ...(targetUserId ? { target_user_id: targetUserId } : {}),
+    }),
+  });
 }

@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from nexent.memory.dreaming import DreamingThresholds, select_candidates
-from services.memory_dreaming_service import DreamingRunError, MemoryDreamingService
+from services.memory_dreaming_service import (
+    DreamingConflictError,
+    DreamingRunError,
+    MemoryDreamingService,
+)
 
 
 @contextmanager
@@ -100,7 +104,17 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         lambda *_args, **_kwargs: True,
     )
     record_service = MagicMock()
-    record_service.create_memory.return_value = {"event": "ADD"}
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
+        lambda *_args: None,
+    )
+    create_version = MagicMock(
+        return_value={"version_id": 1, "version_no": 1, "is_active": True}
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.create_and_activate_version",
+        create_version,
+    )
     result = MemoryDreamingService(record_service=record_service).run(
         tenant_id="t",
         user_id="u",
@@ -117,10 +131,13 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     assert light_payload["daily_count"] == 2
     assert light_payload["grounded_count"] == 1
     assert light_payload["query_hashes"] == ["q1", "q2"]
-    assert (
-        record_service.create_memory.call_args.kwargs["idempotency_key"] == "dreaming:7"
-    )
-    assert record_service.create_memory.call_args.kwargs["layer"] == "user"
+    assert result["version"]["version_no"] == 1
+    version_payload = create_version.call_args.kwargs
+    assert version_payload["parent_version_id"] is None
+    assert version_payload["published_units"][0]["evidence_ids"] == ["7"]
+    assert version_payload["source_evidence_ids"] == ["7"]
+    assert version_payload["config_snapshot"]["min_score"] == 0
+    assert version_payload["config_snapshot"]["source_limit"] == 10
 
 
 def test_ac006_already_promoted_candidate_is_not_written_again(monkeypatch):
@@ -169,9 +186,12 @@ def test_ac006_already_promoted_candidate_is_not_written_again(monkeypatch):
             min_unique_queries=0,
         ),
     )
-    result = service._promote(decisions)
-    assert result[0]["event"] == "DEFER"
-    assert result[0]["reason"] == "already_promoted"
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
+        lambda *_args: None,
+    )
+    result = service._build_version("t", "u", "a", 1, decisions)
+    assert result is None
     service.record_service.create_memory.assert_not_called()
 
 
@@ -197,3 +217,30 @@ def test_ac008_failure_is_audited(monkeypatch):
         service.run(tenant_id="t", user_id="u", agent_id="a")
     assert finish.call_args.kwargs["status"] == "failed"
     assert "ValueError" in finish.call_args.kwargs["error"]
+
+
+def test_ac022_stale_active_version_switch_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
+        lambda *_args: lock(True),
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
+        lambda *_args: {"version_id": 12},
+    )
+    activate = MagicMock()
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.activate_version",
+        activate,
+    )
+
+    with pytest.raises(DreamingConflictError):
+        MemoryDreamingService(record_service=MagicMock()).activate_version(
+            "t",
+            "u",
+            agent_id="a",
+            version_id=10,
+            expected_active_version_id=11,
+        )
+
+    activate.assert_not_called()

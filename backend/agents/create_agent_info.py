@@ -101,6 +101,19 @@ def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
     return "\n\n".join(sections)
 
 
+def _get_active_dreaming_version(
+    tenant_id: str, user_id: str, agent_id: str
+) -> Optional[Dict[str, Any]]:
+    """Keep the Dreaming repository optional in isolated SDK-style tests."""
+    try:
+        from database.memory_dreaming_db import get_active_version
+
+        return get_active_version(tenant_id, user_id, agent_id)
+    except ModuleNotFoundError:
+        logger.debug("Dreaming repository is unavailable in this runtime")
+        return None
+
+
 # Safe fallback for context-manager token_threshold when no capacity is known.
 # Used only when the resolver fails (uncataloged model with no operator-supplied
 # hard capacity). Sized to cover the typical 32K-context band shared by the
@@ -830,6 +843,20 @@ async def create_agent_config(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_id, skip_query=not allow_memory_search
     )
+    if allow_memory_search and memory_context.user_config.memory_switch:
+        active_dreaming_version = _get_active_dreaming_version(
+            str(tenant_id), str(user_id), str(agent_id)
+        )
+        if active_dreaming_version:
+            memory_list.append(
+                {
+                    "memory": active_dreaming_version["published_content"],
+                    "memory_level": "user",
+                    "memory_type": "long_term",
+                    "score": 1.0,
+                    "dreaming_version_id": active_dreaming_version["version_id"],
+                }
+            )
 
     # Append active memory tools if memory is enabled
     if memory_context.user_config.memory_switch:

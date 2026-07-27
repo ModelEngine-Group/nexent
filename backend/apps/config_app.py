@@ -64,6 +64,19 @@ async def sync_default_prompt_template_on_startup():
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
 
+
+@app.on_event("startup")
+async def start_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def stop_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.stop()
+
+
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)

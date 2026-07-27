@@ -4,7 +4,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(override=True)
+# Explicitly sourced deployment variables take precedence over a nearby
+# developer .env file. This is required for tmux/K8s-local verification and
+# avoids silently replacing operator-provided service addresses.
+load_dotenv(override=False)
 
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
@@ -352,10 +355,17 @@ RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
 MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
 MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
 MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
-# Scheduling/cron constants are intentionally not defined here: the
-# background Dreaming scheduler is not part of Phase 2 (an agent-driven
-# timer will be added in a later phase, at which point the cron expression
-# and heartbeat can be reintroduced).
+DREAMING_SOURCE_LIMIT = int(os.getenv("DREAMING_SOURCE_LIMIT", "10"))
+DREAMING_LONG_TERM_MAX_CHARS = int(
+    os.getenv("DREAMING_LONG_TERM_MAX_CHARS", "10000")
+)
+DREAMING_COMPRESSION_MAX_ATTEMPTS = int(
+    os.getenv("DREAMING_COMPRESSION_MAX_ATTEMPTS", "2")
+)
+DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv("DREAMING_SCHEDULER_POLL_SECONDS", "5.0"))
+DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv("DREAMING_SCHEDULER_LEASE_SECONDS", "120.0"))
+DREAMING_SCHEDULER_MAX_CONCURRENCY = int(os.getenv("DREAMING_SCHEDULER_MAX_CONCURRENCY", "1"))
+DREAMING_SCHEDULER_ENABLED = os.getenv("DREAMING_SCHEDULER_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # External provider retry / timeout
 PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))

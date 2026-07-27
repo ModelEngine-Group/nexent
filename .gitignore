@@ -88,3 +88,4 @@ agent_repository_frontend
 .tokensave
 
 .playwright-mcp/
+frontend/test-results/

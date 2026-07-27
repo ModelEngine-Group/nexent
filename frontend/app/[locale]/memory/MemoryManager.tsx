@@ -24,6 +24,7 @@ import {
 import type { Dayjs } from "dayjs";
 import {
   Bot,
+  Brain,
   Building2,
   Clock3,
   Edit3,
@@ -37,6 +38,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { DreamingPanel } from "./DreamingPanel";
 import {
   loadMemoryConfig,
   setMemorySwitch,
@@ -55,7 +57,7 @@ import {
 
 const { Text, Title, Paragraph } = Typography;
 
-type TabKey = "base" | MemoryScope;
+type TabKey = "base" | "dreaming" | MemoryScope;
 type MemoryForm = {
   memory_type: MemoryType;
   status: MemoryStatus;
@@ -135,7 +137,8 @@ export function MemoryManager() {
   const [editing, setEditing] = useState<MemoryRecord | null>(null);
   const [form] = Form.useForm<MemoryForm>();
 
-  const scope = activeTab === "base" ? null : activeTab;
+  const scope =
+    activeTab === "base" || activeTab === "dreaming" ? null : activeTab;
   const records = scope ? recordsByScope[scope] : [];
 
   const refreshRecords = useCallback(
@@ -435,15 +438,15 @@ export function MemoryManager() {
                 : "编辑"
             }
           >
-              <Button
-                type="text"
-                aria-label="编辑记忆"
-                icon={<Edit3 size={17} />}
-                disabled={
-                  scope === "agent" && record.embedding_compatible === false
-                }
-                onClick={() => openEdit(record)}
-              />
+            <Button
+              type="text"
+              aria-label="编辑记忆"
+              icon={<Edit3 size={17} />}
+              disabled={
+                scope === "agent" && record.embedding_compatible === false
+              }
+              onClick={() => openEdit(record)}
+            />
           </Tooltip>
           <Tooltip title="删除">
             <Button
@@ -647,9 +650,25 @@ export function MemoryManager() {
               ),
             };
           }),
+          {
+            key: "dreaming",
+            label: (
+              <span className="tab-label">
+                <Brain size={17} aria-hidden="true" />
+                Dreaming
+              </span>
+            ),
+            disabled: !config.memoryEnabled,
+          },
         ]}
       />
-      {activeTab === "base" ? renderBaseSettings() : renderRecordTable()}
+      {activeTab === "base" ? (
+        renderBaseSettings()
+      ) : activeTab === "dreaming" ? (
+        <DreamingPanel />
+      ) : (
+        renderRecordTable()
+      )}
 
       <Modal
         open={editorOpen}

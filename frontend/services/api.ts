@@ -479,6 +479,14 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
     },
+    dreaming: {
+      parameters: `${API_BASE_URL}/memory/dreaming/parameters`,
+      run: `${API_BASE_URL}/memory/dreaming/run`,
+      audits: `${API_BASE_URL}/memory/dreaming/audit`,
+      versions: `${API_BASE_URL}/memory/dreaming/versions`,
+      activate: (versionId: string | number) =>
+        `${API_BASE_URL}/memory/dreaming/versions/${versionId}/activate`,
+    },
   },
   agentRepository: {
     listings: (params?: AgentRepositoryListingListParams) => {
@@ -620,11 +628,13 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
     // Platform-level quota (SU/ASSET_OWNER only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
-    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,

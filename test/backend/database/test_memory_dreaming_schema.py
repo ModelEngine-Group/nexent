@@ -2,7 +2,13 @@ from pathlib import Path
 from datetime import datetime
 
 from database import memory_retrieval_hit_db
-from database.db_models import MemoryDreamingAudit, MemoryRecord, MemoryRetrievalHit
+from database.db_models import (
+    MemoryDreamingActivationAudit,
+    MemoryDreamingAudit,
+    MemoryDreamingVersion,
+    MemoryRecord,
+    MemoryRetrievalHit,
+)
 from database.memory_dreaming_db import advisory_lock_key
 
 
@@ -30,6 +36,35 @@ def test_ac007_lock_key_is_stable_and_scope_specific():
     assert -(2**63) <= key < 2**63
 
 
+def test_ac023_ac026_version_orm_contract():
+    columns = MemoryDreamingVersion.__table__.columns
+    for name in (
+        "version_id",
+        "version_no",
+        "parent_version_id",
+        "run_id",
+        "is_active",
+        "raw_content",
+        "published_content",
+        "published_units",
+        "source_evidence_ids",
+        "config_snapshot",
+        "compression_status",
+        "compression_audit",
+        "omitted_evidence_ids",
+    ):
+        assert name in columns
+    activation_columns = MemoryDreamingActivationAudit.__table__.columns
+    for name in (
+        "activation_id",
+        "actor_user_id",
+        "from_version_id",
+        "to_version_id",
+        "reason",
+    ):
+        assert name in activation_columns
+
+
 def test_ac010_migration_and_fresh_install_match():
     root = Path(__file__).resolve().parents[3]
     migration = (
@@ -46,6 +81,47 @@ def test_ac010_migration_and_fresh_install_match():
         assert token in init_sql
     assert "CREATE TABLE IF NOT EXISTS" in migration
     assert "CREATE INDEX IF NOT EXISTS" in migration
+
+    version_migration = (
+        root / "deploy/sql/migrations/v2.4.0_0723_add_memory_dreaming_version.sql"
+    ).read_text()
+    for token in (
+        "memory_dreaming_version_t",
+        "parent_version_id",
+        "raw_content",
+        "published_units",
+        "source_evidence_ids",
+        "config_snapshot",
+        "compression_audit",
+        "uq_memory_dreaming_version_active_scope",
+        "memory_dreaming_activation_audit_t",
+        "DREAMING",
+        "VIEW_TENANT",
+        "EDIT_TENANT",
+        "prevent_memory_dreaming_version_content_update",
+        "trg_memory_dreaming_version_immutable",
+    ):
+        assert token in version_migration
+        assert token in init_sql
+
+
+def test_ac012_dreaming_scheduler_is_wired_for_deployment():
+    root = Path(__file__).resolve().parents[3]
+    scheduler_module = (root / "backend/services/memory_dreaming_scheduler.py").read_text()
+    config_app = (root / "backend/apps/config_app.py").read_text()
+    dreaming_app = (root / "backend/apps/memory_dreaming_app.py").read_text()
+    const_py = (root / "backend/consts/const.py").read_text()
+
+    assert "DreamingLeaseStore" in scheduler_module
+    assert "DreamingScheduler" in scheduler_module
+    assert "dreaming_scheduler" in scheduler_module
+    assert "start_dreaming_scheduler" in config_app
+    assert "stop_dreaming_scheduler" in config_app
+    assert "_enqueue_dreaming" not in dreaming_app
+    assert "data_process" not in dreaming_app
+    assert "DREAMING_SCHEDULER_POLL_SECONDS" in const_py
+    assert "DREAMING_SCHEDULER_ENABLED" in const_py
+    assert "dreaming_q" not in const_py.split("QUEUES")[1].split("\n")[0]
 
 
 def test_ac002_dreaming_stats_filter_agent_scope(monkeypatch):

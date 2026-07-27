@@ -391,7 +391,19 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"memory:{index}", type=ContextItemType.MEMORY, content=payload,
                 source=(f"memory:{memory_search_query or 'run'}",), priority=90,
-                metadata={"render_group": "memory", "language": language, "authority": "retrieved"},
+                metadata={
+                    "render_group": "memory",
+                    "language": language,
+                    "authority": "retrieved",
+                    **(
+                        {
+                            "version_id": payload["dreaming_version_id"],
+                            "memory_type": "long_term",
+                        }
+                        if payload.get("dreaming_version_id") is not None
+                        else {}
+                    ),
+                },
             ))
 
     if duty:

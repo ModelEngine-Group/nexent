@@ -47,7 +47,7 @@ export const MODEL_PROVIDER_KEYS = [
   "aliyuncs",
   "tokenpony",
   "dashscope",
-  "volcengine"
+  "volcengine",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -62,7 +62,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   aliyuncs: "aliyuncs",
   tokenpony: "tokenpony",
   dashscope: "dashscope",
-  volcengine:"bytedance"
+  volcengine: "bytedance",
 };
 
 // Icon filenames for providers
@@ -73,9 +73,9 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   jina: "/jina.png",
   deepseek: "/deepseek.png",
   aliyuncs: "/aliyuncs.png",
-  dashscope:"/aliyuncs.png",
+  dashscope: "/aliyuncs.png",
   tokenpony: "/tokenpony.png",
-  volcengine: "/volcengine.png"
+  volcengine: "/volcengine.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -93,7 +93,7 @@ export const PROVIDER_LINKS: Record<string, string> = {
   baai: "https://www.baai.ac.cn/",
   dashscope: "https://dashscope.aliyun.com/",
   tokenpony: "https://www.tokenpony.cn/",
-  volcengine:"https://www.volcengine.com/"
+  volcengine: "https://www.volcengine.com/",
 };
 
 // User role constants
@@ -113,6 +113,7 @@ export const MEMORY_TAB_KEYS = {
   AGENT_SHARED: "agentShared",
   USER_PERSONAL: "userPersonal",
   USER_AGENT: "userAgent",
+  DREAMING: "dreaming",
 } as const;
 
 // Type for memory tab keys
@@ -158,4 +159,3 @@ export const CARD_THEMES = {
     backgroundColor: "#ffffff",
   },
 };
-
