@@ -19,6 +19,23 @@ from nexent.monitor import (
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 
+def _strip_json_fence(content: object) -> str:
+    """Remove one optional Markdown JSON fence without regex backtracking."""
+    raw = str(content or "").strip()
+    if not raw.startswith("```"):
+        return raw
+    first_line_end = raw.find("\n")
+    if first_line_end < 0:
+        return raw
+    opening = raw[:first_line_end].strip().lower()
+    if opening not in {"```", "```json"}:
+        return raw
+    body = raw[first_line_end + 1:].rstrip()
+    if body.endswith("```"):
+        body = body[:-3].rstrip()
+    return body
+
+
 class TenantDreamingCompressor:
     """Compress RAW memory with the tenant's configured default LLM."""
 
@@ -266,8 +283,7 @@ class TenantDreamingCompressor:
                 {"role": "user", "content": prompt},
             ]
         )
-        raw = str(response.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
+        raw = _strip_json_fence(response.content)
         return json.loads(raw)
 
     @staticmethod
@@ -493,8 +509,7 @@ class TenantDreamingCompressor:
                 {"role": "user", "content": prompt},
             ]
         )
-        raw = str(response.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
+        raw = _strip_json_fence(response.content)
         payload = json.loads(raw)
         formatted_facts = payload.get("facts")
         if not isinstance(formatted_facts, list):

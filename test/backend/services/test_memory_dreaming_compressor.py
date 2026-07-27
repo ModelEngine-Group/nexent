@@ -9,7 +9,23 @@ from nexent.memory.dreaming import (
     DreamingMemoryUnit,
 )
 from nexent.monitor import get_agent_monitoring_context
-from services.memory_dreaming_compressor import TenantDreamingCompressor
+from services.memory_dreaming_compressor import (
+    TenantDreamingCompressor,
+    _strip_json_fence,
+)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ('[{"unit_id":"u1"}]', '[{"unit_id":"u1"}]'),
+        ("```json\n[]\n```", "[]"),
+        ("```\n{}\n```", "{}"),
+        ("```yaml\n[]\n```", "```yaml\n[]\n```"),
+    ],
+)
+def test_strip_json_fence(content, expected):
+    assert _strip_json_fence(content) == expected
 
 
 def test_compressor_initializes_tenant_model(mocker):
