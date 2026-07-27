@@ -542,15 +542,15 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
         mock_query_groups.return_value = [4]  # user is in group 4, not group 2
         mock_health.return_value = ["tool1"]
 
-        await add_mcp_service(
-            tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', server_url='https://srv/mcp',
-            tags=[], authorization_token=None,
-            custom_headers=None, container_config=None, registry_json=None,
-            enabled=False, config_json=None, market_id=None,
-        )
-        # Should not raise - installation allowed
-        mock_create.assert_called_once()
+        with self.assertRaises(MCPNameIllegal):
+            await add_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', server_url='https://srv/mcp',
+                tags=[], authorization_token=None,
+                custom_headers=None, container_config=None, registry_json=None,
+                enabled=False, config_json=None, market_id=None,
+            )
+        mock_create.assert_not_called()
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
