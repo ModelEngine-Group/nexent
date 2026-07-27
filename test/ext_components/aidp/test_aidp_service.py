@@ -643,9 +643,23 @@ class TestTimestampToIso:
     def test_invalid_string_returns_none(self, convert):
         assert convert("not-a-number") is None
 
-    def test_zero_treated_as_falsy(self, convert):
-        # 0 == False in Python, so 0 is excluded by the guard clause
-        assert convert(0) is None
+    def test_zero_returns_epoch(self, convert):
+        # Numeric zero is the Unix epoch, not "missing" — previous
+        # implementation treated 0 as falsy because ``0 == False`` in
+        # Python (``bool`` is a subclass of ``int``).
+        result = convert(0)
+        assert result == "1970-01-01T00:00:00Z"
+
+    def test_zero_point_zero_returns_epoch(self, convert):
+        # Float zero should behave the same as integer zero.
+        result = convert(0.0)
+        assert result == "1970-01-01T00:00:00Z"
+
+    def test_true_converts_to_one_second_after_epoch(self, convert):
+        # ``True`` is numeric 1 in Python, so it must NOT be rejected
+        # as falsy — it should convert to 1 second past the epoch.
+        result = convert(True)
+        assert result == "1970-01-01T00:00:01Z"
 
 
 # ---------------------------------------------------------------------------

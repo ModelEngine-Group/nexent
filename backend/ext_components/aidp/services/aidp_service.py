@@ -32,10 +32,19 @@ def _get_list_path(tenant_id: str | None = None) -> str:
 def _timestamp_to_iso(value: Any) -> str | None:
     """Convert a numeric Unix timestamp (seconds or milliseconds) to ISO-8601 UTC.
 
-    Returns None if the input is not a number, so optional fields stay optional
-    in the output (frontend checks ``doc.created_at`` for undefined).
+    Returns None for genuine "no timestamp" inputs only:
+      - ``None``
+      - empty string (AIDP occasionally returns ``""`` for unset fields)
+      - literal ``False`` (distinct from numeric zero)
+
+    Numeric zero (``0`` or ``0.0``) is treated as the Unix epoch — a valid
+    timestamp that AIDP can return for legacy rows or placeholder records.
+    The ``is`` identity checks (rather than ``==``) are deliberate:
+    ``0 == False`` evaluates to True in Python because ``bool`` is a
+    subclass of ``int``, which would silently drop legitimate epoch
+    timestamps if we used equality comparison here.
     """
-    if value in (None, "", False):
+    if value is None or value == "" or value is False:
         return None
     try:
         ts = float(value)
