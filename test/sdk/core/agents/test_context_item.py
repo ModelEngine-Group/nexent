@@ -33,7 +33,7 @@ def test_turn_is_atomic_and_summary_is_a_separate_item():
         "user_message_id": 1, "assistant_message_id": 2,
     })
     summary = ContextItemInput(id="summary", type="history_summary", content={
-        "summary": {"task_overview": "older"}, "covered_through_message_id": 2,
+        "summary": "older summary text", "covered_through_message_id": 2,
     })
     items = normalize_context_inputs([turn, summary])
     assert [item.type.value for item in items] == ["history_summary", "conversation_turn"]
