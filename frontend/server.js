@@ -36,7 +36,7 @@ const SHARE_BASE_URL =
 
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
 const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
-const PORT = 30001;
+const PORT = 3000;
 
 function parseTimeout(value, fallback) {
   const parsed = Number.parseInt(value, 10);
