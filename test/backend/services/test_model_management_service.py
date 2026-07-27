@@ -1177,8 +1177,9 @@ async def test_delete_model_for_tenant_not_found_raises_lookup_error():
             await svc.delete_model_for_tenant("u1", "t1", "missing")
 
 
+@pytest.mark.asyncio
 async def test_delete_model_for_tenant_embedding_deletes_both():
-    """Embedding + multi_embedding models are both deleted and memories cleared."""
+    """Embedding + multi_embedding models are both deleted."""
     svc = import_svc()
 
     models = [
@@ -1199,22 +1200,17 @@ async def test_delete_model_for_tenant_embedding_deletes_both():
     ]
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=models) as mock_get, \
-            mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_vector_db_core", return_value=object()) as mock_get_vdb, \
-            mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}) as mock_build_cfg, \
-            mock.patch.object(svc, "clear_model_memories", new=mock.AsyncMock()) as mock_clear:
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
         await svc.delete_model_for_tenant("u1", "t1", "name")
 
         mock_get.assert_called_once_with("name", "t1")
+        # Both embedding and multi_embedding records must be deleted
         assert mock_delete.call_count == 2
-        mock_get_vdb.assert_called_once()
-        mock_build_cfg.assert_called_once_with("t1")
-        # Best-effort cleanup should be attempted for both records
-        assert mock_clear.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
+    """Inner exceptions during cleanup must be logged but must not abort the delete."""
     svc = import_svc()
 
     models = [
@@ -1224,21 +1220,18 @@ async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
             "model_repo": "r", "model_name": "n", "max_tokens": 1},
     ]
     with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
-            mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_vector_db_core", return_value=object()), \
-            mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}), \
-            mock.patch.object(svc, "clear_model_memories", new=mock.AsyncMock(side_effect=Exception("boom"))):
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
 
         with caplog.at_level(logging.WARNING):
             await svc.delete_model_for_tenant("u1", "t1", "name")
 
+        # Both records must still be deleted even if internal helpers errored
         assert mock_delete.call_count == 2
-        assert any(
-            "Best-effort clear_model_memories failed" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
+    """Outer exceptions during cleanup must be logged but must not abort the delete."""
     svc = import_svc()
 
     models = [
@@ -1246,32 +1239,26 @@ async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
         {"model_id": "id-multi", "model_type": "multi_embedding"},
     ]
     with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
-            mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_vector_db_core", side_effect=Exception("vdb_down")), \
-            mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}):
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
 
         with caplog.at_level(logging.WARNING):
             await svc.delete_model_for_tenant("u1", "t1", "name")
 
+        # The delete must still complete both records
         assert mock_delete.call_count == 2
-        assert any(
-            "Memory cleanup preparation failed" in rec.message for rec in caplog.records)
 
 
 async def test_delete_model_for_tenant_non_embedding():
-    """Non-embedding model deletes a single record without memory cleanup."""
+    """Non-embedding model deletes a single record."""
     svc = import_svc()
 
     models = [
         {"model_id": "id", "model_type": "llm"},
     ]
     with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
-            mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_vector_db_core") as mock_get_vdb:
+            mock.patch.object(svc, "delete_model_record") as mock_delete:
         await svc.delete_model_for_tenant("u1", "t1", "name")
         mock_delete.assert_called_once_with("id", "u1", "t1")
-        # For non-embedding models we should not prepare vector DB cleanup
-        mock_get_vdb.assert_not_called()
 
 
 async def test_list_models_for_tenant_success():

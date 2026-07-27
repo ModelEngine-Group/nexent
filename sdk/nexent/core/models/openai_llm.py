@@ -314,6 +314,8 @@ class OpenAIModel(OpenAIServerModel):
         chunk_list = []
         token_join = []
         role = None
+        finish_reason = None
+        self.last_finish_reason = None
 
         # Reset output mode
         self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
@@ -337,6 +339,10 @@ class OpenAIModel(OpenAIServerModel):
                 if not chunk.choices:
                     chunk_list.append(chunk)
                     continue
+
+                chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                if chunk_finish_reason is not None:
+                    finish_reason = str(chunk_finish_reason)
 
                 new_token = chunk.choices[0].delta.content
                 reasoning_content = getattr(
@@ -375,6 +381,15 @@ class OpenAIModel(OpenAIServerModel):
             # Send end marker
             self.observer.flush_remaining_tokens()
             model_output = "".join(token_join)
+            self.last_finish_reason = finish_reason
+            if finish_reason == "length":
+                logger.warning(
+                    "Model output reached the configured completion token limit; "
+                    "the answer is incomplete"
+                )
+                self._monitoring.add_span_event("completion_truncated", {
+                    "finish_reason": finish_reason,
+                })
 
             # Extract token usage
             input_tokens = 0

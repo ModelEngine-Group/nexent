@@ -832,6 +832,39 @@ pull_mcp_image() {
   echo ""
 }
 
+pull_sandbox_image() {
+  if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
+    echo "🔄 Skipping sandbox image pull because image source is local-latest."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
+  echo "🔄 Checking sandbox Docker image..."
+
+  SANDBOX_IMAGE_NAME=${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:latest}
+  echo "   📦 Image: ${SANDBOX_IMAGE_NAME}"
+
+  if docker image inspect "${SANDBOX_IMAGE_NAME}" >/dev/null 2>&1; then
+    echo "   ✅ Sandbox image already exists locally"
+    echo "   💡 Skipping pull, using existing image"
+  else
+    echo "   📥 Sandbox image not found locally, pulling..."
+    if docker pull "${SANDBOX_IMAGE_NAME}"; then
+      echo "   ✅ Sandbox image pulled successfully"
+      echo "   💡 The image will be available when agent sandbox runs are executed"
+    else
+      echo "   ⚠️  Failed to pull sandbox image, but deployment continues"
+      echo "   💡 You can manually pull the image later: docker pull ${SANDBOX_IMAGE_NAME}"
+    fi
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
 select_deployment_mode() {
   echo "🎛️  Please select deployment mode:"
   echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
@@ -1517,14 +1550,16 @@ create_default_super_admin_user() {
     echo "   ⚠️  Warning: Could not determine if user exists. Proceeding with creation..."
   fi
 
-  # Prompt for password
   local password
-  password="$(prompt_super_admin_password)"
-  local prompt_result=$?
-
-  if [ $prompt_result -ne 0 ] || [ -z "$password" ]; then
-    echo "   ❌ Failed to get password from user."
-    return 1
+  local display_password="true"
+  if deployment_should_prompt_super_admin_password; then
+    password="$(prompt_super_admin_password)" || {
+      echo "   ❌ Failed to get password from user."
+      return 1
+    }
+    display_password="false"
+  else
+    password="$(deployment_super_admin_password)"
   fi
 
   # Export necessary environment variables for the script
@@ -1536,7 +1571,7 @@ create_default_super_admin_user() {
   export DEPLOYMENT_MODE
 
   # Execute the script with password as argument
-  if bash "$script_path" "$password"; then
+  if bash "$script_path" "$password" "$display_password"; then
     unset password
     return 0
   else
@@ -1633,6 +1668,22 @@ main_deploy() {
       echo "⚠️  环境中未找到 NEXENT_MCP_DOCKER_IMAGE，将使用代码默认值"
     else
       echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+    fi
+  fi
+
+  # Set NEXENT_SANDBOX_DOCKER_IMAGE in .env file
+  if [ -n "${NEXENT_SANDBOX_IMAGE:-}" ]; then
+    update_env_var "NEXENT_SANDBOX_DOCKER_IMAGE" "${NEXENT_SANDBOX_IMAGE}"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "🔧 NEXENT_SANDBOX_DOCKER_IMAGE 已设置为：${NEXENT_SANDBOX_IMAGE}"
+    else
+      echo "🔧 NEXENT_SANDBOX_DOCKER_IMAGE set to: ${NEXENT_SANDBOX_IMAGE}"
+    fi
+  else
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "⚠️  环境中未找到 NEXENT_SANDBOX_IMAGE，将使用代码默认值"
+    else
+      echo "⚠️  NEXENT_SANDBOX_IMAGE not found in environment, will use default from code"
     fi
   fi
 
@@ -1746,6 +1797,9 @@ main_deploy() {
     # Pull MCP image for later use
     pull_mcp_image
 
+    # Pull sandbox image for agent sandbox runs
+    pull_sandbox_image
+
     persist_deploy_options
     deployment_persist_local_config
     return 0
@@ -1787,6 +1841,9 @@ main_deploy() {
 
   # Pull MCP image for later use
   pull_mcp_image
+
+  # Pull sandbox image for agent sandbox runs
+  pull_sandbox_image
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "🎉  部署完成！"

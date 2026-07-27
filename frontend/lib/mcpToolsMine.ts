@@ -103,11 +103,11 @@ export function getMineCardReviewBadge(
 
   switch (reviewStatus) {
     case "pending":
-      return { labelKey: "mcpTools.mine.status.reviewing", variant: "pending" };
+      return { labelKey: "repository.status.reviewing", variant: "pending" };
     case "approved":
-      return { labelKey: "mcpTools.mine.status.listed", variant: "approved" };
+      return { labelKey: "repository.status.listed", variant: "approved" };
     case "rejected":
-      return { labelKey: "mcpTools.mine.status.rejected", variant: "rejected" };
+      return { labelKey: "repository.status.rejected", variant: "rejected" };
     default:
       return null;
   }

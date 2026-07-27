@@ -20,7 +20,8 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     allowed_fields = {
         'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
         'authorization_token', 'custom_headers', 'source', 'market_id',
-        'registry_json', 'config_json', 'enabled', 'tags', 'description'
+        'registry_json', 'config_json', 'enabled', 'tags', 'description',
+        'group_ids', 'ingroup_permission', 'shared_fields'
     }
 
     filtered_data = {k: v for k, v in mcp_data.items() if k in allowed_fields and v is not None}
@@ -139,26 +140,34 @@ def update_mcp_record_manage_fields_by_id(
     custom_headers: Dict[str, Any] | None,
     config_json: Dict[str, Any] | None,
     market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     with get_db_session() as session:
+        update_data = {
+            "mcp_name": name,
+            "mcp_server": server_url,
+            "description": description,
+            "tags": tags or [],
+            "source": source,
+            "authorization_token": authorization_token,
+            "custom_headers": custom_headers,
+            "config_json": config_json,
+            "market_id": market_id,
+            "updated_by": user_id,
+        }
+        if group_ids is not None:
+            update_data["group_ids"] = group_ids
+        if ingroup_permission is not None:
+            update_data["ingroup_permission"] = ingroup_permission
+        if shared_fields is not None:
+            update_data["shared_fields"] = shared_fields
         session.query(McpRecord).filter(
             McpRecord.mcp_id == mcp_id,
             McpRecord.tenant_id == tenant_id,
             McpRecord.delete_flag != 'Y'
-        ).update(
-            {
-                "mcp_name": name,
-                "mcp_server": server_url,
-                "description": description,
-                "tags": tags or [],
-                "source": source,
-                "authorization_token": authorization_token,
-                "custom_headers": custom_headers,
-                "config_json": config_json,
-                "market_id": market_id,
-                "updated_by": user_id,
-            }
-        )
+        ).update(update_data)
 
 
 def update_mcp_record_market_id_by_id(

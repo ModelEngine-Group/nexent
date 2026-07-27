@@ -7617,5 +7617,136 @@ def test_require_knowledge_base_edit_permission_rejects_read_only(monkeypatch):
         ElasticSearchService.require_knowledge_base_edit_permission("kb", "user-1", "tenant-1")
 
 
+# ============================================================================
+# KB Read Permission Control Tests (Issue #3339)
+# ============================================================================
+
+
+@pytest.mark.parametrize("permission", ["READ_ONLY", "EDIT", "CREATOR"])
+def test_require_knowledge_base_read_permission_allows_readers(monkeypatch, permission):
+    """User with any non-None permission level can read the knowledge base."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: permission),
+    )
+
+    assert (
+        ElasticSearchService.require_knowledge_base_read_permission("kb", "user-1", "tenant-1")
+        == permission
+    )
+
+
+def test_require_knowledge_base_read_permission_rejects_no_permission(monkeypatch):
+    """User with None permission cannot read the knowledge base."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: None),
+    )
+
+    with pytest.raises(PermissionError, match="No permission"):
+        ElasticSearchService.require_knowledge_base_read_permission("kb", "user-1", "tenant-1")
+
+
+def test_filter_accessible_indices_preserves_order(monkeypatch):
+    """filter_accessible_indices returns accessible indices in original order."""
+    permissions = {
+        "kb1": "READ_ONLY",
+        "kb2": None,
+        "kb3": "EDIT",
+        "kb4": None,
+        "kb5": "CREATOR",
+    }
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        return permissions.get(index_name)
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3", "kb4", "kb5"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb3", "kb5"]
+
+
+def test_filter_accessible_indices_empty_input():
+    """Empty input returns empty output."""
+    result = ElasticSearchService.filter_accessible_indices([], "user-1", "tenant-1")
+    assert result == []
+
+
+def test_filter_accessible_indices_all_accessible(monkeypatch):
+    """When all indices are accessible, all are returned."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kw: "READ_ONLY"),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2", "kb3"]
+
+
+def test_filter_accessible_indices_none_accessible(monkeypatch):
+    """When no indices are accessible, empty list is returned."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kw: None),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3"], "user-1", "tenant-1"
+    )
+    assert result == []
+
+
+def test_filter_accessible_indices_handles_missing_kb_gracefully(monkeypatch):
+    """When KB record is not found (ValueError), treat as inaccessible and continue."""
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        if index_name == "kb_missing":
+            raise ValueError("KB not found")
+        return "READ_ONLY"
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb_missing", "kb2"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2"]
+
+
+def test_filter_accessible_indices_handles_unexpected_exception(monkeypatch):
+    """When permission check raises unexpected exception, treat as inaccessible and continue."""
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        if index_name == "kb_error":
+            raise RuntimeError("DB connection failed")
+        return "READ_ONLY"
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb_error", "kb2"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2"]
+
+
 if __name__ == '__main__':
     unittest.main()

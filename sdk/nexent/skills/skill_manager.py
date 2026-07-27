@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
@@ -35,35 +36,59 @@ class SkillScriptNotFoundError(Exception):
 
 
 class SkillManager:
-    """Manages skill loading and storage from local directory."""
+    """Process-wide manager for tenant-isolated skills."""
+
+    _instance: Optional["SkillManager"] = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, base_skills_dir: Optional[str] = None):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(
         self,
         base_skills_dir: Optional[str] = None,
-        agent_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        version_no: int = 0,
     ):
-        """Initialize SkillManager with local directory.
+        """Initialize the immutable skills root on first construction."""
+        if hasattr(self, "_initialized"):
+            return
+        with self._instance_lock:
+            if hasattr(self, "_initialized"):
+                return
+            self.base_skills_dir = os.path.abspath(base_skills_dir) if base_skills_dir else None
+            self._initialized = True
 
-        Args:
-            base_skills_dir: Base directory for skills storage. Actual path is
-                base_skills_dir / tenant_id when tenant_id is provided.
-            agent_id: Agent ID for filtering skills during error messages
-            tenant_id: Tenant ID for directory isolation. When provided, skills
-                are stored under base_skills_dir / tenant_id /
-            version_no: Version number for filtering skills (default 0 = draft)
-        """
-        self.base_skills_dir = base_skills_dir
-        if tenant_id and base_skills_dir:
-            self.local_skills_dir = os.path.join(base_skills_dir, tenant_id)
-        else:
-            self.local_skills_dir = base_skills_dir
-        self.agent_id = agent_id
-        self.tenant_id = tenant_id
-        self.version_no = version_no
+    def resolve_tenant_dir(self, *, tenant_id: Optional[str]) -> str:
+        """Resolve a tenant directory while preventing escape from the skills root."""
+        if not self.base_skills_dir:
+            raise ValueError("base_skills_dir is not configured")
+        if tenant_id is None:
+            return self.base_skills_dir
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string or explicit None")
+        if os.path.isabs(tenant_id):
+            raise ValueError("tenant_id must not be an absolute path")
+        tenant_dir = os.path.abspath(os.path.join(self.base_skills_dir, tenant_id))
+        if os.path.commonpath([self.base_skills_dir, tenant_dir]) != self.base_skills_dir:
+            raise ValueError("tenant_id resolves outside base_skills_dir")
+        return tenant_dir
 
-    def list_skills(self) -> List[Dict[str, str]]:
+    def resolve_skill_dir(self, skill_name: str, *, tenant_id: Optional[str]) -> str:
+        """Resolve a skill directory and reject names that escape the tenant root."""
+        if not isinstance(skill_name, str) or not skill_name.strip():
+            raise ValueError("skill_name must be a non-empty string")
+        if os.path.isabs(skill_name):
+            raise ValueError("skill_name must not be an absolute path")
+        tenant_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
+        skill_dir = os.path.abspath(os.path.join(tenant_dir, skill_name))
+        if os.path.commonpath([tenant_dir, skill_dir]) != tenant_dir:
+            raise ValueError("skill_name resolves outside the tenant directory")
+        return skill_dir
+
+    def list_skills(self, *, tenant_id: Optional[str]) -> List[Dict[str, str]]:
         """List all available skills from local storage.
 
         Returns:
@@ -71,16 +96,17 @@ class SkillManager:
         """
         skills = []
 
-        if not os.path.exists(self.local_skills_dir):
+        local_skills_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
+        if not os.path.exists(local_skills_dir):
             return skills
 
         try:
-            for skill_name in os.listdir(self.local_skills_dir):
-                skill_path = os.path.join(self.local_skills_dir, skill_name)
+            for skill_name in os.listdir(local_skills_dir):
+                skill_path = os.path.join(local_skills_dir, skill_name)
                 if os.path.isdir(skill_path):
                     skill_file = os.path.join(skill_path, SKILL_FILE_NAME)
                     if os.path.exists(skill_file):
-                        skill = self._get_skill_metadata(skill_name)
+                        skill = self._get_skill_metadata(skill_name, tenant_id=tenant_id)
                         if skill:
                             skills.append(skill)
         except Exception as e:
@@ -88,10 +114,10 @@ class SkillManager:
 
         return skills
 
-    def _get_skill_metadata(self, skill_name: str) -> Optional[Dict[str, str]]:
+    def _get_skill_metadata(self, skill_name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, str]]:
         """Get skill metadata without loading full content."""
         try:
-            skill = self.load_skill(skill_name)
+            skill = self.load_skill(skill_name, tenant_id=tenant_id)
             if skill:
                 return {
                     "name": skill.get("name", skill_name),
@@ -102,7 +128,7 @@ class SkillManager:
             logger.warning(f"Could not load skill {skill_name}: {e}")
         return None
 
-    def load_skill(self, name: str) -> Optional[Dict[str, Any]]:
+    def load_skill(self, name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
         """Load a skill by name from local storage.
 
         Args:
@@ -111,10 +137,9 @@ class SkillManager:
         Returns:
             Skill dict with metadata and content, or None if not found
         """
-        if self.local_skills_dir is None:
-            return None
-
-        local_path = os.path.join(self.local_skills_dir, name, SKILL_FILE_NAME)
+        local_path = os.path.join(
+            self.resolve_skill_dir(name, tenant_id=tenant_id), SKILL_FILE_NAME
+        )
         try:
             if os.path.exists(local_path):
                 return SkillLoader.load(local_path)
@@ -123,7 +148,7 @@ class SkillManager:
 
         return None
 
-    def load_skill_content(self, name: str) -> Optional[str]:
+    def load_skill_content(self, name: str, *, tenant_id: Optional[str]) -> Optional[str]:
         """Load only the content body of a skill.
 
         Args:
@@ -132,10 +157,10 @@ class SkillManager:
         Returns:
             Skill content as string, or None if not found
         """
-        skill = self.load_skill(name)
+        skill = self.load_skill(name, tenant_id=tenant_id)
         return skill.get("content") if skill else None
 
-    def save_skill(self, skill_data: Dict[str, Any]) -> Dict[str, Any]:
+    def save_skill(self, skill_data: Dict[str, Any], *, tenant_id: Optional[str]) -> Dict[str, Any]:
         """Save a skill to local storage.
 
         If skill_data contains a "files" key (list of dicts with file_path and content),
@@ -154,7 +179,7 @@ class SkillManager:
 
         content = SkillLoader.to_skill_md(skill_data)
 
-        local_dir = os.path.join(self.local_skills_dir, name)
+        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
         os.makedirs(local_dir, exist_ok=True)
 
         # Write SKILL.md
@@ -169,12 +194,14 @@ class SkillManager:
             file_content = file_entry.get("content", "")
             if not file_path or file_path.lower() == SKILL_FILE_NAME.lower():
                 continue
-            self._write_skill_file(name, file_path, file_content)
+            self._write_skill_file(name, file_path, file_content, tenant_id=tenant_id)
 
         logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
-        return self.load_skill(name)
+        return self.load_skill(name, tenant_id=tenant_id)
 
-    def _write_skill_file(self, skill_name: str, file_path: str, content: str) -> None:
+    def _write_skill_file(
+        self, skill_name: str, file_path: str, content: str, *, tenant_id: Optional[str]
+    ) -> None:
         """Write a single file inside a skill directory.
 
         Args:
@@ -184,7 +211,7 @@ class SkillManager:
         """
         if not self.base_skills_dir:
             return
-        local_dir = os.path.join(self.local_skills_dir, skill_name)
+        local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)
         full_path = os.path.normpath(os.path.join(local_dir, normalized_path))
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -196,7 +223,9 @@ class SkillManager:
         self,
         file_content: Union[bytes, str, io.BytesIO],
         skill_name: Optional[str] = None,
-        file_type: str = "auto"
+        file_type: str = "auto",
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Upload a skill from file content (SKILL.md or ZIP).
 
@@ -232,14 +261,16 @@ class SkillManager:
                 file_type = "md"
 
         if file_type == "zip":
-            return self._upload_skill_from_zip(content_bytes, skill_name)
+            return self._upload_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)
         else:
-            return self._upload_skill_from_md(content_bytes, skill_name)
+            return self._upload_skill_from_md(content_bytes, skill_name, tenant_id=tenant_id)
 
     def _upload_skill_from_md(
         self,
         content_bytes: bytes,
-        skill_name: Optional[str] = None
+        skill_name: Optional[str] = None,
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Upload skill from SKILL.md content.
 
@@ -262,12 +293,14 @@ class SkillManager:
             raise ValueError("Skill name is required (provide in filename or SKILL.md frontmatter)")
 
         skill_data["name"] = name
-        return self.save_skill(skill_data)
+        return self.save_skill(skill_data, tenant_id=tenant_id)
 
     def _upload_skill_from_zip(
         self,
         zip_bytes: bytes,
-        skill_name: Optional[str] = None
+        skill_name: Optional[str] = None,
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Upload skill from ZIP archive containing SKILL.md and files.
 
@@ -339,7 +372,7 @@ class SkillManager:
         except Exception as e:
             raise ValueError(f"Failed to parse SKILL.md from ZIP: {e}")
 
-        self.save_skill(skill_data)
+        self.save_skill(skill_data, tenant_id=tenant_id)
 
         with zipfile.ZipFile(zip_stream, "r") as zf:
             for file_path in file_list:
@@ -357,7 +390,7 @@ class SkillManager:
 
                 file_data = zf.read(file_path)
 
-                local_dir = os.path.join(self.local_skills_dir, name)
+                local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
                 normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
                 local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -365,13 +398,15 @@ class SkillManager:
                     f.write(file_data)
 
         logger.info(f"Extracted skill '{name}' from ZIP with {len(file_list)} files")
-        return self.load_skill(name)
+        return self.load_skill(name, tenant_id=tenant_id)
 
     def update_skill_from_file(
         self,
         file_content: Union[bytes, str, io.BytesIO],
         skill_name: str,
-        file_type: str = "auto"
+        file_type: str = "auto",
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Update an existing skill from file content.
 
@@ -386,7 +421,7 @@ class SkillManager:
         Returns:
             Updated skill dict
         """
-        existing = self.load_skill(skill_name)
+        existing = self.load_skill(skill_name, tenant_id=tenant_id)
         if not existing:
             raise ValueError(f"Skill not found: {skill_name}")
 
@@ -405,14 +440,16 @@ class SkillManager:
                 file_type = "md"
 
         if file_type == "zip":
-            return self._update_skill_from_zip(content_bytes, skill_name)
+            return self._update_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)
         else:
-            return self._update_skill_from_md(content_bytes, skill_name)
+            return self._update_skill_from_md(content_bytes, skill_name, tenant_id=tenant_id)
 
     def _update_skill_from_md(
         self,
         content_bytes: bytes,
-        skill_name: str
+        skill_name: str,
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Update skill from SKILL.md content.
 
@@ -426,12 +463,14 @@ class SkillManager:
         content_str = content_bytes.decode("utf-8")
         skill_data = SkillLoader.parse(content_str)
         skill_data["name"] = skill_name
-        return self.save_skill(skill_data)
+        return self.save_skill(skill_data, tenant_id=tenant_id)
 
     def _update_skill_from_zip(
         self,
         zip_bytes: bytes,
-        skill_name: str
+        skill_name: str,
+        *,
+        tenant_id: Optional[str],
     ) -> Dict[str, Any]:
         """Update skill from ZIP archive.
 
@@ -445,7 +484,7 @@ class SkillManager:
         Returns:
             Updated skill dict
         """
-        existing = self.load_skill(skill_name)
+        existing = self.load_skill(skill_name, tenant_id=tenant_id)
         if not existing:
             raise ValueError(f"Skill not found: {skill_name}")
 
@@ -467,7 +506,7 @@ class SkillManager:
                 skill_content = zf.read(skill_md_path).decode("utf-8")
                 skill_data = SkillLoader.parse(skill_content)
                 skill_data["name"] = skill_name
-                self.save_skill(skill_data)
+                self.save_skill(skill_data, tenant_id=tenant_id)
 
             for file_path in file_list:
                 if file_path == skill_md_path:
@@ -486,7 +525,7 @@ class SkillManager:
 
                 file_data = zf.read(file_path)
 
-                local_dir = os.path.join(self.local_skills_dir, skill_name)
+                local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
                 normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
                 local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -494,9 +533,9 @@ class SkillManager:
                     f.write(file_data)
 
         logger.info(f"Updated skill '{skill_name}' from ZIP")
-        return self.load_skill(skill_name)
+        return self.load_skill(skill_name, tenant_id=tenant_id)
 
-    def get_skill_file_tree(self, skill_name: str) -> Optional[Dict[str, Any]]:
+    def get_skill_file_tree(self, skill_name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
         """Get file tree structure of a skill.
 
         Args:
@@ -505,7 +544,7 @@ class SkillManager:
         Returns:
             Dict with file tree structure, or None if skill not found
         """
-        skill = self.load_skill(skill_name)
+        skill = self.load_skill(skill_name, tenant_id=tenant_id)
         if not skill:
             return None
 
@@ -515,7 +554,7 @@ class SkillManager:
             "children": []
         }
 
-        local_dir = os.path.join(self.local_skills_dir, skill_name)
+        local_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         if os.path.exists(local_dir):
             for root, dirs, files in os.walk(local_dir):
                 rel_root = os.path.relpath(root, local_dir)
@@ -591,7 +630,7 @@ class SkillManager:
 
             self._add_to_tree(found, parts[1:], is_directory)
 
-    def delete_skill(self, name: str) -> bool:
+    def delete_skill(self, name: str, *, tenant_id: Optional[str]) -> bool:
         """Delete a skill from local storage.
 
         Args:
@@ -600,7 +639,7 @@ class SkillManager:
         Returns:
             True if deleted successfully
         """
-        local_dir = os.path.join(self.local_skills_dir, name)
+        local_dir = self.resolve_skill_dir(name, tenant_id=tenant_id)
         if os.path.exists(local_dir):
             try:
                 shutil.rmtree(local_dir)
@@ -611,7 +650,9 @@ class SkillManager:
         return True
 
 
-    def build_skills_summary(self, available_skills: Optional[List[str]] = None) -> str:
+    def build_skills_summary(
+        self, available_skills: Optional[List[str]] = None, *, tenant_id: Optional[str]
+    ) -> str:
         """Build XML-formatted summary of available skills.
 
         Args:
@@ -621,7 +662,7 @@ class SkillManager:
         Returns:
             XML-formatted skills summary with name and description.
         """
-        all_skills = self.list_skills()
+        all_skills = self.list_skills(tenant_id=tenant_id)
 
         skills_to_include = all_skills
         if available_skills is not None:
@@ -651,7 +692,7 @@ class SkillManager:
         return "\n".join(lines)
 
 
-    def load_skill_directory(self, name: str) -> Optional[Dict[str, Any]]:
+    def load_skill_directory(self, name: str, *, tenant_id: Optional[str]) -> Optional[Dict[str, Any]]:
         """Load entire skill directory including scripts.
 
         This copies the skill directory from local storage to a temp directory
@@ -663,13 +704,13 @@ class SkillManager:
         Returns:
             Dict with skill metadata and local directory path
         """
-        skill = self.load_skill(name)
+        skill = self.load_skill(name, tenant_id=tenant_id)
         if not skill:
             return None
 
         temp_dir = tempfile.mkdtemp(prefix=f"skill_{name}_")
 
-        local_path = os.path.join(self.local_skills_dir, name)
+        local_path = self.resolve_skill_dir(name, tenant_id=tenant_id)
         if os.path.exists(local_path):
             import shutil as sh
             sh.copytree(local_path, temp_dir, dirs_exist_ok=True)
@@ -677,7 +718,7 @@ class SkillManager:
         skill["directory"] = temp_dir
         return skill
 
-    def get_skill_scripts(self, name: str) -> List[str]:
+    def get_skill_scripts(self, name: str, *, tenant_id: Optional[str]) -> List[str]:
         """Get list of executable scripts in skill.
 
         Args:
@@ -686,7 +727,7 @@ class SkillManager:
         Returns:
             List of script file paths within the skill directory
         """
-        skill_dir = self.load_skill_directory(name)
+        skill_dir = self.load_skill_directory(name, tenant_id=tenant_id)
         if not skill_dir:
             return []
 
@@ -702,7 +743,7 @@ class SkillManager:
 
         return scripts
 
-    def cleanup_skill_directory(self, name: str) -> None:
+    def cleanup_skill_directory(self, name: str, *, tenant_id: Optional[str]) -> None:
         """Clean up temporary skill directory.
 
         Args:
@@ -725,9 +766,8 @@ class SkillManager:
         skill_name: str,
         script_path: str,
         params: Optional[str] = None,
-        agent_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        version_no: int = 0,
+        *,
+        tenant_id: Optional[str],
     ) -> Any:
         """Execute a skill script with given parameters.
 
@@ -765,7 +805,7 @@ class SkillManager:
             SkillNotFoundError: When the skill directory does not exist in local storage
             SkillScriptNotFoundError: When the specified script path does not exist within the skill
         """
-        local_skill_dir = os.path.join(self.local_skills_dir, skill_name)
+        local_skill_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
         if not os.path.isdir(local_skill_dir):
             raise SkillNotFoundError(f"Skill '{skill_name}' not found.")
 

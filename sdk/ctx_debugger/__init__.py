@@ -5,7 +5,7 @@ to SDK source code required.
 
 Quick start:
     from ctx_debugger import attach_debugger
-    from nexent.core.agents.agent_context import ContextManager
+    from nexent.core.agents.context import ContextManager
 
     cm = ContextManager(config=...)
     attach_debugger(cm, trace_path="/tmp/run.jsonl")

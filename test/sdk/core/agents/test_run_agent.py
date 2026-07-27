@@ -43,6 +43,49 @@ class _MockToolCollection(MagicMock):
 
 setattr(mock_smolagents, "ToolCollection", _MockToolCollection)
 
+
+def test_log_memory_value_assessment_for_store_attempt(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="167",
+        invocation_count=1,
+        successful_store_count=1,
+        last_outcome="completed",
+    )
+    agent = types.SimpleNamespace(tools={"store_memory": store_tool})
+
+    run_agent._log_memory_value_assessment(agent)
+
+    assert "event=memory_value_assessment" in caplog.text
+    assert "decision=store_attempted" in caplog.text
+    assert "successful_store_count=1" in caplog.text
+    assert "conversation_id=167" in caplog.text
+
+
+def test_log_memory_value_assessment_for_skip_and_unavailable(caplog):
+    caplog.set_level("INFO")
+    store_tool = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_id="agent-1",
+        conversation_id="168",
+        invocation_count=0,
+        successful_store_count=0,
+        last_outcome="not_invoked",
+    )
+
+    run_agent._log_memory_value_assessment(
+        types.SimpleNamespace(tools={"store_memory": store_tool})
+    )
+    run_agent._log_memory_value_assessment(types.SimpleNamespace(tools={}))
+
+    assert "decision=skip" in caplog.text
+    assert "last_outcome=not_invoked" in caplog.text
+    assert "decision=unavailable" in caplog.text
+
 # Create dummy smolagents sub-modules to satisfy indirect imports
 for _sub in [
     "agents",
@@ -137,9 +180,9 @@ mock_langchain.tools = mock_langchain_tools
 
 mock_openai_chat_completion_message = MagicMock()
 
-# Mock memory_service to avoid importing mem0
-mock_memory_service = MagicMock()
-mock_memory_service.add_memory_in_levels = MagicMock()
+# Stub for the legacy ``nexent.memory.memory_service`` module has been
+# removed because that module no longer exists; tests that depend on it
+# will be migrated to the new ``MemoryService`` facade in a follow-up.
 
 # Mock nexent.skills module for run_skill_script_tool
 mock_nexent = ModuleType("nexent")
@@ -177,8 +220,6 @@ module_mocks = {
     "openai.types.chat.chat_completion_message_param": MagicMock(),
     # exa_py is imported by sdk.nexent.core.tools – provide dummy to skip real import
     "exa_py": MagicMock(Exa=MagicMock()),
-    # Mock memory_service to avoid importing mem0
-    "sdk.nexent.memory.memory_service": mock_memory_service,
     # Mock nexent.skills for skill tools
     "nexent.skills": mock_nexent.skills,
     "nexent.skills.skill_manager": MagicMock(),
@@ -255,6 +296,8 @@ def basic_agent_run_info(mock_observer):
         observer=mock_observer,
         agent_config=agent_cfg,
         stop_event=Event(),
+        conversation_id=273,
+        user_id="test_user",
     )
 
 
@@ -277,10 +320,17 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
         redis_client=basic_agent_run_info.redis_client,
+        sandbox_config=None,
+        minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
     )
 
     # Following methods on the NexentAgent instance should be invoked
-    mock_nexent_instance.create_single_agent.assert_called_once_with(basic_agent_run_info.agent_config)
+    mock_nexent_instance.create_single_agent.assert_called_once_with(
+        basic_agent_run_info.agent_config,
+        context_items_override=None,
+    )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
@@ -375,10 +425,17 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
         stop_event=basic_agent_run_info.stop_event,
         mcp_tool_collection=mock_tool_collection,
         redis_client=basic_agent_run_info.redis_client,
+        sandbox_config=None,
+        minio_client=None,
+        conversation_id=basic_agent_run_info.conversation_id,
+        user_id=basic_agent_run_info.user_id,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
-    mock_nexent_instance.create_single_agent.assert_called_once_with(basic_agent_run_info.agent_config)
+    mock_nexent_instance.create_single_agent.assert_called_once_with(
+        basic_agent_run_info.agent_config,
+        context_items_override=None,
+    )
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
@@ -811,43 +868,48 @@ def test_normalize_mcp_config_edge_cases():
     assert result.get("headers") == {"Authorization": ""}
 
 
-def test_mount_conversation_context_manager_updates_runtime_authority(basic_agent_run_info):
-    """Conversation-level ContextManager must replace the managed runtime CM."""
-    factory_context_manager = MagicMock(name="factory_context_manager")
-    conversation_context_manager = MagicMock(name="conversation_context_manager")
-    context_runtime = types.SimpleNamespace(
-        context_manager=factory_context_manager,
-        replace_components=MagicMock(name="replace_components"),
+def test_authorized_context_items_use_run_snapshot(basic_agent_run_info):
+    """Run-local authorized items override mutable AgentConfig data."""
+    authorized_item = types.SimpleNamespace(type=types.SimpleNamespace(value="system_prompt"))
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        items=(authorized_item,),
     )
-    agent = types.SimpleNamespace(
-        context_runtime=context_runtime,
-        context_manager=factory_context_manager,
+    basic_agent_run_info.agent_config.context_items = [MagicMock(name="stale_item")]
+
+    assert run_agent._get_authorized_context_items(basic_agent_run_info) == (authorized_item,)
+
+
+def test_authorized_context_items_preserve_explicit_empty_snapshot(basic_agent_run_info):
+    """An empty authorized snapshot must not fall back to mutable config items."""
+    basic_agent_run_info.context_input = types.SimpleNamespace(items=())
+    basic_agent_run_info.agent_config.context_items = [MagicMock(name="stale_item")]
+
+    assert run_agent._get_authorized_context_items(basic_agent_run_info) == ()
+
+
+def test_authorized_history_snapshot_overrides_mutable_run_history(basic_agent_run_info):
+    """History consumed by the SDK must come from the authorized run snapshot."""
+    authorized_history = types.SimpleNamespace(
+        type=types.SimpleNamespace(value="history"),
+        content={"role": "user", "text": "authorized history"},
     )
-    components = [MagicMock(name="component")]
-    basic_agent_run_info.context_manager = conversation_context_manager
-    basic_agent_run_info.agent_config.context_components = components
-
-    run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
-
-    conversation_context_manager.replace_components.assert_not_called()
-    context_runtime.replace_components.assert_called_once_with(components)
-    assert agent.context_runtime.context_manager is conversation_context_manager
-    assert agent.context_manager is conversation_context_manager
-
-
-def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_run_info):
-    """A reusable ContextManager is valid only when the active runtime is managed."""
-    conversation_context_manager = MagicMock(name="conversation_context_manager")
-    agent = types.SimpleNamespace(
-        context_runtime=types.SimpleNamespace(context_manager=None),
-        context_manager=None,
+    basic_agent_run_info.context_input = types.SimpleNamespace(
+        items=(authorized_history,),
     )
-    basic_agent_run_info.context_manager = conversation_context_manager
+    basic_agent_run_info.history = [MagicMock(name="stale_history")]
 
-    with pytest.raises(RuntimeError, match="managed context runtime"):
-        run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+    history = run_agent._get_authorized_history(basic_agent_run_info)
+    # Cross-run history is represented by ContextItems, never restored into AgentMemory.
+    assert history == []
 
-    conversation_context_manager.replace_components.assert_not_called()
+
+def test_authorized_history_keeps_direct_sdk_compatibility(basic_agent_run_info):
+    """Direct SDK callers without ContextInput retain the existing behavior."""
+    basic_agent_run_info.context_input = None
+    history = [MagicMock(name="history")]
+    basic_agent_run_info.history = history
+
+    assert run_agent._get_authorized_history(basic_agent_run_info) is history
 
 
 @pytest.mark.asyncio

@@ -33,19 +33,26 @@ export default function ContainerPortField({
           onChange={(value) =>
             setContainerPort(value === null ? undefined : value)
           }
+          readOnly={!enabled}
           controls={false}
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
-        <Button
-          onClick={suggestPort}
-          loading={suggesting}
-          disabled={portCheckLoading || suggesting}
-        >
-          {t("mcpTools.addModal.suggestPort")}
-        </Button>
+        {enabled ? (
+          <Button
+            onClick={suggestPort}
+            loading={suggesting}
+            disabled={portCheckLoading || suggesting}
+          >
+            {t("mcpTools.addModal.suggestPort")}
+          </Button>
+        ) : null}
       </div>
-      {containerPort && portCheckLoading ? (
+      {!enabled ? (
+        <p className="mt-2 text-xs text-slate-400">
+          {t("mcpTools.addModal.portReadonlyHint")}
+        </p>
+      ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">
           <LoadingOutlined className="animate-spin" />
           {t("mcpTools.addModal.portChecking")}...

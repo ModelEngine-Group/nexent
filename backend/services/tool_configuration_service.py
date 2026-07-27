@@ -796,7 +796,10 @@ def _validate_local_tool(
             # Build display_name to index_name mapping for LLM parameter conversion
             display_name_to_index_map = {}
             if index_names:
-                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                knowledge_name_map = get_knowledge_name_map_by_index_names(
+                    index_names,
+                    tenant_id=tenant_id,
+                )
                 for idx_name, kb_name in knowledge_name_map.items():
                     display_name_to_index_map[kb_name] = idx_name
 

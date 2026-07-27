@@ -14,6 +14,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
+import { configService } from "@/services/configService";
 import {
   analyzeAutomationMessage,
   canAnalyzeAutomationMessage,
@@ -76,13 +77,10 @@ const getConfiguredShareBaseUrl = async () => {
   }
 
   try {
-    const response = await fetch("/api/frontend-config", { cache: "no-store" });
-    if (response.ok) {
-      const data = await response.json();
-      const runtimeBaseUrl = data.shareBaseUrl?.trim();
-      cachedShareBaseUrl = runtimeBaseUrl || null;
-      return cachedShareBaseUrl;
-    }
+    const data = await configService.fetchRuntimeFrontendConfig();
+    const runtimeBaseUrl = data.shareBaseUrl?.trim();
+    cachedShareBaseUrl = runtimeBaseUrl || null;
+    return cachedShareBaseUrl;
   } catch (error) {
     log.warn("Failed to load runtime frontend config", error);
   }

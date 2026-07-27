@@ -962,6 +962,48 @@ pull_mcp_image() {
     echo ""
 }
 
+# Pull sandbox Docker image to local host (best-effort)
+pull_sandbox_image() {
+    echo "=========================================="
+    echo "  Sandbox Image Pull"
+    echo "=========================================="
+
+    local image="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox}"
+    local image_tail="${image##*/}"
+    local sandbox_image_name="$image"
+    if [[ "$image_tail" != *:* ]]; then
+        sandbox_image_name="${image}:${APP_VERSION:-latest}"
+    fi
+    echo "Checking sandbox image: ${sandbox_image_name}"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Warning: Docker is not installed or not in PATH, skipping sandbox image pull."
+        echo ""
+        echo "--------------------------------"
+        echo ""
+        return 0
+    fi
+
+    if docker image inspect "${sandbox_image_name}" >/dev/null 2>&1; then
+        echo "Sandbox image already exists locally, skipping pull."
+    elif [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
+        echo "Warning: Sandbox local image not found: ${sandbox_image_name}"
+        echo "Build or load it locally before using --image-source local-latest."
+    else
+        echo "Sandbox image not found locally, pulling..."
+        if docker pull "${sandbox_image_name}"; then
+            echo "Sandbox image pulled successfully."
+        else
+            echo "Warning: Failed to pull sandbox image, but deployment will continue."
+            echo "You can pull it manually later: docker pull ${sandbox_image_name}"
+        fi
+    fi
+
+    echo ""
+    echo "--------------------------------"
+    echo ""
+}
+
 render_runtime_secret_values() {
     local gotrue_db_url
     local env_checksum
@@ -1291,6 +1333,9 @@ apply() {
 
     # Step 11: Pull MCP image after persisting deployment options
     pull_mcp_image
+
+    # Step 12: Pull sandbox image for agent sandbox runs
+    pull_sandbox_image
 
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "部署完成！"

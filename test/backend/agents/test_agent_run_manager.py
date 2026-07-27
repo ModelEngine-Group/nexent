@@ -1,6 +1,5 @@
-import pytest
 import threading
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 from backend.agents.agent_run_manager import AgentRunManager, agent_run_manager
 
 
@@ -152,13 +151,21 @@ class TestAgentRunManager:
         assert result is True
         mock_stop_event.set.assert_called_once()
 
-    def test_stop_agent_run_nonexistent(self):
-        """Test stopping a non-existent agent run"""
+    def test_stop_agent_run_nonexistent(self, monkeypatch):
+        """Return false when neither a local run nor a remote signal exists."""
+        monkeypatch.setattr(
+            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            lambda **_kwargs: False,
+        )
         result = self.manager.stop_agent_run(999, "nonexistent_user")
         assert result is False
 
-    def test_stop_agent_run_wrong_user(self):
-        """Test stopping an agent run with wrong user_id"""
+    def test_stop_agent_run_wrong_user(self, monkeypatch):
+        """A different user cannot stop the locally registered run."""
+        monkeypatch.setattr(
+            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            lambda **_kwargs: False,
+        )
         conversation_id = 123
         user1_id = "user1"
         user2_id = "user2"
@@ -170,6 +177,15 @@ class TestAgentRunManager:
         # Try to stop run for user2 (should return False)
         result = self.manager.stop_agent_run(conversation_id, user2_id)
         assert result is False
+
+    def test_stop_agent_run_returns_remote_signal_result(self, monkeypatch):
+        """A remote cancellation signal is a successful stop request."""
+        monkeypatch.setattr(
+            "backend.agents.agent_run_manager.runtime_state_service.set_cancel_signal",
+            lambda **_kwargs: True,
+        )
+
+        assert self.manager.stop_agent_run(999, "remote_user") is True
 
     def test_thread_safety(self):
         """Test thread safety of the manager"""
@@ -294,4 +310,11 @@ class TestAgentRunManager:
         # Should have the second run info
         retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
         assert retrieved_info == mock_run_info2
-        assert retrieved_info != mock_run_info1 
+        assert retrieved_info != mock_run_info1
+
+    def test_context_manager_lifecycle_is_not_owned_by_run_manager(self):
+        """AgentRunManager tracks executions but never constructs mutable context state."""
+        assert not hasattr(self.manager, "create_context_manager")
+        assert not hasattr(self.manager, "clear_conversation_context_manager")
+        assert not hasattr(self.manager, "_conversation_context_managers")
+        assert not hasattr(self.manager, "_conversation_run_counts")

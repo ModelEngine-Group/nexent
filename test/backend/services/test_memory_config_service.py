@@ -37,9 +37,9 @@ class MemoryUserConfig:
         self.disable_agent_ids = disable_agent_ids
         self.disable_user_agent_ids = disable_user_agent_ids
 class MemoryContext:
-    def __init__(self, user_config, memory_config, tenant_id, user_id, agent_id):
+    def __init__(self, user_config, tenant_id, user_id, agent_id, memory_config=None):
         self.user_config = user_config
-        self.memory_config = memory_config
+        self.memory_config = memory_config if memory_config is not None else {}
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.agent_id = agent_id
@@ -372,13 +372,14 @@ class TestMemoryConfigService(unittest.TestCase):
     def test_build_memory_context_switch_on(self, m_switch):
         with patch("backend.services.memory_config_service.get_agent_share", return_value=MagicMock(value="ask")), \
              patch("backend.services.memory_config_service.get_disabled_agent_ids", return_value=["A1"]), \
-             patch("backend.services.memory_config_service.get_disabled_useragent_ids", return_value=["UA1"]), \
-             patch("backend.services.memory_config_service.build_memory_config", return_value={"cfg": 1}) as m_build:
+             patch("backend.services.memory_config_service.get_disabled_useragent_ids", return_value=["UA1"]):
             from backend.services.memory_config_service import build_memory_context
 
             ctx = build_memory_context(self.user_id, self.tenant_id, self.agent_id)
-            self.assertEqual(ctx.memory_config, {"cfg": 1})
-            m_build.assert_called_once_with(self.tenant_id)
+            self.assertEqual(ctx.tenant_id, self.tenant_id)
+            self.assertEqual(ctx.user_id, self.user_id)
+            self.assertEqual(ctx.agent_id, str(self.agent_id))
+            self.assertEqual(ctx.memory_config, {})
 
     def test_build_memory_context_skip_query(self):
         """Test build_memory_context with skip_query=True"""
@@ -403,8 +404,7 @@ class TestMemoryConfigService(unittest.TestCase):
         with patch("backend.services.memory_config_service.get_memory_switch") as mock_memory_switch, \
              patch("backend.services.memory_config_service.get_agent_share") as mock_agent_share, \
              patch("backend.services.memory_config_service.get_disabled_agent_ids") as mock_disabled_agents, \
-             patch("backend.services.memory_config_service.get_disabled_useragent_ids") as mock_disabled_user_agents, \
-             patch("backend.services.memory_config_service.build_memory_config") as mock_build_config:
+             patch("backend.services.memory_config_service.get_disabled_useragent_ids") as mock_disabled_user_agents:
 
             ctx = build_memory_context(self.user_id, self.tenant_id, self.agent_id, skip_query=True)
 
@@ -413,7 +413,6 @@ class TestMemoryConfigService(unittest.TestCase):
             mock_agent_share.assert_not_called()
             mock_disabled_agents.assert_not_called()
             mock_disabled_user_agents.assert_not_called()
-            mock_build_config.assert_not_called()
 
             # Verify the context is still properly constructed
             self.assertEqual(ctx.tenant_id, self.tenant_id)

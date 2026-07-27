@@ -267,6 +267,42 @@ def test_agent_run_api_exception(mocker, mock_auth_header):
     mock_logger.error.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
+    from consts.exceptions import ForbiddenError
+    from consts.model import AgentRequest
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+    )
+    mock_run_agent_stream.side_effect = ForbiddenError("Conversation is not accessible")
+
+    request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="test query",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Conversation is not accessible"
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

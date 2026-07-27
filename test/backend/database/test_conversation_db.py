@@ -103,6 +103,7 @@ class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
+    chat_mode = MagicMock(name="ConversationRecord.chat_mode")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -127,6 +128,7 @@ class ConversationMessageUnit:
     unit_index = MagicMock(name="ConversationMessageUnit.unit_index")
     unit_type = MagicMock(name="ConversationMessageUnit.unit_type")
     unit_content = MagicMock(name="ConversationMessageUnit.unit_content")
+    tool_call_id = MagicMock(name="ConversationMessageUnit.tool_call_id")
     message_id = MagicMock(name="ConversationMessageUnit.message_id")
     conversation_id = MagicMock(name="ConversationMessageUnit.conversation_id")
     delete_flag = MagicMock(name="ConversationMessageUnit.delete_flag")
@@ -183,6 +185,8 @@ sys.modules["backend.database.utils"] = utils_mod
 
 # Import module under test after stubbing
 from backend.database.conversation_db import (
+    HistorySummaryPersistenceError,
+    _parse_history_summary_content,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -194,6 +198,7 @@ from backend.database.conversation_db import (
     delete_source_search,
     get_conversation,
     get_conversation_history,
+    get_historical_context,
     get_conversation_list,
     get_conversation_messages,
     get_last_unit_for_message,
@@ -207,8 +212,10 @@ from backend.database.conversation_db import (
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    save_history_summary,
     soft_delete_all_conversations_by_user,
     update_conversation_agent_id,
+    update_conversation_chat_mode,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -1060,6 +1067,56 @@ def test_update_conversation_agent_id_not_found(monkeypatch, mock_session_ctx):
 
 
 # =============================================================================
+# Tests for update_conversation_chat_mode
+# =============================================================================
+
+
+def test_update_conversation_chat_mode_rejects_invalid_mode(monkeypatch, mock_session_ctx):
+    """Reject invalid chat modes before opening a database session."""
+    _, ctx = mock_session_ctx
+    get_session = MagicMock(return_value=ctx)
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", get_session)
+
+    with pytest.raises(ValueError, match="Invalid chat_mode 'invalid'"):
+        update_conversation_chat_mode(123, "invalid")
+
+    get_session.assert_not_called()
+
+
+def test_update_conversation_chat_mode_success(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """Persist a valid chat mode and return True when a row is updated."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 1
+    session.execute.return_value = update_result
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_chat_mode("123", "planning", user_id="user-1")
+
+    assert result is True
+    assert fresh_update_mock["chat_mode"] == "planning"
+    assert fresh_update_mock["updated_by"] == "user-1"
+    assert "update_time" in fresh_update_mock
+    session.execute.assert_called_once()
+
+
+def test_update_conversation_chat_mode_not_found(monkeypatch, mock_session_ctx, fresh_update_mock):
+    """Return False when no non-deleted conversation matches the ID."""
+    session, ctx = mock_session_ctx
+    update_result = MagicMock()
+    update_result.rowcount = 0
+    session.execute.return_value = update_result
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_conversation_chat_mode(123, "execution")
+
+    assert result is False
+    assert fresh_update_mock["chat_mode"] == "execution"
+    assert "updated_by" not in fresh_update_mock
+    session.execute.assert_called_once()
+
+
+# =============================================================================
 # Tests for get_message
 # =============================================================================
 
@@ -1555,6 +1612,58 @@ def test_get_conversation_with_user_id_filter(monkeypatch, mock_session_ctx):
 
     assert result is not None
     assert result["conversation_id"] == 42
+
+
+def test_get_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    tenant_lookup = MagicMock(return_value={"user_id": "user-1", "tenant_id": "tenant-1"})
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        tenant_lookup,
+    )
+
+    result = get_conversation(42, user_id="user-1", tenant_id="tenant-1")
+
+    assert result is None
+    tenant_lookup.assert_called_once_with("user-1")
+    session.scalars.assert_called_once()
+
+
+def test_get_conversation_rejects_cross_tenant_identity(monkeypatch, mock_session_ctx):
+    session, _ = mock_session_ctx
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda user_id: {"user_id": user_id, "tenant_id": "tenant-2"},
+    )
+
+    assert get_conversation(42, user_id="user-1", tenant_id="tenant-1") is None
+    session.scalars.assert_not_called()
+
+
+def test_get_conversation_accepts_legacy_asset_owner_tenant(monkeypatch, mock_session_ctx):
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = MagicMock()
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "", "user_role": "ASSET_OWNER"},
+    )
+
+    result = get_conversation(
+        42,
+        user_id="asset-owner",
+        tenant_id="asset_owner_tenant_id",
+    )
+
+    assert result is not None
+    session.scalars.assert_called_once()
+
+
+def test_get_conversation_rejects_tenant_without_user():
+    with pytest.raises(ValueError, match="user_id is required"):
+        get_conversation(42, tenant_id="tenant-1")
 
 
 def test_get_message_with_user_id_filter(monkeypatch, mock_session_ctx):
@@ -2384,3 +2493,144 @@ def test_get_conversation_history_units_empty_list(monkeypatch, mock_session_ctx
 
     assert result is not None
     assert result['message_records'][0]['units'] == []
+
+
+# =============================================================================
+# History summary checkpoint tests
+# =============================================================================
+
+
+def test_parse_history_summary_requires_summary_and_positive_boundary():
+    assert _parse_history_summary_content(
+        '{"summary":{"task_overview":"x"},"covered_through_message_id":24}'
+    )["covered_through_message_id"] == 24
+    assert _parse_history_summary_content('{"covered_through_message_id":24}') is None
+    assert _parse_history_summary_content(
+        '{"summary":{},"covered_through_message_id":0}') is None
+    assert _parse_history_summary_content("not-json") is None
+
+
+def test_save_history_summary_rejects_cross_tenant_before_database(monkeypatch):
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "tenant-b"})
+    with pytest.raises(HistorySummaryPersistenceError, match="not accessible"):
+        save_history_summary(1, "user-a", "tenant-a", {}, 24)
+
+
+def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_ctx,
+                                                       fresh_insert_mock):
+    from types import SimpleNamespace
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "tenant-a"})
+    message_index_column = MagicMock()
+    message_index_column.__gt__.return_value = MagicMock()
+    message_index_column.__le__.return_value = MagicMock()
+    monkeypatch.setattr(ConversationMessage, "message_index", message_index_column)
+    owner_result = MagicMock()
+    owner_result.first.return_value = SimpleNamespace(conversation_id=1)
+    covered_result = MagicMock()
+    covered_result.first.return_value = SimpleNamespace(
+        message_id=24, message_index=3, message_role="assistant",
+        status="completed")
+    insert_result = MagicMock()
+    insert_result.scalar_one.return_value = 1001
+    session.execute.side_effect = [owner_result, covered_result, insert_result]
+    session.scalar.side_effect = [0, 4]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    unit_id = save_history_summary(
+        1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
+        trigger="soft_budget_exceeded")
+
+    assert unit_id == 1001
+    assert fresh_insert_mock["message_id"] == 24
+    assert fresh_insert_mock["unit_index"] == 5
+    assert fresh_insert_mock["unit_type"] == "history_summary"
+    assert fresh_insert_mock["unit_status"] == "completed"
+    payload = __import__("json").loads(fresh_insert_mock["unit_content"])
+    assert payload["covered_through_message_id"] == 24
+    assert payload["trigger"] == "soft_budget_exceeded"
+
+
+def test_save_history_summary_rejects_incomplete_covered_range(
+        monkeypatch, mock_session_ctx):
+    from types import SimpleNamespace
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "tenant-a"})
+    message_index_column = MagicMock()
+    message_index_column.__gt__.return_value = MagicMock()
+    message_index_column.__le__.return_value = MagicMock()
+    monkeypatch.setattr(ConversationMessage, "message_index", message_index_column)
+    owner_result = MagicMock()
+    owner_result.first.return_value = SimpleNamespace(conversation_id=1)
+    covered_result = MagicMock()
+    covered_result.first.return_value = SimpleNamespace(
+        message_id=24, message_index=3, message_role="assistant",
+        status="completed")
+    session.execute.side_effect = [owner_result, covered_result]
+    session.scalar.return_value = 1
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(HistorySummaryPersistenceError, match="completed messages only"):
+        save_history_summary(1, "user-a", "tenant-a", {}, 24)
+
+
+def test_get_historical_context_rejects_cross_tenant(monkeypatch):
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "tenant-b"})
+    assert get_historical_context(1, 25, "user-a", "tenant-a") is None
+
+
+def test_get_historical_context_returns_latest_summary_and_only_new_turns(
+        monkeypatch, mock_session_ctx):
+    from types import SimpleNamespace
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr(
+        "backend.database.conversation_db._get_user_tenant",
+        lambda _user_id: {"tenant_id": "tenant-a"})
+    index_column = MagicMock()
+    index_column.__lt__.return_value = MagicMock()
+    index_column.__gt__.return_value = MagicMock()
+    monkeypatch.setattr(ConversationMessage, "message_index", index_column)
+    role_column = MagicMock()
+    role_column.in_.return_value = MagicMock()
+    monkeypatch.setattr(ConversationMessage, "message_role", role_column)
+
+    current_result = MagicMock()
+    current_result.first.return_value = SimpleNamespace(message_id=25, message_index=6)
+    candidates_result = MagicMock()
+    candidates_result.all.return_value = [SimpleNamespace(
+        unit_id=1001, unit_index=4, message_index=3,
+        unit_content='{"summary":{"task_overview":"old"},'
+                     '"covered_through_message_id":24}')]
+    boundary_result = MagicMock()
+    boundary_result.first.return_value = SimpleNamespace(
+        message_index=3, message_role="assistant", status="completed")
+    messages_result = MagicMock()
+    messages_result.all.return_value = [
+        SimpleNamespace(message_id=31, message_index=4, message_role="user",
+                        message_content="new question", minio_files=None),
+        SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
+                        message_content="new answer", minio_files=None),
+    ]
+    session.execute.side_effect = [
+        current_result, candidates_result, boundary_result, messages_result]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_historical_context(1, 25, "user-a", "tenant-a")
+
+    assert result["history_summary"]["unit_id"] == 1001
+    assert result["history_summary"]["covered_through_message_id"] == 24
+    assert result["conversation_turns"] == [{
+        "user_message": "new question",
+        "assistant_final_answer": "new answer",
+        "attachments": None,
+        "user_message_id": 31,
+        "assistant_message_id": 32,
+    }]

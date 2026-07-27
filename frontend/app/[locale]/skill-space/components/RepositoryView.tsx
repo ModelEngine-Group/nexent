@@ -71,51 +71,52 @@ export function RepositoryView({
         isEmpty={listings.length === 0}
         emptyDescription={t("skillRepository.repository.empty")}
       >
-        <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {listings.map((listing) => (
-            <SkillRepositoryCard
-              key={listing.skill_repository_id}
-              listing={listing}
-              onDetailClick={() => onDetailClick(listing)}
-              showAdminMenu={showAdminMenu}
-              isTakingDown={
-                takingDownRepositoryId === listing.skill_repository_id
-              }
-              onTakeDown={() => onTakeDown(listing)}
-              action={
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="primary"
-                    className="flex-1 text-sm"
-                    icon={<Copy className="size-3.5" />}
-                    loading={
-                      installingRepositoryId === listing.skill_repository_id
-                    }
-                    onClick={() => onInstall(listing)}
-                  >
-                    {t("skillRepository.repository.copy")}
-                  </Button>
-                  <Button
-                    type="default"
-                    className="flex-1 text-sm"
-                    icon={<Eye className="size-3.5" />}
-                    onClick={() => onDetailClick(listing)}
-                  >
-                    {t("skillRepository.common.detail")}
-                  </Button>
-                </div>
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {listings.map((listing) => (
+              <SkillRepositoryCard
+                key={listing.skill_repository_id}
+                listing={listing}
+                onDetailClick={() => onDetailClick(listing)}
+                showAdminMenu={showAdminMenu}
+                isTakingDown={
+                  takingDownRepositoryId === listing.skill_repository_id
+                }
+                onTakeDown={() => onTakeDown(listing)}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="primary"
+                      className="flex-1 text-sm"
+                      icon={<Copy className="size-3.5" />}
+                      loading={
+                        installingRepositoryId === listing.skill_repository_id
+                      }
+                      onClick={() => onInstall(listing)}
+                    >
+                      {t("skillRepository.repository.copy")}
+                    </Button>
+                    <Button
+                      type="default"
+                      className="flex-1 text-sm"
+                      icon={<Eye className="size-3.5" />}
+                      onClick={() => onDetailClick(listing)}
+                    >
+                      {t("skillRepository.common.detail")}
+                    </Button>
+                  </div>
+                }
+              />
+            ))}
+          </div>
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={onPageChange}
+          />
+        </>
       </AsyncContent>
-
-      <PaginationBar
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={onPageChange}
-      />
     </div>
   );
 }

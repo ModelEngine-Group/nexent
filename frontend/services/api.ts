@@ -11,6 +11,7 @@ import type {
   SkillRepositoryListingListParams,
 } from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
+import type { NotificationListParams } from "@/types/notification";
 
 const API_BASE_URL = "/api";
 
@@ -94,6 +95,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
       version: (agentId: number, versionNo: number) =>
@@ -151,6 +153,7 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -337,6 +340,7 @@ export const API_ENDPOINTS = {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
+    projectConfig: `${API_BASE_URL}/config/project-config`,
   },
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
@@ -446,6 +450,7 @@ export const API_ENDPOINTS = {
     // ---------------- Memory configuration ----------------
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
+      embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -453,6 +458,16 @@ export const API_ENDPOINTS = {
       disableUserAgentAdd: `${API_BASE_URL}/memory/config/disable_useragent`,
       disableUserAgentRemove: (agentId: string | number) =>
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
+    },
+
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
     },
 
     // ---------------- Memory CRUD ----------------
@@ -500,6 +515,9 @@ export const API_ENDPOINTS = {
       }
       if (params?.new_agent_padding) {
         queryParams.append("new_agent_padding", "true");
+      }
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
@@ -560,6 +578,7 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
     install: (skillRepositoryId: number) =>
@@ -640,6 +659,23 @@ export const API_ENDPOINTS = {
   monitoring: {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
+  },
+  notifications: {
+    list: (params?: NotificationListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.only_unread) {
+        queryParams.append("only_unread", "true");
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/notifications${queryString ? `?${queryString}` : ""}`;
+    },
+    markRead: `${API_BASE_URL}/notifications/read`,
   },
 };
 

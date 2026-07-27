@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Input, Modal, Space, Spin, Typography } from "antd";
+import { optimizePromptFromDebug } from "@/services/promptService";
 
 const { TextArea } = Input;
 const { Paragraph, Text } = Typography;
@@ -86,27 +87,17 @@ export default function DebugOptimizeModal({
 
     setIsOptimizing(true);
     try {
-      const resp = await fetch("/api/prompt/optimize/from_debug", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_id: agentId,
-          model_id: modelId,
-          feedback: feedback.trim(),
-          selected: {
-            user_question: userQuestion,
-            assistant_answer: assistantAnswer,
-          },
-          history,
-        }),
+      const data = await optimizePromptFromDebug({
+        agent_id: agentId,
+        model_id: modelId,
+        feedback: feedback.trim(),
+        selected: {
+          user_question: userQuestion,
+          assistant_answer: assistantAnswer,
+        },
+        history,
       });
 
-      const result = await resp.json();
-      if (!resp.ok) {
-        throw new Error(result?.message || t("systemPrompt.optimize.error"));
-      }
-
-      const data = result?.data;
       const original = data?.original_full_prompt || "";
       const fullText = mapHeadersToChinese(data?.optimized_full_prompt || "");
 

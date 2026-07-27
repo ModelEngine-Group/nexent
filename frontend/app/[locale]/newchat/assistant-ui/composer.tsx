@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, type FC, type ReactNode } from "react";
+import { useSyncExternalStore, type FC, type ReactNode } from "react";
 import {
   ArrowUp,
   Mic,
   Square,
   Lightbulb,
   Play,
+  Check,
+  Circle,
+  ListChecks,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,13 +28,24 @@ import {
   type ModelOption,
 } from "../ui/model-selector";
 import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  planRegistry,
+  type PlanData,
+} from "../adapter/remote-chat-model-adapter";
 
-type ChatMode = "planning" | "execution";
+export type ChatMode = "planning" | "execution";
 
 export interface ComposerProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
 }
 
 // Simple tooltip wrapper
@@ -47,15 +62,89 @@ const TooltipWrapper: FC<{
   );
 };
 
+const PlanView: FC = () => {
+  const plan = useSyncExternalStore<PlanData | null>(
+    planRegistry.subscribe,
+    () => planRegistry.data,
+    () => null,
+  );
+
+  if (!plan || plan.steps.length === 0) return null;
+
+  return (
+    <Collapsible asChild defaultOpen>
+      <section className="border-b border-border" aria-label="执行计划">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-4 py-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/40 data-[state=open]:[&_svg.plan-chevron]:rotate-180"
+          >
+            <ListChecks className="size-4 shrink-0 text-primary" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{plan.title}</span>
+            <ChevronDown
+              className="plan-chevron size-4 shrink-0 text-muted-foreground transition-transform duration-200"
+              aria-hidden
+            />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ol className="space-y-1.5 px-4 pb-3">
+            {plan.steps.map((step) => {
+              const completed = step.status === "completed";
+              return (
+                <li
+                  key={step.id}
+                  className={cn(
+                    "flex min-w-0 items-center gap-3 text-xs leading-5 text-muted-foreground",
+                    completed && "text-muted-foreground/60",
+                  )}
+                >
+                  {completed ? (
+                    <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
+                  ) : (
+                    <Circle className="size-4 shrink-0" aria-hidden />
+                  )}
+                  <span
+                    className={cn(
+                      "min-w-0 max-w-[40%] shrink-0 truncate font-medium text-foreground",
+                      completed && "text-muted-foreground/60 line-through",
+                    )}
+                    title={step.title}
+                  >
+                    {step.title}
+                  </span>
+                  {step.description && (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left",
+                        completed && "line-through",
+                      )}
+                      title={step.description}
+                    >
+                      {step.description}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+};
+
 export const Composer: FC<ComposerProps> = ({
   models,
   selectedModelId,
   onModelChange,
+  chatMode,
+  onChatModeChange,
 }) => {
-  const [chatMode, setChatMode] = useState<ChatMode>("execution");
-
   return (
-    <div className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-sm">
+    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      <PlanView />
+
       {/* Mode switcher above input */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         {/* Mode switcher */}
@@ -67,7 +156,7 @@ export const Composer: FC<ComposerProps> = ({
               "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
               chatMode === "planning" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
             )}
-            onClick={() => setChatMode("planning")}
+            onClick={() => onChatModeChange("planning")}
           >
             <Lightbulb className={cn("size-3", chatMode === "planning" ? "text-blue-600" : "")} />
             规划
@@ -79,7 +168,7 @@ export const Composer: FC<ComposerProps> = ({
               "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
               chatMode === "execution" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
             )}
-            onClick={() => setChatMode("execution")}
+            onClick={() => onChatModeChange("execution")}
           >
             <Play className="size-3" />
             执行

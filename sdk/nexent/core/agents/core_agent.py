@@ -342,59 +342,39 @@ def _scan_code_for_tool_calls(
     return results
 
 
-def _emit_real_tool_chunks_from_code(
+def _wrap_tool_for_observer(
+    tool: Any,
     observer: "MessageObserver",
     agent_name: str,
-    code_action: str,
-    known_tool_names,
 ) -> None:
-    """Translate real tool calls in ``code_action`` into observer TOOL chunks.
-
-    CodeAgent wraps every step in a synthetic ``python_interpreter`` ToolCall,
-    so without this bridge the SSE stream never sees the actual MCP /
-    managed-agent names the LLM invoked. We emit one `type=tool` chunk per
-    unique tool call AFTER the PARSE chunk has been published and BEFORE
-    ``python_executor(code_action)`` runs, so the downstream stream order is:
-
-        parse -> tool -> execution_logs
-
-    matching what the user sees during a real builtin-tool invocation.
-    """
-    if observer is None or not code_action:
+    """Emit one tool event and correlation context for every actual call."""
+    if tool is None or getattr(tool, "_tool_call_observer_wrapped", False):
         return
 
-    normalized_names = {str(name) for name in (known_tool_names or set())}
-
-    calls = _scan_code_for_tool_calls(code_action, normalized_names)
-    fallback_logger = logging.getLogger(__name__)
-    if not calls:
-        # Visibility aid: when we expected real tools but found none, log at
-        # DEBUG so operators can confirm the bridge ran instead of silently
-        # skipping. Disabled by default to avoid noisy logs in production.
-        if normalized_names:
-            fallback_logger.debug(
-                "Tool bridge: no tool calls matched known tool names "
-                "(known=%d) in code_action of %d chars",
-                len(normalized_names),
-                len(code_action or ""),
-            )
+    original_forward = getattr(tool, "forward", None)
+    if not callable(original_forward):
         return
 
-    for call in calls:
-        try:
-            observer.add_message(
-                agent_name or "",
-                ProcessType.TOOL,
-                "",
-                tool_name=call["name"],
-                tool_arguments=_coerce_observer_arguments(call["arguments"]),
-            )
-        except Exception:
-            fallback_logger.debug(
-                "Failed to bridge real tool call into observer: %s",
-                call["name"],
-                exc_info=True,
-            )
+    tool_name = str(getattr(tool, "name", "") or "")
+
+    def observed_forward(*args, **kwargs):
+        tool_call_id = str(uuid.uuid4())
+        observer.add_message(
+            agent_name or "",
+            ProcessType.TOOL,
+            "",
+            tool_name=tool_name,
+            tool_arguments=_coerce_observer_arguments(kwargs),
+            tool_call_id=tool_call_id,
+        )
+        with observer.tool_call_context(tool_call_id):
+            return original_forward(*args, **kwargs)
+
+    tool.forward = observed_forward
+    try:
+        tool._tool_call_observer_wrapped = True
+    except Exception:
+        pass
 
 
 class CoreAgent(CodeAgent):
@@ -409,6 +389,8 @@ class CoreAgent(CodeAgent):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
         redis_client = kwargs.pop("redis_client", None)
+        self.conversation_id = kwargs.pop("conversation_id", None)
+        self.user_id = kwargs.pop("user_id", None)
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -426,9 +408,6 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
-        self.context_manager: Any = getattr(
-            self.context_runtime, "context_manager", None
-        )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -467,6 +446,54 @@ class CoreAgent(CodeAgent):
             except AttributeError:
                 continue
         return names
+
+    def _managed_agent_names(self) -> set:
+        """Return the set of names belonging to managed sub-agents.
+
+        Used to suppress ``type=tool`` chunks for sub-agent invocations: those
+        are surfaced exclusively through ``subagent_start``/``subagent_end``
+        so the frontend can render the nested execution without duplicate
+        tool entries on the outer message.
+        """
+        managed_agents = getattr(self, "managed_agents", {}) or {}
+        try:
+            return {str(name) for name in managed_agents.keys()}
+        except AttributeError:
+            return {
+                str(name)
+                for agent in managed_agents
+                if (name := getattr(agent, "name", None))
+            }
+
+    def _non_emitting_tool_names(self) -> set:
+        """Return tool names that should stay out of generic TOOL events."""
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.items()
+            except AttributeError:
+                iterable = (
+                    (getattr(tool, "name", None), tool)
+                    for tool in container
+                )
+            for name, tool in iterable:
+                if name is None or getattr(tool, "emit_tool_event", True) is not False:
+                    continue
+                names.add(str(name))
+        return names
+
+    def _wrap_visible_tool_events(self) -> None:
+        """Instrument visible tools at their actual execution boundary."""
+        hidden_names = self._non_emitting_tool_names()
+        for container in (getattr(self, "tools", {}) or {},):
+            try:
+                iterable = container.items()
+            except AttributeError:
+                iterable = ((getattr(tool, "name", None), tool) for tool in container)
+            for name, tool in iterable:
+                if name is None or str(name) in hidden_names:
+                    continue
+                _wrap_tool_for_observer(tool, self.observer, self.agent_name)
 
     def _context_tools(self) -> List[Any]:
         """Return a stable tool list for ContextRuntime/ContextManager evidence.
@@ -645,6 +672,25 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
+    @staticmethod
+    def _ensure_context_within_hard_budget(final_context: Any) -> None:
+        """Stop before the provider call when safe compaction cannot fit input."""
+        evidence = final_context.evidence
+        if evidence.over_hard_budget is True:
+            raise ValueError(
+                "Context input remains over the model hard budget after compaction: "
+                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
+            )
+
+    def _emit_history_summary_event(self) -> None:
+        payload = self.context_runtime.consume_history_summary_event()
+        if isinstance(payload, dict):
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.HISTORY_SUMMARY,
+                json.dumps(payload, ensure_ascii=False),
+            )
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -659,18 +705,15 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
-        # is already the COMPRESSED payload, so using it here made save%
-        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
-        # token count (computed in compress_if_needed from the raw memory) as the
-        # baseline; fall back to the (compressed) input size when no
-        # ContextManager is active -- the legacy path does not compress, so 0% is
-        # correct there.
-        uncompressed_tokens = None
-        if self.context_manager is not None:
-            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        # is already the compressed payload, so use the ContextManager's raw
+        # memory token count when compression produced one. When compression is
+        # disabled, the final input size is the correct zero-savings baseline.
+        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
         if uncompressed_tokens:
             self._last_uncompressed_est = uncompressed_tokens
         else:
@@ -763,19 +806,6 @@ Additional Args:
             id=f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
-
-        # Bridge the real tools invoked by `code_action` into the observer so the
-        # SSE stream carries `type=tool` chunks with the actual MCP/managed-agent
-        # name and arguments, instead of the synthetic `python_interpreter`
-        # placeholder below. We deliberately emit AFTER the PARSE chunk and BEFORE
-        # `python_executor(code_action)` runs so the chunk order matches the
-        # user-visible flow: parse -> tool call -> execution result.
-        _emit_real_tool_chunks_from_code(
-            self.observer,
-            self.agent_name,
-            code_action,
-            known_tool_names=self._known_tool_names(),
-        )
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
@@ -871,7 +901,8 @@ Additional Args:
             if postcheck.severity == "warning":
                 self._append_verification_feedback(memory_step, postcheck)
 
-        # Guardrail checkpoint ②: screen tool output; block downgrades to mask (tool already ran), redact before memory. Never raises, never loops.
+        # Guardrail checkpoint ②: screen tool output; block downgrades to mask
+        # because the tool already ran, then redact before memory.
         guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
         if guardrail_engine:
             decision = guardrail_engine.check_output(
@@ -884,12 +915,6 @@ Additional Args:
             if decision.effective_action == "mask" and decision.cleaned_content is not None:
                 memory_step.observations = decision.cleaned_content
                 self._append_verification_feedback(memory_step, decision.verification_result)
-
-        # Pre-truncate observations when ContextManager is enabled. Keeps the
-        # head + tail of long outputs around a truncation marker so downstream
-        # compression sees bounded-length step records and the model can still
-        # search/read for the elided portion.
-        self.context_runtime.truncate_observation(memory_step)
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -964,15 +989,20 @@ You have been provided with these additional arguments, that you can access usin
 
         if getattr(self, "python_executor", None):
             self._guardrail_wrap_tools()
+            self._wrap_visible_tool_events()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
-            return self._run_stream(task=self.task, max_steps=max_steps, images=images)
+            return self._run_stream_with_context_evidence(
+                task=self.task, max_steps=max_steps, images=images
+            )
         run_start_time = time.time()
-        steps = list(self._run_stream(task=self.task, max_steps=max_steps, images=images))
+        steps = list(self._run_stream_with_context_evidence(
+            task=self.task, max_steps=max_steps, images=images
+        ))
 
         # Outputs are returned only at the end. We only look at the last step.
         assert isinstance(steps[-1], FinalAnswerStep)
@@ -1012,6 +1042,25 @@ You have been provided with these additional arguments, that you can access usin
             )
 
         return output
+
+    def _run_stream_with_context_evidence(
+        self,
+        *,
+        task: str,
+        max_steps: int,
+        images: list["PIL.Image.Image"] | None = None,
+    ):
+        """Finalize exactly one context evidence record for a complete loop."""
+
+        status = "error"
+        try:
+            yield from self._run_stream(task=task, max_steps=max_steps, images=images)
+            status = "cancelled" if self.stop_event.is_set() else "completed"
+        except GeneratorExit:
+            status = "cancelled"
+            raise
+        finally:
+            self.context_runtime.finalize_evidence(status=status)
 
     def __call__(self, task: str, **kwargs):
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
@@ -1293,6 +1342,8 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        self._emit_history_summary_event()
+        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error
@@ -1347,9 +1398,10 @@ You have been provided with these additional arguments, that you can access usin
 
     def _get_context_summary(self) -> Optional[str]:
         """Extract a compressed context summary from ContextManager if available."""
-        if self.context_manager and hasattr(self.context_manager, "get_summary"):
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "get_summary"):
             try:
-                return self.context_manager.get_summary()
+                return context_manager.get_summary()
             except Exception:
                 return None
         return None
@@ -1432,19 +1484,25 @@ You have been provided with these additional arguments, that you can access usin
                     user_id=self._get_user_id(),
                 )
             except Exception as e:
-                self.logger.log(f"Implicit plan save failed: {e}", level=LogLevel.WARN)
+                self.logger.log(f"Implicit plan save failed: {e}", level=LogLevel.ERROR)
         self._advance_current_index()
 
     def _get_conversation_id(self) -> int:
-        """Extract conversation_id from context_manager."""
-        if self.context_manager and hasattr(self.context_manager, "conversation_id"):
-            return self.context_manager.conversation_id
+        """Return the run-scoped conversation id used for plan persistence."""
+        if self.conversation_id is not None:
+            return self.conversation_id
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "conversation_id"):
+            return context_manager.conversation_id
         return 0
 
     def _get_user_id(self) -> str:
-        """Extract user_id from context_manager."""
-        if self.context_manager and hasattr(self.context_manager, "user_id"):
-            return str(self.context_manager.user_id)
+        """Return the run-scoped user id used for plan persistence."""
+        if self.user_id is not None:
+            return str(self.user_id)
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager and hasattr(context_manager, "user_id"):
+            return str(context_manager.user_id)
         return "anonymous"
 
     def _cleanup_plan(self) -> None:
@@ -1468,5 +1526,4 @@ You have been provided with these additional arguments, that you can access usin
                 user_id=user_id,
             )
         except Exception as e:
-            self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.WARN)
-
+            self.logger.log(f"Plan finalization failed: {e}", level=LogLevel.ERROR)

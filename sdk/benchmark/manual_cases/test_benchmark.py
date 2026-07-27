@@ -17,7 +17,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 
-from nexent.core.agents.agent_context import ContextManager
+from nexent.core.agents.context import ContextManager
 from nexent.core.utils.token_estimation import estimate_tokens_text
 
 from eval_utils import eval_text, average_score
@@ -37,7 +37,7 @@ Now start!"""
 
 
 # --- Custom summary schema and prompts for knowledge-discussion benchmarks ---
-# These override the default 10-field Hermes schema from summary_config.py
+# These override the default 10-field Hermes schema from context/config.py
 # with a deduplicated 6-field schema (~620 word budget) that merges
 # completed_work + resolved_questions into "progress" and restricts
 # key_facts to values NOT already stated in progress, eliminating
@@ -303,7 +303,7 @@ async def run_probe_questions(
     - Probes are fully independent, no shared state
     """
     probe_results = []
-    no_compression_config = ContextManagerConfig(enabled=False, token_threshold=10**9)
+    no_compression_config = ContextManagerConfig(token_threshold=10**9)
 
     for probe in probes:
         question = probe["question"]
@@ -347,7 +347,7 @@ async def run_baseline_probes(
     the complete history. probe_retention = compressed_score / baseline_score.
     """
     probe_results = []
-    baseline_config = ContextManagerConfig(enabled=False, token_threshold=10**9)
+    baseline_config = ContextManagerConfig(token_threshold=10**9)
 
     for probe in probes:
         question = probe["question"]
@@ -437,11 +437,9 @@ def _resolve_compressed_config(case: dict, use_default_prompts: bool = False) ->
     """
     case_cfg = case.get("compressed_config", {})
     kwargs = dict(
-        enabled=True,
         token_threshold=case_cfg.get("token_threshold", 3600),
-        keep_recent_pairs=case_cfg.get("keep_recent_pairs", 1),
         keep_recent_steps=case_cfg.get("keep_recent_steps", 4),
-        max_observation_length=case_cfg.get("max_observation_length", 20000),
+        policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
     )
     if not use_default_prompts:
         kwargs.update(
@@ -477,9 +475,7 @@ async def run_one_case(case_dir: str, use_default_prompts: bool = False):
     base_history = parse_conversation_to_history(history_abspath)
 
     baseline_config = ContextManagerConfig(
-        enabled=False,
         token_threshold=10**9,
-        keep_recent_pairs=1,
     )
 
     # P5: Allow per-case config override

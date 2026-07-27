@@ -95,6 +95,7 @@ def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_hea
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_list.assert_called_once_with(
         "tenant-1",
+        user_id="user-1",
         status="pending_review",
         skill_id=3,
         category_id=2,
@@ -131,6 +132,46 @@ def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
         search="report",
         new_skill_padding=True,
     )
+
+
+def test_count_my_editable_skills_api(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_count = mocker.patch(
+        "apps.skill_repository_app.count_my_editable_skills_impl",
+        return_value={"counts": {"all": 2, "created": 1, "others": 1}},
+    )
+
+    response = client.get(
+        "/repository/skill/mine/counts",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "counts": {"all": 2, "created": 1, "others": 1}
+    }
+    mock_count.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+
+def test_count_my_editable_skills_api_maps_unauthorized(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        side_effect=app_module.UnauthorizedError("expired"),
+    )
+
+    response = client.get(
+        "/repository/skill/mine/counts",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "expired"}
 
 
 def test_create_skill_repository_listing_api_maps_forbidden(mocker, mock_auth_header):
@@ -174,6 +215,7 @@ def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
         status="shared",
         user_id="user-1",
         tenant_id="tenant-1",
+        content=None,
     )
 
 

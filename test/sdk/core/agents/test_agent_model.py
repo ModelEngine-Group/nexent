@@ -22,6 +22,7 @@ from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent
@@ -242,6 +243,14 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    context_package = ModuleType("sdk.nexent.core.agents.context")
+    context_package.__path__ = []
+    context_models = ModuleType("sdk.nexent.core.agents.context.models")
+    class ContextItemInput(BaseModel):
+        id: str = "item"
+    context_models.ContextItemInput = ContextItemInput
+    sys.modules["sdk.nexent.core.agents.context"] = context_package
+    sys.modules["sdk.nexent.core.agents.context.models"] = context_models
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.agent_model", agent_model_path)
     module = importlib.util.module_from_spec(spec)
@@ -620,7 +629,6 @@ class TestMemoryContext:
         )
         context = agent_model_module.MemoryContext(
             user_config=user_config,
-            memory_config={"type": "chroma"},
             tenant_id="tenant-123",
             user_id="user-456",
             agent_id="agent-789"
@@ -629,7 +637,6 @@ class TestMemoryContext:
         assert context.user_id == "user-456"
         assert context.agent_id == "agent-789"
         assert context.user_config == user_config
-        assert context.memory_config == {"type": "chroma"}
 
     def test_memory_context_str_method(self):
         """Test MemoryContext __str__ method returns JSON string."""
@@ -657,6 +664,9 @@ class TestMemoryContext:
 
 class TestAgentRunInfo:
     """Tests for AgentRunInfo Pydantic model."""
+
+    def test_agent_run_info_does_not_own_context_manager(self):
+        assert "context_manager" not in agent_model_module.AgentRunInfo.model_fields
 
     def test_agent_run_info_creation(self):
         """Test AgentRunInfo creation with all fields."""
@@ -839,6 +849,16 @@ class TestAgentRunInfoPlanning:
     def test_enable_planning_can_be_true(self):
         run_info = self._make_run_info(enable_planning=True)
         assert run_info.enable_planning is True
+
+    def test_run_identity_defaults_to_none(self):
+        run_info = self._make_run_info()
+        assert run_info.conversation_id is None
+        assert run_info.user_id is None
+
+    def test_run_identity_can_be_set(self):
+        run_info = self._make_run_info(conversation_id=273, user_id="user-1")
+        assert run_info.conversation_id == 273
+        assert run_info.user_id == "user-1"
 
     def test_redis_client_defaults_to_none(self):
         run_info = self._make_run_info()

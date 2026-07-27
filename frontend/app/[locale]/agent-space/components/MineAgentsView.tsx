@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Spin } from "antd";
@@ -24,7 +24,9 @@ import log from "@/lib/logger";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
+  findRepositoryInfoById,
   pickReviewDisplayRepositoryInfo,
+  resolveReviewModalMode,
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
@@ -46,6 +48,11 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "others",
 ];
 
+export interface ReviewDeepLinkTarget {
+  agentRepositoryId: number;
+  agentId: number;
+}
+
 interface MineAgentsViewProps {
   agents: MyEditableAgentListItem[];
   counts: MyEditableAgentOwnershipCounts;
@@ -62,6 +69,10 @@ interface MineAgentsViewProps {
   isFetching: boolean;
   onRetry: () => void;
   onViewDetail: (agentId: number, versionNo: number) => void;
+  reviewDeepLink?: ReviewDeepLinkTarget | null;
+  deepLinkFallbackAgent?: MyEditableAgentItem | null;
+  deepLinkFallbackLoading?: boolean;
+  onReviewDeepLinkConsumed?: () => void;
 }
 
 export function MineAgentsView({
@@ -80,6 +91,10 @@ export function MineAgentsView({
   isFetching,
   onRetry,
   onViewDetail,
+  reviewDeepLink = null,
+  deepLinkFallbackAgent = null,
+  deepLinkFallbackLoading = false,
+  onReviewDeepLinkConsumed,
 }: MineAgentsViewProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -103,6 +118,7 @@ export function MineAgentsView({
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const consumedDeepLinkRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -221,15 +237,11 @@ export function MineAgentsView({
         payload,
       });
       message.success(
-        t("agentRepository.mine.applySuccess", {
-          name:
-            applyModalAgent.name?.trim() ||
-            t("agentRepository.card.untitled"),
-        })
+        t("repository.mine.applySuccess")
       );
       closeApplyModal();
     } catch {
-      message.error(t("agentRepository.mine.applyError"));
+      message.error(t("repository.mine.applyError"));
     } finally {
       setApplyingAgentId(null);
     }
@@ -245,11 +257,80 @@ export function MineAgentsView({
     if (!repositoryInfo) {
       return;
     }
+    openReviewModal(agent, repositoryInfo, mode);
+  };
+
+  const openReviewModal = (
+    agent: MyEditableAgentItem,
+    repositoryInfo: MyAgentRepositoryInfoItem,
+    mode: "review" | "reviewUpdate"
+  ) => {
     setReviewModalAgent(agent);
     setReviewModalInfo(repositoryInfo);
     setReviewModalMode(mode);
     setReviewModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.agentRepositoryId) {
+      return;
+    }
+
+    const listStillLoading = isLoading;
+    const fallbackStillLoading = deepLinkFallbackLoading;
+    if (listStillLoading && fallbackStillLoading) {
+      return;
+    }
+
+    const agentFromList = agents.find(
+      (item): item is MyEditableAgentItem =>
+        !isNewAgentPaddingItem(item) && item.agent_id === reviewDeepLink.agentId
+    );
+    const agent = agentFromList ?? deepLinkFallbackAgent;
+
+    if (!agent) {
+      if (listStillLoading || fallbackStillLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      agent.repository_info ?? [],
+      reviewDeepLink.agentRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    openReviewModal(
+      agent,
+      repositoryInfo,
+      resolveReviewModalMode(agent, repositoryInfo)
+    );
+    consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    agents,
+    deepLinkFallbackAgent,
+    deepLinkFallbackLoading,
+    isLoading,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    t,
+  ]);
 
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {
@@ -272,24 +353,24 @@ export function MineAgentsView({
       });
       message.success(
         wasShared
-          ? t("agentRepository.mine.takeDownSuccess")
-          : t("agentRepository.mine.cancelApplySuccess")
+          ? t("repository.mine.takeDownSuccess")
+          : t("repository.mine.cancelApplySuccess")
       );
       closeReviewModal();
     } catch {
       message.error(
         wasShared
-          ? t("agentRepository.mine.takeDownError")
-          : t("agentRepository.mine.cancelApplyError")
+          ? t("repository.mine.takeDownError")
+          : t("repository.mine.cancelApplyError")
       );
       throw new Error("Update repository status failed");
     }
   };
 
   const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "agentRepository.mine.filter.all",
-    created: "agentRepository.mine.filter.created",
-    others: "agentRepository.mine.filter.others",
+    all: "repository.mine.filter.all",
+    created: "repository.mine.filter.created",
+    others: "repository.mine.filter.others",
   };
 
   const hasActiveFilter = ownership !== "all" || normalizedQuery.length > 0;
@@ -365,7 +446,7 @@ export function MineAgentsView({
             {t("agentRepository.mine.loadError")}
           </p>
           <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : showFilteredEmpty ? (
@@ -421,7 +502,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-label={t("agentRepository.mine.pagination.prev")}
+                aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </Button>
@@ -432,7 +513,7 @@ export function MineAgentsView({
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
                     onClick={() => onPageChange(pageNumber)}
-                    aria-label={t("agentRepository.mine.pagination.page", {
+                    aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
                     aria-current={pageNumber === page ? "page" : undefined}
@@ -446,7 +527,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-label={t("agentRepository.mine.pagination.next")}
+                aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
               </Button>

@@ -13,6 +13,9 @@ export interface TokenMetrics {
   total_output_tokens: number;
   estimated_context_tokens: number | null;
   token_threshold: number | null;
+  hard_input_budget_tokens: number | null;
+  context_processing_mode: "adaptive_compact" | "passthrough" | null;
+  output_finish_reason: string | null;
 }
 
 // Step related types
@@ -41,6 +44,7 @@ export interface StepContent {
     | typeof chatConfig.messageTypes.MEMORY_SEARCH
     | typeof chatConfig.messageTypes.PREPROCESS
     | typeof chatConfig.messageTypes.VERIFICATION
+    | typeof chatConfig.messageTypes.HISTORY_SUMMARY
     | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
   content: string;
   expanded: boolean;
