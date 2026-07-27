@@ -215,6 +215,7 @@ def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
         status="shared",
         user_id="user-1",
         tenant_id="tenant-1",
+        content=None,
     )
 
 

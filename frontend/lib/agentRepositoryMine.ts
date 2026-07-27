@@ -166,10 +166,10 @@ export interface MineCardRepositoryStatusBadge {
 }
 
 const MINE_STATUS_LABEL_KEYS = {
-  reviewing: "agentRepository.mine.status.reviewing",
+  reviewing: "repository.status.reviewing",
   updateReviewing: "agentRepository.mine.status.updateReviewing",
-  listed: "agentRepository.mine.status.listed",
-  rejected: "agentRepository.mine.status.rejected",
+  listed: "repository.status.listed",
+  rejected: "repository.status.rejected",
 } as const;
 
 export function getMineCardRepositoryStatusBadge(

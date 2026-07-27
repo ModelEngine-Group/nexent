@@ -873,6 +873,7 @@ class McpMarketRecord(TableBase):
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+    content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
     download_count = Column(Integer, default=0, doc="Cumulative download/install count")
     review_status = Column(String(30), default="not_shared",
                            doc="Listing status: not_shared / pending_review / rejected / shared")
@@ -1110,6 +1111,7 @@ class SkillRepository(TableBase):
     skill_zip_base64 = Column(Text, nullable=False, doc="Frozen skill ZIP payload encoded as base64")
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared / pending_review / rejected / shared")
+    content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
 
 
 class UserTokenInfo(TableBase):

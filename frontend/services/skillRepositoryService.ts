@@ -147,7 +147,8 @@ export async function createSkillRepositoryListing(
 
 export async function updateSkillRepositoryStatus(
   skillRepositoryId: number,
-  status: SkillRepositoryListingStatus
+  status: SkillRepositoryListingStatus,
+  content?: string
 ): Promise<SkillRepositoryListingItem> {
   try {
     const response = await fetchWithErrorHandling(
@@ -158,7 +159,10 @@ export async function updateSkillRepositoryStatus(
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(content != null && content !== "" ? { content } : {}),
+        }),
       }
     );
 

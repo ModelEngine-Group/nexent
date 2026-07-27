@@ -196,7 +196,7 @@ export function AgentRepositoryCopyDialog({
             {t("agentRepository.copy.loadError")}
           </p>
           <Button type="primary" onClick={() => refetch()} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : precheck ? (

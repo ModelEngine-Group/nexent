@@ -3,31 +3,28 @@
 import { useEffect, useState } from "react";
 import { Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
-import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
-export type AgentRepositoryReviewAction = "approve" | "reject";
+import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 
-interface AgentRepositoryReviewConfirmModalProps {
+export type SkillRepositoryReviewAction = "approve" | "reject";
+
+interface SkillRepositoryReviewConfirmModalProps {
   open: boolean;
-  action: AgentRepositoryReviewAction | null;
-  listing: AgentRepositoryListingItem | null;
+  action: SkillRepositoryReviewAction | null;
+  listing: SkillRepositoryListingItem | null;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (content?: string) => Promise<void>;
 }
 
-function getListingTitle(listing: AgentRepositoryListingItem) {
-  return listing.display_name?.trim() || listing.name?.trim() || "";
-}
-
-export function AgentRepositoryReviewConfirmModal({
+export function SkillRepositoryReviewConfirmModal({
   open,
   action,
   listing,
   loading = false,
   onClose,
   onConfirm,
-}: AgentRepositoryReviewConfirmModalProps) {
+}: SkillRepositoryReviewConfirmModalProps) {
   const { t } = useTranslation("common");
   const [reviewOpinion, setReviewOpinion] = useState("");
 
@@ -43,7 +40,7 @@ export function AgentRepositoryReviewConfirmModal({
 
   const isApprove = action === "approve";
   const title =
-    getListingTitle(listing) || t("agentRepository.card.untitled");
+    listing.name?.trim() || t("skillRepository.common.untitled");
 
   const handleOk = async () => {
     const trimmed = reviewOpinion.trim();
@@ -79,13 +76,13 @@ export function AgentRepositoryReviewConfirmModal({
         </p>
         <div className="space-y-2">
           <label
-            htmlFor="agent-repository-review-opinion"
+            htmlFor="skill-repository-review-opinion"
             className="block text-sm font-medium text-slate-700 dark:text-slate-200"
           >
             {t("repository.review.reviewOpinionLabel")}
           </label>
           <Input.TextArea
-            id="agent-repository-review-opinion"
+            id="skill-repository-review-opinion"
             value={reviewOpinion}
             onChange={(event) => setReviewOpinion(event.target.value)}
             placeholder={t("repository.review.reviewOpinionPlaceholder")}
