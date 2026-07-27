@@ -23,12 +23,12 @@ from consts.exceptions import (
     ConversationNotFoundError,
 )
 from consts.model import AgentRequest, ToolParamsRequest
-from database.conversation_db import get_conversation_messages, get_source_searches_by_message
+from database.conversation_db import get_conversation_messages
 from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
-    get_agent_id_by_name
+    get_agent_by_name_impl,
 )
 from services.runtime_state_service import runtime_state_service
 from services.agent_version_service import list_published_agents_impl
@@ -349,11 +349,6 @@ def _build_title_update_idempotency_key(tenant_id: str, conversation_id: int, ti
 # -----------------------------
 # Agent resolver
 # -----------------------------
-async def get_agent_info_by_name(agent_name: str, tenant_id: str) -> int:
-    try:
-        return await get_agent_id_by_name(agent_name=agent_name, tenant_id=tenant_id)
-    except Exception as _:
-        raise Exception(f"Failed to get agent id for agent_name: {agent_name} in tenant_id: {tenant_id}")
 
 
 async def start_streaming_chat(
@@ -382,7 +377,9 @@ async def start_streaming_chat(
 
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
-        agent_id = await get_agent_id_by_name(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        agent_info = get_agent_by_name_impl(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        agent_id = agent_info["agent_id"]
+        latest_version_no = agent_info["latest_version_no"]
         normalized_attachments = _normalize_northbound_attachments(
             attachments=attachments,
             user_id=ctx.user_id,
@@ -400,12 +397,22 @@ async def start_streaming_chat(
             is_debug=False,
             tool_params=tool_params,
             model_id=model_id,
+            version_no=latest_version_no,
         )
 
-        # Synchronously persist the user message before starting the stream to avoid race conditions
+        # Persist the user message off the event loop before starting the stream.
+        # We deliberately keep this synchronous step (not async submit) for
+        # northbound reliability -- external callers may not have SSE reconnect
+        # capability, so a late INSERT failure after the stream starts would
+        # silently lose the user message.  asyncio.to_thread avoids blocking
+        # the event loop while preserving the synchronous commit semantics.
         try:
-            save_conversation_user(
-                agent_request, user_id=ctx.user_id, tenant_id=ctx.tenant_id)
+            await asyncio.to_thread(
+                save_conversation_user,
+                agent_request,
+                ctx.user_id,
+                ctx.tenant_id,
+            )
         except Exception as e:
             raise Exception(f"Failed to persist user message: {str(e)}")
 
@@ -502,29 +509,6 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
-def _format_search_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Format a search source record for API response."""
-    search_item = {
-        "title": record.get("source_title", ""),
-        "text": record.get("source_content", ""),
-        "source_type": record.get("source_type", ""),
-        "url": record.get("source_location", ""),
-        "filename": record.get("source_title", "") if record.get("source_type") == "file" else None,
-        "published_date": None,
-        "score": float(record["score_overall"]) if record.get("score_overall") is not None else None,
-        "tool_sign": record.get("tool_sign", ""),
-        "cite_index": record.get("cite_index")
-    }
-
-    if record.get("published_date"):
-        if hasattr(record["published_date"], "strftime"):
-            search_item["published_date"] = record["published_date"].strftime("%Y-%m-%d")
-        else:
-            search_item["published_date"] = str(record["published_date"])[:10]
-
-    return search_item
-
-
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
     history = get_conversation_messages(conversation_id)
@@ -537,23 +521,14 @@ async def get_conversation_history_internal(ctx: NorthboundContext, conversation
             try:
                 minio_files = json.loads(raw_minio_files) if isinstance(raw_minio_files, str) else raw_minio_files
             except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Failed to parse minio_files for message {message.get('message_id')}")
-
-        # Fetch search results for this message
-        message_id = message.get("message_id")
-        search_results = []
-        if message_id:
-            try:
-                search_records = get_source_searches_by_message(message_id, user_id=ctx.user_id)
-                search_results = [_format_search_record(r) for r in search_records]
-            except Exception as e:
-                logger.warning(f"Failed to get search records for message {message_id}: {str(e)}")
-
+                logger.warning(
+                    "Failed to parse minio_files for message %s",
+                    message.get("message_id"),
+                )
         result.append({
             "role": message["message_role"],
             "content": message["message_content"],
             "minio_files": minio_files,
-            "search": search_results
         })
 
     response = {
