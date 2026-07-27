@@ -6,10 +6,10 @@ The minimum verifiable implementation currently provides only these capabilities
 
 - Reuse the ordinary chat UI through `/newchat?mode=nl2agent` and its existing stream rendering.
 - Construct NL2Agent in backend memory for every request without saving an agent or conversation.
-- Bind only `search_installed_mcp_tools` and display its structured JSON in the existing tool Result area.
-- Do not implement recommendation cards, a final confirmation card, the confirmation API, or target-agent creation.
+- Bind only `search_installed_mcp_tools` and render a read-only recommendation card from assistant-ui metadata in its result.
+- Do not implement the final confirmation card, confirmation API, or target-agent creation.
 
-The post-search flow in Section 3, Sections 7 through 9, and their full acceptance cases describe the later target design rather than currently implemented behavior.
+The flow after the recommendation card in Section 3, Section 5, Section 6.4, Section 7.3, Sections 8 through 9, and their full acceptance cases describe the later target design rather than currently implemented behavior.
 
 ## 1. Design Goals
 
@@ -99,7 +99,7 @@ flowchart TD
     E --> C
     D -- Yes --> F[Generate ephemeral agent draft]
     F --> G[Call search_installed_mcp_tools]
-    G --> H[Emit tool recommendation card over SSE]
+    G --> H[Render tool recommendation card from execution_logs]
     H --> I{Enough information to create the agent?}
     I -- No --> J[Continue conversation and collect requirements]
     J --> C
@@ -123,15 +123,17 @@ After the final confirmation card is emitted, the flow enters `awaiting_confirma
 
 ### 4.1 Duty Prompt
 
-NL2Agent has no standalone YAML file, database prompt record, or prompt-loader entry. Whenever the ephemeral `AgentConfig` is built, the backend assembles role, workflow, keyword schema, constraints, and final-response sections from the authenticated language, runtime tool name, and result limit. It injects this text through `AgentConfig.instructions` into the SDK's default CodeAgent system prompt.
+NL2Agent has no standalone YAML file, database prompt record, or prompt-loader entry. Whenever the ephemeral `AgentConfig` is built, the backend assembles role, workflow, keyword schema, few-shots, constraints, and final-response sections from the authenticated language, runtime tool name, and result limit. It injects this text through `AgentConfig.instructions` into the SDK's default CodeAgent system prompt.
 
 The duty prompt uses consistent stage-specific instructions:
 
 - `clarify`: Learn the agent's goals, usage scenario, inputs, outputs, constraints, and success criteria through free-form conversation. Do not require a fixed structure or emit a requirements confirmation card.
-- `tool_search`: Once there is enough information to identify required capabilities, generate 1 to 10 concise capability keywords and call `search_installed_mcp_tools`.
+- `tool_search`: Once there is enough information to identify required capabilities, generate 1 to 10 concise capability keywords, call `search_installed_mcp_tools`, and preserve the result with `print(result)`.
 - `ready_to_create` (later phase): Once the draft is sufficiently complete and a tool search has completed in the current run, call `present_creation_confirmation_card`. The current MVP explicitly prohibits entering this phase or claiming that an agent was created.
-- Tool Observations tell the model the search result, card generation result, and allowed next action.
+- Tool Observations tell the model the search result and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
+
+The prompt contains two concise few-shots: ask one clarification question without a tool call when the request is unclear; generate keywords, call the MCP tool, and print its original result when the request is clear. The examples contain no fixed Observation, preventing the model from copying or inventing search results. Executable actions consistently use `<code>...</code>` tags.
 
 ### 4.2 Runtime Tool Construction
 
@@ -165,6 +167,8 @@ mcp_host = [{
 
 `search_installed_mcp_tools` exposes one model-visible `keywords: string[]` argument. The Local MCP schema rejects type mismatches; the handler validates 1 to 10 trimmed, non-empty strings of at most 100 characters and de-duplicates normalized values while preserving order.
 
+The MCP tool description includes a `print(result)` call example so the Agent writes the returned JSON unchanged to the existing `execution_logs`.
+
 The successful Observation has this fixed shape:
 
 ```python
@@ -191,7 +195,18 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     retryable: Literal[True]
 ```
 
-An empty result is a successful completed search. Keyword validation, database, or ranking failures return retryable error Observations without internal exception details. The existing `execution_logs` mapping displays this structured JSON in ToolFallback's Result area.
+Serialized success, empty, and error Observations all add the following presentation metadata:
+
+```json
+{
+  "_assistant_ui": {
+    "type": "data",
+    "name": "tool_recommendations"
+  }
+}
+```
+
+An empty result is a successful completed search. Keyword validation, database, or ranking failures return retryable error Observations without internal exception details. The existing `execution_logs` mapping retains this structured JSON in ToolFallback's Result area while the shared frontend adapter also converts it into a tool-recommendation data part.
 
 `present_creation_confirmation_card` and shared per-run card state are deferred to the later card phase.
 
@@ -286,11 +301,11 @@ Fixed rules:
 | Default selection threshold | `0.65` |
 | Tie-break order | Ascending `tool_id` |
 
-Candidates below the minimum score are discarded. The remaining candidates are sorted by descending score and then ascending `tool_id`, truncated to five, and their scores are rounded to four decimal places for the tool Observation and card payload.
+Candidates below the minimum score are discarded. The remaining candidates are sorted by descending score and then ascending `tool_id`, truncated to five, and their scores are rounded to four decimal places in the tool Observation.
 
 The score thresholds are initial values and are expected to be tuned with real usage data.
 
-When no tool matches, the tool emits an empty-state recommendation card, and creation without tool bindings remains allowed.
+When no tool matches, the frontend renders an empty-state recommendation card from the successful Observation.
 
 ### 6.4 Draft Revisions and Tool Selection
 
@@ -302,37 +317,29 @@ When no tool matches, the tool emits an empty-state recommendation card, and cre
 - Because the confirmation card is always produced in the same run as a completed search, its `draft_revision` always equals the latest recommendation card's revision; no cross-revision matching is needed.
 - The final confirmation card always reads the latest selection state from the tool card with the same `draft_revision`.
 
-## 7. SSE Cards and Frontend State
+## 7. Tool Recommendation Card and Frontend State
 
-### 7.1 Card Envelope
+### 7.1 Tool Result Presentation Metadata
 
-Both runtime tools emit through the existing `ProcessType.CARD`:
+`search_installed_mcp_tools` carries generic assistant-ui presentation metadata in its business result:
 
 ```ts
-type NL2AgentCardEnvelope<T> = {
-  card_id: string;
-  draft_revision: string;
-  schema_version: 1;
-  name:
-    | "nl2agent_tool_recommendations_card"
-    | "nl2agent_creation_confirmation_card";
-  status: "pending" | "confirmed" | "superseded" | "failed";
-  data: T;
+type AssistantUiMetadata = {
+  type: "data";
+  name: "tool_recommendations";
 };
 ```
 
-The server generates both `card_id` and `draft_revision`. Cards are delivered only through the current SSE stream and are not stored in conversation message units.
+The frontend removes `_assistant_ui` from the business result and uses the remaining result as the assistant-ui data part's `data`. This protocol does not depend on the agent name, runtime mode, or tool-name detection.
 
 ### 7.2 Tool Recommendation Card
 
 The tool recommendation card contains:
 
-- The current `draft_revision`.
 - Each recommended tool's `tool_id`, name, description, MCP source, labels, and match score.
-- Default selected tool IDs.
 - Empty-result or search-failure state.
 
-The frontend owns selection state for the current page and prevents duplicate actions while a request is in progress.
+The current recommendation card is read-only.
 
 ### 7.3 Final Confirmation Card
 
@@ -348,16 +355,16 @@ The card exposes only a confirmation button. The frontend dynamically displays t
 
 ### 7.4 assistant-ui Mapping
 
-Verified against the current frontend (`@assistant-ui/react ^0.14.20`, new chat under `app/[locale]/newchat/`): the shared streaming adapter (`newchat/adapter/remote-chat-model-adapter.ts`) currently maps `card` chunks to `null` (skipped), and the message renderer (`thread.tsx`) supports data parts only through the generic `dataRendererUI` path; the installed version has no `by_name` component registry.
+The currently locked `@assistant-ui/react 0.14.27` supports data renderer registration through `components.data.by_name`. New chat lives under `app/[locale]/newchat/`, and its shared streaming adapter handles SSE for ordinary agents and NL2Agent.
 
-The current MVP integrates as follows:
+Tool results are mapped as follows:
 
-- `/newchat?mode=nl2agent` uses a local assistant-ui runtime and an in-memory NL2Agent display object without loading the remote conversation list.
-- The shared streaming adapter switches to `/api/agent/nl2agent/run` through `runConfig.custom.runtimeMode` and omits `agent_id`, `conversation_id`, model overrides, resume, and title callbacks.
-- Existing `tool` and `execution_logs` mappings display the structured JSON in ToolFallback; no `card` chunk parsing or card component registration is added.
-- Ordinary `/newchat` continues to use its existing remote conversation runtime unchanged.
-
-NL2Agent has no historical conversation adapter. Existing non-NL2Agent text, reasoning, tool-call, source, and card rendering remains unchanged.
+1. `execution_logs` remains attached to the preceding tool call.
+2. A shared converter parses the complete JSON and reads `_assistant_ui`.
+3. `AssistantPartType` and `mapChunkType` add the `data` mapping.
+4. The adapter creates `{type: "data", name: "tool_recommendations", data: result}`.
+5. Live streaming and historical-message restoration reuse the same converter.
+6. `components.data.by_name.tool_recommendations` renders recommendation, empty, and error states.
 
 ## 8. Final Confirmation API
 
@@ -446,8 +453,9 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - Tool search returns only installed and available MCP tools from the current tenant.
 - The Local MCP handler calls the tenant-scoped query-text search function exactly once and never invokes another tool, agent, or LLM.
 - Search normalization, fields, score threshold, Top 5 limit, score rounding, default selection, and tie-break order remain deterministic.
-- Successful Observations and card payloads contain the same ordered recommendation DTOs and expose no executable tool configuration.
-- Empty search results count as successful searches, while backend failures emit a failed card and do not satisfy the confirmation precondition.
+- Success and error Observations carry fixed `_assistant_ui` metadata and expose no executable tool configuration.
+- The Chinese and English duty prompts contain clarification and MCP tool-call few-shots whose tool example preserves `print(result)`.
+- Empty search results count as successful searches, while backend failures return sanitized errors with presentation metadata.
 - The confirmation tool rejects calls when no tool search has completed in the current run, and its error Observation instructs the model to search first.
 - The confirmation API validates the draft, tool permissions, positive IDs, and stable deduplication.
 - Forged, cross-tenant, non-MCP, and unavailable tools are rejected.
@@ -458,8 +466,8 @@ Repeated submissions with the same idempotency key return the existing draft wit
 
 - The dedicated Create Agent entry starts NL2Agent, and the ordinary agent selector does not show it.
 - Current-page history supports multi-turn clarification, while refresh or exit does not restore the flow.
-- The two card types map to independent assistant-ui components.
-- The tool card correctly renders recommendations, defaults, multi-select, empty, and failed states.
+- Presentation metadata in `execution_logs` maps through `mapChunkType` to an assistant-ui data part.
+- The tool recommendation card renders recommendation, empty, and failed states.
 - A new `draft_revision` supersedes older recommendation and confirmation cards.
 - The final confirmation card displays the draft summary and latest tool selection and exposes only confirmation.
 - Successful confirmation shows the draft entry point; failure does not show a success state.

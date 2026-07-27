@@ -6,10 +6,10 @@
 
 - 通过 `/newchat?mode=nl2agent` 复用普通聊天界面和流式消息渲染。
 - 每次请求在后端内存中临时构建 NL2Agent，不保存智能体或会话。
-- 仅绑定 `search_installed_mcp_tools`，并在现有工具 Result 区域展示结构化 JSON。
-- 不实现推荐卡、最终确认卡、确认接口或目标智能体创建。
+- 仅绑定 `search_installed_mcp_tools`，并根据工具结果中的 assistant-ui 元数据渲染只读推荐卡。
+- 不实现最终确认卡、确认接口或目标智能体创建。
 
-本文第 3 节中搜索之后的流程、第 7 至 9 节以及对应的完整验收项描述后续目标设计，不代表当前版本已经实现。
+本文第 3 节中推荐卡之后的流程、第 5 节、第 6.4 节、第 7.3 节、第 8 至 9 节以及对应的完整验收项描述后续目标设计，不代表当前版本已经实现。
 
 ## 1. 设计目标
 
@@ -99,7 +99,7 @@ flowchart TD
     E --> C
     D -- 是 --> F[生成临时智能体草稿]
     F --> G[调用 search_installed_mcp_tools]
-    G --> H[通过 SSE 推送工具推荐卡]
+    G --> H[从 execution_logs 渲染工具推荐卡]
     H --> I{信息是否足以创建智能体}
     I -- 否 --> J[继续对话并补充需求]
     J --> C
@@ -123,15 +123,17 @@ flowchart TD
 
 ### 4.1 职责提示词
 
-NL2Agent 不使用独立 YAML、数据库提示词记录或提示词加载器。每次构建临时 `AgentConfig` 时，后端根据鉴权语言、工具名和最大结果数即时拼接角色、工作流、关键词结构、约束和最终回答规则，并通过 `AgentConfig.instructions` 注入 SDK 默认 CodeAgent system prompt。
+NL2Agent 不使用独立 YAML、数据库提示词记录或提示词加载器。每次构建临时 `AgentConfig` 时，后端根据鉴权语言、工具名和最大结果数即时拼接角色、工作流、关键词结构、few-shot、约束和最终回答规则，并通过 `AgentConfig.instructions` 注入 SDK 默认 CodeAgent system prompt。
 
 职责提示词使用一致的分阶段指令：
 
 - `clarify`：通过自由对话了解智能体目标、使用场景、输入、输出、约束和成功标准。不得要求用户填写固定结构，也不得生成需求确认卡。
-- `tool_search`：当信息足以判断所需能力时，生成 1 到 10 个简洁的能力关键词，然后调用 `search_installed_mcp_tools`。
+- `tool_search`：当信息足以判断所需能力时，生成 1 到 10 个简洁的能力关键词，调用 `search_installed_mcp_tools` 并原样 `print(result)`。
 - `ready_to_create`（后续阶段）：当草稿已经足够完整且本次运行内已完成工具搜索时，调用 `present_creation_confirmation_card`。当前 MVP 明确禁止进入该阶段或声称已经创建智能体。
-- 工具返回的 Observation 用于告知搜索结果、卡片生成结果及下一步允许的行为。
+- 工具返回的 Observation 用于告知搜索结果及下一步允许的行为。
 - 模型不得生成或覆盖用户 ID、租户 ID、授权信息、卡片 ID 和工具凭据。
+
+提示词包含两组精简 few-shot：需求不明确时只提出澄清问题；需求明确时生成关键词、调用 MCP 工具并输出原始结果。示例不包含固定 Observation，避免模型复制或编造搜索结果。可执行动作统一使用 `<code>...</code>` 标签。
 
 ### 4.2 运行时工具构建
 
@@ -165,6 +167,8 @@ mcp_host = [{
 
 `search_installed_mcp_tools` 只向模型暴露一个 `keywords: string[]` 参数。Local MCP Schema 会拒绝类型错误；处理函数校验 1 到 10 个去除首尾空格后的非空字符串，每项最长 100 个字符，并按规范化值去重且保持顺序。
 
+MCP 工具描述包含 `print(result)` 调用示例，要求 Agent 将返回的 JSON 原样写入现有 `execution_logs`。
+
 成功 Observation 使用以下固定结构：
 
 ```python
@@ -191,7 +195,18 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     retryable: Literal[True]
 ```
 
-空结果属于成功完成的搜索。关键词校验、数据库或排序失败时，处理函数返回不包含内部异常细节的可重试错误 Observation。结构化 JSON 由现有 `execution_logs` 映射显示在 ToolFallback Result 中。
+成功、空结果和错误 Observation 的序列化 JSON 均增加以下展示元数据：
+
+```json
+{
+  "_assistant_ui": {
+    "type": "data",
+    "name": "tool_recommendations"
+  }
+}
+```
+
+空结果属于成功完成的搜索。关键词校验、数据库或排序失败时，处理函数返回不包含内部异常细节的可重试错误 Observation。结构化 JSON 由现有 `execution_logs` 映射保留在 ToolFallback Result 中，同时被通用前端适配器转换为工具推荐 data part。
 
 `present_creation_confirmation_card` 和单次运行共享状态留待后续卡片阶段实现。
 
@@ -286,11 +301,11 @@ score = max(
 | 默认选中阈值 | `0.65` |
 | 同分排序 | `tool_id` 升序 |
 
-低于最低分数的候选项直接丢弃；其余结果先按分数降序、再按 `tool_id` 升序排列，截取前五项，并在工具 Observation 和卡片载荷中把分数保留四位小数。
+低于最低分数的候选项直接丢弃；其余结果先按分数降序、再按 `tool_id` 升序排列，截取前五项，并在工具 Observation 中把分数保留四位小数。
 
 评分阈值为初始值，待真实使用数据调参。
 
-没有匹配结果时由工具发送空状态推荐卡，并允许用户不绑定工具完成创建。
+没有匹配结果时，前端根据成功 Observation 渲染空状态推荐卡。
 
 ### 6.4 草稿修订与工具选择
 
@@ -302,37 +317,29 @@ score = max(
 - 确认卡始终与同一次运行内已完成的搜索配对，其 `draft_revision` 恒等于最新推荐卡的修订，无需跨修订匹配。
 - 最终确认卡始终读取同一 `draft_revision` 下最新工具卡的选择状态。
 
-## 7. SSE 卡片和前端状态
+## 7. 工具推荐卡和前端状态
 
-### 7.1 卡片信封
+### 7.1 工具结果展示元数据
 
-两个运行时工具通过现有 `ProcessType.CARD` 输出：
+`search_installed_mcp_tools` 在业务结果中携带通用 assistant-ui 展示元数据：
 
 ```ts
-type NL2AgentCardEnvelope<T> = {
-  card_id: string;
-  draft_revision: string;
-  schema_version: 1;
-  name:
-    | "nl2agent_tool_recommendations_card"
-    | "nl2agent_creation_confirmation_card";
-  status: "pending" | "confirmed" | "superseded" | "failed";
-  data: T;
+type AssistantUiMetadata = {
+  type: "data";
+  name: "tool_recommendations";
 };
 ```
 
-`card_id` 和 `draft_revision` 均由服务端生成。卡片只通过当前 SSE 流发送，不写入 conversation message units。
+前端将 `_assistant_ui` 从业务结果中移除，再把剩余结果作为 assistant-ui data part 的 `data`。该协议不依赖 Agent 名称、运行模式或工具名称判断。
 
 ### 7.2 工具推荐卡
 
 工具推荐卡包含：
 
-- 当前 `draft_revision`。
 - 推荐工具的 `tool_id`、名称、说明、MCP 来源、标签和匹配分数。
-- 默认选中的工具 ID。
 - 空结果或搜索失败状态。
 
-前端负责维护当前页面中的选择状态，请求进行中禁止重复操作。
+当前推荐卡为只读展示。
 
 ### 7.3 最终确认卡
 
@@ -348,16 +355,16 @@ type NL2AgentCardEnvelope<T> = {
 
 ### 7.4 assistant-ui 映射
 
-已对照当前前端验证（`@assistant-ui/react ^0.14.20`，新聊天位于 `app/[locale]/newchat/`）：共享流式适配器（`newchat/adapter/remote-chat-model-adapter.ts`）目前将 `card` 块映射为 `null`（直接跳过），消息渲染器（`thread.tsx`）仅通过通用 `dataRendererUI` 路径支持 data part，当前安装版本没有 `by_name` 组件注册机制。
+当前锁定的 `@assistant-ui/react 0.14.27` 支持通过 `components.data.by_name` 注册 data renderer。新聊天位于 `app/[locale]/newchat/`，共享流式适配器统一处理普通 Agent 和 NL2Agent 的 SSE。
 
-当前 MVP 按以下方式集成：
+工具结果按以下方式映射：
 
-- `/newchat?mode=nl2agent` 使用本地 assistant-ui runtime 和内存态 NL2Agent 展示对象，不加载远程会话列表。
-- 共享流式适配器根据 `runConfig.custom.runtimeMode` 切换到 `/api/agent/nl2agent/run`，并省略 `agent_id`、`conversation_id`、模型覆盖、resume 和标题回调。
-- 现有 `tool` 与 `execution_logs` 映射将结构化 JSON 显示在 ToolFallback 中，不解析 `card` 块，也不注册卡片组件。
-- 普通 `/newchat` 继续使用原有远程会话 runtime，行为不变。
-
-NL2Agent 不提供历史会话适配器。现有非 NL2Agent 的 text、reasoning、tool-call、source 和 card 渲染保持不变。
+1. `execution_logs` 继续关联到之前的 tool-call。
+2. 共享转换函数解析完整 JSON，并读取 `_assistant_ui`。
+3. `AssistantPartType` 和 `mapChunkType` 增加 `data` 映射。
+4. 适配器生成 `{type: "data", name: "tool_recommendations", data: result}`。
+5. 实时流和历史消息恢复复用同一转换函数。
+6. `components.data.by_name.tool_recommendations` 渲染推荐列表、空状态和错误状态。
 
 ## 8. 最终确认接口
 
@@ -446,8 +453,9 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 工具搜索仅返回当前租户已安装且可用的 MCP 工具。
 - Local MCP 处理函数只调用一次租户范围内的查询文本搜索函数，绝不调用其他工具、智能体或 LLM。
 - 搜索规范化、检索字段、评分阈值、Top 5、分数取整、默认选择和同分排序保持确定性。
-- 成功 Observation 与卡片载荷使用相同顺序的推荐 DTO，且不暴露可执行工具配置。
-- 空结果视为成功搜索；后端失败时发送失败卡片，且不满足确认前置条件。
+- 成功和错误 Observation 均携带固定 `_assistant_ui`，且不暴露可执行工具配置。
+- 中英文职责提示词包含澄清和 MCP 工具调用 few-shot，工具调用示例原样 `print(result)`。
+- 空结果视为成功搜索；后端失败时返回带展示元数据的脱敏错误。
 - 最终确认工具在本次运行内没有已完成工具搜索时拒绝生成卡片，并通过错误 Observation 要求模型先搜索。
 - 确认接口正确校验草稿、工具权限、正整数 ID 和稳定去重。
 - 伪造、跨租户、非 MCP 和不可用工具均被拒绝。
@@ -458,8 +466,8 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 
 - 创建智能体专用入口能够启动 NL2Agent，普通智能体选择器不展示 NL2Agent。
 - 当前页面历史支持多轮澄清，刷新或退出后不恢复流程。
-- 两种卡片分别映射到独立的 assistant-ui 组件。
-- 工具卡正确展示推荐、默认选择、多选、空状态和失败状态。
+- `execution_logs` 中的展示元数据通过 `mapChunkType` 转换为 assistant-ui data part。
+- 工具推荐卡正确展示推荐列表、空状态和失败状态。
 - 新 `draft_revision` 正确取代旧推荐卡和旧确认卡。
 - 最终确认卡展示草稿摘要和最新工具选择，并且只提供确认按钮。
 - 确认成功后展示草稿入口，失败时不显示成功状态。
