@@ -219,6 +219,8 @@ services:
       - nexent
     ports:
       - "3000:3000"
+    env_file:
+      - ../../env/.env
     environment:
       - HTTP_BACKEND=http://nexent-config:5010
       - WS_BACKEND=ws://nexent-runtime:5014

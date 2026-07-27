@@ -29,6 +29,9 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          envFrom:
+            - configMapRef:
+                name: nexent-config
           env:
             - name: HOSTNAME
               value: "0.0.0.0"

@@ -17,6 +17,8 @@ require("dotenv").config({
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
+require("./build-config");
+
 const dev = process.env.NODE_ENV !== "production";
 const app = next({
   dev,

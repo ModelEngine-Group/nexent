@@ -10,7 +10,7 @@ const resources = {
   },
 }
 
-const resourcesCustom = {
+export const resourcesCustom = {
   en: {
     custom: {},
     replacemenKeyArr: [],
