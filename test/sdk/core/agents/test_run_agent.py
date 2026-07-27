@@ -624,6 +624,30 @@ async def test_agent_run_skips_loop_when_thread_not_alive(basic_agent_run_info, 
     assert received == ["final_only"]
 
 
+@pytest.mark.asyncio
+async def test_agent_run_stops_worker_when_stream_is_closed(basic_agent_run_info, monkeypatch):
+    """Closing the SSE generator should propagate cancellation to the agent thread."""
+    basic_agent_run_info.observer.get_cached_message.return_value = ["first"]
+
+    class FakeThread:
+        def __init__(self, target=None, args=None):  # pylint: disable=unused-argument
+            pass
+
+        def start(self):
+            pass
+
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr(run_agent, "Thread", FakeThread)
+
+    stream = run_agent.agent_run(basic_agent_run_info)
+    assert await anext(stream) == "first"
+    await stream.aclose()
+
+    assert basic_agent_run_info.stop_event.is_set()
+
+
 # ----------------------------------------------------------------------------
 # Additional tests for improved coverage
 # ----------------------------------------------------------------------------

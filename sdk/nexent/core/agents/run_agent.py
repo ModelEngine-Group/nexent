@@ -132,14 +132,22 @@ async def agent_run(agent_run_info: AgentRunInfo):
     thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
     thread_agent.start()
 
-    while thread_agent.is_alive():
+    try:
+        while thread_agent.is_alive():
+            cached_message = observer.get_cached_message()
+            for message in cached_message:
+                yield message
+                if len(cached_message) < 8:
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
+
         cached_message = observer.get_cached_message()
         for message in cached_message:
             yield message
-            if len(cached_message) < 8:
-                await asyncio.sleep(0.05)
-        await asyncio.sleep(0.1)
-
-    cached_message = observer.get_cached_message()
-    for message in cached_message:
-        yield message
+    finally:
+        # StreamingResponse closes this async generator when its client
+        # disconnects. Propagate that cancellation to the synchronous agent
+        # thread so it stops after the current blocking model/tool call instead
+        # of continuing the remaining agent steps in the background.
+        if thread_agent.is_alive():
+            agent_run_info.stop_event.set()
