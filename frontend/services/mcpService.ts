@@ -691,7 +691,7 @@ export const streamMcpContainerLogs = async (
 /**
  * Upload MCP image and start container
  */
-export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null) => {
+export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null, groupIds?: string, ingroupPermission?: string, sharedFields?: string) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -701,6 +701,15 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
     }
     if (envVars) {
       formData.append('env_vars', envVars);
+    }
+    if (groupIds) {
+      formData.append('group_ids', groupIds);
+    }
+    if (ingroupPermission) {
+      formData.append('ingroup_permission', ingroupPermission);
+    }
+    if (sharedFields) {
+      formData.append('shared_fields', sharedFields);
     }
     if (tenantId) {
       formData.append('tenant_id', tenantId);
