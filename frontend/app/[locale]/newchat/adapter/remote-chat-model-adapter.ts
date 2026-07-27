@@ -945,7 +945,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       );
     } catch (error: unknown) {
-      if (error instanceof Error && error.message === "请求已被取消") {
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.message === "请求已被取消")
+      ) {
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
       }
