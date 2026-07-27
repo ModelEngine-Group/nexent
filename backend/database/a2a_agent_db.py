@@ -240,6 +240,7 @@ def create_external_agent_from_url(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "custom_headers": getattr(agent, "custom_headers", None),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -347,6 +348,7 @@ def create_external_agent_from_nacos(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "custom_headers": getattr(agent, "custom_headers", None),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -385,6 +387,7 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "agent_url": agent.agent_url,
             "streaming": agent.streaming,
             "protocol_type": agent.protocol_type,
+            "custom_headers": getattr(agent, "custom_headers", None),
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
@@ -443,6 +446,7 @@ def list_external_agents(
                 "agent_url": agent.agent_url,
                 "streaming": agent.streaming,
                 "protocol_type": agent.protocol_type,
+                "custom_headers": getattr(agent, "custom_headers", None),
                 "supported_interfaces": agent.supported_interfaces,
                 "source_type": agent.source_type,
                 "source_url": agent.source_url,
@@ -519,6 +523,74 @@ def _find_interface_by_protocol_type(
     return None
 
 
+def _validate_custom_headers(custom_headers: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """Validate A2A custom headers."""
+    if custom_headers is None:
+        return None
+    if not isinstance(custom_headers, dict):
+        raise ValueError("custom_headers must be an object")
+
+    sanitized = {}
+    for key, value in custom_headers.items():
+        header_name = str(key).strip()
+        if not header_name:
+            raise ValueError("custom header names cannot be empty")
+        if any(ch in header_name for ch in "\r\n:"):
+            raise ValueError(f"invalid custom header name: {header_name}")
+        sanitized[header_name] = str(value)
+    return sanitized
+
+
+def update_external_agent_call_settings(
+    external_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    custom_headers: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Update custom call settings for an external A2A agent."""
+    sanitized_headers = _validate_custom_headers(custom_headers)
+
+    with _get_db_session() as session:
+        agent = session.query(A2AExternalAgent).filter(
+            A2AExternalAgent.id == external_agent_id,
+            A2AExternalAgent.tenant_id == tenant_id,
+            A2AExternalAgent.delete_flag != 'Y'
+        ).first()
+
+        if not agent:
+            return None
+
+        if custom_headers is not None:
+            setattr(agent, "custom_headers", sanitized_headers)
+        agent.updated_by = user_id
+        agent.update_time = datetime.now(timezone.utc)
+        session.flush()
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "description": agent.description,
+            "version": agent.version,
+            "agent_url": agent.agent_url,
+            "protocol_type": agent.protocol_type,
+            "custom_headers": getattr(agent, "custom_headers", None),
+            "streaming": agent.streaming,
+            "supported_interfaces": agent.supported_interfaces,
+            "source_type": agent.source_type,
+            "source_url": agent.source_url,
+            "nacos_config_id": agent.nacos_config_id,
+            "nacos_agent_name": agent.nacos_agent_name,
+            "raw_card": agent.raw_card,
+            "is_available": agent.is_available,
+            "last_check_at": agent.last_check_at.isoformat() if agent.last_check_at else None,
+            "last_check_result": agent.last_check_result,
+            "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
+            "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
+            "create_time": agent.create_time.isoformat() if agent.create_time else None,
+            "update_time": agent.update_time.isoformat() if agent.update_time else None,
+        }
+
+
 def update_external_agent_protocol(
     external_agent_id: int,
     tenant_id: str,
@@ -567,6 +639,7 @@ def update_external_agent_protocol(
             "version": agent.version,
             "agent_url": agent.agent_url,
             "protocol_type": agent.protocol_type,
+            "custom_headers": getattr(agent, "custom_headers", None),
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
@@ -852,6 +925,7 @@ def query_external_sub_agents(
                 "version": agent.version,
                 "agent_url": agent.agent_url,
                 "protocol_type": agent.protocol_type,
+                "custom_headers": getattr(agent, "custom_headers", None),
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,
                 "raw_card": agent.raw_card,

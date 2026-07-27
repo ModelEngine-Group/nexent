@@ -29,6 +29,7 @@ export interface A2AExternalAgent {
   cached_at?: string;
   cache_expires_at?: string;
   create_time?: string;
+  custom_headers?: Record<string, string> | null;
 }
 
 export interface A2AExternalAgentRelation {
@@ -39,6 +40,7 @@ export interface A2AExternalAgentRelation {
   external_agent_name?: string;
   external_agent_url?: string;
   create_time?: string;
+  custom_headers?: Record<string, string> | null;
 }
 
 export interface NacosConfig {
@@ -303,6 +305,38 @@ export const a2aClientService = {
   // ---------------------------------------------------------------------------
   // External Agent Relations
   // ---------------------------------------------------------------------------
+
+  /**
+   * Update call settings for an external agent
+   */
+  async updateAgentSettings(
+    agentId: string,
+    settings: {
+      custom_headers?: Record<string, string> | null;
+    }
+  ): Promise<{
+    success: boolean;
+    data?: A2AExternalAgent;
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentSettings(agentId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+
+      return { success: false, message: data.detail || t('a2a.service.updateSettingsFailed') };
+    } catch (error) {
+      log.error('Failed to update agent settings:', error);
+      return { success: false, message: t('a2a.service.updateSettingsFailed') };
+    }
+  },
 
   /**
    * Add relation between local agent and external A2A agent

@@ -265,6 +265,7 @@ class TestA2AAgentInfo:
         assert info.protocol_version == "1.0"
         assert info.protocol_type == PROTOCOL_JSONRPC
         assert info.timeout == 300.0
+        assert info.custom_headers is None
         assert info.raw_card is None
 
     def test_custom_values(self):
@@ -279,6 +280,7 @@ class TestA2AAgentInfo:
             protocol_version="2.0",
             protocol_type=PROTOCOL_HTTP_JSON,
             timeout=60.0,
+            custom_headers={"X-Agent": "custom"},
             raw_card=raw_card,
         )
         assert info.agent_id == "agent-002"
@@ -287,6 +289,7 @@ class TestA2AAgentInfo:
         assert info.protocol_version == "2.0"
         assert info.protocol_type == PROTOCOL_HTTP_JSON
         assert info.timeout == 60.0
+        assert info.custom_headers == {"X-Agent": "custom"}
         assert info.raw_card == raw_card
 
     def test_get_protocol_type(self):
