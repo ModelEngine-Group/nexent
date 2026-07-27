@@ -10,18 +10,16 @@ let fileUploadSizeLimit = process.env.FILE_UPLOAD_SIZE_LIMIT || defaultSize;
 if (!Number.isInteger(Number(fileUploadSizeLimit))) {
     fileUploadSizeLimit = defaultSize;
 } else {
-
-    fileUploadSizeLimit = fileUploadSizeLimit > 100 ? 100 : fileUploadSizeLimit;
-    fileUploadSizeLimit = fileUploadSizeLimit < 10 ? 10 : fileUploadSizeLimit;
+    fileUploadSizeLimit = Math.min(100, Math.max(10, fileUploadSizeLimit));
 }
 
-function ensureDir(dir) {
+export function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
 
-function readLocaleConfig(lang) {
+export function readLocaleConfig(lang) {
   try {
     const fileName = 'custom.json';
     const filepath = path.join(LOCALES_CONFIG_DIR, lang === 'zh' ? 'zh' : 'en', fileName);
@@ -35,7 +33,7 @@ function readLocaleConfig(lang) {
   }
 }
 
-function saveLocaleConfig(fileData, lang) {
+export function saveLocaleConfig(fileData, lang) {
   ensureDir(LOCALES_CONFIG_DIR);
   const fileName = 'custom.json';
   const filepath = path.join(LOCALES_CONFIG_DIR, lang, fileName);

@@ -17,7 +17,7 @@ require("dotenv").config({
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
-require("./build-config");
+const { ensureDir, readLocaleConfig, saveLocaleConfig } = require("./build-config");
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({
@@ -202,37 +202,9 @@ function isSuperAdminRequest(req) {
   return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
 }
 
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
 function renameFile(oldPath, newFileName) {
   ensureDir(ICON_UPLOAD_DIR);
   fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
-}
-
-function readLocaleConfig(lang) {
-  try {
-    const fileName = 'custom.json';
-    const filepath = path.join(LOCALES_CONFIG_DIR, lang === 'zh' ? 'zh' : 'en', fileName);
-    if (!fs.existsSync(filepath)) {
-      return {};
-    }
-    const data = JSON.parse(fs.readFileSync(filepath, "utf-8"))
-    return data;
-  } catch (error) {
-    console.log(error.message)
-  }
-}
-
-function saveLocaleConfig(fileData, lang) {
-  ensureDir(LOCALES_CONFIG_DIR);
-  const fileName = 'custom.json';
-  const filepath = path.join(LOCALES_CONFIG_DIR, lang, fileName);
-  fs.writeFileSync(filepath, fileData, "utf-8");
-  return fileName;
 }
 
 function updateLocalConfig(oldData, newData) {
