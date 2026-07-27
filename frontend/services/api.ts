@@ -381,6 +381,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
     agentProtocol: (agentId: string) =>
       `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentSecurityCredentials: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/security-credentials`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>

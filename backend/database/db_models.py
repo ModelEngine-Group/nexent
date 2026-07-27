@@ -1568,6 +1568,18 @@ class A2AExternalAgent(TableBase):
 
     # For URL mode
     source_url = Column(String(512), doc="Direct URL to agent card")
+    agent_card_headers = Column(
+        JSON,
+        doc="Headers used only to retrieve and refresh the Agent Card"
+    )
+
+    # Security declared by the Agent Card and credentials configured by the user
+    security_schemes = Column(JSON, doc="Security schemes declared by the Agent Card")
+    security_requirements = Column(JSON, doc="Security requirements declared by the Agent Card")
+    security_credentials = Column(
+        JSON,
+        doc="Credential values for Agent Card security schemes, never exposed by APIs"
+    )
 
     # For Nacos mode
     nacos_config_id = Column(

@@ -18,6 +18,9 @@ export interface A2AExternalAgent {
   version?: string;
   streaming?: boolean;
   supported_interfaces?: Record<string, any>[];
+  security_schemes?: Record<string, any>;
+  security_requirements?: Record<string, any>[];
+  configured_security_scheme_ids?: string[];
   source_type: 'url' | 'nacos';
   source_url?: string;
   nacos_config_id?: string;
@@ -76,6 +79,7 @@ export interface A2AServerAgent {
 export interface DiscoverFromUrlRequest {
   url: string;
   name?: string;
+  custom_headers?: Record<string, string>;
 }
 
 export interface DiscoverFromNacosRequest {
@@ -297,6 +301,34 @@ export const a2aClientService = {
     } catch (error) {
       log.error('Failed to update agent protocol:', error);
       return { success: false, message: t('a2a.service.updateProtocolFailed') };
+    }
+  },
+
+  async updateAgentSecurityCredentials(
+    agentId: string,
+    securityCredentials: Record<string, string>,
+  ): Promise<{
+    success: boolean;
+    data?: { configured_security_scheme_ids: string[] };
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.a2a.agentSecurityCredentials(agentId),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ security_credentials: securityCredentials }),
+        },
+      );
+      const data = await response.json();
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+      return { success: false, message: data.detail || t('a2a.security.saveFailed') };
+    } catch (error) {
+      log.error('Failed to update agent security credentials:', error);
+      return { success: false, message: t('a2a.security.saveFailed') };
     }
   },
 

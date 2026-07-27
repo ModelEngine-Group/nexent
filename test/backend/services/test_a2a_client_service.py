@@ -256,20 +256,20 @@ class TestFindUrlInEndpoints:
 class TestBuildEndpointUrl:
     """Test class for _build_endpoint_url method."""
 
-    def test_build_json_rpc_url(self):
-        """Test building JSON-RPC endpoint URL."""
+    def test_uses_json_rpc_agent_card_url_as_complete_endpoint(self):
+        """Test JSON-RPC calls preserve the exact Agent Card endpoint."""
         from backend.services.a2a_client_service import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
         result = service._build_endpoint_url(
-            agent_url="https://example.com/a2a",
+            agent_url="http://127.0.0.1:8888/idkey",
             protocol_type=PROTOCOL_JSONRPC,
-            streaming=False
+            streaming=False,
         )
 
-        assert result == "https://example.com/a2a/v1"
+        assert result == "http://127.0.0.1:8888/idkey"
 
     def test_build_http_json_streaming_url(self):
         """Test building HTTP+JSON streaming endpoint URL."""
@@ -331,7 +331,7 @@ class TestBuildEndpointUrl:
             streaming=False
         )
 
-        assert result == "https://example.com/v1"
+        assert result == "https://example.com"
 
 
 class TestGetProtocolPath:
@@ -357,15 +357,15 @@ class TestGetProtocolPath:
         result = service._get_protocol_path(PROTOCOL_HTTP_JSON, streaming=False)
         assert result == "/message:send"
 
-    def test_json_rpc(self):
-        """Test JSON-RPC path."""
+    def test_json_rpc_has_no_operation_suffix(self):
+        """Test JSON-RPC Agent Card URLs do not receive a path suffix."""
         from backend.services.a2a_client_service import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
         result = service._get_protocol_path(PROTOCOL_JSONRPC, streaming=False)
-        assert result == "/v1"
+        assert result == ""
 
     def test_unknown_protocol(self):
         """Test unknown protocol returns empty path."""
@@ -588,6 +588,36 @@ class TestDiscoverFromUrl:
 
                 assert result == mock_result
                 mock_db.create_external_agent_from_url.assert_called_once()
+                assert mock_db.create_external_agent_from_url.call_args.kwargs["agent_card_headers"] == {}
+
+    @pytest.mark.asyncio
+    async def test_forwards_custom_headers_when_discovering_agent_card(self):
+        """Test custom request headers are forwarded only to the Agent Card request."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        custom_headers = {"Authorization": "Bearer secret", "X-Tenant-Key": "tenant-key"}
+        mock_card = {"name": "Authenticated Agent"}
+
+        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            mock_client = MockClient.return_value.__aenter__.return_value
+            mock_client.get_json = AsyncMock(return_value=mock_card)
+
+            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                mock_db.create_external_agent_from_url.return_value = {"id": 1}
+
+                await service.discover_from_url(
+                    url="https://example.com/.well-known/agent-card.json",
+                    tenant_id="tenant-1",
+                    user_id="user-1",
+                    custom_headers=custom_headers,
+                )
+
+        forwarded_headers = mock_client.get_json.call_args.kwargs["headers"]
+        assert forwarded_headers["Authorization"] == "Bearer secret"
+        assert forwarded_headers["X-Tenant-Key"] == "tenant-key"
+        assert forwarded_headers["A2A-Version"] == "1.0"
+        assert mock_db.create_external_agent_from_url.call_args.kwargs["agent_card_headers"] == custom_headers
 
     @pytest.mark.asyncio
     async def test_discovers_with_agent_id_field(self):
@@ -1096,7 +1126,8 @@ class TestRefreshAgentCard:
         mock_agent = {
             "id": 1,
             "name": "Old Name",
-            "source_url": "https://example.com/agent.json"
+            "source_url": "https://example.com/agent.json",
+            "agent_card_headers": {"Authorization": "Bearer stored-card-token"},
         }
 
         mock_card = {
@@ -1125,10 +1156,101 @@ class TestRefreshAgentCard:
                 )
 
                 assert result == mock_result
+                headers = mock_client.get_json.call_args.kwargs["headers"]
+                assert headers["Authorization"] == "Bearer stored-card-token"
+                assert headers["A2A-Version"] == "1.0"
 
 
 class TestCallAgent:
     """Test class for call_agent async method."""
+
+    @pytest.mark.asyncio
+    async def test_does_not_send_card_headers_when_calling_agent(self):
+        """Test Agent Card headers are not used for agent calls."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": "JSONRPC",
+            "is_available": True,
+            "agent_card_headers": {"Authorization": "Bearer card-token"},
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value={"result": {}})
+
+                await service.call_agent(1, "tenant-1", {"role": "user", "parts": []})
+
+        headers = mock_client.post_json.call_args.args[2]
+        assert "Authorization" not in headers
+
+    @pytest.mark.asyncio
+    async def test_forwards_security_credentials_by_declared_location(self):
+        """Test required credentials are sent as header, query, and cookie values."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": "JSONRPC",
+            "is_available": True,
+            "security_schemes": {
+                "authorizationAuth": {"apiKeySecurityScheme": {"location": "header", "name": "Authorization"}},
+                "queryAuth": {"apiKeySecurityScheme": {"location": "query", "name": "api_key"}},
+                "cookieAuth": {"apiKeySecurityScheme": {"location": "cookie", "name": "session"}},
+            },
+            "security_requirements": [{"schemes": {
+                "authorizationAuth": {}, "queryAuth": {}, "cookieAuth": {}
+            }}],
+            "security_credentials": {
+                "authorizationAuth": "Bearer call-token",
+                "queryAuth": "query-token",
+                "cookieAuth": "cookie-token",
+            },
+        }
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value={"result": {}})
+                await service.call_agent(1, "tenant-1", {"role": "user", "parts": []})
+
+        args = mock_client.post_json.call_args
+        assert args.args[2]["Authorization"] == "Bearer call-token"
+        assert args.kwargs["params"] == {"api_key": "query-token"}
+        assert args.kwargs["cookies"] == {"session": "cookie-token"}
+
+    @pytest.mark.asyncio
+    async def test_rejects_unsatisfied_security_requirements(self):
+        """Test calls fail before the external request when credentials are missing."""
+        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": "JSONRPC",
+            "is_available": True,
+            "security_schemes": {
+                "apiKey": {"apiKeySecurityScheme": {"location": "header", "name": "X-API-Key"}}
+            },
+            "security_requirements": [{"schemes": {"apiKey": {}}}],
+            "security_credentials": {},
+        }
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value={"result": {}})
+                with pytest.raises(AgentCallError, match="do not satisfy"):
+                    await service.call_agent(1, "tenant-1", {"role": "user", "parts": []})
+                mock_client.post_json.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_not_found(self):
@@ -1296,6 +1418,36 @@ class TestCallAgent:
                 error_msg = str(exc_info.value)
                 assert "Agent error" in error_msg
                 assert "Invalid Request" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_raises_authentication_error_on_unauthorized_response(self):
+        """Test unauthorized responses explain that configured credentials failed."""
+        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+        from backend.utils.a2a_http_client import A2AHttpStatusError
+
+        service = A2AClientService()
+        mock_agent = {
+            "id": 1,
+            "name": "Test Agent",
+            "agent_url": "https://example.com/a2a",
+            "is_available": True,
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = mock_agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(
+                    side_effect=A2AHttpStatusError("POST", "https://example.com/a2a", 401)
+                )
+                MockClient.return_value.__aexit__ = AsyncMock()
+
+                with pytest.raises(AgentCallError, match="authentication failed.*HTTP 401"):
+                    await service.call_agent(
+                        external_agent_id=1,
+                        tenant_id="tenant-1",
+                        message={"text": "test"},
+                    )
 
     @pytest.mark.asyncio
     async def test_raises_error_on_client_error(self):

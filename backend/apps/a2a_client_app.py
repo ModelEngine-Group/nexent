@@ -6,7 +6,7 @@ Used internally for configuring A2A sub-agents.
 """
 import logging
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -27,9 +27,10 @@ logger = logging.getLogger("a2a_client_app")
 
 
 class DiscoverFromUrlRequest(BaseModel):
-    """Request to discover external A2A agent from URL."""
+    """Request to discover an external A2A agent from an Agent Card URL."""
     url: str
     name: Optional[str] = None
+    custom_headers: Optional[Dict[str, str]] = None
 
 
 class DiscoverFromNacosRequest(BaseModel):
@@ -44,6 +45,11 @@ class UpdateAgentProtocolRequest(BaseModel):
     protocol_type: str = Field(
         description="Protocol type to use: JSONRPC, HTTP+JSON, or GRPC"
     )
+
+
+class UpdateExternalAgentSecurityCredentialsRequest(BaseModel):
+    """Request to configure credentials required by an Agent Card."""
+    security_credentials: Dict[str, str] = Field(default_factory=dict)
 
 
 class TestNacosConnectionRequest(BaseModel):
@@ -74,7 +80,8 @@ async def discover_from_url(
         result = await a2a_client_service.discover_from_url(
             url=request.url,
             tenant_id=tenant_id,
-            user_id=user_id
+            user_id=user_id,
+            custom_headers=request.custom_headers
         )
 
         return JSONResponse(
@@ -200,6 +207,69 @@ async def get_external_agent(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to get agent"
+        )
+
+
+@router.put("/agents/{external_agent_id}/security-credentials")
+async def update_external_agent_security_credentials(
+    external_agent_id: int,
+    request: UpdateExternalAgentSecurityCredentialsRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None,
+):
+    """Save the credential values required to call an external A2A agent."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        if not request.security_credentials:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="At least one security credential is required"
+            )
+        if any(not scheme_id or not value for scheme_id, value in request.security_credentials.items()):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Security credential names and values must be non-empty"
+            )
+        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        if not agent:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+        supported_scheme_ids = set((agent.get("security_schemes") or {}).keys())
+        if not set(request.security_credentials).issubset(supported_scheme_ids):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Security credentials must use scheme names declared by the Agent Card"
+            )
+        result = a2a_agent_db.update_external_agent_security_credentials(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            security_credentials=request.security_credentials,
+        )
+        if not result:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "status": "success",
+                "data": {
+                    "configured_security_scheme_ids": agent["configured_security_scheme_ids"],
+                },
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update agent security credentials failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update agent security credentials"
         )
 
 

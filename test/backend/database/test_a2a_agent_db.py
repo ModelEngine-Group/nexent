@@ -125,7 +125,8 @@ def _make_ext_agent_cls():
     return _make_cls('A2AExternalAgent', [
         'id', 'source_url', 'name', 'description', 'version', 'agent_url',
         'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
-        'nacos_config_id', 'nacos_agent_name', 'base_url', 'raw_card', 'is_available',
+        'nacos_config_id', 'nacos_agent_name', 'base_url', 'agent_card_headers', 'security_schemes',
+        'security_requirements', 'security_credentials', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
         'create_time', 'update_time', 'delete_flag', 'tenant_id',
     ])
@@ -206,7 +207,8 @@ def factory_external_agent(**kw):
         'agent_url': 'http://localhost:8000/a2a', 'protocol_type': 'JSONRPC',
         'streaming': False, 'supported_interfaces': [], 'source_type': 'url',
         'source_url': 'http://example.com/agent_card.json',
-        'nacos_config_id': None, 'nacos_agent_name': None, 'raw_card': None,
+        'nacos_config_id': None, 'nacos_agent_name': None, 'agent_card_headers': None,
+        'security_schemes': None, 'security_requirements': None, 'security_credentials': None, 'raw_card': None,
         'is_available': True, 'last_check_at': None, 'last_check_result': None,
         'cached_at': datetime(2024, 1, 1, tzinfo=timezone.utc),
         'cache_expires_at': datetime(2024, 1, 2, tzinfo=timezone.utc),
@@ -608,6 +610,33 @@ class TestCreateExternalAgentFromUrl:
             assert result['name'] == 'New Agent'
             assert result['source_type'] == 'url'
 
+    def test_saves_agent_card_headers(self):
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession()
+            a2a_db.create_external_agent_from_url(
+                source_url='http://example.com/card.json', name='New Agent',
+                description='A new agent', agent_url='http://example.com/a2a',
+                tenant_id='tenant-1', user_id='user-1',
+                agent_card_headers={'Authorization': 'Bearer card-token'},
+            )
+            created_agent = mk.return_value.added[0]
+            assert created_agent.agent_card_headers == {'Authorization': 'Bearer card-token'}
+
+    def test_saves_agent_card_security_metadata(self):
+        schemes = {'apiKey': {'apiKeySecurityScheme': {'location': 'header', 'name': 'X-API-Key'}}}
+        requirements = [{'schemes': {'apiKey': {}}}]
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession()
+            a2a_db.create_external_agent_from_url(
+                source_url='http://example.com/card.json', name='New Agent',
+                description='A new agent', agent_url='http://example.com/a2a',
+                tenant_id='tenant-1', user_id='user-1',
+                security_schemes=schemes, security_requirements=requirements,
+            )
+            created_agent = mk.return_value.added[0]
+            assert created_agent.security_schemes == schemes
+            assert created_agent.security_requirements == requirements
+
     def test_updates_existing_agent(self, external_agent):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
@@ -618,6 +647,18 @@ class TestCreateExternalAgentFromUrl:
                 tenant_id='tenant-1', user_id='user-1',
             )
             assert result['name'] == 'Updated Agent'
+
+    def test_keeps_existing_headers_when_not_provided(self, external_agent):
+        external_agent.agent_card_headers = {'Authorization': 'Bearer existing-token'}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            a2a_db.create_external_agent_from_url(
+                source_url='http://agent.example.com/agent_card.json',
+                name='Updated Agent', description='Updated',
+                agent_url='http://agent.example.com/a2a',
+                tenant_id='tenant-1', user_id='user-1',
+            )
+            assert external_agent.agent_card_headers == {'Authorization': 'Bearer existing-token'}
 
     def test_updates_all_fields_on_existing_agent(self):
         agent = factory_external_agent(
@@ -709,6 +750,35 @@ class TestGetExternalAgentById:
             assert result is not None
             assert result['id'] == 1
 
+    def test_returns_configured_scheme_ids_without_security_credentials(self, external_agent):
+        external_agent.security_credentials = {'apiKey': 'secret', 'empty': ''}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            result = a2a_db.get_external_agent_by_id(1, 'tenant-1')
+            assert result['configured_security_scheme_ids'] == ['apiKey']
+            assert 'security_credentials' not in result
+
+    def test_returns_security_credentials_for_internal_call(self, external_agent):
+        external_agent.security_credentials = {'apiKey': 'secret'}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            result = a2a_db.get_external_agent_by_id(1, 'tenant-1', include_security_credentials=True)
+            assert result['security_credentials'] == {'apiKey': 'secret'}
+
+    def test_hides_agent_card_headers_by_default(self, external_agent):
+        external_agent.agent_card_headers = {'Authorization': 'Bearer card-token'}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            result = a2a_db.get_external_agent_by_id(1, 'tenant-1')
+            assert 'agent_card_headers' not in result
+
+    def test_returns_agent_card_headers_for_internal_refresh(self, external_agent):
+        external_agent.agent_card_headers = {'Authorization': 'Bearer card-token'}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            result = a2a_db.get_external_agent_by_id(1, 'tenant-1', include_agent_card_headers=True)
+            assert result['agent_card_headers'] == {'Authorization': 'Bearer card-token'}
+
     def test_returns_none_when_not_found(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()
@@ -723,6 +793,14 @@ class TestListExternalAgents:
             result = a2a_db.list_external_agents('tenant-1')
             assert len(result) == 1
             assert result[0]['name'] == 'External Agent'
+
+    def test_returns_configured_scheme_ids_without_secret_values(self, external_agent):
+        external_agent.security_credentials = {'apiKey': 'secret'}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+            result = a2a_db.list_external_agents('tenant-1')
+            assert result[0]['configured_security_scheme_ids'] == ['apiKey']
+            assert 'security_credentials' not in result[0]
 
     def test_empty_when_no_agents(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
