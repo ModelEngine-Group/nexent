@@ -448,6 +448,7 @@ export const API_ENDPOINTS = {
     // ---------------- Memory configuration ----------------
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
+      embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -455,6 +456,16 @@ export const API_ENDPOINTS = {
       disableUserAgentAdd: `${API_BASE_URL}/memory/config/disable_useragent`,
       disableUserAgentRemove: (agentId: string | number) =>
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
+    },
+
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
     },
 
     // ---------------- Memory CRUD ----------------

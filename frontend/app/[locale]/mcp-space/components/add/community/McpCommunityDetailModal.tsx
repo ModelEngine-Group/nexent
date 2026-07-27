@@ -60,7 +60,7 @@ export default function McpCommunityDetailModal({
   const serverTypeText = t(getTransportLabelKey(service.transportType));
   const sourceText = t("mcpTools.source.community");
   const reviewTypeText = service.reviewType
-    ? t(`mcpTools.review.type.${service.reviewType}`)
+    ? t(`repository.review.type.${service.reviewType}`)
     : undefined;
 
   return (
@@ -134,7 +134,7 @@ export default function McpCommunityDetailModal({
                 {reviewTypeText ? (
                   <InfoRow
                     icon={<FileText className="h-3.5 w-3.5" />}
-                    label={t("mcpTools.review.typeLabel")}
+                    label={t("repository.review.typeLabel")}
                     value={reviewTypeText}
                   />
                 ) : null}

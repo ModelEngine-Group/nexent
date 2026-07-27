@@ -130,6 +130,7 @@ export interface CommunityMcpCard {
   name: string;
   version?: string;
   description: string;
+  content?: string;
   status: string;
   createdAt: string;
   updatedAt?: string;

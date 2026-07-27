@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, ConfigProvider, Empty, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
@@ -8,6 +9,7 @@ import { motion } from "framer-motion";
 import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, User, XCircle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -59,7 +61,11 @@ import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import MineMcpServiceCard, {
   type MineMcpCardItem,
 } from "./components/MineMcpServiceCard";
+import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
+import McpRepositoryReviewConfirmModal, {
+  type McpRepositoryReviewAction,
+} from "./components/McpRepositoryReviewConfirmModal";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
@@ -116,6 +122,10 @@ export default function McpToolsPage() {
   const { message, modal } = App.useApp();
   const { user } = useAuthorizationContext();
   const { pageVariants, pageTransition } = useSetupFlow();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
+  const searchParams = useSearchParams();
   const isAdmin = useMemo(
     () => user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU,
     [user?.role]
@@ -135,8 +145,30 @@ export default function McpToolsPage() {
   const [selectedPublished, setSelectedPublished] =
     useState<CommunityMcpCard | null>(null);
 
+  const reviewDeepLink = useMemo(
+    () => parseMcpReviewDeepLinkParams(searchParams),
+    [searchParams]
+  );
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === McpToolsServicesTab.MINE) {
+      setTab(McpToolsServicesTab.MINE);
+    } else if (tabParam === McpToolsServicesTab.REVIEW && isAdmin) {
+      setTab(McpToolsServicesTab.REVIEW);
+    } else if (tabParam === McpToolsServicesTab.REPOSITORY) {
+      setTab(McpToolsServicesTab.REPOSITORY);
+    }
+  }, [searchParams, isAdmin]);
+
+  const handleReviewDeepLinkConsumed = useCallback(() => {
+    router.replace(`/${locale}/mcp-space?tab=mine`);
+  }, [locale, router]);
+
   const localList = useMcpServicesList();
-  const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.MINE);
+  const myPublished = useMyCommunityMcp(
+    tab === McpToolsServicesTab.MINE || Boolean(reviewDeepLink)
+  );
   const repositoryBrowser = useMcpCommunityBrowser(
     tab === McpToolsServicesTab.REPOSITORY
   );
@@ -266,7 +298,7 @@ export default function McpToolsPage() {
                 <TabsList className={cn("mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
                   <TabsTrigger value={McpToolsServicesTab.REPOSITORY} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
                     <Inbox className="size-4" aria-hidden />
-                    {t("mcpTools.page.tab.repository")}
+                    {t("repository.page.tab.repository")}
                     <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{repositoryCount}</span>
                   </TabsTrigger>
                   <TabsTrigger value={McpToolsServicesTab.MINE} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
@@ -277,7 +309,7 @@ export default function McpToolsPage() {
                   {isAdmin ? (
                     <TabsTrigger value={McpToolsServicesTab.REVIEW} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
                       <ShieldCheck className="size-4" aria-hidden />
-                      {t("mcpTools.page.tab.review")}
+                      {t("repository.page.tab.review")}
                       {pendingReviewCount > 0 ? (
                         <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white">
                           {pendingReviewCount}
@@ -305,6 +337,8 @@ export default function McpToolsPage() {
                   localList={localList}
                   myPublished={myPublished}
                   actions={searchActions}
+                  reviewDeepLink={reviewDeepLink}
+                  onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
                   onAdd={openAddModal}
                   onEditLocal={openLocalDetail}
                   onEditCommunity={setSelectedPublished}
@@ -468,6 +502,8 @@ function MineView({
   localList,
   myPublished,
   actions,
+  reviewDeepLink,
+  onReviewDeepLinkConsumed,
   onAdd,
   onEditLocal,
   onEditCommunity,
@@ -476,6 +512,8 @@ function MineView({
   localList: ReturnType<typeof useMcpServicesList>;
   myPublished: ReturnType<typeof useMyCommunityMcp>;
   actions: React.ReactNode;
+  reviewDeepLink: { marketId: number; sourceMcpId: number } | null;
+  onReviewDeepLinkConsumed: () => void;
   onAdd: () => void;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
@@ -497,6 +535,11 @@ function MineView({
     item: MineMcpCardItem;
     onlineService?: CommunityMcpCard;
   } | null>(null);
+  const [applyListingItem, setApplyListingItem] = useState<{
+    item: MineMcpCardItem;
+    onlineService?: CommunityMcpCard;
+  } | null>(null);
+  const deepLinkHandledRef = useRef<string | null>(null);
 
   const tagStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -531,6 +574,67 @@ function MineView({
     }
     return services;
   }, [myPublished.items]);
+
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      deepLinkHandledRef.current = null;
+      return;
+    }
+    if (localList.loading || myPublished.loading) {
+      return;
+    }
+
+    const deepLinkKey = `${reviewDeepLink.marketId}:${reviewDeepLink.sourceMcpId}`;
+    if (deepLinkHandledRef.current === deepLinkKey) {
+      return;
+    }
+
+    const onlineService =
+      myPublished.items.find(
+        (service) =>
+          service.marketId === reviewDeepLink.marketId ||
+          service.communityId === reviewDeepLink.marketId
+      ) || onlineServiceBySourceMcpId.get(reviewDeepLink.sourceMcpId);
+
+    const localService = localList.services.find(
+      (service) => service.mcpId === reviewDeepLink.sourceMcpId
+    );
+
+    if (localService) {
+      const item: MineMcpCardItem = { kind: "local", service: localService };
+      setReviewProgressItem({
+        item,
+        onlineService: onlineService || undefined,
+      });
+      deepLinkHandledRef.current = deepLinkKey;
+      onReviewDeepLinkConsumed();
+      return;
+    }
+
+    if (onlineService) {
+      setReviewProgressItem({
+        item: { kind: "community", service: onlineService },
+        onlineService,
+      });
+      deepLinkHandledRef.current = deepLinkKey;
+      onReviewDeepLinkConsumed();
+      return;
+    }
+
+    deepLinkHandledRef.current = deepLinkKey;
+    message.error(t("notifications.deepLink.mcpNotFound"));
+    onReviewDeepLinkConsumed();
+  }, [
+    localList.loading,
+    localList.services,
+    message,
+    myPublished.items,
+    myPublished.loading,
+    onReviewDeepLinkConsumed,
+    onlineServiceBySourceMcpId,
+    reviewDeepLink,
+    t,
+  ]);
 
   const categoryStats = useMemo(
     () =>
@@ -592,26 +696,17 @@ function MineView({
       return;
     }
     if (item.kind === "community") {
-      // Community items: submit directly
-      doSubmitVersionUpdate(item, onlineService);
+      // Community items: submit directly with optional listing note
+      setApplyListingItem({ item, onlineService });
       return;
     }
-    // Local items: confirm first
-    modal.confirm({
-      title: t("mcpTools.mine.applyForListing"),
-      content: t("mcpTools.mine.confirmApplyListing", {
-        name: item.service.name,
-      }),
-      okText: t("mcpTools.mine.applyForListing"),
-      cancelText: t("common.cancel"),
-      centered: true,
-      onOk: () => doSubmitVersionUpdate(item, onlineService),
-    });
+    setApplyListingItem({ item, onlineService });
   };
 
   const doSubmitVersionUpdate = async (
     item: MineMcpCardItem,
-    onlineService?: CommunityMcpCard
+    onlineService: CommunityMcpCard | undefined,
+    content?: string
   ) => {
     const key = getMineItemKey(item);
     setPublishingKey(key);
@@ -627,6 +722,7 @@ function MineView({
           tags: service.tags || [],
           registry_json: service.registryJson,
           shared_fields: item.service.sharedFields,
+          content,
         });
       } else if (onlineService?.marketId) {
         const service = item.service;
@@ -644,6 +740,7 @@ function MineView({
             : McpTransportType.URL,
           config_json: configJson,
           shared_fields: item.service.sharedFields,
+          content,
         });
       } else if (item.kind === "local") {
         const service = item.service;
@@ -657,19 +754,16 @@ function MineView({
           mcp_server: configJson ? undefined : service.serverUrl,
           config_json: configJson,
           shared_fields: item.service.sharedFields,
+          content,
         });
       }
-      const isInitialPublish = item.kind === "local" && !onlineService?.marketId;
-      message.success(
-        isInitialPublish
-          ? "上架申请成功"
-          : "上架申请成功"
-      );
+      message.success("上架申请成功");
       // Optimistically update local cache to show pending status
       updateLocalReviewStatus(item, "pending");
       await refreshMineData();
     } catch {
       message.error("上架申请失败");
+      throw new Error("Apply listing failed");
     } finally {
       setPublishingKey(null);
     }
@@ -700,11 +794,11 @@ function MineView({
     modal.confirm({
       title: isPendingReview ? "确认撤回审核？" : t("mcpTools.mine.unpublishOnlineVersionTitle"),
       content: isPendingReview
-        ? t("mcpTools.mine.reviewModal.cancelApply")
+        ? t("repository.listingStatus.cancelApply")
         : t("mcpTools.mine.unpublishOnlineVersionDescription", {
             name: onlineService.name || item.service.name,
           }),
-      okText: isPendingReview ? t("mcpTools.mine.reviewModal.cancelApply") : t("mcpTools.mine.unpublishOnlineVersion"),
+      okText: isPendingReview ? t("repository.listingStatus.cancelApply") : t("mcpTools.mine.unpublishOnlineVersion"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
@@ -715,14 +809,14 @@ function MineView({
           await deleteCommunityMcpTool(onlineService.communityId!);
           message.success(
             isPendingReview
-              ? t("mcpTools.mine.cancelApplySuccess")
+              ? t("repository.mine.cancelApplySuccess")
               : t("mcpTools.mine.unpublishOnlineVersionSuccess")
           );
           await refreshMineData();
         } catch {
           message.error(
             isPendingReview
-              ? t("mcpTools.mine.cancelApplyFailed")
+              ? t("repository.mine.cancelApplyError")
               : t("mcpTools.mine.unpublishOnlineVersionFailed")
           );
         } finally {
@@ -738,7 +832,7 @@ function MineView({
       content: t("mcpTools.mine.deleteConfirmDescription", {
         name: item.service.name,
       }),
-      okText: t("mcpTools.mine.delete"),
+      okText: t("common.delete"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
@@ -749,7 +843,7 @@ function MineView({
           } else if (item.service.communityId) {
             await deleteCommunityMcpTool(item.service.communityId);
           }
-          message.success(t("mcpTools.mine.deleteSuccess"));
+          message.success(t("repository.mine.deleteSuccess"));
           await refreshMineData();
           // Force-refresh all caches the agent config page relies on
           await Promise.all([
@@ -759,7 +853,7 @@ function MineView({
             queryClient.refetchQueries({ queryKey: MCP_SERVERS_QUERY_KEY, type: 'all' }),
           ]);
         } catch {
-          message.error(t("mcpTools.mine.deleteFailed"));
+          message.error(t("repository.mine.deleteFailed"));
         }
       },
     });
@@ -789,11 +883,11 @@ function MineView({
     if (!reviewId) return;
     try {
       await cancelCommunityMcpReview(reviewId);
-      message.success(t("mcpTools.mine.cancelApplySuccess"));
+      message.success(t("repository.mine.cancelApplySuccess"));
       setReviewProgressItem(null);
       await refreshMineData();
     } catch {
-      message.error(t("mcpTools.mine.cancelApplyFailed"));
+      message.error(t("repository.mine.cancelApplyError"));
     }
   };
 
@@ -918,6 +1012,25 @@ function MineView({
         onCancelApply={handleCancelApply}
         onTakeDown={handleTakeDown}
       />
+
+      <MineApplyListingModal
+        open={Boolean(applyListingItem)}
+        item={applyListingItem?.item ?? null}
+        loading={
+          applyListingItem
+            ? publishingKey === getMineItemKey(applyListingItem.item)
+            : false
+        }
+        onClose={() => setApplyListingItem(null)}
+        onConfirm={async (content) => {
+          if (!applyListingItem) return;
+          await doSubmitVersionUpdate(
+            applyListingItem.item,
+            applyListingItem.onlineService,
+            content
+          );
+        }}
+      />
     </div>
   );
 }
@@ -1010,24 +1123,41 @@ function ReviewCenterView({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [reviewingId, setReviewingId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] =
+    useState<McpRepositoryReviewAction | null>(null);
+  const [confirmService, setConfirmService] = useState<CommunityMcpCard | null>(
+    null
+  );
 
-  const handleReview = async (
+  const openReviewConfirm = (
     service: CommunityMcpCard,
-    action: "approve" | "reject"
+    action: McpRepositoryReviewAction
   ) => {
-    if (!service.reviewId) return;
-    setReviewingId(service.reviewId);
+    setConfirmService(service);
+    setConfirmAction(action);
+  };
+
+  const handleReviewConfirm = async (content?: string) => {
+    if (!confirmService?.reviewId || !confirmAction) return;
+    setReviewingId(confirmService.reviewId);
     try {
-      if (action === "approve") {
-        await approveCommunityMcpTool(service.reviewId);
-        message.success(t("mcpTools.review.approveSuccess"));
+      if (confirmAction === "approve") {
+        await approveCommunityMcpTool(confirmService.reviewId, content);
+        message.success(
+          t("repository.review.approveSuccess", { name: confirmService.name })
+        );
       } else {
-        await rejectCommunityMcpTool(service.reviewId);
-        message.success(t("mcpTools.review.rejectSuccess"));
+        await rejectCommunityMcpTool(confirmService.reviewId, content);
+        message.success(
+          t("repository.review.rejectSuccess", { name: confirmService.name })
+        );
       }
+      setConfirmAction(null);
+      setConfirmService(null);
       await onReviewed();
     } catch {
-      message.error(t("mcpTools.review.actionFailed"));
+      message.error(t("repository.review.actionFailed"));
+      throw new Error("Review action failed");
     } finally {
       setReviewingId(null);
     }
@@ -1041,7 +1171,7 @@ function ReviewCenterView({
         </PlaceholderBox>
       ) : browser.services.length === 0 ? (
         <PlaceholderBox>
-          <Empty description={t("mcpTools.review.emptyTitle")} />
+          <Empty description={t("repository.review.empty")} />
         </PlaceholderBox>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1049,19 +1179,22 @@ function ReviewCenterView({
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80">
                 <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t("mcpTools.review.table.mcpService")}
+                  {t("repository.review.column.name")}
                 </th>
                 <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t("mcpTools.review.table.deploymentType")}
+                  {t("repository.review.column.deploymentType")}
                 </th>
                 <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t("mcpTools.review.table.submitter")}
+                  {t("repository.review.column.submitter")}
                 </th>
                 <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t("mcpTools.review.table.status")}
+                  {t("repository.review.column.listingNote")}
+                </th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("repository.review.column.status")}
                 </th>
                 <th className="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {t("mcpTools.review.table.actions")}
+                  {t("repository.review.column.actions")}
                 </th>
               </tr>
             </thead>
@@ -1072,8 +1205,8 @@ function ReviewCenterView({
                   service={service}
                   reviewing={reviewingId === service.reviewId}
                   onSelect={() => onSelect(service)}
-                  onApprove={() => handleReview(service, "approve")}
-                  onReject={() => handleReview(service, "reject")}
+                  onApprove={() => openReviewConfirm(service, "approve")}
+                  onReject={() => openReviewConfirm(service, "reject")}
                 />
               ))}
             </tbody>
@@ -1089,6 +1222,21 @@ function ReviewCenterView({
         hasNextPage={browser.hasNextPage}
         onPrevPage={browser.prevPage}
         onNextPage={browser.nextPage}
+      />
+
+      <McpRepositoryReviewConfirmModal
+        open={Boolean(confirmAction && confirmService)}
+        action={confirmAction}
+        service={confirmService}
+        loading={
+          confirmService?.reviewId != null &&
+          reviewingId === confirmService.reviewId
+        }
+        onClose={() => {
+          setConfirmAction(null);
+          setConfirmService(null);
+        }}
+        onConfirm={handleReviewConfirm}
       />
     </div>
   );
@@ -1115,13 +1263,14 @@ function ReviewTableRow({
   const author =
     service.authorDisplayName || service.authorName || "-";
   const submitDate = formatRegistryDate(service.createdAt || "");
+  const listingNote = service.content?.trim() || "—";
 
   const statusBadge = (() => {
     if (reviewStatus === "approved") {
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">
           <CheckCircle className="h-3 w-3" />
-          {t("mcpTools.review.status.approved")}
+          {t("repository.review.status.approved")}
         </span>
       );
     }
@@ -1129,14 +1278,14 @@ function ReviewTableRow({
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
           <XCircle className="h-3 w-3" />
-          {t("mcpTools.review.status.rejected")}
+          {t("repository.review.status.rejected")}
         </span>
       );
     }
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
         <Clock className="h-3 w-3" />
-        {t("mcpTools.review.status.pending")}
+        {t("repository.review.status.pending")}
       </span>
     );
   })();
@@ -1174,6 +1323,16 @@ function ReviewTableRow({
         <div className="mt-0.5 text-xs text-slate-400">{submitDate}</div>
       </td>
 
+      {/* Listing note */}
+      <td className="px-5 py-4">
+        <span
+          className="line-clamp-2 max-w-[220px] text-sm text-slate-600"
+          title={listingNote === "—" ? undefined : listingNote}
+        >
+          {listingNote}
+        </span>
+      </td>
+
       {/* Status */}
       <td className="px-5 py-4">{statusBadge}</td>
 
@@ -1187,7 +1346,7 @@ function ReviewTableRow({
               icon={<Eye className="h-3.5 w-3.5" />}
               onClick={onSelect}
             >
-              {t("mcpTools.review.details")}
+              {t("repository.review.details")}
             </Button>
             <Button
               className="!border-green-600 !bg-green-600 text-white hover:!border-green-700 hover:!bg-green-700 !text-white"
@@ -1196,7 +1355,7 @@ function ReviewTableRow({
               loading={reviewing}
               onClick={onApprove}
             >
-              {t("mcpTools.review.approve")}
+              {t("repository.review.approve")}
             </Button>
             <Button
               danger
@@ -1206,7 +1365,7 @@ function ReviewTableRow({
               loading={reviewing}
               onClick={onReject}
             >
-              {t("mcpTools.review.reject")}
+              {t("repository.review.reject")}
             </Button>
           </div>
         ) : (
@@ -1216,7 +1375,7 @@ function ReviewTableRow({
             icon={<Eye className="h-3.5 w-3.5" />}
             onClick={onSelect}
           >
-            {t("mcpTools.review.details")}
+            {t("repository.review.details")}
           </Button>
         )}
       </td>

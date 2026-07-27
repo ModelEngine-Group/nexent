@@ -32,6 +32,7 @@ class _SkillRepositoryModel:
     icon = MagicMock(name="icon")
     downloads = MagicMock(name="downloads")
     status = MagicMock(name="status")
+    content = MagicMock(name="content")
     delete_flag = MagicMock(name="delete_flag")
     create_time = MagicMock(name="create_time")
     update_time = MagicMock(name="update_time")
@@ -164,6 +165,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
         tags=["tag"],
         icon="skill",
         downloads=4,
+        content="please review",
         create_time=created_at,
     )
     query.filter.return_value = query
@@ -187,6 +189,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
     )
 
     assert result["items"][0]["created_at"] == created_at.isoformat()
+    assert result["items"][0]["content"] == "please review"
     assert result["pagination"] == {
         "page": 2,
         "page_size": 5,
@@ -236,10 +239,13 @@ def test_update_repository_status_applies_optional_values(monkeypatch, mock_sess
         publisher_tenant_id="tenant-2",
         publisher_user_id="user-2",
         submitted_by="dev@example.com",
+        content="please review",
     )
 
     assert affected == 1
-    assert statement.values.call_args.kwargs["publisher_tenant_id"] == "tenant-2"
+    values = statement.values.call_args.kwargs
+    assert values["publisher_tenant_id"] == "tenant-2"
+    assert values["content"] == "please review"
 
 
 def test_increment_downloads_updates_audit_user(monkeypatch, mock_session):
@@ -287,5 +293,6 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         "skill_repository_id": 1,
         "skill_id": 8,
         "status": "shared",
+        "content": row.content,
         "create_time": created_at,
     }]

@@ -83,7 +83,7 @@ export default function MineMcpServiceCard({
       return [
         {
           key: "delete",
-          label: t("mcpTools.mine.delete"),
+          label: t("common.delete"),
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           onClick: () => onDelete(item),
@@ -107,7 +107,7 @@ export default function MineMcpServiceCard({
       // only remote link and container MCPs can be published to community
       items.push({
         key: "apply-for-listing",
-        label: t("mcpTools.mine.applyForListing"),
+        label: t("repository.mine.applyForListing"),
         icon: <Upload className="h-3.5 w-3.5" />,
         disabled: publishing,
         onClick: () => onSubmitVersionUpdate(item, onlineService),
@@ -139,7 +139,7 @@ export default function MineMcpServiceCard({
 
     items.push({
       key: "delete",
-      label: t("mcpTools.mine.delete"),
+      label: t("common.delete"),
       icon: <Trash2 className="h-3.5 w-3.5" />,
       danger: true,
       onClick: () => onDelete(item),

@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import concurrent.futures
 import io
 import logging
 import os
@@ -56,8 +55,20 @@ class DataProcessService:
         self._inspector_last_time = 0
         # 5 minutes - inspector is expensive to create (ping all workers)
         self._inspector_ttl = 300
-        self._inspector_lock = None
         self._inspector_lock = threading.Lock()
+
+        # Cache Celery inspect(active/reserved) results to avoid pidbox storms
+        # when knowledge-base upload polling hits get_all_tasks repeatedly
+        # (especially during long-running large-file processing).
+        self._inspect_result_cache = None
+        self._inspect_result_cache_time = 0.0
+        # Slightly below typical frontend document poll interval (~3s)
+        self._inspect_result_cache_ttl = 2.5
+        # Short timeouts cause late pidbox replies: "*.reply.celery.pidbox: No consumers"
+        self._inspect_timeout = 2.0
+        self._inspect_warn_threshold = 2.5
+        # Serialize concurrent inspect calls from overlapping status polls
+        self._inspect_async_lock = asyncio.Lock()
 
     def _init_redis_client(self):
         """Initializes the Redis client and connection pool."""
@@ -105,19 +116,24 @@ class DataProcessService:
         """Stop the data processing service"""
         logger.info("Data processing service stopped")
 
+    def _ensure_celery_broker_configured(self) -> None:
+        """Ensure Celery broker/backend URLs are set before control/inspect calls."""
+        if not celery_app.conf.broker_url or not celery_app.conf.result_backend:
+            celery_app.conf.broker_url = REDIS_URL
+            celery_app.conf.result_backend = REDIS_BACKEND_URL
+            logger.warning(
+                f"Celery broker URL is not configured properly, reconfiguring to {celery_app.conf.broker_url}")
+
     def _get_celery_inspector(self):
         """Get Celery inspector (cached for performance)"""
         with self._inspector_lock:
             now = time.time()
             if self._inspector and now - self._inspector_last_time < self._inspector_ttl:
                 return self._inspector
-            if not celery_app.conf.broker_url or not celery_app.conf.result_backend:
-                celery_app.conf.broker_url = REDIS_URL
-                celery_app.conf.result_backend = REDIS_BACKEND_URL
-                logger.warning(
-                    f"Celery broker URL is not configured properly, reconfiguring to {celery_app.conf.broker_url}")
+            self._ensure_celery_broker_configured()
             try:
-                inspector = celery_app.control.inspect()
+                # Prefer a longer timeout so busy workers can still reply via pidbox.
+                inspector = celery_app.control.inspect(timeout=self._inspect_timeout)
                 self._inspector = inspector
                 self._inspector_last_time = now
                 self._inspector_init_time = now
@@ -126,6 +142,89 @@ class DataProcessService:
                 self._inspector = None
                 raise Exception(
                     f"Failed to create inspector with celery_app: {str(e)}")
+
+    def _inspect_active_and_reserved_sync(self):
+        """Synchronously inspect active/reserved tasks with one control client.
+
+        Important:
+        - Do NOT call inspect() in parallel (active + reserved at once). That opens
+          multiple temporary *.reply.celery.pidbox queues and frequently logs
+          "No consumers" when workers reply after the client already timed out.
+        - Prefer one inspector instance and call active()/reserved() sequentially.
+        """
+        self._ensure_celery_broker_configured()
+        inspector = celery_app.control.inspect(timeout=self._inspect_timeout)
+        active = inspector.active() or {}
+        reserved = inspector.reserved() or {}
+        if not isinstance(active, dict):
+            active = {}
+        if not isinstance(reserved, dict):
+            reserved = {}
+        return active, reserved
+
+    async def _get_active_and_reserved_tasks(self):
+        """Return (active_dict, reserved_dict) with short-lived cache + Redis-safe fallback.
+
+        Temporary mitigation for pidbox noise during knowledge-base file status polling.
+        Cached results reduce control-channel pressure while large files keep workers busy.
+        """
+        # Fast path: serve fresh cache without waiting on the inspect lock.
+        now = time.time()
+        with self._inspector_lock:
+            cached = self._inspect_result_cache
+            cache_age = now - self._inspect_result_cache_time
+            if cached is not None and cache_age < self._inspect_result_cache_ttl:
+                logger.debug(
+                    f"[get_all_tasks] Using cached inspect result (age={cache_age:.3f}s)")
+                return cached
+
+        async with self._inspect_async_lock:
+            # Re-check cache after acquiring lock: another coroutine may have filled it.
+            now = time.time()
+            with self._inspector_lock:
+                cached = self._inspect_result_cache
+                cache_age = now - self._inspect_result_cache_time
+                if cached is not None and cache_age < self._inspect_result_cache_ttl:
+                    logger.debug(
+                        f"[get_all_tasks] Using cached inspect result after wait "
+                        f"(age={cache_age:.3f}s)")
+                    return cached
+
+            celery_start = time.time()
+            try:
+                loop = asyncio.get_running_loop()
+                active_tasks_dict, reserved_tasks_dict = await loop.run_in_executor(
+                    None, self._inspect_active_and_reserved_sync
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[get_all_tasks] Inspector failed, fallback to Redis only: {exc}")
+                # Keep serving Redis-backed tasks; empty inspect maps are acceptable.
+                active_tasks_dict, reserved_tasks_dict = {}, {}
+                # Cache empty failure briefly to avoid inspect storms under outage.
+                with self._inspector_lock:
+                    self._inspect_result_cache = (active_tasks_dict, reserved_tasks_dict)
+                    self._inspect_result_cache_time = time.time()
+                return active_tasks_dict, reserved_tasks_dict
+
+            celery_duration = time.time() - celery_start
+            active_count = sum(len(v or []) for v in active_tasks_dict.values())
+            reserved_count = sum(len(v or []) for v in reserved_tasks_dict.values())
+            logger.info(
+                f"[get_all_tasks] inspector.active()+reserved() took {celery_duration:.3f}s "
+                f"(active={active_count}, reserved={reserved_count}, timeout={self._inspect_timeout}s)"
+            )
+            if celery_duration > self._inspect_warn_threshold:
+                logger.warning(
+                    f"[get_all_tasks] Inspector took {celery_duration:.3f}s "
+                    f"(expected <{self._inspect_warn_threshold}s); "
+                    f"busy workers may still emit late pidbox replies"
+                )
+
+            with self._inspector_lock:
+                self._inspect_result_cache = (active_tasks_dict, reserved_tasks_dict)
+                self._inspect_result_cache_time = time.time()
+            return active_tasks_dict, reserved_tasks_dict
 
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task by ID (async)"""
@@ -142,11 +241,6 @@ class DataProcessService:
         """
         all_tasks = []
         try:
-            start_time = time.time()
-            inspector_start = time.time()
-            inspector = self._get_celery_inspector()
-            inspector_duration = time.time() - inspector_start
-
             # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
             runtime_task_meta: Dict[str, Dict[str, Any]] = {}
@@ -171,44 +265,8 @@ class DataProcessService:
                     'original_filename': kwargs.get('original_filename', ''),
                 }
 
-            celery_start = time.time()
-
-            # Use short timeout for inspector since workers can respond in ~0.1s
-            # Default 1s timeout is unnecessary and causes delay
-            short_timeout = 0.2
-
-            def get_active():
-                t = time.time()
-                # Create fresh inspector with short timeout for each call
-                short_inspector = celery_app.control.inspect(
-                    timeout=short_timeout)
-                result = short_inspector.active()
-                elapsed = time.time() - t
-                logger.info(
-                    f"[get_all_tasks] inspector.active() took {elapsed:.3f}s")
-                return result if result else {}
-
-            def get_reserved():
-                t = time.time()
-                short_inspector = celery_app.control.inspect(
-                    timeout=short_timeout)
-                result = short_inspector.reserved()
-                elapsed = time.time() - t
-                logger.info(
-                    f"[get_all_tasks] inspector.reserved() took {elapsed:.3f}s")
-                return result if result else {}
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                future_active = executor.submit(get_active)
-                future_reserved = executor.submit(get_reserved)
-                active_tasks_dict = future_active.result(
-                    timeout=short_timeout + 0.5)
-                reserved_tasks_dict = future_reserved.result(
-                    timeout=short_timeout + 0.5)
-            celery_duration = time.time() - celery_start
-            if celery_duration > 0.5:
-                logger.warning(
-                    f"[get_all_tasks] Inspector took {celery_duration:.3f}s (expected <0.5s)")
+            # Best-effort Celery runtime view; Redis remains the durable source.
+            active_tasks_dict, reserved_tasks_dict = await self._get_active_and_reserved_tasks()
             if active_tasks_dict:
                 for worker, tasks in active_tasks_dict.items():
                     for task in tasks:

@@ -1,3 +1,4 @@
+import importlib
 import json
 import sys
 import types
@@ -367,6 +368,10 @@ with patch.dict("sys.modules", module_mocks):
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
 
+# Retain the tested module after patch.dict restores the module registry so it
+# can be reloaded by tests that exercise conditional imports.
+sys.modules["sdk.nexent.core.agents.nexent_agent"] = nexent_agent
+
 
 # Keep the lightweight runtime modules available for create_single_agent()
 # tests.  They exercise runtime selection after the import-time patch.dict
@@ -498,8 +503,39 @@ def mock_core_agent():
 
 
 # ----------------------------------------------------------------------------
-# Tests for helper functions (_has_host_tools, _is_retriever_tool)
+# Tests for type-only imports and helper functions
 # ----------------------------------------------------------------------------
+
+
+def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
+    """Verify type-only imports resolve their expected public symbols."""
+    context_module = types.ModuleType("sdk.nexent.core.agents.context")
+    context_item_input = type("ContextItemInput", (), {})
+    context_module.ContextItemInput = context_item_input
+
+    subagent_module = types.ModuleType("sdk.nexent.core.agents.subagent_wrapper")
+    subagent_tool_wrapper = type("SubAgentToolWrapper", (), {})
+    subagent_module.SubAgentToolWrapper = subagent_tool_wrapper
+
+    agent_model_module = types.ModuleType("sdk.nexent.core.agents.agent_model")
+    agent_model_module.AgentConfig = AgentConfig
+    agent_model_module.AgentHistory = AgentHistory
+    agent_model_module.ModelConfig = ModelConfig
+    agent_model_module.ToolConfig = ToolConfig
+
+    monkeypatch.setattr("typing.TYPE_CHECKING", True)
+    with patch.dict(
+        sys.modules,
+        {
+            **module_mocks,
+            "sdk.nexent.core.agents.agent_model": agent_model_module,
+            "sdk.nexent.core.agents.context": context_module,
+            "sdk.nexent.core.agents.subagent_wrapper": subagent_module,
+        },
+    ):
+        reloaded_module = importlib.reload(nexent_agent)
+        assert reloaded_module.ContextItemInput is context_item_input
+        assert reloaded_module.SubAgentToolWrapper is subagent_tool_wrapper
 
 
 def test_has_host_tools_with_host_tool():
@@ -3385,6 +3421,42 @@ class TestCreateSingleAgent:
         with pytest.raises(TypeError, match="agent_config must be a AgentConfig object"):
             nexent_agent_instance.create_single_agent("not_an_agent_config")
 
+    def test_wrap_subagent_uses_config_identity_and_name(self, nexent_agent_instance):
+        """Test _wrap_subagent loads the wrapper and resolves managed-agent metadata."""
+        inner_agent = MagicMock()
+        sub_agent_config = types.SimpleNamespace(agent_id="managed-1", name="Research agent")
+
+        wrapped_agent = nexent_agent_instance._wrap_subagent(inner_agent, sub_agent_config)
+
+        assert wrapped_agent._inner is inner_agent
+        assert wrapped_agent._observer is nexent_agent_instance.observer
+        assert wrapped_agent._agent_id == "managed-1"
+        assert wrapped_agent._agent_name == "Research agent"
+
+    def test_create_single_agent_passes_context_item_override(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        """Test create_single_agent converts the supplied context input sequence into runtime state."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        context_item = MagicMock()
+        agent_config = AgentConfig(
+            name="context_agent",
+            description="Agent with runtime context",
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            result = nexent_agent_instance.create_single_agent(
+                agent_config,
+                context_items_override=(context_item,),
+            )
+
+        context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
+        assert result is mock_core_agent
+        assert context_runtime.items == [context_item]
+
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
         nexent_agent_instance.model_config_list = [mock_model_config]
@@ -3480,10 +3552,12 @@ class TestCreateSingleAgent:
                 assert a2a_agent_info is not None
                 assert hasattr(a2a_agent_info, 'agent_id')
 
-                # Verify wrapper was passed to CoreAgent
+                # Verify the A2A agent is nested in the managed-agent observer wrapper.
                 mock_core_agent_fn.assert_called_once()
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert len(managed) == 1
+                assert managed[0]._inner is mock_wrapper_instance
 
     def test_create_single_agent_with_multiple_external_a2a_agents(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """Test create_single_agent correctly creates multiple external A2A agent wrappers."""
@@ -3526,10 +3600,13 @@ class TestCreateSingleAgent:
 
                 assert mock_wrapper_class.call_count == 2
 
-                # Verify both wrappers were passed to CoreAgent
+                # Verify both A2A agents are nested in managed-agent observer wrappers.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance_1 in core_agent_call_kwargs["managed_agents"]
-                assert mock_wrapper_instance_2 in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert [wrapped_agent._inner for wrapped_agent in managed] == [
+                    mock_wrapper_instance_1,
+                    mock_wrapper_instance_2,
+                ]
 
     def test_create_single_agent_with_external_a2a_agent_import_error(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent handles import error for ExternalA2AAgentWrapper."""
@@ -3627,12 +3704,12 @@ class TestCreateSingleAgent:
                 # Verify external wrapper was created
                 mock_wrapper_class.assert_called_once()
 
-                # Verify CoreAgent received both sub-agent and external wrapper
+                # Verify CoreAgent received wrappers around both managed agents.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
                 managed = core_agent_call_kwargs["managed_agents"]
                 assert len(managed) == 2
-                assert isinstance(managed[0], mock_core_agent_class)  # Sub-agent
-                assert managed[1] == mock_wrapper_instance  # External wrapper
+                assert isinstance(managed[0]._inner, mock_core_agent_class)
+                assert managed[1]._inner is mock_wrapper_instance
 
 
 class TestAddHistoryToAgentEdgeCases:
@@ -4575,6 +4652,7 @@ class TestCreateLocalToolMemory:
                 "tenant_id": "tenant_123",
                 "user_id": "user_456",
                 "agent_id": "agent_789",
+                "conversation_id": 101,
                 "memory_user_config": {"version": "v1"}
             }
         )
@@ -4593,10 +4671,15 @@ class TestCreateLocalToolMemory:
             assert result.user_id == "user_456"
             # Verify agent_id was set
             assert result.agent_id == "agent_789"
+            # Verify conversation_id was set for short-term memory isolation
+            assert result.conversation_id == "101"
             # Verify memory_user_config was set
             assert result.memory_user_config == {"version": "v1"}
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
+            assert result.description == "desc"
+            assert result.inputs == {}
+            assert result.output_type == "string"
         finally:
             if original_value is not None:
                 nexent_agent.__dict__["StoreMemoryTool"] = original_value
@@ -4621,7 +4704,8 @@ class TestCreateLocalToolMemory:
                 "memory_config": {"type": "vector"},
                 "tenant_id": "tenant_abc",
                 "user_id": "user_def",
-                "agent_id": "agent_ghi"
+                "agent_id": "agent_ghi",
+                "conversation_id": "conversation_jkl",
             }
         )
 
@@ -4635,6 +4719,7 @@ class TestCreateLocalToolMemory:
             assert result.memory_config == {"type": "vector"}
             # Verify tenant_id was set
             assert result.tenant_id == "tenant_abc"
+            assert result.conversation_id == "conversation_jkl"
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
         finally:
@@ -4671,6 +4756,7 @@ class TestCreateLocalToolMemory:
             assert result.tenant_id == ""
             assert result.user_id == ""
             assert result.agent_id == ""
+            assert result.conversation_id == ""
             assert result.memory_user_config is None
         finally:
             if original_value is not None:

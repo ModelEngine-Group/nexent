@@ -55,15 +55,15 @@ export function AgentRepositoryReviewConfirmModal({
       open={open}
       title={
         isApprove
-          ? t("agentRepository.review.confirmApproveTitle")
-          : t("agentRepository.review.confirmRejectTitle")
+          ? t("repository.review.confirmApproveTitle")
+          : t("repository.review.confirmRejectTitle")
       }
       onCancel={onClose}
       onOk={handleOk}
       okText={
         isApprove
-          ? t("agentRepository.review.approve")
-          : t("agentRepository.review.reject")
+          ? t("repository.review.approve")
+          : t("repository.review.reject")
       }
       cancelText={t("common.cancel")}
       okButtonProps={isApprove ? undefined : { danger: true }}
@@ -74,21 +74,21 @@ export function AgentRepositoryReviewConfirmModal({
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
           {isApprove
-            ? t("agentRepository.review.confirmApproveContent", { name: title })
-            : t("agentRepository.review.confirmRejectContent", { name: title })}
+            ? t("repository.review.confirmApproveContent", { name: title })
+            : t("repository.review.confirmRejectContent", { name: title })}
         </p>
         <div className="space-y-2">
           <label
             htmlFor="agent-repository-review-opinion"
             className="block text-sm font-medium text-slate-700 dark:text-slate-200"
           >
-            {t("agentRepository.review.reviewOpinionLabel")}
+            {t("repository.review.reviewOpinionLabel")}
           </label>
           <Input.TextArea
             id="agent-repository-review-opinion"
             value={reviewOpinion}
             onChange={(event) => setReviewOpinion(event.target.value)}
-            placeholder={t("agentRepository.review.reviewOpinionPlaceholder")}
+            placeholder={t("repository.review.reviewOpinionPlaceholder")}
             rows={4}
             disabled={loading}
           />
