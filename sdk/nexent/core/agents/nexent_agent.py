@@ -310,6 +310,26 @@ class NexentAgent:
             elif class_name == "AidpSearchTool":
                 tools_obj = tool_class(**params)
                 tools_obj.observer = self.observer
+                # Install the KDS whitelist so the tool only retrieves from
+                # KBs the current user is permitted to see.  Guard against
+                # ``metadata=None`` the same way every other branch does
+                # (``.get(...) if tool_config.metadata else ...``).
+                allowed_raw = (
+                    tool_config.metadata.get("allowed_kds_set")
+                    if tool_config.metadata else None
+                )
+                if allowed_raw is not None:
+                    try:
+                        tools_obj.set_allowed_kds([str(k) for k in allowed_raw])
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to install Aidp whitelist from metadata: %s; "
+                            "falling back to no-op filtering", exc,
+                        )
+                        tools_obj.set_allowed_kds(None)
+                else:
+                    # Whitelist not set by backend → treat as uninstalled.
+                    tools_obj.set_allowed_kds(None)
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

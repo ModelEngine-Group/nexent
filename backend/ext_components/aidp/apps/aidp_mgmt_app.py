@@ -132,6 +132,30 @@ async def _auth(request: Request) -> tuple[str, str]:
     return user_id, tenant_id
 
 
+def _infer_is_multimodal(detail: dict) -> bool:
+    """Reverse-derive ``is_multimodal`` from AIDP detail response.
+
+    AIDP does not return an ``is_multimodal`` field — it is a Nexent-side
+    concept. On create the SDK mapper translates it one-to-one into
+    ``caption_enable`` (``sdk/nexent/core/knowledge_base/mapper.py``):
+
+        caption_enable = 1 if is_multimodal else DEFAULT_CAPTION_ENABLE
+
+    So the reverse mapping only needs to inspect ``caption_enable``. The
+    ``vlm_model`` field is a separate, optional identifier that the user
+    may or may not supply — we deliberately do NOT gate on it being
+    non-empty, because (a) the user can choose any VLM model from the
+    AIDP catalog (not a fixed name) and (b) AIDP may not even return
+    the field for a given KB.
+
+    Returns ``True`` iff ``caption_enable ∈ {1, "1", True}``.
+    """
+    if not isinstance(detail, dict):
+        return False
+    caption = detail.get("caption_enable")
+    return caption in (1, "1", True)
+
+
 def _raise_aidp_conflict(exc: IntegrityError) -> None:
     """Translate a unique-index violation into an HTTP 409 conflict."""
     logger.warning("AIDP permission unique constraint violated: %s", exc)
@@ -220,7 +244,15 @@ async def list_knowledge_bases(
             "document_count": detail.get("document_count", 0),
             "chunk_count": detail.get("chunk_count", 0),
             "embedding_model": detail.get("embedding_model", ""),
-            "is_multimodal": detail.get("is_multimodal", False),
+            # ``is_multimodal`` is a Nexent-side concept (frontend sends it
+            # when creating a KB; the SDK mapper converts it to
+            # ``caption_enable`` + ``vlm_model``). AIDP does NOT return this
+            # field, so we reverse-derive it from ``caption_enable == 1``
+            # and a non-empty ``vlm_model``. Matches the forward mapping
+            # in ``sdk/nexent/core/knowledge_base/mapper.py``.
+            "is_multimodal": _infer_is_multimodal(detail),
+            "vlm_model": detail.get("vlm_model") or "",
+            "caption_enable": detail.get("caption_enable", 0),
             "created_at": detail.get("created_at"),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
@@ -302,6 +334,12 @@ async def create_knowledge_base(
             ErrorCode.AIDP_SERVICE_ERROR,
             "AIDP did not return a kds_id for the created knowledge base",
         )
+    # Normalize to string. AIDP may return kds_id as int or str; the DB
+    # schema declares ``kb_id VARCHAR(64)``, so PostgreSQL rejects a
+    # mixed-type comparison (``varchar = integer``) with an
+    # ``UndefinedFunction`` error. Cast once here so every downstream
+    # use (DB lookup, permission record insert, log messages) is a str.
+    kds_id = str(kds_id)
 
     if aidp_permission_db.get_permission_by_kb_id(kds_id, tenant_id):
         raise AidpKbConflictError(kds_id, tenant_id).__class__(

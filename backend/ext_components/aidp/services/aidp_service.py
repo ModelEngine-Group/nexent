@@ -476,18 +476,35 @@ def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
     injects them before forwarding to AIDP. Matches the frontend
     AIDP_CREATE_DEFAULTS and the SDK build_create_payload defaults exactly.
 
-    Special rule: if payload.is_multimodal is truthy, caption_enable defaults
-    to ``1`` (matching SDK mapper logic).
-
-    Inverse rule: when caption_enable is disabled (``0`` or ``"0"``), clear
-    ``vlm_model`` so AIDP never receives a stale model identifier for a
-    non-multimodal KB. Callers that omit the field entirely still get the
-    ``_AIDP_CREATE_DEFAULTS`` default above.
+    Special rules:
+      * if payload.is_multimodal is truthy, caption_enable defaults to ``1``
+        (matching SDK mapper logic).
+      * when caption_enable is disabled (``0`` or ``"0"``), clear ``vlm_model``
+        so AIDP never receives a stale model identifier for a non-multimodal KB.
+      * ``description`` is normalized: AIDP rejects empty strings (the spec
+        declares length 1-255). Any None/empty/whitespace-only description is
+        replaced with the KB name, falling back to ``"Nexent knowledge base"``
+        if name is also empty. This converts an AIDP 500 into a successful
+        create, because the server-side 500 we observed was traced to an
+        empty description in the UI payload.
     """
     result = dict(payload)
     for key, default in _AIDP_CREATE_DEFAULTS.items():
         if key not in result:
             result[key] = default
+
+    # Normalize description: AIDP spec declares length 1-255, but some
+    # backend implementations return HTTP 500 (instead of 400) when a
+    # required string field arrives as an empty string. This defensive
+    # rewrite guarantees the field is never forwarded empty.
+    desc = result.get("description")
+    if not isinstance(desc, str) or not desc.strip():
+        fallback_name = result.get("name")
+        if isinstance(fallback_name, str) and fallback_name.strip():
+            result["description"] = fallback_name.strip()
+        else:
+            result["description"] = "Nexent knowledge base"
+
     if result.get("is_multimodal") and "caption_enable" not in payload:
         result["caption_enable"] = 1
 
@@ -514,7 +531,7 @@ def create_aidp_kb_impl(
     full_payload = _apply_create_defaults(payload)
 
     create_url = urljoin(f"{normalized_url}/", _get_list_path())
-    logger.info("Creating AIDP knowledge base at %s", create_url)
+    logger.info("Creating AIDP knowledge base at %s with payload=%s", create_url, full_payload)
 
     try:
         client = http_client_manager.get_sync_client(
@@ -523,6 +540,23 @@ def create_aidp_kb_impl(
             verify_ssl=False,
         )
         response = client.put(create_url, headers=headers, json=full_payload)
+
+        if response.status_code >= 400:
+            # Log the full AIDP response body so we can see exactly what
+            # the remote service is complaining about. httpx's own
+            # HTTPStatusError only carries URL + status, so this body
+            # dump is the most valuable diagnostic for 500s and other
+            # non-2xx codes. api_key is printed with only the last 4
+            # chars visible to avoid leaking credentials.
+            safe_api_key = api_key[-4:] if api_key else ""
+            logger.warning(
+                "AIDP create KB failed: url=%s status=%d api_key=***%s body=%s",
+                create_url,
+                response.status_code,
+                safe_api_key,
+                response.text[:3000],
+            )
+
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
@@ -538,6 +572,8 @@ def create_aidp_kb_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
+        # Body is already logged above before raise_for_status, so we
+        # only re-log the status for correlation with existing searches.
         logger.exception(
             "AIDP API HTTP error: %s, status_code: %s",
             e,

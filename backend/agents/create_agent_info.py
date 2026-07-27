@@ -1171,17 +1171,21 @@ async def create_tool_config_list(
         )
 
         if tool.get("class_name") == "AidpSearchTool":
-            # Carry over the runtime whitelist first; langchain metadata, if
-            # any, takes precedence for non-whitelist keys via the merge.
+            # Carry over the runtime whitelist; merge into any existing
+            # metadata so langchain_tool references that may already be
+            # attached are preserved. ``tool_config.metadata`` defaults to
+            # None on ToolConfig, so guard the spread accordingly.
+            existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
             tool_config.metadata = {
-                **tool_config.metadata,
+                **existing,
                 "allowed_kds_set": _allowed_kds_set,
             }
             tool_class_name = tool.get("class_name")
             for langchain_tool in langchain_tools:
                 if langchain_tool.name == tool_class_name:
+                    existing2 = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
                     tool_config.metadata = {
-                        **tool_config.metadata,
+                        **existing2,
                         "langchain_tool": langchain_tool,
                     }
                     break

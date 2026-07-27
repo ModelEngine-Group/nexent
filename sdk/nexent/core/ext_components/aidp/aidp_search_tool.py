@@ -6,6 +6,7 @@ Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_
 """
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -23,6 +24,15 @@ logger = logging.getLogger("aidp_search_tool")
 _VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
 _VALID_RERANK_MODES = {"performance", "high_accuracy"}
 _MAX_KDS = 10
+
+# Transient HTTP status codes that merit automatic retry. 502/503/504 per
+# HTTP spec indicate the upstream server was temporarily unavailable; a
+# short backoff and retry is the standard client-side mitigation. AIDP's
+# FusionSearch endpoint is observed to return 503 intermittently (e.g. cold
+# start or gateway-level instability), so this is the main consumer.
+_AIDP_SEARCH_RETRY_STATUSES = {502, 503, 504}
+_AIDP_SEARCH_MAX_ATTEMPTS = 3
+_AIDP_SEARCH_RETRY_BACKOFF = (0.5, 1.5)  # seconds between retry 1 and 2
 
 
 class AidpSearchError(RuntimeError):
@@ -188,10 +198,25 @@ class AidpSearchTool(Tool):
         self.multi_modal = bool(resolved_multi_modal)
         self.observer = observer
         # Runtime whitelist populated by the backend (create_agent_info).
-        # When non-empty, both the configured ``kds_list`` and any LLM-supplied
-        # ``kds_list`` are intersected with this set so permission changes take
-        # effect immediately, without ever touching the database.
+        # When the whitelist has been explicitly installed (even as an empty
+        # set), both the configured ``kds_list`` and any LLM-supplied
+        # ``kds_list`` are intersected with this set so permission changes
+        # take effect immediately, without ever touching the database.
+        #
+        # Two fields control filtering:
+        #   * ``_whitelist_installed`` — True iff ``set_allowed_kds`` was
+        #     called by the backend. False only in SDK unit tests or legacy
+        #     code paths that never call it.
+        #   * ``_allowed_kds_set``     — the actual set of permitted KB ids.
+        #     An empty set means "user has access to nothing" and blocks
+        #     all KBs. A non-empty set means "only these KBs".
+        #
+        # The distinction matters: previously an empty set was treated as
+        # a no-op (preserving the SDK's unit-test mode), which meant a
+        # user with zero KB permissions could still query any KB the LLM
+        # passed. That was a privilege-escalation bug and is now fixed.
         self._allowed_kds_set: set[str] = set()
+        self._whitelist_installed: bool = False
 
         self._http_client = http_client_manager.get_sync_client(
             base_url=self.base_url,
@@ -305,17 +330,75 @@ class AidpSearchTool(Tool):
             )
 
     def _execute_request(self, query: str, kds_list: List[str]):
-        """POST to the AIDP FusionSearch endpoint and return parsed records."""
+        """POST to the AIDP FusionSearch endpoint and return parsed records.
+
+        Retries automatically on transient HTTP statuses (502 / 503 / 504)
+        with a short exponential backoff. These are the only retryable
+        failures we handle — 4xx errors and other 5xx responses are raised
+        immediately. Retrying 503 is the most valuable case in practice:
+        AIDP's FusionSearch endpoint has been observed to return 503 on the
+        first invocation after a period of inactivity and succeed on a
+        quick retry.
+
+        On a final 503 error (all retries exhausted) we surface a
+        user-friendly message that explains the likely cause (AIDP
+        retrieval service temporarily unavailable / KB still warming up)
+        rather than the raw httpx exception string.
+        """
         url = self._build_retrieve_url()
         payload = self._build_retrieve_payload(query.strip(), kds_list)
-        resp = self._http_client.post(
-            url,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            json=payload,
-        )
+
+        last_status_error: Optional[httpx.HTTPStatusError] = None
+        for attempt in range(1, _AIDP_SEARCH_MAX_ATTEMPTS + 1):
+            resp = self._http_client.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}",
+                },
+                json=payload,
+            )
+            if resp.status_code not in _AIDP_SEARCH_RETRY_STATUSES:
+                # Non-retryable: raise_for_status will either succeed (2xx)
+                # or throw immediately for 4xx / other 5xx.
+                break
+
+            last_status_error = httpx.HTTPStatusError(
+                message=f"{resp.status_code} {resp.reason_phrase}",
+                request=resp.request,
+                response=resp,
+            )
+            if attempt >= _AIDP_SEARCH_MAX_ATTEMPTS:
+                break
+            wait = _AIDP_SEARCH_RETRY_BACKOFF[0] * (2 ** (attempt - 1))
+            logger.warning(
+                "AIDP FusionSearch returned %d on attempt %d/%d for query=%r, "
+                "retrying in %.1fs",
+                resp.status_code, attempt, _AIDP_SEARCH_MAX_ATTEMPTS,
+                query[:50], wait,
+            )
+            time.sleep(wait)
+
+        # If we exhausted all retries on a transient status, surface it as
+        # a domain-level AidpSearchError with a clearer message.
+        if last_status_error is not None and resp.status_code in _AIDP_SEARCH_RETRY_STATUSES:
+            if resp.status_code == 503:
+                # AIDP 503 is almost always caused by the retrieval service
+                # being temporarily down, which in turn is almost always
+                # caused by the selected KB(s) having no indexed content
+                # yet (empty or still processing).
+                raise AidpSearchError(
+                    "AIDP retrieval service is temporarily unavailable (HTTP 503). "
+                    "This usually means the selected knowledge base(s) have no "
+                    "searchable content yet — upload at least one document to "
+                    "each KB and wait for indexing to finish, then retry. "
+                    "If the problem persists, contact the AIDP operator."
+                )
+            raise AidpSearchError(
+                f"AIDP retrieval service returned HTTP {resp.status_code} "
+                f"after {_AIDP_SEARCH_MAX_ATTEMPTS} attempts. Please retry later."
+            )
+
         resp.raise_for_status()
         return self._parse_response(resp.json())
 
@@ -347,17 +430,37 @@ class AidpSearchTool(Tool):
 
         Called once during agent setup so the tool never reaches a forbidden
         KB even if the LLM later crafts a ``kds_list`` that includes one.
-        Passing ``None`` or an empty list clears the whitelist (i.e. trust
-        the configured ``kds_list``).
+
+        Semantics after v7.1:
+          * ``allowed is None``  → whitelist is cleared and marked as NOT
+            installed. The tool falls through to no-op filtering (legacy
+            SDK unit-test compatibility).
+          * ``allowed == []``    → whitelist is installed as an empty set.
+            ``_filter_by_whitelist`` will block every KB. This is how the
+            backend signals "user has access to nothing".
+          * ``allowed`` non-empty → whitelist is installed with those ids.
+            ``_filter_by_whitelist`` intersects input with the set.
         """
         if allowed is None:
             self._allowed_kds_set = set()
+            self._whitelist_installed = False
+            logger.debug("AidpSearchTool whitelist cleared (not installed)")
         else:
             self._allowed_kds_set = {str(k) for k in allowed if k}
+            self._whitelist_installed = True
+            logger.info(
+                "AidpSearchTool whitelist installed with %d permitted KB(s)",
+                len(self._allowed_kds_set),
+            )
 
     def _filter_by_whitelist(self, kds: List[str]) -> List[str]:
-        """Intersect ``kds`` with the runtime whitelist, preserving order."""
-        if not self._allowed_kds_set:
+        """Intersect ``kds`` with the runtime whitelist, preserving order.
+
+        No-op iff ``set_allowed_kds`` was never called (whitelist not
+        installed). Once installed — even as an empty set — filtering is
+        strict and blocks every id that isn't in the set.
+        """
+        if not self._whitelist_installed:
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
