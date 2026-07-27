@@ -106,9 +106,6 @@ export function extractObjectNameFromUrl(url: string): string | null {
  */
 export async function fetchImageBlob(url: string): Promise<Blob> {
   const response = await fetch(convertImageUrlToApiUrl(url));
-  if (!response.ok) {
-    throw new Error(`Failed to load image: ${response.statusText}`);
-  }
   return response.blob();
 }
 
