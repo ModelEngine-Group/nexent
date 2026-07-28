@@ -109,7 +109,13 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
     } == {"weather forecast"}
     assert result["status"] == "success"
     assert result["recommendation_count"] == 2
-    assert set(result) == {"status", "recommendation_count", "recommendations"}
+    assert set(result) == {
+        "subtype",
+        "status",
+        "recommendation_count",
+        "recommendations",
+    }
+    assert result["subtype"] == "local_mcp_recommendation"
     assert [item["tool_id"] for item in result["recommendations"]] == [7, 12]
     assert result["recommendations"][0] == {
         "tool_id": 7,
@@ -144,6 +150,7 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
             await search_installed_mcp_tools.fn(keywords)
         )
         assert invalid_result == {
+            "subtype": "local_mcp_recommendation",
             "status": "error",
             "code": "invalid_keywords",
             "retryable": True,
@@ -168,6 +175,7 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     result_text = await search_installed_mcp_tools.fn(["private", "weather"])
 
     assert json.loads(result_text) == {
+        "subtype": "local_mcp_recommendation",
         "status": "error",
         "code": "tool_search_failed",
         "retryable": True,
@@ -221,6 +229,7 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
     result = json.loads(await search_installed_mcp_tools.fn(["weather"]))
 
     assert result == {
+        "subtype": "local_mcp_recommendation",
         "status": "success",
         "recommendation_count": 0,
         "recommendations": [],

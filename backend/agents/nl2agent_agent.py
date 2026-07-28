@@ -43,6 +43,7 @@ class GeneratedAgentDraft(BaseModel):
 class SearchInstalledMcpToolsObservation(BaseModel):
     """Successful structured observation returned to the agent."""
 
+    subtype: Literal["local_mcp_recommendation"] = "local_mcp_recommendation"
     status: Literal["success"] = "success"
     recommendation_count: int
     recommendations: list[InstalledMcpToolRecommendation]
@@ -51,6 +52,7 @@ class SearchInstalledMcpToolsObservation(BaseModel):
 class SearchInstalledMcpToolsErrorObservation(BaseModel):
     """Safe structured error returned to the agent."""
 
+    subtype: Literal["local_mcp_recommendation"] = "local_mcp_recommendation"
     status: Literal["error"] = "error"
     code: Literal["invalid_keywords", "tool_search_failed"]
     retryable: Literal[True] = True
@@ -143,7 +145,7 @@ final_answer(\"\"\"<nl2a>
 </nl2a>
 The installed tool search is complete. No suitable installed tools were found.\"\"\")
 </code>
-Replace the empty recommendation list with the selected recommendation objects. The visible response must mention only the same selected tools. If no tool is suitable, keep the empty success payload. If the search returns an error observation, add `subtype` with value `local_mcp_recommendation` to the error object in the wrapper and explain the failure outside it. For a clarifying question before any search, do not output an `<nl2a>` wrapper. Do not wrap the JSON in Markdown fences or claim that recommended tools were executed.""",
+Preserve the Observation's top-level `subtype` and other fields. Replace only the recommendation list with the selected recommendation objects and update `recommendation_count` accordingly. The visible response must mention only the same selected tools. If no tool is suitable, keep the empty success payload. If the search returns an error observation, copy the complete error object, including `subtype`, into the wrapper and explain the failure outside it. For a clarifying question before any search, do not output an `<nl2a>` wrapper. Do not wrap the JSON in Markdown fences or claim that recommended tools were executed.""",
         ]
     else:
         sections = [
@@ -225,7 +227,7 @@ final_answer(\"\"\"<nl2a>
 </nl2a>
 已完成已安装工具搜索，没有找到合适的已安装工具。\"\"\")
 </code>
-有推荐工具时，用选中的完整推荐对象替换空数组。可见说明只能提及同一组选中工具。没有合适工具时保留空的 success 结果。搜索返回错误 Observation 时，在错误对象中增加值为 `local_mcp_recommendation` 的 `subtype` 后放入 wrapper，并在 wrapper 外说明搜索失败。搜索前需要澄清需求时，不得输出 `<nl2a>` wrapper。不得使用 Markdown 围栏包裹 JSON，也不得声称已经执行推荐工具。""",
+保留 Observation 顶层的 `subtype` 和其他字段，只用筛选后的完整推荐对象替换推荐数组，并同步更新 `recommendation_count`。可见说明只能提及同一组选中工具。没有合适工具时保留空的 success 结果。搜索返回错误 Observation 时，将包含 `subtype` 的完整错误对象放入 wrapper，并在 wrapper 外说明搜索失败。搜索前需要澄清需求时，不得输出 `<nl2a>` wrapper。不得使用 Markdown 围栏包裹 JSON，也不得声称已经执行推荐工具。""",
         ]
 
     return "\n\n".join(sections)
