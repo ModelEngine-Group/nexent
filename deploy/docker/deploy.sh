@@ -1184,7 +1184,7 @@ configure_root_dir_from_env() {
     echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
   else
     local default_root_dir="$HOME/nexent-data"
-    if [ -t 0 ]; then
+    if deployment_should_prompt_root_dir && [ -t 0 ]; then
       local user_root_dir
       read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
       ROOT_DIR="${user_root_dir:-$default_root_dir}"
