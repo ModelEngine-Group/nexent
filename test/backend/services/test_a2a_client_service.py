@@ -1512,7 +1512,7 @@ class TestCallAgent:
                 mock_client.post_json = AsyncMock(
                     side_effect=A2AHttpStatusError("POST", "https://example.com/a2a", 401)
                 )
-                MockClient.return_value.__aexit__ = AsyncMock()
+                MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
                 with pytest.raises(AgentCallError, match="authentication failed.*HTTP 401"):
                     await service.call_agent(
