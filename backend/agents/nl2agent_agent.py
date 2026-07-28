@@ -68,8 +68,9 @@ You are NL2Agent, an ephemeral assistant that clarifies a user's desired agent a
             f"""## Workflow
 1. If the user's goal is not clear enough to identify required capabilities, ask a concise clarifying question and do not call a tool.
 2. Once the goal is clear, select 1 to 10 concise keywords that describe the required tool capabilities and call `{tool_name}` with those keywords.
-3. Review the returned candidates against the user's requirements. Keep only suitable recommendations and order them consistently with the visible recommendation text. The tool returns at most {max_results} candidates.
-4. Return the filtered recommendations in the structured final response format below.""",
+3. If a successful search made with Chinese keywords returns `recommendation_count` equal to 0, translate the same capabilities into concise English keywords and call `{tool_name}` exactly once more. Use the retry observation as the search result.
+4. Review the returned candidates against the user's requirements. Keep only suitable recommendations and order them consistently with the visible recommendation text. The tool returns at most {max_results} candidates.
+5. Return the filtered recommendations in the structured final response format below.""",
             """## Keyword Schema
 Pass exactly one `keywords` array with this shape:
 ```json
@@ -82,6 +83,13 @@ Thought: Briefly explain why the search is needed.
 Code:
 <code>
 result = {tool_name}(keywords=["capability keyword", "another capability"])
+print(result)
+</code>
+If a Chinese-keyword search succeeds with no recommendations, retry in the next action:
+Thought: The Chinese keywords returned no matches, so retry the same capabilities in English.
+Code:
+<code>
+result = {tool_name}(keywords=["english capability keyword", "another english capability"])
 print(result)
 </code>
 Executable code must use the `<code>...</code>` tags. Never use a Markdown fenced code block with a `python` language marker for an executable action. The JSON block above documents the keyword schema only; it is not an executable action format.""",
@@ -123,8 +131,9 @@ Replace the empty recommendation list with the selected recommendation objects. 
             f"""## 工作流程
 1. 如果用户目标尚不足以判断所需能力，提出一个简洁的澄清问题，不调用工具。
 2. 目标明确后，选择 1 到 10 个描述所需工具能力的简洁关键词，并用这些关键词调用 `{tool_name}`。
-3. 根据用户需求审查返回的候选工具，只保留合适的推荐，并使推荐顺序与可见推荐说明一致。工具最多返回 {max_results} 个候选结果。
-4. 按下方结构化最终回答格式返回筛选后的推荐结果。""",
+3. 如果使用中文关键词搜索成功，但返回的 `recommendation_count` 为 0，将同一组能力翻译成简洁的英文关键词，并且只重试一次 `{tool_name}`。后续使用重试 Observation 作为搜索结果。
+4. 根据用户需求审查返回的候选工具，只保留合适的推荐，并使推荐顺序与可见推荐说明一致。工具最多返回 {max_results} 个候选结果。
+5. 按下方结构化最终回答格式返回筛选后的推荐结果。""",
             """## 关键词结构
 只传入一个 `keywords` 数组，结构必须如下：
 ```json
@@ -137,6 +146,13 @@ Thought: 简要说明为什么需要搜索。
 Code:
 <code>
 result = {tool_name}(keywords=["能力关键词", "另一个能力关键词"])
+print(result)
+</code>
+如果中文关键词搜索成功但没有推荐结果，在下一个动作中使用英文关键词重试：
+Thought: 中文关键词没有匹配结果，因此使用表达相同能力的英文关键词重试。
+Code:
+<code>
+result = {tool_name}(keywords=["english capability keyword", "another english capability"])
 print(result)
 </code>
 可执行代码必须使用 `<code>...</code>` 标签，禁止使用带 `python` 语言标记的 Markdown 围栏代码块。上面的 JSON 代码块仅用于说明关键词结构，不是可执行动作格式。""",
