@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | 智能问答",
   "mainPage.layout.titleTemplate": "%s | {productName} 智能问答",
@@ -2421,8 +2421,8 @@
   "market.install.warning.continue": "仍要继续",
   "market.install.warning.goBack": "返回配置",
   "market.install.skillDuplicate.title": "检测到技能名称冲突",
-  "market.install.skillDuplicate.message": "以下技能在您的工作空间中已存在。请选择如何继续。",
-  "market.install.skillDuplicate.hint": "您可以在「 智能体技能管理 」列表中删除现有技能。",
+  "market.install.skillDuplicate.message": "以下技能在您的工作空间中已存在，请选择如何继续。若选择跳过技能，需要重新编辑智能体进行关联。",
+  "market.install.skillDuplicate.hint": "您可以在「智能体技能管理」列表中删除现有技能后重新导入。",
   "market.install.skillDuplicate.skip": "跳过技能",
   "market.error.fetchDetailFailed": "加载智能体详情失败",
   "market.error.retry": "重试",

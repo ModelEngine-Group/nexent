@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | AI Agents",
   "mainPage.layout.titleTemplate": "%s | {productName} AI Agents",
@@ -2881,8 +2881,8 @@
   "market.install.warning.continue": "Continue Anyway",
   "market.install.warning.goBack": "Go Back to Configure",
   "market.install.skillDuplicate.title": "Skill Name Conflict Detected",
-  "market.install.skillDuplicate.message": "The following skill(s) already exist in your workspace. Please choose how to proceed.",
-  "market.install.skillDuplicate.hint": "You can manage your existing skills in Skill Management list.",
+  "market.install.skillDuplicate.message": "The following skill(s) already exist in your workspace. Please choose how to proceed. If you skip the skills, you'll need to re-edit the agent to associate them.",
+  "market.install.skillDuplicate.hint": "You can delete existing skills in Skill Management list and re-import.",
   "market.install.skillDuplicate.skip": "Skip Skills",
   "market.error.fetchDetailFailed": "Failed to load Agent details",
   "market.error.retry": "Retry",
