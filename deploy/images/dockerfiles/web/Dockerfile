@@ -22,6 +22,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
     cp -r .next/static ../frontend-dist/.next/static && \
     cp -r public ../frontend-dist/ && \
     cp server.js ../frontend-dist/server.js && \
+    cp base-path.mjs ../frontend-dist/base-path.mjs && \
     cp build-config.js ../frontend-dist/build-config.js && \
     mkdir -p ../frontend-dist/node_modules/next/dist/compiled && \
     cp -r node_modules/next/dist/compiled/. ../frontend-dist/node_modules/next/dist/compiled/ && \

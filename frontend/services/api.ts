@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
+import { withBasePath } from "@/lib/basePath";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
@@ -13,7 +14,7 @@ import type {
 import type { MarketAgentListParams } from "@/types/market";
 import type { NotificationListParams } from "@/types/notification";
 
-export const API_BASE_URL = "/api";
+export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   user: {
