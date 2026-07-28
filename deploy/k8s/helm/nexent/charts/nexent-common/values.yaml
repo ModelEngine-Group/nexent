@@ -124,7 +124,7 @@ config:
     celeryWorkerPrefetchMultiplier: "1"
     celeryTaskTimeLimit: "3600"
     elasticsearchRequestTimeout: "30"
-    queues: "process_q,process_part_q,forward_q,dreaming_q"
+    queues: "process_q,forward_q,dreaming_q"
     workerName: ""
     workerConcurrency: "4"
   telemetry:
