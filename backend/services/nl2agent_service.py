@@ -11,11 +11,14 @@ from typing import Any
 from urllib.parse import urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.utils.observer import MessageObserver
 from rapidfuzz import fuzz
 
 from agents.create_agent_info import (
+    _resolve_input_budget,
+    _resolve_safe_input_budget,
     create_model_config_list,
     join_minio_file_description_to_query,
 )
@@ -23,9 +26,10 @@ from agents.nl2agent_agent import (
     InstalledMcpToolRecommendation,
     create_nl2agent_agent_config,
 )
-from consts.const import LOCAL_MCP_SERVER
+from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.tool_db import query_all_tools
+from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +151,46 @@ async def build_nl2agent_run_info(
     )
     model_config_list = await create_model_config_list(tenant_id)
     agent_config = create_nl2agent_agent_config(language)
+    default_model = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"],
+        tenant_id=tenant_id,
+    )
+    input_budget, capacity_snapshot, resolved_capacity_snapshot = (
+        _resolve_input_budget(default_model)
+    )
+    safe_input_budget_snapshot = _resolve_safe_input_budget(
+        capacity_snapshot=resolved_capacity_snapshot,
+        tenant_id=tenant_id,
+        agent_requested_output_tokens=None,
+        request_requested_output_tokens=None,
+    )
+    if safe_input_budget_snapshot is not None:
+        soft_input_budget_tokens = safe_input_budget_snapshot[
+            "soft_input_budget_tokens"
+        ]
+        hard_input_budget_tokens = safe_input_budget_snapshot[
+            "hard_input_budget_tokens"
+        ]
+        token_threshold = soft_input_budget_tokens
+    else:
+        soft_input_budget_tokens = 0
+        hard_input_budget_tokens = 0
+        token_threshold = input_budget
+
+    context_window_tokens = (
+        resolved_capacity_snapshot.context_window_tokens
+        if resolved_capacity_snapshot is not None
+        and resolved_capacity_snapshot.context_window_tokens is not None
+        else input_budget
+    )
+    agent_config.context_manager_config = ContextManagerConfig(
+        token_threshold=token_threshold,
+        context_window_tokens=context_window_tokens,
+        soft_input_budget_tokens=soft_input_budget_tokens,
+        hard_input_budget_tokens=hard_input_budget_tokens,
+    )
+    agent_config.capacity_snapshot = capacity_snapshot
+    agent_config.safe_input_budget_snapshot = safe_input_budget_snapshot
     mcp_config: dict[str, Any] = {
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
@@ -165,6 +209,8 @@ async def build_nl2agent_run_info(
         mcp_host=[mcp_config],
         history=_convert_history(request.history),
         stop_event=threading.Event(),
+        capacity_snapshot=capacity_snapshot,
+        safe_input_budget_snapshot=safe_input_budget_snapshot,
         enable_planning=False,
         sandbox_config=None,
         redis_client=None,

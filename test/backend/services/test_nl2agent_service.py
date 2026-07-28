@@ -117,6 +117,17 @@ def test_search_filters_scores_below_threshold(mocker):
 
 @pytest.mark.asyncio
 async def test_build_run_info_is_ephemeral(mocker):
+    default_model = {
+        "model_factory": "openai",
+        "model_name": "gpt-4o",
+        "context_window_tokens": 32768,
+    }
+    capacity_snapshot = {"capacity_fingerprint": "capacity-fingerprint"}
+    resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
+    safe_input_budget_snapshot = {
+        "soft_input_budget_tokens": 24000,
+        "hard_input_budget_tokens": 30000,
+    }
     mocker.patch(
         "services.nl2agent_service.join_minio_file_description_to_query",
         new_callable=AsyncMock,
@@ -126,6 +137,18 @@ async def test_build_run_info_is_ephemeral(mocker):
         "services.nl2agent_service.create_model_config_list",
         new_callable=AsyncMock,
         return_value=[],
+    )
+    get_model_config = mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value=default_model,
+    )
+    resolve_input_budget = mocker.patch(
+        "services.nl2agent_service._resolve_input_budget",
+        return_value=(32768, capacity_snapshot, resolved_capacity_snapshot),
+    )
+    resolve_safe_input_budget = mocker.patch(
+        "services.nl2agent_service._resolve_safe_input_budget",
+        return_value=safe_input_budget_snapshot,
     )
     mocker.patch(
         "services.nl2agent_service.LOCAL_MCP_SERVER",
@@ -145,6 +168,18 @@ async def test_build_run_info_is_ephemeral(mocker):
 
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
+    assert run_info.agent_config.context_manager_config.token_threshold == 24000
+    assert (
+        run_info.agent_config.context_manager_config.hard_input_budget_tokens
+        == 30000
+    )
+    assert run_info.agent_config.capacity_snapshot == capacity_snapshot
+    assert (
+        run_info.agent_config.safe_input_budget_snapshot
+        == safe_input_budget_snapshot
+    )
+    assert run_info.capacity_snapshot == capacity_snapshot
+    assert run_info.safe_input_budget_snapshot == safe_input_budget_snapshot
     assert run_info.history[0].content == "Earlier request"
     assert run_info.mcp_host == [
         {
@@ -157,6 +192,17 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
     assert run_info.observer.enable_nl2a_wrapper is True
+    get_model_config.assert_called_once_with(
+        key="LLM_ID",
+        tenant_id="tenant-a",
+    )
+    resolve_input_budget.assert_called_once_with(default_model)
+    resolve_safe_input_budget.assert_called_once_with(
+        capacity_snapshot=resolved_capacity_snapshot,
+        tenant_id="tenant-a",
+        agent_requested_output_tokens=None,
+        request_requested_output_tokens=None,
+    )
 
 
 @pytest.mark.asyncio
