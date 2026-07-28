@@ -15,7 +15,6 @@ from .db_models import (
     MemoryDreamingAudit,
     MemoryDreamingSchedule,
     MemoryDreamingVersion,
-    MemoryRecord,
 )
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from services.agent_automation.models import ScheduleTrigger
@@ -632,12 +631,3 @@ def delete_user_dreaming_history(tenant_id: str, user_id: str) -> None:
                 {"delete_flag": "Y", "updated_by": user_id},
                 synchronize_session=False,
             )
-        session.query(MemoryRecord).filter(
-            MemoryRecord.tenant_id == tenant_id,
-            MemoryRecord.user_id == user_id,
-            MemoryRecord.created_by == "dreaming",
-            MemoryRecord.delete_flag == "N",
-        ).update(
-            {"delete_flag": "Y", "updated_by": user_id},
-            synchronize_session=False,
-        )

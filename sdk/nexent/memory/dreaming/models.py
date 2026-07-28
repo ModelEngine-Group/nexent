@@ -30,7 +30,6 @@ class DreamingCandidate(BaseModel):
     last_light_at: Optional[datetime] = None
     last_rem_at: Optional[datetime] = None
     noise: bool = False
-    already_promoted: bool = False
 
 
 class DreamingMetrics(BaseModel):
@@ -49,7 +48,6 @@ class DreamingThresholds(BaseModel):
     min_score: float = 0.72
     min_recall_count: int = 3
     min_unique_queries: int = 2
-    include_promoted: bool = False
 
 
 class DreamingDecision(BaseModel):

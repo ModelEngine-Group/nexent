@@ -16,6 +16,8 @@ sys.path.insert(
 
 # Stub database
 database_pkg = types.ModuleType("database")
+database_pkg.memory_dreaming_db = MagicMock(name="memory_dreaming_db")
+database_pkg.memory_dreaming_db.get_active_version.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
@@ -218,6 +220,42 @@ def test_search_returns_full_context_memories(service):
     assert results[0].layer == memory_retrieval_service.MemoryLayer.TENANT
 
 
+def test_ac039_user_context_combines_records_and_active_dreaming_version(service):
+    memory_retrieval_service.memory_dreaming_db.get_active_version.return_value = {
+        "version_id": 8,
+        "version_no": 2,
+        "published_content": "dreaming long-term memory",
+        "source_evidence_ids": ["46", "47"],
+    }
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn",
+        user_id="u1",
+        agent_id="a1",
+        layers=[memory_retrieval_service.MemoryLayer.USER],
+        query="",
+        top_k=1,
+        threshold=0.65,
+    )
+
+    import asyncio
+
+    results = asyncio.new_event_loop().run_until_complete(
+        service.search(request, write_hits=False)
+    )
+
+    assert len(results) == 2
+    dreaming = results[1]
+    assert dreaming.content == "dreaming long-term memory"
+    assert dreaming.layer == memory_retrieval_service.MemoryLayer.USER
+    assert dreaming.source == "dreaming"
+    assert dreaming.metadata["dreaming_version_id"] == 8
+    assert dreaming.metadata["source_evidence_ids"] == ["46", "47"]
+    memory_retrieval_service.memory_dreaming_db.get_active_version.assert_called_with(
+        "tn", "u1", "a1"
+    )
+    memory_retrieval_service.memory_dreaming_db.get_active_version.return_value = None
+
+
 def test_search_returns_vector_results(service):
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn",
@@ -290,7 +328,9 @@ def test_search_writes_hits(service):
 
 
 @pytest.mark.asyncio
-async def test_search_uses_default_layers_and_truncates_results(service, monkeypatch):
+async def test_search_uses_default_layers_without_truncating_full_context(
+    service, monkeypatch
+):
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         layers=None, query="hello", top_k=1, threshold=0.5
@@ -302,7 +342,7 @@ async def test_search_uses_default_layers_and_truncates_results(service, monkeyp
 
     results = await service.search(request, write_hits=False)
 
-    assert results == [full_result]
+    assert results == [full_result, full_result, vector_result]
     service._full_context_search.assert_any_call(request=request, layer="tenant")
     service._full_context_search.assert_any_call(request=request, layer="user")
     service._vector_search.assert_called_once()

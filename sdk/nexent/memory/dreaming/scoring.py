@@ -117,8 +117,6 @@ def select_candidates(
         promote = True
         if candidate.noise:
             promote, reason = False, "noise"
-        elif candidate.already_promoted and not thresholds.include_promoted:
-            promote, reason = False, "already_promoted"
         elif score < thresholds.min_score:
             promote, reason = False, "score_below_threshold"
         elif metrics.signal_count < thresholds.min_recall_count:

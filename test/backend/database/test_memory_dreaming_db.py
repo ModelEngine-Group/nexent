@@ -196,7 +196,7 @@ def test_ac037_delete_history_physically_deletes_schedule(monkeypatch):
 
     assert session.query.call_args_list[0].args == (MemoryDreamingSchedule,)
     query.delete.assert_called_once_with(synchronize_session=False)
-    assert query.update.call_count == 4
+    assert query.update.call_count == 3
 
 
 # ---------------------------------------------------------------------------

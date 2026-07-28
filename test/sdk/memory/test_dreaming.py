@@ -50,11 +50,6 @@ def test_ac004_openclaw_score_formula():
     [
         ({"noise": True}, DreamingThresholds(min_score=0), "noise"),
         (
-            {"already_promoted": True},
-            DreamingThresholds(min_score=0),
-            "already_promoted",
-        ),
-        (
             {"total_retrieval_score": 0},
             DreamingThresholds(min_score=0.7),
             "score_below_threshold",

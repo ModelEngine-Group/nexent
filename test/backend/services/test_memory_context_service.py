@@ -42,6 +42,8 @@ sys.path.insert(
 
 # Stub ``database`` so transitive imports succeed without a real DB.
 database_pkg = types.ModuleType("database")
+database_pkg.memory_dreaming_db = MagicMock(name="memory_dreaming_db")
+database_pkg.memory_dreaming_db.get_active_version.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg

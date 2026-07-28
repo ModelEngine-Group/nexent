@@ -66,5 +66,4 @@ def build_candidate(record: Dict[str, Any], total_retrieval_score: float) -> Dre
         last_light_at=record.get("last_light_at"),
         last_rem_at=record.get("last_rem_at"),
         noise=noise,
-        already_promoted=bool(record.get("already_promoted", False)),
     )

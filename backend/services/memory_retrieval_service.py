@@ -15,11 +15,8 @@ hit so Dreaming can aggregate recall statistics in batch.
 
 from __future__ import annotations
 
-import json
 import hashlib
 import logging
-import os
-import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -27,7 +24,7 @@ from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemorySearchRequest, MemorySearchResult
 from nexent.memory.policy import MemoryRetrievalPolicy
 
-from database import memory_record_db, memory_retrieval_hit_db
+from database import memory_dreaming_db, memory_record_db, memory_retrieval_hit_db
 from services.memory_index_service import (
     MemoryIndexService,
     get_memory_index_service,
@@ -78,6 +75,28 @@ def _serialize_record_as_result(
             "memory_type": record.get("memory_type"),
             "status": record.get("status"),
             "concept_tags": record.get("concept_tags") or [],
+        },
+    )
+
+
+def _serialize_dreaming_version_as_result(
+    version: Dict[str, Any],
+) -> MemorySearchResult:
+    return MemorySearchResult(
+        memory_id=None,
+        external_id=f"dreaming-version:{version['version_id']}",
+        content=version.get("published_content", ""),
+        score=1.0,
+        layer=MemoryLayer.USER,
+        source="dreaming",
+        is_external=False,
+        metadata={
+            "source_type": "dreaming",
+            "memory_type": "long_term",
+            "status": "active",
+            "dreaming_version_id": version.get("version_id"),
+            "dreaming_version_no": version.get("version_no"),
+            "source_evidence_ids": version.get("source_evidence_ids") or [],
         },
     )
 
@@ -138,7 +157,7 @@ class MemoryRetrievalService:
         if write_hits and results:
             self._record_hits(request=request, results=results)
 
-        return results[:top_k]
+        return results
 
     async def search_memories(
         self,
@@ -231,7 +250,16 @@ class MemoryRetrievalService:
             status="active",
             limit=1000,
         )
-        return [_serialize_record_as_result(row, score=1.0) for row in rows]
+        results = [_serialize_record_as_result(row, score=1.0) for row in rows]
+        if layer == MemoryLayer.USER.value:
+            active_version = memory_dreaming_db.get_active_version(
+                request.tenant_id,
+                request.user_id,
+                request.agent_id or "__user__",
+            )
+            if active_version:
+                results.append(_serialize_dreaming_version_as_result(active_version))
+        return results
 
     def _vector_search(
         self,
