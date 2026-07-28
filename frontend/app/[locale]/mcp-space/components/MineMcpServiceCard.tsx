@@ -21,7 +21,7 @@ interface MineMcpServiceCardProps {
   toggling?: boolean;
   publishing?: boolean;
   unpublishing?: boolean;
-  refreshingToolCount?: boolean;
+  healthChecking?: boolean;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggle: (service: McpServiceItem) => void;
@@ -35,7 +35,7 @@ interface MineMcpServiceCardProps {
   ) => void;
   onDelete: (item: MineMcpCardItem) => void;
   onViewReviewProgress?: (item: MineMcpCardItem, onlineService?: CommunityMcpCard) => void;
-  onRefreshToolCount?: (item: MineMcpCardItem) => void;
+  onHealthCheck?: (item: MineMcpCardItem) => void;
 }
 
 export default function MineMcpServiceCard({
@@ -44,7 +44,7 @@ export default function MineMcpServiceCard({
   toggling,
   publishing,
   unpublishing,
-  refreshingToolCount,
+  healthChecking = false,
   onEditLocal,
   onEditCommunity,
   onToggle,
@@ -52,7 +52,7 @@ export default function MineMcpServiceCard({
   onUnpublishOnline,
   onDelete,
   onViewReviewProgress,
-  onRefreshToolCount,
+  onHealthCheck,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
   const service = item.service;
@@ -130,13 +130,13 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (item.kind === "local") {
+    if (onHealthCheck) {
       items.push({
-        key: "refresh-tool-count",
-        label: t("mcpTools.mine.refreshToolCount"),
+        key: "health-check",
+        label: t("mcpConfig.serverList.button.healthCheck"),
         icon: <RefreshCw className="h-3.5 w-3.5" />,
-        disabled: refreshingToolCount,
-        onClick: () => onRefreshToolCount?.(item),
+        disabled: healthChecking,
+        onClick: () => onHealthCheck(item),
       });
     }
 

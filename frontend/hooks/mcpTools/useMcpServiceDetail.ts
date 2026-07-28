@@ -232,7 +232,13 @@ export function useMcpServiceDetail({
       invalidateServices();
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
-      message.error(t("mcpTools.service.saveFailed"));
+      // Show user-friendly message for known errors
+      const msg = error instanceof Error ? error.message : "";
+      if (msg.includes("MCP name already exists")) {
+        message.error(t("mcpTools.add.error.nameExists"));
+      } else {
+        message.error(msg || t("mcpTools.service.saveFailed"));
+      }
     } finally {
       setSaving(false);
     }

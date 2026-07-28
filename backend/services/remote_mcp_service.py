@@ -710,6 +710,13 @@ def update_mcp_service(
     if not current_record:
         raise McpNotFoundError("MCP record not found")
 
+    # Check name uniqueness (exclude the current record itself)
+    if new_name != current_record.get("mcp_name"):
+        if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):
+            logger.error(f"MCP name already exists: {new_name} in tenant {tenant_id}")
+            from consts.exceptions import McpNameConflictError
+            raise McpNameConflictError("MCP name already exists")
+
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
     next_config_json = config_json if config_json is not None else current_config_json
 
@@ -1305,6 +1312,10 @@ async def check_mcp_service_health(
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[dict]:
     """Get tools from an MCP service by ID.
 
+    For API-type MCPs (OpenAPI), tools are already registered in the database
+    via import_openapi_service.  Return them from the tool registry instead of
+    attempting an MCP-protocol connection.
+
     Args:
         tenant_id: Tenant ID
         mcp_id: MCP record ID
@@ -1320,6 +1331,22 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise McpNotFoundError("MCP record not found")
+
+    config_json = record.get("config_json")
+    registry_json = record.get("registry_json")
+    is_api_type = isinstance(config_json, dict) and "openapi" in config_json
+    if is_api_type:
+        # API-type MCPs have no MCP protocol endpoint.
+        # Return the tool names that were extracted during registration.
+        tool_names = []
+        if isinstance(registry_json, dict):
+            raw = registry_json.get("_toolNames")
+            if isinstance(raw, list):
+                tool_names = raw
+        return [
+            {"name": name, "description": ""}
+            for name in tool_names
+        ]
 
     service_name = record.get("mcp_name")
     server_url = record.get("mcp_server")
