@@ -1,5 +1,3 @@
-import base64
-import json
 import logging
 import os
 import threading
@@ -455,10 +453,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if doc.get("process_source") == "UniversalImageExtractor":
                     img_bytes = doc.pop("image_bytes", "")
                     if len(img_bytes) > 0:
-                        image_base64_str = base64.b64encode(
-                            img_bytes).decode("utf-8")
-                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                        inputs.append({"image": data})
+                        inputs.append({"image": img_bytes})
                 else:
                     inputs.append({"text": doc[content_field]})
             embeddings = embedding_model.get_multimodal_embeddings(inputs)
@@ -472,6 +467,13 @@ class ElasticSearchCore(VectorDatabaseCore):
             inputs = [doc[content_field] for doc in filtered_docs]
             embeddings = embedding_model.get_embeddings(inputs)
             return filtered_docs, embeddings
+
+    @staticmethod
+    def _normalize_embedding_vector(embedding: Any) -> Any:
+        """Convert numeric vector values to floats for Elasticsearch dense vectors."""
+        if not isinstance(embedding, list):
+            return embedding
+        return [float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else value for value in embedding]
 
     @staticmethod
     def _build_bulk_operations(
@@ -488,7 +490,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if doc.get("process_source") == "UniversalImageExtractor"
                 else "embedding"
             )
-            doc[embedding_field] = embedding
+            doc[embedding_field] = ElasticSearchCore._normalize_embedding_vector(embedding)
             if "embedding_model_name" not in doc:
                 doc["embedding_model_name"] = embedding_model.embedding_model_name
             operations.append(doc)
@@ -551,10 +553,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                                 if doc.get("process_source") == "UniversalImageExtractor":
                                     img_bytes = doc.pop("image_bytes", "")
                                     if len(img_bytes) > 0:
-                                        image_base64_str = base64.b64encode(
-                                            img_bytes).decode('utf-8')
-                                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                                        inputs.append({"image": data})
+                                        inputs.append({"image": img_bytes})
                                         docs_for_embeddings.append(doc)
                                 else:
                                     inputs.append({"text": doc[content_field]})
@@ -609,7 +608,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             for doc, embedding in doc_embedding_pairs:
                 operations.append({"index": {"_index": index_name}})
                 doc["multi_embedding" if doc["process_source"]
-                        == "UniversalImageExtractor" else "embedding"] = embedding
+                        == "UniversalImageExtractor" else "embedding"] = self._normalize_embedding_vector(embedding)
                 if "embedding_model_name" not in doc:
                     doc["embedding_model_name"] = getattr(
                         embedding_model, "embedding_model_name", "unknown")

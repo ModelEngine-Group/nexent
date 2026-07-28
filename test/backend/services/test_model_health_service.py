@@ -1056,6 +1056,14 @@ async def test_infer_model_factory_dashscope():
 
 
 @pytest.mark.asyncio
+async def test_infer_model_factory_siliconflow():
+    """L47: _infer_model_factory returns SILICONFLOW_MODEL_FACTORY for siliconflow URLs"""
+    from backend.services.model_health_service import _infer_model_factory
+    result = _infer_model_factory("multi_embedding", "https://api.siliconflow.cn/v1/", None)
+    assert result == "silicon"
+
+
+@pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding_dashscope():
     """L181: multi_embedding with model_factory=dasScope uses DashScopeMultimodalEmbedding"""
     with mock.patch("backend.services.model_health_service.DashScopeMultimodalEmbedding") as mock_dashscope:

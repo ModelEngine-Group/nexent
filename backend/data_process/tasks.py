@@ -107,7 +107,9 @@ def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
     return sum(
         1
         for chunk in chunks
-        if isinstance(chunk, dict) and chunk.get("process_source") == IMAGE_METADATA_PROCESS_SOURCE
+        if isinstance(chunk, dict)
+        and (chunk.get("process_source") or chunk.get("metadata", {}).get("process_source"))
+        == IMAGE_METADATA_PROCESS_SOURCE
     )
 
 

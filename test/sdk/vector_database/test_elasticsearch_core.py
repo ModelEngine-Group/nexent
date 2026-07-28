@@ -844,7 +844,7 @@ def test_vectorize_documents_small_batch(elasticsearch_core_instance):
 def test_vectorize_documents_multimodal_sets_multi_embedding(elasticsearch_core_instance):
     embedding_model = MagicMock()
     embedding_model.model_type = "multimodal"
-    embedding_model.get_multimodal_embeddings.return_value = [[0.1, 0.2], [0.3, 0.4]]
+    embedding_model.get_multimodal_embeddings.return_value = [[0, 1], [0.3, 0.4]]
 
     documents = [
         {
@@ -879,6 +879,8 @@ def test_vectorize_documents_multimodal_sets_multi_embedding(elasticsearch_core_
         text_doc = next(doc for doc in doc_entries if doc["process_source"] != "UniversalImageExtractor")
         assert "multi_embedding" in image_doc
         assert "embedding" in text_doc
+        assert image_doc["multi_embedding"] == [0.3, 0.4]
+        assert all(isinstance(value, float) for value in text_doc["embedding"])
 
 
 def test_vectorize_documents_text_embedding_skips_images(elasticsearch_core_instance):

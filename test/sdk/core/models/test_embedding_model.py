@@ -3,7 +3,12 @@ import requests
 import sys
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding
+from nexent.core.models.embedding_model import (
+    DashScopeMultimodalEmbedding,
+    JinaEmbedding,
+    OpenAICompatibleEmbedding,
+    SiliconflowMultimodalEmbedding,
+)
 
 class DummyResponse:
     def __init__(self, status_code=200, json_data=None):
@@ -750,6 +755,7 @@ def test_dashscope_init_sets_attributes(dashscope_embedding_instance):
     assert emb.model == "text-embedding-vision"
     assert emb.embedding_dim == 1024
     assert emb.ssl_verify is True
+    assert emb.model_type == "multimodal"
     assert "Authorization" in emb.headers
 
 
@@ -759,6 +765,17 @@ def test_dashscope_prepare_multimodal_input_formats_correctly(dashscope_embeddin
     result = dashscope_embedding_instance._prepare_multimodal_input(inputs)
     assert result["model"] == "text-embedding-vision"
     assert result["input"]["contents"] == inputs
+
+
+def test_siliconflow_init_sets_multimodal_model_type():
+    """Siliconflow multimodal clients must declare the indexing model type."""
+    embedding = SiliconflowMultimodalEmbedding(
+        api_key="dummy-key",
+        base_url="https://api.siliconflow.cn/v1/embeddings",
+        model_name="Qwen/Qwen3-VL-Embedding-8B",
+    )
+
+    assert embedding.model_type == "multimodal"
 
 
 def test_dashscope_get_embeddings_with_string_input(dashscope_embedding_instance):
