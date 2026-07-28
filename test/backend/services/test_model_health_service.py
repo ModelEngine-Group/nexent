@@ -130,7 +130,7 @@ async def test_perform_connectivity_check_embedding():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
     # Setup
-    with mock.patch("backend.services.model_health_service.JinaEmbedding") as mock_embedding:
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(return_value=[
             [1]
@@ -711,7 +711,7 @@ async def test_embedding_dimension_check_embedding_success():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_success():
-    with mock.patch("backend.services.model_health_service.JinaEmbedding") as mock_embedding:
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3, 0.4]])
@@ -796,8 +796,8 @@ async def test_embedding_dimension_check_wrapper_exception():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_empty_response():
-    """Test multi_embedding dimension check with empty response (covers line 48-50)"""
-    with mock.patch("backend.services.model_health_service.JinaEmbedding") as mock_embedding, \
+    """Test multi_embedding dimension check with an empty response."""
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding, \
             mock.patch("backend.services.model_health_service.logging") as mock_logging:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(
