@@ -13,9 +13,9 @@ export interface ChatProps {
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
   onAgentSelected?: (agent: Agent) => void;
-  onBack: () => void;
-  chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
+  onBack?: () => void;
+  chatMode?: ChatMode;
+  onChatModeChange?: (mode: ChatMode) => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -37,8 +37,8 @@ export const Chat: FC<ChatProps> = ({
   selectedAgent,
   onAgentSelected,
   onBack,
-  chatMode,
-  onChatModeChange,
+  chatMode = "execution",
+  onChatModeChange = () => undefined,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {

@@ -81,7 +81,7 @@ import { useTranslation } from "react-i18next";
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
-  onBack: () => void;
+  onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
@@ -191,7 +191,7 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
-  onBack: () => void;
+  onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
@@ -224,9 +224,11 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
+          {onBack && (
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <div className="flex flex-col">
             <span className="text-sm font-medium text-foreground">
               {hasMessages ? conversationTitle : displayName}

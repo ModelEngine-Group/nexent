@@ -1751,6 +1751,7 @@
   "agentConfig.agents.noAgentSelected": "Please select an Agent to edit",
   "agentConfig.button.new": "New",
   "agentConfig.button.import": "Import",
+  "agentConfig.button.generationAssistant": "Agent Generation Assistant",
   "agentConfig.agents.copySuffix": "_copy",
   "agentConfig.tools.refreshFailedDebug": "Failed to refresh tools list:",
   "agentConfig.agents.detailsLoadFailed": "Failed to load Agent details:",

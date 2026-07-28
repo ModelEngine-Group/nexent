@@ -1719,6 +1719,7 @@
   "agentConfig.agents.noAgentSelected": "请选择一个智能体进行编辑",
   "agentConfig.button.new": "新建",
   "agentConfig.button.import": "导入",
+  "agentConfig.button.generationAssistant": "智能体生成助手",
   "agentConfig.agents.copySuffix": "_副本",
   "agentConfig.tools.refreshFailedDebug": "刷新工具列表失败:",
   "agentConfig.agents.detailsLoadFailed": "加载智能体详情失败:",
