@@ -21,6 +21,7 @@ export interface A2AExternalAgent {
   security_schemes?: Record<string, any>;
   security_requirements?: Record<string, any>[];
   configured_security_scheme_ids?: string[];
+  selected_security_requirement_index?: number | null;
   source_type: 'url' | 'nacos';
   source_url?: string;
   nacos_config_id?: string;
@@ -307,9 +308,13 @@ export const a2aClientService = {
   async updateAgentSecurityCredentials(
     agentId: string,
     securityCredentials: Record<string, string>,
+    selectedSecurityRequirementIndex?: number,
   ): Promise<{
     success: boolean;
-    data?: { configured_security_scheme_ids: string[] };
+    data?: {
+      configured_security_scheme_ids: string[];
+      selected_security_requirement_index?: number | null;
+    };
     message?: string;
   }> {
     try {
@@ -318,7 +323,10 @@ export const a2aClientService = {
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ security_credentials: securityCredentials }),
+          body: JSON.stringify({
+            security_credentials: securityCredentials,
+            selected_security_requirement_index: selectedSecurityRequirementIndex,
+          }),
         },
       );
       const data = await response.json();

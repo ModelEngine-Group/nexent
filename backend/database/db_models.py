@@ -1579,6 +1579,10 @@ class A2AExternalAgent(TableBase):
         JSON,
         doc="Credential values for Agent Card security schemes, never exposed by APIs"
     )
+    selected_security_requirement_index = Column(
+        Integer,
+        doc="Selected Agent Card security requirement index used for external agent calls"
+    )
 
     # For Nacos mode
     nacos_config_id = Column(

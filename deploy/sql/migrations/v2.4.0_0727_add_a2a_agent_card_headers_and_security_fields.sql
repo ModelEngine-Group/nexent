@@ -15,3 +15,9 @@ COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.security_requirements
     IS 'Security requirements declared by the Agent Card';
 COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.security_credentials
     IS 'Credential values for Agent Card security schemes, never exposed by APIs';
+
+ALTER TABLE nexent.ag_a2a_external_agent_t
+    ADD COLUMN IF NOT EXISTS selected_security_requirement_index INTEGER;
+
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.selected_security_requirement_index
+    IS 'Selected Agent Card security requirement index used for external agent calls';

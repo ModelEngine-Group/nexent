@@ -50,6 +50,7 @@ class UpdateAgentProtocolRequest(BaseModel):
 class UpdateExternalAgentSecurityCredentialsRequest(BaseModel):
     """Request to configure credentials required by an Agent Card."""
     security_credentials: Dict[str, str] = Field(default_factory=dict)
+    selected_security_requirement_index: Optional[int] = Field(default=None, ge=0)
 
 
 class TestNacosConnectionRequest(BaseModel):
@@ -220,17 +221,21 @@ async def update_external_agent_security_credentials(
     """Save the credential values required to call an external A2A agent."""
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        if not request.security_credentials:
+        if not request.security_credentials and request.selected_security_requirement_index is None:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
-                detail="At least one security credential is required"
+                detail="At least one security credential or a security requirement selection is required"
             )
         if any(not scheme_id or not value for scheme_id, value in request.security_credentials.items()):
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Security credential names and values must be non-empty"
             )
-        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
         if not agent:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
@@ -242,11 +247,28 @@ async def update_external_agent_security_credentials(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Security credentials must use scheme names declared by the Agent Card"
             )
+        requirements = agent.get("security_requirements") or []
+        if request.selected_security_requirement_index is not None:
+            selected_index = request.selected_security_requirement_index
+            if selected_index >= len(requirements):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail="Selected security requirement does not exist"
+                )
+            selected_schemes = (requirements[selected_index] or {}).get("schemes", {})
+            configured_credentials = dict(agent.get("security_credentials") or {})
+            configured_credentials.update(request.security_credentials)
+            if not selected_schemes or not set(selected_schemes).issubset(set(configured_credentials)):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail="Credentials must satisfy the selected security requirement"
+                )
         result = a2a_agent_db.update_external_agent_security_credentials(
             external_agent_id=external_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
             security_credentials=request.security_credentials,
+            selected_security_requirement_index=request.selected_security_requirement_index,
         )
         if not result:
             raise HTTPException(
@@ -260,6 +282,7 @@ async def update_external_agent_security_credentials(
                 "status": "success",
                 "data": {
                     "configured_security_scheme_ids": agent["configured_security_scheme_ids"],
+                    "selected_security_requirement_index": agent.get("selected_security_requirement_index"),
                 },
             },
         )

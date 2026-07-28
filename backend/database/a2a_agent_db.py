@@ -263,6 +263,7 @@ def create_external_agent_from_url(
             "security_schemes": agent.security_schemes,
             "security_requirements": agent.security_requirements,
             "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
             "is_available": agent.is_available,
@@ -381,6 +382,7 @@ def create_external_agent_from_nacos(
             "security_schemes": agent.security_schemes,
             "security_requirements": agent.security_requirements,
             "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
             "is_available": agent.is_available,
@@ -428,6 +430,7 @@ def get_external_agent_by_id(
             "security_schemes": agent.security_schemes,
             "security_requirements": agent.security_requirements,
             "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
             "base_url": agent.base_url,
@@ -489,12 +492,13 @@ def list_external_agents(
                 "version": agent.version,
                 "agent_url": agent.agent_url,
                 "streaming": agent.streaming,
-                "protocol_type": agent.protocol_type,
-                "supported_interfaces": agent.supported_interfaces,
-                "security_schemes": agent.security_schemes,
-                "security_requirements": agent.security_requirements,
-                "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
-                "source_type": agent.source_type,
+            "protocol_type": agent.protocol_type,
+            "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
+            "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
+            "source_type": agent.source_type,
                 "source_url": agent.source_url,
                 "base_url": agent.base_url,
                 "is_available": agent.is_available,
@@ -510,6 +514,7 @@ def update_external_agent_security_credentials(
     tenant_id: str,
     user_id: str,
     security_credentials: Dict[str, str],
+    selected_security_requirement_index: Optional[int] = None,
 ) -> bool:
     """Save configured security credential values for an external agent."""
     with _get_db_session() as session:
@@ -524,6 +529,8 @@ def update_external_agent_security_credentials(
         existing_credentials = dict(agent.security_credentials or {})
         existing_credentials.update(security_credentials)
         agent.security_credentials = existing_credentials
+        if selected_security_requirement_index is not None:
+            agent.selected_security_requirement_index = selected_security_requirement_index
         agent.updated_by = user_id
         session.flush()
         return True

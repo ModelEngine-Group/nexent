@@ -33,6 +33,7 @@ import {
   Settings,
   KeyRound,
   MessageCircle,
+  Info,
 } from "lucide-react";
 import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 import A2AChatModal from "./A2AChatModal";
@@ -69,6 +70,9 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<number | undefined>(
+    agent.selected_security_requirement_index ?? undefined,
+  );
   const [configuredSchemeIds, setConfiguredSchemeIds] = useState<string[]>(
     agent.configured_security_scheme_ids || [],
   );
@@ -90,6 +94,7 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
         description: httpAuthScheme.bearerFormat
           ? `${httpAuthScheme.bearerFormat} token`
           : "Bearer token value",
+        isHttpBearer: true,
       }];
     }
 
@@ -98,7 +103,8 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
 
   useEffect(() => {
     setConfiguredSchemeIds(agent.configured_security_scheme_ids || []);
-  }, [agent.configured_security_scheme_ids]);
+    setSelectedRequirementIndex(agent.selected_security_requirement_index ?? undefined);
+  }, [agent.configured_security_scheme_ids, agent.selected_security_requirement_index]);
 
   if (entries.length === 0 || requirements.length === 0) {
     return null;
@@ -108,8 +114,12 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
     const configuredValues = Object.fromEntries(
       Object.entries(values).filter(([, value]) => value.trim()),
     );
-    if (Object.keys(configuredValues).length === 0) {
+    if (Object.keys(configuredValues).length === 0 && configuredSchemeIds.length === 0) {
       message.error(t("a2a.security.valueRequired"));
+      return;
+    }
+    if (requirements.length > 1 && selectedRequirementIndex === undefined) {
+      message.error(t("a2a.security.requirementRequired"));
       return;
     }
 
@@ -117,10 +127,12 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
     const result = await a2aClientService.updateAgentSecurityCredentials(
       String(agent.id),
       configuredValues,
+      selectedRequirementIndex,
     );
     setSaving(false);
     if (result.success) {
       setConfiguredSchemeIds(result.data?.configured_security_scheme_ids || configuredSchemeIds);
+      setSelectedRequirementIndex(result.data?.selected_security_requirement_index ?? selectedRequirementIndex);
       message.success(t("a2a.security.saveSuccess"));
       setValues({});
       setOpen(false);
@@ -137,12 +149,35 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
           <Text type="secondary" className="text-xs block" style={{ marginBottom: 12 }}>
             {t("a2a.security.requirementsHint")}
           </Text>
+          {requirements.length > 1 && (
+            <div style={{ marginBottom: 12 }}>
+              <Text strong className="text-xs block" style={{ marginBottom: 4 }}>
+                {t("a2a.security.requirementLabel")}
+              </Text>
+              <Select
+                size="small"
+                style={{ width: "100%" }}
+                placeholder={t("a2a.security.requirementPlaceholder")}
+                value={selectedRequirementIndex}
+                onChange={setSelectedRequirementIndex}
+                options={requirements.map((requirement, index) => ({
+                  value: index,
+                  label: Object.keys(requirement?.schemes || {}).join(" + ") || `${t("a2a.security.requirementLabel")} ${index + 1}`,
+                }))}
+              />
+            </div>
+          )}
           <Space direction="vertical" size="small" style={{ width: "100%" }}>
-            {entries.map(({ schemeId, description, location, name }) => {
+            {entries.map(({ schemeId, description, location, name, isHttpBearer }) => {
               const isConfigured = configuredSchemeIds.includes(schemeId);
               return (
                 <div key={schemeId}>
                   <Space size="small" style={{ marginBottom: 4 }}>
+                    {isHttpBearer && (
+                      <Tooltip title={t("a2a.security.bearerTokenHint")}>
+                        <Info size={14} className="text-gray-400" />
+                      </Tooltip>
+                    )}
                     <Text strong className="text-xs">{name || schemeId}</Text>
                     {location && <Tag>{location}</Tag>}
                     {isConfigured && (

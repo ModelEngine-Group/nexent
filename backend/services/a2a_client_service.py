@@ -680,6 +680,12 @@ class A2AClientService:
         if not requirements:
             return {}, {}, {}
 
+        selected_index = agent.get("selected_security_requirement_index")
+        if selected_index is not None:
+            if not isinstance(selected_index, int) or not 0 <= selected_index < len(requirements):
+                raise AgentCallError("Selected Agent Card security requirement is invalid")
+            requirements = [requirements[selected_index]]
+
         for requirement in requirements:
             required_schemes = requirement.get("schemes", {}) if isinstance(requirement, dict) else {}
             if not required_schemes:

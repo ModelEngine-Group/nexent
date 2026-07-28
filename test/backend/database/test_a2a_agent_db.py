@@ -126,7 +126,7 @@ def _make_ext_agent_cls():
         'id', 'source_url', 'name', 'description', 'version', 'agent_url',
         'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
         'nacos_config_id', 'nacos_agent_name', 'base_url', 'agent_card_headers', 'security_schemes',
-        'security_requirements', 'security_credentials', 'raw_card', 'is_available',
+        'security_requirements', 'security_credentials', 'selected_security_requirement_index', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
         'create_time', 'update_time', 'delete_flag', 'tenant_id',
     ])
@@ -208,7 +208,8 @@ def factory_external_agent(**kw):
         'streaming': False, 'supported_interfaces': [], 'source_type': 'url',
         'source_url': 'http://example.com/agent_card.json',
         'nacos_config_id': None, 'nacos_agent_name': None, 'agent_card_headers': None,
-        'security_schemes': None, 'security_requirements': None, 'security_credentials': None, 'raw_card': None,
+        'security_schemes': None, 'security_requirements': None, 'security_credentials': None,
+        'selected_security_requirement_index': None, 'raw_card': None,
         'is_available': True, 'last_check_at': None, 'last_check_result': None,
         'cached_at': datetime(2024, 1, 1, tzinfo=timezone.utc),
         'cache_expires_at': datetime(2024, 1, 2, tzinfo=timezone.utc),

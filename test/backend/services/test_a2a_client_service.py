@@ -1271,6 +1271,31 @@ class TestCallAgent:
         with pytest.raises(AgentCallError, match="do not satisfy"):
             service._build_security_request_parts(agent)
 
+    def test_uses_selected_security_requirement_instead_of_fallback(self):
+        """Test the selected requirement is used even when another one is also satisfied."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "security_schemes": {
+                "appKey": {"apiKeySecurityScheme": {"location": "header", "name": "X-App-Key"}},
+                "bearer": {"httpAuthSecurityScheme": {"scheme": "Bearer"}},
+                "id": {"apiKeySecurityScheme": {"location": "header", "name": "X-Id"}},
+            },
+            "security_requirements": [
+                {"schemes": {"appKey": {}, "id": {}}},
+                {"schemes": {"bearer": {}, "id": {}}},
+            ],
+            "selected_security_requirement_index": 1,
+            "security_credentials": {"appKey": "app-token", "bearer": "jwt-token", "id": "agent-id"},
+        }
+
+        headers, params, cookies = service._build_security_request_parts(agent)
+
+        assert headers == {"Authorization": "Bearer jwt-token", "X-Id": "agent-id"}
+        assert params == {}
+        assert cookies == {}
+
     @pytest.mark.asyncio
     async def test_rejects_unsatisfied_security_requirements(self):
         """Test calls fail before the external request when credentials are missing."""
@@ -1286,6 +1311,7 @@ class TestCallAgent:
                 "apiKey": {"apiKeySecurityScheme": {"location": "header", "name": "X-API-Key"}}
             },
             "security_requirements": [{"schemes": {"apiKey": {}}}],
+            "selected_security_requirement_index": 0,
             "security_credentials": {},
         }
         with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
