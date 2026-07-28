@@ -357,6 +357,25 @@ class TestDiscoverFromUrlRequest:
         )
         assert req.name == "Custom Name"
 
+    def test_custom_headers(self):
+        """Test custom headers are accepted as string key-value pairs."""
+        from backend.consts.a2a_models import DiscoverFromUrlRequest
+
+        req = DiscoverFromUrlRequest(
+            url="https://example.com/.well-known/agent-card.json",
+            custom_headers={"Authorization": "Bearer token"},
+        )
+
+        assert req.custom_headers == {"Authorization": "Bearer token"}
+
+    def test_headers_default_to_none_when_not_provided(self):
+        """Test omitted headers preserve an existing stored configuration."""
+        from backend.consts.a2a_models import DiscoverFromUrlRequest
+
+        req = DiscoverFromUrlRequest(url="https://example.com/.well-known/agent-card.json")
+
+        assert req.custom_headers is None
+
 
 class TestDiscoverFromNacosRequest:
     """Test class for DiscoverFromNacosRequest model."""
