@@ -93,16 +93,19 @@ export default function MineMcpServiceCard({
 
     const items: MenuProps["items"] = [];
 
-    if (reviewStatus === "pending") {
+    // Show "view review progress" for any submitted status (pending/approved/rejected)
+    if (reviewStatus === "pending" || reviewStatus === "approved" || reviewStatus === "rejected") {
       items.push({
         key: "view-review-progress",
         label: t("mcpTools.mine.viewReviewProgress"),
         icon: <Clock className="h-3.5 w-3.5" />,
         onClick: () => onViewReviewProgress?.(item, onlineService),
       });
-    } else if (
-      deploymentType === McpDeploymentType.REMOTE_LINK ||
-      deploymentType === McpDeploymentType.CONTAINER
+    }
+
+    if (reviewStatus !== "approved" && reviewStatus !== "pending" &&
+      (deploymentType === McpDeploymentType.REMOTE_LINK ||
+      deploymentType === McpDeploymentType.CONTAINER)
     ) {
       // only remote link and container MCPs can be published to community
       items.push({
