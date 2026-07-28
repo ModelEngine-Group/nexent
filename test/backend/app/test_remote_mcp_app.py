@@ -336,6 +336,17 @@ class TestUpdateMcpService:
         call_kwargs = mock_update.call_args[1]
         assert call_kwargs["custom_headers"] == {}
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """McpNameConflictError should return 409 CONFLICT."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("MCP name already exists")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "existing-name", "server_url": "http://url",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.CONFLICT
+
 
 # ============================================================================
 # DELETE /mcp/{mcp_id}

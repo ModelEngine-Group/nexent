@@ -2079,3 +2079,49 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
         mock_create.assert_called_once()
         call_data = mock_create.call_args[1]['mcp_data']
         self.assertEqual(call_data['container_port'], 8080)
+
+
+# ============================================================================
+# list_mcp_service_tools_by_id - API type tests
+# ============================================================================
+
+class TestListMcpServiceToolsByIdApiType(unittest.IsolatedAsyncioTestCase):
+    """Test list_mcp_service_tools_by_id for API-type MCPs (OpenAPI)."""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_api_type_returns_tool_names(self, mock_get):
+        """API-type MCP should return tool names from registry_json._toolNames."""
+        mock_get.return_value = {
+            "mcp_name": "api-svc",
+            "mcp_server": "https://api.example.com",
+            "config_json": {"openapi": "3.0", "paths": {}},
+            "registry_json": {"_toolNames": ["getUsers", "createUser"]},
+        }
+        result = await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["name"], "getUsers")
+        self.assertEqual(result[1]["name"], "createUser")
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_api_type_no_tool_names(self, mock_get):
+        """API-type MCP with no _toolNames should return empty list."""
+        mock_get.return_value = {
+            "mcp_name": "api-svc",
+            "mcp_server": "https://api.example.com",
+            "config_json": {"openapi": "3.0", "paths": {}},
+            "registry_json": {},
+        }
+        result = await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
+        self.assertEqual(result, [])
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_non_api_type_calls_mcp_protocol(self, mock_get):
+        """Non-API-type MCP should still try MCP protocol (mcp_server required)."""
+        mock_get.return_value = {
+            "mcp_name": "regular-svc",
+            "mcp_server": "",
+            "config_json": {},
+            "registry_json": {},
+        }
+        with self.assertRaises(McpValidationError):
+            await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
