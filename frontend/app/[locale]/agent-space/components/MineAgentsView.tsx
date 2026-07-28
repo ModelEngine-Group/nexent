@@ -133,7 +133,7 @@ export function MineAgentsView({
   };
 
   const handleImportAgent = async () => {
-    const file = await selectFile(".json");
+    const file = await selectFile(".json,.zip");
     if (!file) return;
 
     const agentData = await parseAgentImportFile(file, {
