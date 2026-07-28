@@ -476,12 +476,12 @@ function TenantList({
       >
         {loading && (
           <div key="loading" className="p-4 text-center text-gray-500">
-            <Spin size="small" /> Loading tenants...
+            <Spin size="small" /> {t("tenantResources.tenants.loading")}
           </div>
         )}
         {!loading && tenants.length === 0 && (
           <div key="empty" className="p-4 text-center text-gray-500">
-            No tenants found
+            {t("tenantResources.tenants.empty")}
           </div>
         )}
         {!loading && tenants.length > 0 && (

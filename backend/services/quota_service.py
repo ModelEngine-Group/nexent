@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
 from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
@@ -34,6 +34,14 @@ KEY_WARNING_THRESHOLD_PCT = "KB_QUOTA_WARNING_THRESHOLD_PCT"
 KEY_CRITICAL_THRESHOLD_PCT = "KB_QUOTA_CRITICAL_THRESHOLD_PCT"
 KEY_HARD_LIMIT_EDITABLE = "KB_QUOTA_HARD_LIMIT_EDITABLE"
 KEY_PLATFORM_CAPACITY_BYTES = "PLATFORM_KB_STORAGE_CAPACITY_BYTES"
+
+
+def _is_platform_quota_tenant_id(tenant_id: Optional[str], asset_owner_tenant_id: str) -> bool:
+    """Return whether a tenant id should appear in platform tenant quota views."""
+    if not tenant_id:
+        return False
+    return tenant_id not in {DEFAULT_TENANT_ID, asset_owner_tenant_id}
+
 
 # Constants
 GB = 1024 * 1024 * 1024
@@ -630,7 +638,7 @@ class QuotaService:
         tenant_ids = [
             tenant_id
             for tenant_id in get_all_tenant_ids()
-            if tenant_id != asset_owner_tenant_id
+            if _is_platform_quota_tenant_id(tenant_id, asset_owner_tenant_id)
         ]
         hard_limits: Dict[str, Optional[int]] = {}
         total_allocated_bytes = 0

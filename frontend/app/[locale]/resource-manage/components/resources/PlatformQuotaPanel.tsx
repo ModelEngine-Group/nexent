@@ -452,6 +452,7 @@ export function PlatformQuotaPanel() {
         pagination={false}
         size="small"
         scroll={{ x: 890 }}
+        locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
       />
 
       {/* Capacity Settings Modal */}
