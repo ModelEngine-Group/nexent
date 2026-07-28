@@ -336,6 +336,17 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  aidpMgmt: {
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
+    /** PATCH endpoint for the per-KB in-group permission. */
+    kbPermission: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,

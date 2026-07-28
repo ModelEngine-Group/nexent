@@ -1040,7 +1040,7 @@ export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, enableAidpKnowledge } = useDeployment();
   const params = useParams();
   const locale = (params as { locale?: string })?.locale || "en";
 
@@ -1315,13 +1315,19 @@ export default function UserManageComp() {
                           label: t("tenantResources.tabs.models") || "Models",
                           children: <ModelList tenantId={tenantId} />,
                         },
-                        {
-                          key: "knowledge",
-                          label:
-                            t("tenantResources.tabs.knowledge") ||
-                            "Knowledge Base",
-                          children: <KnowledgeList tenantId={tenantId} />,
-                        },
+                        // When AIDP knowledge is enabled, the knowledge tab is managed
+                        // via the unified `/knowledges` entry and must not appear here.
+                        ...(!enableAidpKnowledge
+                          ? [
+                              {
+                                key: "knowledge",
+                                label:
+                                  t("tenantResources.tabs.knowledge") ||
+                                  "Knowledge Base",
+                                children: <KnowledgeList tenantId={tenantId} />,
+                              },
+                            ]
+                          : []),
                         {
                           key: "agents",
                           label: t("tenantResources.tabs.agents") || "Agents",
