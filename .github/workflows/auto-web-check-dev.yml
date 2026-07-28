@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd frontend
-          npm install
+          npm install --legacy-peer-deps
 
       - name: Run TypeScript type check
         run: |

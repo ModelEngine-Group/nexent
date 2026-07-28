@@ -11,6 +11,7 @@ Main features include:
 """
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -21,7 +22,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding, BaseEmbedding
+from nexent.core.models.embedding_model import (
+    BaseEmbedding,
+    DashScopeMultimodalEmbedding,
+    JinaEmbedding,
+    OpenAICompatibleEmbedding,
+    SiliconflowMultimodalEmbedding,
+)
 from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
@@ -352,6 +359,8 @@ def _create_embedding_model(model: dict) -> Any:
         model_factory = model.get("model_factory", "").lower()
         if model_factory == "dashscope":
             return DashScopeMultimodalEmbedding(**common_kwargs)
+        if model_factory == "silicon":
+            return SiliconflowMultimodalEmbedding(**common_kwargs)
         return JinaEmbedding(**common_kwargs)
     return OpenAICompatibleEmbedding(**common_kwargs)
 
@@ -425,33 +434,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     try:
         model = get_model_by_model_id(model_id, tenant_id)
         if model and model.get("model_type") in ["embedding", "multi_embedding"]:
-            model_config = {
-                "model_repo": model.get("model_repo", ""),
-                "model_name": model["model_name"],
-                "api_key": model.get("api_key", ""),
-                "base_url": model.get("base_url", ""),
-                "model_type": model.get("model_type", "embedding"),
-                "max_tokens": model.get("max_tokens", 1024),
-                "ssl_verify": model.get("ssl_verify", True),
-            }
-            model_type = model.get("model_type", "embedding")
-            if model_type == "multi_embedding":
-                embedding_model = JinaEmbedding(
-                    api_key=model_config.get("api_key", ""),
-                    base_url=model_config.get("base_url", ""),
-                    model_name=get_model_name_from_config(model_config) or "",
-                    embedding_dim=model_config.get("max_tokens", 1024),
-                    ssl_verify=model_config.get("ssl_verify", True),
-                )
-            else:
-                embedding_model = OpenAICompatibleEmbedding(
-                    api_key=model_config.get("api_key", ""),
-                    base_url=model_config.get("base_url", ""),
-                    model_name=get_model_name_from_config(model_config) or "",
-                    embedding_dim=model_config.get("max_tokens", 1024),
-                    ssl_verify=model_config.get("ssl_verify", True),
-                )
-            return embedding_model, model.get("model_id")
+            return _create_embedding_model(model), model.get("model_id")
         else:
             logger.warning(f"Model with id {model_id} not found or is not an embedding model")
     except Exception as e:
