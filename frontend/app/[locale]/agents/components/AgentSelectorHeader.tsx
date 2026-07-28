@@ -27,7 +27,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData, selectFile, parseAgentImportFile } from "@/lib/agentImportUtils";
+import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
@@ -147,22 +147,15 @@ export default function AgentSelectorHeader({
 
   // Handle import agent
   const handleImportAgent = async () => {
-    const file = await selectFile(".json,.zip");
-    if (!file) return;
-
-    const agentData = await parseAgentImportFile(file, {
-      onParseError: (msgKey) => message.error(t(msgKey)),
-      onValidationError: (msgKey) => message.error(t(msgKey)),
-      onGenericError: (error) => {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
+        setImportWizardData(agentData);
+        setImportWizardVisible(true);
       },
+      message: message,
+      t: t,
+      log: log,
     });
-
-    if (!agentData) return;
-
-    setImportWizardData(agentData);
-    setImportWizardVisible(true);
   };
 
   // Handle view call relationship

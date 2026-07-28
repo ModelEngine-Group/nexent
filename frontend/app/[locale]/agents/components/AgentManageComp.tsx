@@ -12,8 +12,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import log from "@/lib/logger";
 import { useState } from "react";
 import {
-  parseAgentImportFile,
-  selectFile,
+  openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
@@ -39,22 +38,15 @@ export default function AgentManageComp() {
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = async () => {
-    const file = await selectFile(".json,.zip");
-    if (!file) return;
-
-    const agentData = await parseAgentImportFile(file, {
-      onParseError: (msgKey) => message.error(t(msgKey)),
-      onValidationError: (msgKey) => message.error(t(msgKey)),
-      onGenericError: (error) => {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
+        setImportWizardData(agentData);
+        setImportWizardVisible(true);
       },
+      message: message,
+      t: t,
+      log: log,
     });
-
-    if (!agentData) return;
-
-    setImportWizardData(agentData);
-    setImportWizardVisible(true);
   };
 
   return (

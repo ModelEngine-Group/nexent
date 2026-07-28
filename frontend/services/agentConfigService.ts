@@ -91,13 +91,13 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-              try {
-                const p = JSON.parse(tool.labels);
-                return Array.isArray(p) ? p : [];
-              } catch {
-                return [];
-              }
-            })()
+            try {
+              const p = JSON.parse(tool.labels);
+              return Array.isArray(p) ? p : [];
+            } catch {
+              return [];
+            }
+          })()
           : [],
       updated_by: tool.updated_by || "",
       inputs: tool.inputs,
@@ -1550,8 +1550,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
+              .map((e: any) => e.msg || JSON.stringify(e))
+              .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

@@ -16,8 +16,7 @@ import {
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
-  parseAgentImportFile,
-  selectFile,
+  openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
@@ -133,22 +132,15 @@ export function MineAgentsView({
   };
 
   const handleImportAgent = async () => {
-    const file = await selectFile(".json,.zip");
-    if (!file) return;
-
-    const agentData = await parseAgentImportFile(file, {
-      onParseError: (msgKey) => message.error(t(msgKey)),
-      onValidationError: (msgKey) => message.error(t(msgKey)),
-      onGenericError: (error) => {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
+        setImportWizardData(agentData);
+        setImportWizardVisible(true);
       },
+      message: message,
+      t: t,
+      log: log,
     });
-
-    if (!agentData) return;
-
-    setImportWizardData(agentData);
-    setImportWizardVisible(true);
   };
 
   const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
