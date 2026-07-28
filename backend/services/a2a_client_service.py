@@ -12,7 +12,7 @@ import aiohttp
 
 from database import a2a_agent_db
 from database.a2a_agent_db import _extract_protocol_type, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from backend.utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,8 @@ class A2AClientService:
             AgentDiscoveryError: If discovery fails.
         """
         try:
-            custom_headers = custom_headers or {}
+            # custom_headers=None means preserve existing stored headers (don't pass anything to DB).
+            # custom_headers={} means explicitly clear stored headers.
             async with A2AHttpClient() as client:
                 headers = build_a2a_headers()
                 if custom_headers:

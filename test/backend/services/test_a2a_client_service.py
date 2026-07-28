@@ -553,7 +553,7 @@ class TestDiscoverFromUrl:
 
     @pytest.mark.asyncio
     async def test_discovers_agent_from_url(self):
-        """Test discovering agent from URL."""
+        """Test discovering agent from URL without custom headers preserves existing headers."""
         from backend.services.a2a_client_service import (
             A2AClientService,
             AgentDiscoveryError
@@ -588,7 +588,8 @@ class TestDiscoverFromUrl:
 
                 assert result == mock_result
                 mock_db.create_external_agent_from_url.assert_called_once()
-                assert mock_db.create_external_agent_from_url.call_args.kwargs["agent_card_headers"] == {}
+                # None means "preserve existing stored headers"; {} means "explicitly clear headers"
+                assert mock_db.create_external_agent_from_url.call_args.kwargs["agent_card_headers"] is None
 
     @pytest.mark.asyncio
     async def test_forwards_custom_headers_when_discovering_agent_card(self):
