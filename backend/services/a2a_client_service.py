@@ -705,10 +705,11 @@ class A2AClientService:
 
                 http_auth_scheme = scheme.get("httpAuthSecurityScheme", {})
                 if http_auth_scheme:
-                    if http_auth_scheme.get("scheme", "").lower() != "bearer":
+                    auth_scheme = http_auth_scheme.get("scheme") if isinstance(http_auth_scheme, dict) else None
+                    if not isinstance(auth_scheme, str) or not auth_scheme.strip():
                         valid = False
                         break
-                    headers["Authorization"] = f"Bearer {credential}"
+                    headers["Authorization"] = f"{auth_scheme} {credential}"
                     continue
 
                 api_key_scheme = scheme.get("apiKeySecurityScheme", {})

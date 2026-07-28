@@ -1161,6 +1161,49 @@ class TestRefreshAgentCard:
                 assert headers["Authorization"] == "Bearer stored-card-token"
                 assert headers["A2A-Version"] == "1.0"
 
+    @pytest.mark.asyncio
+    async def test_refreshes_cache_with_changed_agent_url(self):
+        """Test refreshing persists a changed URL without changing the protocol."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/old",
+            "source_url": "https://example.com/agent-card.json",
+            "protocol_type": "JSONRPC",
+        }
+        card = {
+            "name": "Test Agent",
+            "description": "Updated endpoint",
+            "url": "https://example.com/new",
+            "supportedInterfaces": [],
+        }
+        refreshed_agent = {"id": 1, "agent_url": "https://example.com/new"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            mock_db.refresh_external_agent_cache.return_value = refreshed_agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.get_json = AsyncMock(return_value=card)
+
+                result = await service.refresh_agent_card(1, "tenant-1", "user-1")
+
+        assert result == refreshed_agent
+        mock_db.refresh_external_agent_cache.assert_called_once_with(
+            external_agent_id=1,
+            tenant_id="tenant-1",
+            user_id="user-1",
+            new_raw_card=card,
+            new_agent_url="https://example.com/new",
+            new_name="Test Agent",
+            new_description="Updated endpoint",
+            new_supported_interfaces=[],
+            new_security_schemes={},
+            new_security_requirements=[],
+        )
+
 
 class TestCallAgent:
     """Test class for call_agent async method."""
@@ -1258,15 +1301,32 @@ class TestCallAgent:
         headers = mock_client.post_json.call_args.args[2]
         assert headers["Authorization"] == "Bearer eyJhbGciOiJIUzI1NiJ9"
 
-    def test_rejects_unsupported_http_auth_scheme(self):
-        """Test non-Bearer HTTP authentication schemes are rejected before requests."""
-        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+    def test_forwards_http_basic_security_credential_as_authorization_header(self):
+        """Test an HTTP Basic scheme maps its credential to the Authorization header."""
+        from backend.services.a2a_client_service import A2AClientService
 
         service = A2AClientService()
         agent = {
             "security_schemes": {"basicAuth": {"httpAuthSecurityScheme": {"scheme": "Basic"}}},
             "security_requirements": [{"schemes": {"basicAuth": {}}}],
-            "security_credentials": {"basicAuth": "credential"},
+            "security_credentials": {"basicAuth": "dXNlcjpwYXNz"},
+        }
+
+        headers, params, cookies = service._build_security_request_parts(agent)
+
+        assert headers == {"Authorization": "Basic dXNlcjpwYXNz"}
+        assert params == {}
+        assert cookies == {}
+
+    def test_rejects_http_auth_scheme_without_scheme_value(self):
+        """Test an HTTP authentication scheme without a scheme value is rejected."""
+        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+
+        service = A2AClientService()
+        agent = {
+            "security_schemes": {"invalidAuth": {"httpAuthSecurityScheme": {}}},
+            "security_requirements": [{"schemes": {"invalidAuth": {}}}],
+            "security_credentials": {"invalidAuth": "credential"},
         }
 
         with pytest.raises(AgentCallError, match="do not satisfy"):

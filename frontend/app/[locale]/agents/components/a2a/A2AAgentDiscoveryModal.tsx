@@ -86,15 +86,17 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
     }
 
     const httpAuthScheme = securityScheme.httpAuthSecurityScheme;
-    if (httpAuthScheme?.scheme?.toLowerCase() === "bearer") {
+    if (typeof httpAuthScheme?.scheme === "string" && httpAuthScheme.scheme.trim()) {
+      const authScheme = httpAuthScheme.scheme.trim();
+      const isHttpBearer = authScheme.toLowerCase() === "bearer";
       return [{
         schemeId,
         name: "Authorization",
         location: "header",
-        description: httpAuthScheme.bearerFormat
+        description: isHttpBearer && httpAuthScheme.bearerFormat
           ? `${httpAuthScheme.bearerFormat} token`
-          : "Bearer token value",
-        isHttpBearer: true,
+          : `${authScheme} credential`,
+        isHttpBearer,
       }];
     }
 

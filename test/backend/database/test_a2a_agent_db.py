@@ -661,6 +661,21 @@ class TestCreateExternalAgentFromUrl:
             )
             assert external_agent.agent_card_headers == {'Authorization': 'Bearer existing-token'}
 
+    def test_updates_existing_agent_card_headers_when_provided(self, external_agent):
+        external_agent.agent_card_headers = {'Authorization': 'Bearer old-token'}
+        session = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+        with patch.object(a2a_db, '_get_db_session', return_value=session):
+            a2a_db.create_external_agent_from_url(
+                source_url='http://agent.example.com/agent_card.json',
+                name='Updated Agent', description='Updated',
+                agent_url='http://agent.example.com/a2a',
+                tenant_id='tenant-1', user_id='user-1',
+                agent_card_headers={'Authorization': 'Bearer new-token'},
+            )
+
+        assert external_agent.agent_card_headers == {'Authorization': 'Bearer new-token'}
+        assert session.flushed is True
+
     def test_updates_all_fields_on_existing_agent(self):
         agent = factory_external_agent(
             id=1, name='Old Name', description='Old description',
@@ -989,6 +1004,62 @@ class TestRefreshExternalAgentCache:
                 new_protocol_type='GRPC',
             )
             assert result is not None
+
+    def test_refreshes_security_metadata(self):
+        agent = factory_external_agent(
+            id=1,
+            security_schemes={'oldScheme': {'apiKeySecurityScheme': {'name': 'X-Old'}}},
+            security_requirements=[{'schemes': {'oldScheme': {}}}],
+        )
+        new_schemes = {'bearer': {'httpAuthSecurityScheme': {'scheme': 'bearer'}}}
+        new_requirements = [{'schemes': {'bearer': {}}}]
+        session = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+        with patch.object(a2a_db, '_get_db_session', return_value=session):
+            result = a2a_db.refresh_external_agent_cache(
+                1,
+                'tenant-1',
+                'user-2',
+                new_security_schemes=new_schemes,
+                new_security_requirements=new_requirements,
+            )
+
+        assert result is not None
+        assert agent.security_schemes == new_schemes
+        assert agent.security_requirements == new_requirements
+        assert agent.updated_by == 'user-2'
+        assert session.flushed is True
+
+
+class TestUpdateExternalAgentSecurityCredentials:
+    def test_merges_credentials_and_updates_selected_requirement(self, external_agent):
+        external_agent.security_credentials = {'apiKey': 'old-api-key', 'bearer': 'existing-token'}
+        session = MockSession({db_models_mock.A2AExternalAgent: [external_agent]})
+        with patch.object(a2a_db, '_get_db_session', return_value=session):
+            result = a2a_db.update_external_agent_security_credentials(
+                1,
+                'tenant-1',
+                'user-2',
+                {'apiKey': 'new-api-key', 'basicAuth': 'encoded-credentials'},
+                selected_security_requirement_index=1,
+            )
+
+        assert result is True
+        assert external_agent.security_credentials == {
+            'apiKey': 'new-api-key',
+            'bearer': 'existing-token',
+            'basicAuth': 'encoded-credentials',
+        }
+        assert external_agent.selected_security_requirement_index == 1
+        assert external_agent.updated_by == 'user-2'
+        assert session.flushed is True
+
+    def test_returns_false_when_agent_is_not_found(self):
+        with patch.object(a2a_db, '_get_db_session', return_value=MockSession()):
+            result = a2a_db.update_external_agent_security_credentials(
+                999, 'tenant-1', 'user-1', {'apiKey': 'api-key'}
+            )
+
+        assert result is False
 
 
 class TestUpdateAgentAvailability:
