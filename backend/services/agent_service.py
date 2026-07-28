@@ -12,8 +12,7 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
-from nexent.core.agents.context_input import ContextInput
-from nexent.core.agents.context import ContextItemInput
+from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -119,6 +118,8 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
+from utils.context_utils import build_authorized_context_input
+from utils.memory_utils import build_memory_config
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -2731,44 +2732,6 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
-def _build_authorized_context_input(agent_run_info, historical_context=None) -> ContextInput:
-    """Freeze configured context and authorized history into one item snapshot."""
-    if historical_context is None:
-        fallback_turns = []
-        pending_user = None
-        for index, entry in enumerate(agent_run_info.history or ()):
-            if entry.role == MESSAGE_ROLE["USER"]:
-                pending_user = (index, entry)
-            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
-                user_index, user_entry = pending_user
-                fallback_turns.append({
-                    "user_message": user_entry.content,
-                    "assistant_final_answer": entry.content,
-                    "attachments": [],
-                    "user_message_id": -(user_index + 1),
-                    "assistant_message_id": -(index + 1),
-                })
-                pending_user = None
-        historical_context = {"conversation_turns": fallback_turns}
-    history_items = []
-    summary = historical_context.get("history_summary")
-    if summary:
-        history_items.append(ContextItemInput(
-            id=f"history_summary:{summary['unit_id']}", type="history_summary",
-            content=summary, source=("conversation_history",),
-        ))
-    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
-        history_items.append(ContextItemInput(
-            id=f"conversation_turn:{turn['user_message_id']}:{turn['assistant_message_id']}",
-            type="conversation_turn", content=turn,
-            source=("conversation_history",),
-            metadata={"layout_order": order},
-        ))
-    return ContextInput(
-        items=tuple(agent_run_info.agent_config.context_items or ()) + tuple(history_items),
-    )
-
-
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2815,7 +2778,7 @@ async def prepare_agent_run(
             historical_context = load_historical_context(
                 agent_request.conversation_id, current_message_id, user_id, tenant_id
             )
-    agent_run_info.context_input = _build_authorized_context_input(
+    agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
     agent_run_info.conversation_id = agent_request.conversation_id

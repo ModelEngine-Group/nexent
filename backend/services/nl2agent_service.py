@@ -31,6 +31,7 @@ from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.tool_db import query_all_tools
 from utils.config_utils import tenant_config_manager
+from utils.context_utils import build_authorized_context_input
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_config["headers"] = {"Authorization": authorization}
 
-    return AgentRunInfo(
+    run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(
@@ -254,6 +255,8 @@ async def build_nl2agent_run_info(
         sandbox_config=None,
         redis_client=None,
     )
+    run_info.context_input = build_authorized_context_input(run_info)
+    return run_info
 
 
 async def create_nl2agent_stream(

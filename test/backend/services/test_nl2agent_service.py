@@ -128,7 +128,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         "soft_input_budget_tokens": 24000,
         "hard_input_budget_tokens": 30000,
     }
-    mocker.patch(
+    join_query = mocker.patch(
         "services.nl2agent_service.join_minio_file_description_to_query",
         new_callable=AsyncMock,
         return_value="final query",
@@ -155,8 +155,17 @@ async def test_build_run_info_is_ephemeral(mocker):
         "http://local-mcp:5011",
     )
     request = NL2AgentRunRequest(
-        query="Build a weather agent",
-        history=[HistoryItem(role="user", content="Earlier request")],
+        query='{"type":"nl2agent_tool_selection","tools":[]}',
+        history=[
+            HistoryItem(
+                role="user",
+                content="Build an agent that summarizes weather risks.",
+            ),
+            HistoryItem(
+                role="assistant",
+                content="I found matching weather tools.",
+            ),
+        ],
     )
 
     run_info = await build_nl2agent_run_info(
@@ -180,7 +189,20 @@ async def test_build_run_info_is_ephemeral(mocker):
     )
     assert run_info.capacity_snapshot == capacity_snapshot
     assert run_info.safe_input_budget_snapshot == safe_input_budget_snapshot
-    assert run_info.history[0].content == "Earlier request"
+    assert run_info.history[0].content == (
+        "Build an agent that summarizes weather risks."
+    )
+    assert len(run_info.context_input.items) == 1
+    history_item = run_info.context_input.items[0]
+    assert history_item.type.value == "conversation_turn"
+    assert history_item.content == {
+        "user_message": "Build an agent that summarizes weather risks.",
+        "assistant_final_answer": "I found matching weather tools.",
+        "attachments": [],
+        "user_message_id": -1,
+        "assistant_message_id": -2,
+    }
+    assert history_item.metadata == {"layout_order": 0}
     assert run_info.mcp_host == [
         {
             "url": "http://local-mcp:5011/sse",
@@ -192,6 +214,11 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
     assert run_info.observer.enable_nl2a_wrapper is True
+    join_query.assert_awaited_once_with(
+        minio_files=None,
+        query='{"type":"nl2agent_tool_selection","tools":[]}',
+        history=request.history,
+    )
     get_model_config.assert_called_once_with(
         key="LLM_ID",
         tenant_id="tenant-a",

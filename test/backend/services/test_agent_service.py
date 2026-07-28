@@ -191,6 +191,12 @@ sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_in
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
+sys.modules['utils.context_utils'] = MagicMock()
+sys.modules['utils.context_utils'].build_authorized_context_input = (
+    lambda agent_run_info, historical_context=None: MockContextInput(
+        items=tuple(agent_run_info.agent_config.context_items or ())
+    )
+)
 
 # Mock str_utils with actual convert_list_to_string implementation
 def mock_convert_list_to_string(items):
