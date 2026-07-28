@@ -6,26 +6,26 @@ The minimum verifiable implementation currently provides only these capabilities
 
 - Reuse the ordinary chat UI through `/newchat?mode=nl2agent` and its existing stream rendering.
 - Construct NL2Agent in backend memory for every request without saving an agent or conversation.
-- Bind only `search_installed_mcp_tools` and render a selectable recommendation card from assistant-ui metadata in its result.
+- Bind only `search_installed_mcp_tools` and render a selectable recommendation card from the structured `nl2a` SSE stored in assistant message metadata.
 - Select all recommendations by default, allow zero to all tools, and make the card read-only immediately after confirmation.
 - Send selected safe tool metadata through the next NL2Agent query and generate one visible `GeneratedAgentDraft` JSON with one few-shot per selected tool.
 - Do not implement the final creation confirmation card, confirmation API, draft revision flow, persistence, or target-agent creation.
 
-The persistence flow in Section 7.3, Sections 8 through 9, and its full acceptance cases describes the later target design rather than currently implemented behavior.
+Sections 7.3 through 9 describe the later persistence design rather than currently implemented behavior.
 
 ## 1. Design Goals
 
-NL2Agent is an ephemeral ReAct agent started from the dedicated "Create Agent" entry point. It clarifies user requirements through natural-language conversation, recommends MCP tools installed for the current tenant, and creates an editable agent draft after final user confirmation.
+NL2Agent is an ephemeral ReAct agent started from the dedicated "Create Agent" entry point. The current MVP clarifies user requirements, recommends MCP tools installed for the current tenant, and returns a generated agent draft as visible JSON after tool selection. Creating an editable database draft remains a later phase.
 
 Core principles:
 
 - NL2Agent is constructed only while handling the current request and has no database agent record.
 - The current page maintains multi-turn context through the `history` field in each request.
 - NL2Agent conversations, cards, and runtime state are not written to history. Refreshing or leaving the page starts a new flow.
-- The model decides when to continue clarifying, when to search for tools, and when enough information exists to create the agent.
-- No database draft is created before final confirmation.
-- The server owns authentication, data validation, tenant isolation, transactions, and idempotency.
-- The resulting target agent uses the standard draft, tool-binding, and publishing lifecycle.
+- The model decides when to continue clarifying, when to search for tools, and how to generate the final JSON draft.
+- The current flow never creates a database draft.
+- The server owns authentication, input validation, and tenant-isolated tool search. Transactions and idempotency belong to the later persistence phase.
+- A future persisted target agent will use the standard draft, tool-binding, and publishing lifecycle.
 
 ## 2. Ephemeral Runtime Architecture
 
@@ -94,7 +94,7 @@ NL2Agent does not load configuration through the database-backed `create_agent_c
 - It does not read or write conversations, messages, historical cards, or history summaries.
 - It does not enable long-term memory, historical context loading, conversation title generation, or SSE resume.
 - Refreshing, closing, or leaving the creation flow discards the frontend history, draft, and card state.
-- The NL2Agent flow ends after the target agent draft is created successfully.
+- The current NL2Agent flow ends after the generated Draft JSON is returned.
 
 ## 3. ReAct Conversation Flow
 
@@ -105,7 +105,7 @@ flowchart TD
     C --> D{Enough information to search for tools?}
     D -- No --> E[Continue asking through final_answer]
     E --> C
-    D -- Yes --> F[Generate ephemeral agent draft]
+    D -- Yes --> F[Generate capability keywords]
     F --> G[Call search_installed_mcp_tools]
     G --> H[Render selectable tool recommendation card]
     H --> I[User confirms zero to all tools]
@@ -126,12 +126,14 @@ The duty prompt uses consistent stage-specific instructions:
 
 - `clarify`: Learn the agent's goals, usage scenario, inputs, outputs, constraints, and success criteria through free-form conversation. Do not require a fixed structure or emit a requirements confirmation card.
 - `tool_search`: Once there is enough information to identify required capabilities, generate 1 to 10 concise capability keywords, call `search_installed_mcp_tools`, and preserve the result with `print(result)`.
+- `tool_search_retry`: If a successful search using Chinese keywords returns no recommendations, translate the same capabilities to English and retry exactly once.
+- `recommendation_output`: Review the candidates against the conversation, keep only suitable complete objects, and return them in one `<nl2a>` wrapper. The model may remove or reorder objects but may not alter their fields.
 - `tool_selection`: When the current query has `type="nl2agent_tool_selection"`, do not search again. Generate the complete draft JSON from the preceding requirements and selected tools.
 - `ready_to_create` (later phase): Persist or present a final creation confirmation. The current MVP explicitly prohibits entering this phase or claiming that an agent was created.
 - Tool Observations tell the model the search result and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
 
-The prompt contains two concise few-shots: ask one clarification question without a tool call when the request is unclear; generate keywords, call the MCP tool, and print its original result when the request is clear. The examples contain no fixed Observation, preventing the model from copying or inventing search results. Executable actions consistently use `<code>...</code>` tags.
+The prompt contains two concise few-shots: ask one clarification question without a tool call when the request is unclear; generate keywords, call the MCP tool, and print its original result when the request is clear. The retry instructions include a separate English-keyword action. Examples contain no fixed Observation, preventing the model from copying or inventing search results. Executable actions consistently use `<code>...</code>` tags.
 
 ### 4.2 Runtime Tool Construction
 
@@ -194,18 +196,9 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     retryable: Literal[True]
 ```
 
-Serialized success, empty, and error Observations all add the following presentation metadata:
+Serialized success, empty, and error Observations contain only the business fields above. They do not carry `_assistant_ui` presentation metadata. The raw tool Observation remains in `execution_logs` and is displayed in ToolFallback's Result area.
 
-```json
-{
-  "_assistant_ui": {
-    "type": "data",
-    "name": "tool_recommendations"
-  }
-}
-```
-
-An empty result is a successful completed search. Keyword validation, database, or ranking failures return retryable error Observations without internal exception details. The existing `execution_logs` mapping retains this structured JSON in ToolFallback's Result area while the shared frontend adapter also converts it into a tool-recommendation data part.
+An empty result is a successful completed search. Keyword validation, database, or ranking failures return retryable error Observations without internal exception details. After a search, the model filters the candidate objects and copies the resulting JSON into exactly one `<nl2a>...</nl2a>` wrapper in `final_answer`. The opt-in `MessageObserver(enable_nl2a_wrapper=True)` extracts a valid object into a separate `nl2a` SSE event and removes the wrapper from visible text. An invalid wrapper is removed without emitting an `nl2a` event.
 
 `present_creation_confirmation_card` and shared per-run card state are deferred to the later card phase.
 
@@ -252,7 +245,7 @@ Field requirements:
 
 The draft is returned as the only visible JSON in the model's final answer. It is not parsed by the backend or written to the database in this MVP.
 
-The resulting target agent has these properties:
+A target agent created by the later persistence phase will have these properties:
 
 - A database-generated `target_agent_id > 0`.
 - `version_no=0`.
@@ -290,7 +283,7 @@ The searchable tool document contains:
 
 Before matching, values are converted to strings, Unicode-normalized, lowercased, stripped, and whitespace-collapsed. Missing optional fields contribute an empty string. Labels retain their list order and are joined with spaces.
 
-The server builds search text from the ephemeral draft's `display_name`, `description`, `duty_prompt`, `constraint_prompt`, and `few_shots_prompt`. The model cannot provide an arbitrary search scope or tenant condition separately.
+The model supplies 1 to 10 capability keywords. The Local MCP handler validates and de-duplicates them, joins them with spaces in their preserved order, and passes that query text to the tenant-scoped search function. Tenant scope and result limits remain server-controlled.
 
 ### 6.3 Matching Rules
 
@@ -329,18 +322,11 @@ When no tool matches, the frontend renders an empty-state recommendation card fr
 
 ## 7. Tool Recommendation Card and Frontend State
 
-### 7.1 Tool Result Presentation Metadata
+### 7.1 Structured Recommendation Event
 
-`search_installed_mcp_tools` carries generic assistant-ui presentation metadata in its business result:
+The recommendation card is driven by the model-filtered `nl2a` SSE event, not by the raw tool result. The event content is either the successful recommendation contract or the sanitized error contract from Section 4.2.
 
-```ts
-type AssistantUiMetadata = {
-  type: "data";
-  name: "tool_recommendations";
-};
-```
-
-The frontend removes `_assistant_ui` from the business result and uses the remaining result as the assistant-ui data part's `data`. This protocol does not depend on the agent name, runtime mode, or tool-name detection.
+The frontend parses this event into `Nl2aMessage` and stores it in `message.metadata.custom.nl2a`. The raw search Observation independently remains attached to the preceding tool call as `execution_logs`.
 
 ### 7.2 Tool Recommendation Card
 
@@ -366,18 +352,17 @@ The card exposes only a confirmation button. The frontend dynamically displays t
 
 ### 7.4 assistant-ui Mapping
 
-The currently locked `@assistant-ui/react 0.14.27` supports data renderer registration through `components.data.by_name`. New chat lives under `app/[locale]/newchat/`, and its shared streaming adapter handles SSE for ordinary agents and NL2Agent.
+New chat lives under `app/[locale]/newchat/`, and its shared streaming adapter handles SSE for ordinary agents and NL2Agent.
 
-Tool results are mapped as follows:
+Recommendation events are mapped as follows:
 
 1. `execution_logs` remains attached to the preceding tool call.
-2. A shared converter parses the complete JSON and reads `_assistant_ui`.
-3. `AssistantPartType` and `mapChunkType` add the `data` mapping.
-4. The adapter creates `{type: "data", name: "tool_recommendations", data: result}`.
-5. Live streaming and historical-message restoration reuse the same converter.
-6. `components.data.by_name.tool_recommendations` renders recommendation, empty, and error states.
+2. `nl2a` is an internal metadata event and is not converted into an assistant-ui message part.
+3. The adapter parses the event and adds `{custom: {nl2a}}` to the streamed assistant message metadata.
+4. `AssistantMessage` reads that metadata and renders `ToolRecommendations` after the grouped tool-call UI.
+5. NL2Agent history is not persisted or restored, so no historical adapter mapping is implemented.
 
-## 8. Final Confirmation API
+## 8. Final Confirmation API (Later Phase)
 
 ```http
 POST /agent/nl2agent/confirm
@@ -394,7 +379,8 @@ Request:
     "description": "...",
     "duty_prompt": "...",
     "constraint_prompt": "...",
-    "few_shots_prompt": null
+    "few_shots_prompt": null,
+    "tools": []
   },
   "selected_tool_ids": [10, 12]
 }
@@ -436,7 +422,7 @@ After a successful response, the frontend marks the confirmation card as `confir
 
 Repeated submissions with the same idempotency key return the existing draft within the idempotency TTL; beyond the TTL, the frontend's `confirmed` card state prevents resubmission. Validation or transaction failures must not retain a partial agent or tool bindings, and must release the in-progress lock without recording a success. The card becomes `failed`, and transient failures may be retried.
 
-## 9. Security and Consistency
+## 9. Security and Consistency (Later Phase)
 
 - User and tenant identity comes only from the authentication context.
 - The submitted draft is user-controlled configuration and still undergoes all standard agent validation rules.
@@ -461,31 +447,29 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - The ephemeral run does not enable memory search, history recovery, or SSE resume.
 - The runtime search tool exposes only keyword data to the model and receives authentication through the server-built MCP connection.
 - The generated `ToolConfig` uses `source="mcp"` and `usage="outer-apis"` without creating or updating tool catalog rows.
-- Tool search returns only installed and available MCP tools from the current tenant.
-- The Local MCP handler calls the tenant-scoped query-text search function exactly once and never invokes another tool, agent, or LLM.
-- Search normalization, fields, score threshold, Top 5 limit, score rounding, default selection, and tie-break order remain deterministic.
-- Success and error Observations carry fixed `_assistant_ui` metadata and expose no executable tool configuration.
-- The Chinese and English duty prompts contain clarification and MCP tool-call few-shots whose tool example preserves `print(result)`.
+- Keyword validation, normalization, de-duplication, score threshold, Top 5 limit, score rounding, and tie-break order remain deterministic.
+- Tool search returns only installed and available MCP tools from the current tenant, includes raw `inputs`, and excludes `params` and credentials.
+- Success, empty, and error Observations contain only their business contracts and expose no executable configuration or `_assistant_ui` metadata.
+- The Chinese and English duty prompts contain clarification and MCP tool-call few-shots whose executable example preserves `print(result)`.
+- The prompts require exactly one English-keyword retry after a successful Chinese-keyword empty result.
+- The model may filter or reorder returned candidates but must preserve every field of retained objects.
+- A valid `<nl2a>` object is emitted as an `nl2a` SSE event before the visible final answer; invalid wrapper JSON is removed without emitting an event.
 - Tool-selection queries prohibit another search and require one non-empty, input-aware few-shot for every selected tool.
 - Generated drafts allow an empty tool list and are returned as plain JSON without an `<nl2a>` wrapper.
-- Empty search results count as successful searches, while backend failures return sanitized errors with presentation metadata.
-- The confirmation tool rejects calls when no tool search has completed in the current run, and its error Observation instructs the model to search first.
-- The confirmation API validates the draft, tool permissions, positive IDs, and stable deduplication.
-- Forged, cross-tenant, non-MCP, and unavailable tools are rejected.
-- Agent creation and tool bindings are atomic; concurrent duplicate confirmations are blocked by the idempotency lock.
-- Retrying after a network timeout within the idempotency TTL returns the same `target_agent_id`.
+- Empty search results count as successful searches, while backend failures return sanitized retryable errors.
 
 ### 10.2 Frontend
 
 - The dedicated Create Agent entry starts NL2Agent, and the ordinary agent selector does not show it.
 - Current-page history supports multi-turn clarification, while refresh or exit does not restore the flow.
-- Presentation metadata in `execution_logs` maps through `mapChunkType` to an assistant-ui data part.
+- `execution_logs` remains attached to ToolFallback, while `nl2a` is parsed into `message.metadata.custom.nl2a`.
+- The recommendation card renders after the grouped tool-call UI without creating an assistant-ui data part.
 - The tool recommendation card renders recommendation, empty, and failed states.
-- Successful cards default to all tools selected, allow zero to all selections, and become read-only after one confirmation.
+- Successful cards default to all tools selected and support full, partial, and zero-tool selections.
+- Empty success cards allow continuing without tools; error cards cannot be confirmed.
+- Confirmation preserves recommendation order, removes `score`, adds `few_shots_prompt: null`, and immediately makes the card read-only.
+- A synchronous guard prevents duplicate confirmation before the React state update is committed.
 - The NL2Agent adapter sends selection metadata as the query without changing ordinary-agent requests.
-- A new `draft_revision` supersedes older recommendation and confirmation cards.
-- The final confirmation card displays the draft summary and latest tool selection and exposes only confirmation.
-- Successful confirmation shows the draft entry point; failure does not show a success state.
 - Existing non-NL2Agent SSE messages and cards are unaffected.
 
 ### 10.3 End-to-End
@@ -493,20 +477,21 @@ Repeated submissions with the same idempotency key return the existing draft wit
 1. Start NL2Agent from the dedicated Create Agent entry point.
 2. Provide incomplete requirements and verify free-form model clarification.
 3. Supply enough information for search and verify capability keyword generation and the MCP recommendation card.
-4. Change the tool selection and continue supplying requirements.
-5. Verify that a new draft revision supersedes old cards and produces new recommendations.
-6. Once information is sufficient, verify that the final card displays the draft summary and latest tool selection.
-7. Confirm and verify atomic creation of a positive-ID target draft and its tool bindings.
-8. Verify that the UI directs the user to an editable, enabled, unpublished draft.
-9. Refresh the creation page and verify that the NL2Agent conversation and cards are not restored.
-10. Repeat the same confirmation and verify that no duplicate agent is created.
+4. Verify that the visible recommendation set exactly matches the model-filtered `nl2a` payload.
+5. Confirm the default full selection and verify that the card becomes read-only.
+6. Repeat with partial and zero-tool selections, including an empty successful recommendation.
+7. Verify that the next request query is `nl2agent_tool_selection` JSON while its visible user message is only the localized summary.
+8. Verify that the final answer is one plain `GeneratedAgentDraft` JSON object and each selected tool has one concrete few-shot.
+9. Verify that no agent, conversation, card, or tool binding is persisted.
+10. Refresh the creation page and verify that the NL2Agent conversation and cards are not restored.
 
 ## 11. Implementation Contract
 
-- The model owns semantic clarification, stage decisions, draft generation, and tool call ordering.
-- The server owns ephemeral runtime configuration, security context, search scope, validation, transactions, and idempotency.
-- The frontend owns current-page conversation history, draft revisions, card state, and tool selection.
-- Tool search is a required precondition for the final confirmation card, enforced through shared per-run runtime state; across requests it is maintained as a prompt-level rule, and the confirmation API's revalidation remains the security boundary.
-- The NL2Agent search tool is a non-persistent internal Local MCP tool; the SDK remains unchanged.
-- User confirmation is the only action that writes the target agent to the database.
+- The model owns semantic clarification, keyword generation, candidate filtering, draft generation, and tool-level few-shots.
+- The server owns ephemeral runtime configuration, authenticated tenant scope, search validation, deterministic ranking, and safe Observation contracts.
+- The frontend owns current-page conversation history, per-card selection state, the confirmation summary, and selection metadata.
+- The NL2Agent search tool is a non-persistent internal Local MCP tool.
+- The SDK change is limited to an opt-in `nl2a` wrapper extractor; ordinary observers keep it disabled by default.
+- Tool confirmation triggers Draft JSON generation only and performs no database write.
+- Card revisioning, final creation confirmation, persistence, transactions, and idempotency remain the later design described in Sections 7.3 through 9.
 - The Chinese and English design documents define identical behavior.

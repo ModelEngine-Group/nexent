@@ -6,26 +6,26 @@
 
 - 通过 `/newchat?mode=nl2agent` 复用普通聊天界面和流式消息渲染。
 - 每次请求在后端内存中临时构建 NL2Agent，不保存智能体或会话。
-- 仅绑定 `search_installed_mcp_tools`，并根据工具结果中的 assistant-ui 元数据渲染可选择的推荐卡。
+- 仅绑定 `search_installed_mcp_tools`，并根据保存到 assistant 消息 metadata 的结构化 `nl2a` SSE 渲染可选择的推荐卡。
 - 默认全选推荐工具，允许选择零到全部工具，确认后立即将卡片设为只读。
 - 将选中的安全工具元数据作为下一轮 NL2Agent query 发送，并生成一个可见的 `GeneratedAgentDraft` JSON；每个已选工具包含一个 few-shot。
 - 不实现最终创建确认卡、确认接口、草稿 revision、持久化或目标智能体创建。
 
-本文第 7.3 节、第 8 至 9 节及其完整验收项中的持久化流程描述后续目标设计，不代表当前版本已经实现。
+本文第 7.3 至 9 节描述后续持久化设计，不代表当前版本已经实现。
 
 ## 1. 设计目标
 
-NL2Agent 是通过“创建智能体”专用入口启动的临时 ReAct 智能体，负责通过自然语言对话明确用户需求、推荐当前租户已安装的 MCP 工具，并在用户最终确认后创建可编辑的智能体草稿。
+NL2Agent 是通过“创建智能体”专用入口启动的临时 ReAct 智能体。当前 MVP 负责通过自然语言对话明确用户需求、推荐当前租户已安装的 MCP 工具，并在用户确认工具选择后返回可见的智能体 Draft JSON。创建可编辑的数据库草稿属于后续阶段。
 
 核心原则：
 
 - NL2Agent 仅在处理当前请求时构建，不创建数据库智能体记录。
 - 当前页面通过请求中的 `history` 维持多轮上下文。
 - NL2Agent 的对话、卡片和运行状态不写入历史记录，刷新或退出后重新开始。
-- 模型决定何时继续澄清、何时搜索工具以及何时可以创建智能体。
-- 最终确认前不创建数据库草稿。
-- 服务端负责鉴权、数据校验、租户隔离、事务和幂等。
-- 最终创建的目标智能体仍使用普通的草稿、工具绑定和发布链路。
+- 模型决定何时继续澄清、何时搜索工具以及如何生成最终 Draft JSON。
+- 当前流程始终不创建数据库草稿。
+- 服务端负责鉴权、输入校验和租户隔离的工具搜索；事务和幂等属于后续持久化阶段。
+- 后续持久化的目标智能体仍使用普通的草稿、工具绑定和发布链路。
 
 ## 2. 临时运行架构
 
@@ -94,7 +94,7 @@ NL2Agent 不通过数据库版 `create_agent_config` 加载配置，不出现在
 - 不读取或写入 conversation、message、历史卡片和历史摘要。
 - 不启用长期记忆、历史上下文加载、对话标题生成或 SSE resume。
 - 页面刷新、关闭或离开创建流程后，前端丢弃当前历史、草稿和卡片状态。
-- 目标智能体草稿创建成功后，NL2Agent 流程结束。
+- 当前 NL2Agent 流程在返回生成的 Draft JSON 后结束。
 
 ## 3. ReAct 对话流程
 
@@ -105,7 +105,7 @@ flowchart TD
     C --> D{信息是否足以搜索工具}
     D -- 否 --> E[通过 final_answer 继续追问]
     E --> C
-    D -- 是 --> F[生成临时智能体草稿]
+    D -- 是 --> F[生成能力关键词]
     F --> G[调用 search_installed_mcp_tools]
     G --> H[渲染可选择的工具推荐卡]
     H --> I[用户确认零到全部工具]
@@ -126,12 +126,14 @@ NL2Agent 不使用独立 YAML、数据库提示词记录或提示词加载器。
 
 - `clarify`：通过自由对话了解智能体目标、使用场景、输入、输出、约束和成功标准。不得要求用户填写固定结构，也不得生成需求确认卡。
 - `tool_search`：当信息足以判断所需能力时，生成 1 到 10 个简洁的能力关键词，调用 `search_installed_mcp_tools` 并原样 `print(result)`。
+- `tool_search_retry`：使用中文关键词成功搜索但无推荐时，将相同能力翻译为英文，并且只重试一次。
+- `recommendation_output`：结合对话审查候选项，只保留合适的完整对象，并通过一个 `<nl2a>` wrapper 返回。模型只能删除或重排对象，不得修改字段。
 - `tool_selection`：当前 query 的 `type="nl2agent_tool_selection"` 时不得再次搜索，依据之前的需求和已选工具生成完整 Draft JSON。
 - `ready_to_create`（后续阶段）：持久化或展示最终创建确认。当前 MVP 明确禁止进入该阶段或声称已经创建智能体。
 - 工具返回的 Observation 用于告知搜索结果及下一步允许的行为。
 - 模型不得生成或覆盖用户 ID、租户 ID、授权信息、卡片 ID 和工具凭据。
 
-提示词包含两组精简 few-shot：需求不明确时只提出澄清问题；需求明确时生成关键词、调用 MCP 工具并输出原始结果。示例不包含固定 Observation，避免模型复制或编造搜索结果。可执行动作统一使用 `<code>...</code>` 标签。
+提示词包含两组精简 few-shot：需求不明确时只提出澄清问题；需求明确时生成关键词、调用 MCP 工具并输出原始结果。重试规则包含独立的英文关键词动作。示例不包含固定 Observation，避免模型复制或编造搜索结果。可执行动作统一使用 `<code>...</code>` 标签。
 
 ### 4.2 运行时工具构建
 
@@ -194,18 +196,9 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     retryable: Literal[True]
 ```
 
-成功、空结果和错误 Observation 的序列化 JSON 均增加以下展示元数据：
+成功、空结果和错误 Observation 的序列化 JSON 只包含上述业务字段，不携带 `_assistant_ui` 展示元数据。原始工具 Observation 继续保留在 `execution_logs` 中，并显示在 ToolFallback 的 Result 区域。
 
-```json
-{
-  "_assistant_ui": {
-    "type": "data",
-    "name": "tool_recommendations"
-  }
-}
-```
-
-空结果属于成功完成的搜索。关键词校验、数据库或排序失败时，处理函数返回不包含内部异常细节的可重试错误 Observation。结构化 JSON 由现有 `execution_logs` 映射保留在 ToolFallback Result 中，同时被通用前端适配器转换为工具推荐 data part。
+空结果属于成功完成的搜索。关键词校验、数据库或排序失败时，处理函数返回不包含内部异常细节的可重试错误 Observation。搜索后，模型筛选候选对象，并在 `final_answer` 中将结果 JSON 放入唯一的 `<nl2a>...</nl2a>` wrapper。启用 `MessageObserver(enable_nl2a_wrapper=True)` 后，Observer 将合法对象提取为独立的 `nl2a` SSE 事件，并从可见文本中移除 wrapper；非法 wrapper 会被移除，但不会产生 `nl2a` 事件。
 
 `present_creation_confirmation_card` 和单次运行共享状态留待后续卡片阶段实现。
 
@@ -252,7 +245,7 @@ class GeneratedAgentDraft(BaseModel):
 
 Draft 作为模型最终回答中唯一可见的 JSON 返回。本 MVP 不在后端解析它，也不写入数据库。
 
-最终创建的目标智能体属性：
+后续持久化阶段创建的目标智能体具有以下属性：
 
 - 数据库生成 `target_agent_id > 0`。
 - `version_no=0`。
@@ -290,7 +283,7 @@ is_available == true
 
 匹配前，所有值先转换为字符串，执行 Unicode 规范化、转小写、去除首尾空白并合并连续空白。缺失的可选字段按空字符串处理，标签按原列表顺序以空格连接。
 
-服务端从临时草稿的 `display_name`、`description`、`duty_prompt`、`constraint_prompt` 和 `few_shots_prompt` 构造检索文本，不接收模型单独提供的任意检索范围或租户条件。
+模型提供 1 到 10 个能力关键词。Local MCP 处理函数校验并去重后，按原顺序使用空格拼接，并将该查询文本传给租户范围内的搜索函数。租户范围和结果数量仍由服务端控制。
 
 ### 6.3 匹配规则
 
@@ -329,18 +322,11 @@ score = max(
 
 ## 7. 工具推荐卡和前端状态
 
-### 7.1 工具结果展示元数据
+### 7.1 结构化推荐事件
 
-`search_installed_mcp_tools` 在业务结果中携带通用 assistant-ui 展示元数据：
+推荐卡由模型筛选后的 `nl2a` SSE 事件驱动，而不是直接使用原始工具结果。事件内容是第 4.2 节中的成功推荐合约或脱敏错误合约。
 
-```ts
-type AssistantUiMetadata = {
-  type: "data";
-  name: "tool_recommendations";
-};
-```
-
-前端将 `_assistant_ui` 从业务结果中移除，再把剩余结果作为 assistant-ui data part 的 `data`。该协议不依赖 Agent 名称、运行模式或工具名称判断。
+前端将事件解析为 `Nl2aMessage`，并保存到 `message.metadata.custom.nl2a`。原始搜索 Observation 则独立作为 `execution_logs` 关联到之前的工具调用。
 
 ### 7.2 工具推荐卡
 
@@ -366,18 +352,17 @@ type AssistantUiMetadata = {
 
 ### 7.4 assistant-ui 映射
 
-当前锁定的 `@assistant-ui/react 0.14.27` 支持通过 `components.data.by_name` 注册 data renderer。新聊天位于 `app/[locale]/newchat/`，共享流式适配器统一处理普通 Agent 和 NL2Agent 的 SSE。
+新聊天位于 `app/[locale]/newchat/`，共享流式适配器统一处理普通 Agent 和 NL2Agent 的 SSE。
 
-工具结果按以下方式映射：
+推荐事件按以下方式映射：
 
 1. `execution_logs` 继续关联到之前的 tool-call。
-2. 共享转换函数解析完整 JSON，并读取 `_assistant_ui`。
-3. `AssistantPartType` 和 `mapChunkType` 增加 `data` 映射。
-4. 适配器生成 `{type: "data", name: "tool_recommendations", data: result}`。
-5. 实时流和历史消息恢复复用同一转换函数。
-6. `components.data.by_name.tool_recommendations` 渲染推荐列表、空状态和错误状态。
+2. `nl2a` 是内部 metadata 事件，不转换为 assistant-ui 消息 part。
+3. adapter 解析事件，并将 `{custom: {nl2a}}` 加入流式 assistant 消息 metadata。
+4. `AssistantMessage` 读取该 metadata，在工具调用分组之后渲染 `ToolRecommendations`。
+5. NL2Agent 历史不持久化或恢复，因此不实现历史 adapter 映射。
 
-## 8. 最终确认接口
+## 8. 最终确认接口（后续阶段）
 
 ```http
 POST /agent/nl2agent/confirm
@@ -394,7 +379,8 @@ POST /agent/nl2agent/confirm
     "description": "...",
     "duty_prompt": "...",
     "constraint_prompt": "...",
-    "few_shots_prompt": null
+    "few_shots_prompt": null,
+    "tools": []
   },
   "selected_tool_ids": [10, 12]
 }
@@ -436,7 +422,7 @@ class NL2AgentConfirmRequest(BaseModel):
 
 TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前端的 `confirmed` 卡片状态阻止重复提交。校验失败或事务失败时不得保留部分智能体或工具绑定，必须释放进行中锁且不记录成功结果；卡片标记为 `failed`，瞬时错误允许重试。
 
-## 9. 安全与一致性
+## 9. 安全与一致性（后续阶段）
 
 - 用户和租户身份只从鉴权上下文获取。
 - 前端提交的草稿属于用户待创建配置，服务端仍需应用普通智能体的完整校验规则。
@@ -461,31 +447,29 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 临时运行不启用记忆检索、历史恢复或 SSE resume。
 - 运行时搜索工具只向模型暴露关键词数据，并通过服务端构建的 MCP 连接接收鉴权信息。
 - 生成的 `ToolConfig` 使用 `source="mcp"` 和 `usage="outer-apis"`，不创建或更新工具目录记录。
-- 工具搜索仅返回当前租户已安装且可用的 MCP 工具。
-- Local MCP 处理函数只调用一次租户范围内的查询文本搜索函数，绝不调用其他工具、智能体或 LLM。
-- 搜索规范化、检索字段、评分阈值、Top 5、分数取整、默认选择和同分排序保持确定性。
-- 成功和错误 Observation 均携带固定 `_assistant_ui`，且不暴露可执行工具配置。
-- 中英文职责提示词包含澄清和 MCP 工具调用 few-shot，工具调用示例原样 `print(result)`。
+- 关键词校验、规范化、去重、评分阈值、Top 5、分数取整和同分排序保持确定性。
+- 工具搜索仅返回当前租户已安装且可用的 MCP 工具，包含原始 `inputs`，并排除 `params` 和凭据。
+- 成功、空结果和错误 Observation 只包含各自业务合约，不暴露可执行配置或 `_assistant_ui` metadata。
+- 中英文职责提示词包含澄清和 MCP 工具调用 few-shot，可执行工具示例原样 `print(result)`。
+- 提示词要求中文关键词成功搜索但无结果时，只执行一次英文关键词重试。
+- 模型可以过滤或重排返回的候选项，但必须保留所选对象的所有字段。
+- 合法的 `<nl2a>` 对象在可见最终回答前作为 `nl2a` SSE 发出；非法 wrapper JSON 被移除且不产生事件。
 - 工具选择 query 禁止再次搜索，并要求为每个已选工具生成一个非空且符合输入的 few-shot。
 - 生成的 Draft 允许工具列表为空，并以不含 `<nl2a>` wrapper 的纯 JSON 返回。
-- 空结果视为成功搜索；后端失败时返回带展示元数据的脱敏错误。
-- 最终确认工具在本次运行内没有已完成工具搜索时拒绝生成卡片，并通过错误 Observation 要求模型先搜索。
-- 确认接口正确校验草稿、工具权限、正整数 ID 和稳定去重。
-- 伪造、跨租户、非 MCP 和不可用工具均被拒绝。
-- 草稿创建与工具绑定满足原子性；并发重复确认被幂等锁阻止。
-- 幂等 TTL 内网络超时后的重复确认返回同一个 `target_agent_id`。
+- 空结果视为成功搜索；后端失败时返回脱敏且可重试的错误。
 
 ### 10.2 前端测试
 
 - 创建智能体专用入口能够启动 NL2Agent，普通智能体选择器不展示 NL2Agent。
 - 当前页面历史支持多轮澄清，刷新或退出后不恢复流程。
-- `execution_logs` 中的展示元数据通过 `mapChunkType` 转换为 assistant-ui data part。
+- `execution_logs` 继续关联到 ToolFallback，`nl2a` 则解析到 `message.metadata.custom.nl2a`。
+- 推荐卡在工具调用分组之后渲染，不创建 assistant-ui data part。
 - 工具推荐卡正确展示推荐列表、空状态和失败状态。
-- 成功卡默认全选，允许选择零到全部工具，并在一次确认后变为只读。
+- 成功卡默认全选，并支持全选、部分选择和零工具选择。
+- 空成功卡允许无工具继续，错误卡不可确认。
+- 确认保持推荐顺序，移除 `score`，加入 `few_shots_prompt: null`，并立即将卡片设为只读。
+- 同步 guard 在 React 状态提交前阻止重复确认。
 - NL2Agent adapter 将选择 metadata 作为 query 发送，不改变普通 Agent 请求。
-- 新 `draft_revision` 正确取代旧推荐卡和旧确认卡。
-- 最终确认卡展示草稿摘要和最新工具选择，并且只提供确认按钮。
-- 确认成功后展示草稿入口，失败时不显示成功状态。
 - 现有非 NL2Agent SSE 消息和卡片渲染不受影响。
 
 ### 10.3 端到端测试
@@ -493,20 +477,21 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 1. 从“创建智能体”专用入口启动 NL2Agent。
 2. 提供不完整需求并验证模型通过自由对话追问。
 3. 补充到可搜索状态并验证生成能力关键词和 MCP 工具推荐卡。
-4. 修改工具多选结果并继续补充需求。
-5. 验证新草稿修订会取代旧卡片并生成新的推荐结果。
-6. 信息充足后验证最终确认卡展示草稿摘要和最新工具选择。
-7. 确认后验证原子创建正整数 ID 的目标草稿和工具绑定。
-8. 验证页面引导用户进入可编辑、启用且未发布的草稿。
-9. 刷新创建页面并验证 NL2Agent 对话和卡片不会恢复。
-10. 重复提交相同确认并验证不会创建重复智能体。
+4. 验证可见推荐集合与模型筛选后的 `nl2a` payload 完全一致。
+5. 确认默认全选，并验证卡片变为只读。
+6. 分别验证部分选择和零工具选择，包括空的成功推荐结果。
+7. 验证下一轮请求 query 为 `nl2agent_tool_selection` JSON，而可见用户消息只有本地化摘要。
+8. 验证最终回答是一个纯 `GeneratedAgentDraft` JSON 对象，且每个已选工具包含一个具体 few-shot。
+9. 验证不持久化智能体、conversation、卡片或工具绑定。
+10. 刷新创建页面并验证 NL2Agent 对话和卡片不会恢复。
 
 ## 11. 实施约定
 
-- 模型负责语义澄清、阶段判断、草稿生成和工具调用顺序。
-- 服务端负责临时运行配置、安全上下文、搜索范围、数据校验、事务和幂等。
-- 前端负责当前页面内的对话历史、草稿修订、卡片状态和工具选择。
-- 工具搜索是生成最终确认卡的必要前置步骤，通过两个运行时工具共享的单次运行状态强制；跨请求场景下作为提示词层规则维持，安全边界始终是确认接口的重新校验。
-- NL2Agent 搜索工具是非持久化的内部 Local MCP 工具，SDK 保持不变。
-- 用户确认是唯一触发目标智能体数据库写入的动作。
+- 模型负责语义澄清、关键词生成、候选过滤、Draft 生成和工具级 few-shot。
+- 服务端负责临时运行配置、鉴权租户范围、搜索校验、确定性排序和安全 Observation 合约。
+- 前端负责当前页面内的对话历史、单卡选择状态、确认摘要和选择 metadata。
+- NL2Agent 搜索工具是非持久化的内部 Local MCP 工具。
+- SDK 改动仅限可选的 `nl2a` wrapper 提取器；普通 Observer 默认不启用。
+- 工具确认只触发 Draft JSON 生成，不执行数据库写入。
+- 卡片 revision、最终创建确认、持久化、事务和幂等仍属于第 7.3 至 9 节描述的后续设计。
 - 中英文设计文档保持同一份行为规范。
