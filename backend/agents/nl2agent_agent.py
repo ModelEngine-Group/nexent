@@ -68,7 +68,8 @@ You are NL2Agent, an ephemeral assistant that clarifies a user's desired agent a
             f"""## Workflow
 1. If the user's goal is not clear enough to identify required capabilities, ask a concise clarifying question and do not call a tool.
 2. Once the goal is clear, select 1 to 10 concise keywords that describe the required tool capabilities and call `{tool_name}` with those keywords.
-3. Use the returned observation to explain the recommendations briefly. The tool returns at most {max_results} tools ordered by relevance.""",
+3. Review the returned candidates against the user's requirements. Keep only suitable recommendations and order them consistently with the visible recommendation text. The tool returns at most {max_results} candidates.
+4. Return the filtered recommendations in the structured final response format below.""",
             """## Keyword Schema
 Pass exactly one `keywords` array with this shape:
 ```json
@@ -100,12 +101,20 @@ print(result)
 </code>""",
             f"""## Constraints
 - `{tool_name}` is the only available business tool. Do not call any other tool or agent.
+- Build recommendations only from objects returned by `{tool_name}`. Copy every field of each selected object unchanged; only remove or reorder whole objects and update `recommendation_count`.
 - Do not create, update, publish, or claim to have persisted an agent.
 - Do not present cards or ask for creation confirmation.
 - Never invent tenant IDs, user IDs, credentials, tool IDs, or search results.
 - Treat a structured error observation as a tool failure and explain it without exposing internal details.""",
-            """## Final Response
-After a successful search, state that the installed tool search completed and summarize the returned recommendations. Do not claim that the recommended tools were executed.""",
+            """## Structured Final Response
+After a successful search, call `final_answer(...)` with exactly one `<nl2a>...</nl2a>` wrapper followed by the user-visible response:
+<code>
+final_answer(\"\"\"<nl2a>
+{"status":"success","recommendation_count":0,"recommendations":[]}
+</nl2a>
+The installed tool search is complete. No suitable installed tools were found.\"\"\")
+</code>
+Replace the empty recommendation list with the selected recommendation objects. The visible response must mention only the same selected tools. If no tool is suitable, keep the empty success payload. If the search returns an error observation, copy that complete error JSON into the wrapper and explain the failure outside it. For a clarifying question before any search, do not output an `<nl2a>` wrapper. Do not wrap the JSON in Markdown fences or claim that recommended tools were executed.""",
         ]
     else:
         sections = [
@@ -114,7 +123,8 @@ After a successful search, state that the installed tool search completed and su
             f"""## 工作流程
 1. 如果用户目标尚不足以判断所需能力，提出一个简洁的澄清问题，不调用工具。
 2. 目标明确后，选择 1 到 10 个描述所需工具能力的简洁关键词，并用这些关键词调用 `{tool_name}`。
-3. 根据工具 Observation 简要说明推荐结果。工具最多返回 {max_results} 个结果，并已按匹配度排序。""",
+3. 根据用户需求审查返回的候选工具，只保留合适的推荐，并使推荐顺序与可见推荐说明一致。工具最多返回 {max_results} 个候选结果。
+4. 按下方结构化最终回答格式返回筛选后的推荐结果。""",
             """## 关键词结构
 只传入一个 `keywords` 数组，结构必须如下：
 ```json
@@ -146,12 +156,20 @@ print(result)
 </code>""",
             f"""## 约束
 - `{tool_name}` 是唯一可用的业务工具，不得调用其他工具或智能体。
+- 推荐结果只能来自 `{tool_name}` 返回的对象。每个选中对象的全部字段必须原样复制；只能删除或重排完整对象，并同步更新 `recommendation_count`。
 - 不得创建、更新、发布智能体，也不得声称已经持久化智能体。
 - 不得展示卡片或请求创建确认。
 - 不得编造租户 ID、用户 ID、凭据、工具 ID 或搜索结果。
 - 收到结构化错误 Observation 时，将其作为工具失败处理，不得暴露内部错误细节。""",
-            """## 最终回答
-搜索成功后，说明已完成已安装工具搜索，并简要概括返回的推荐结果。不得声称已经执行推荐工具。""",
+            """## 结构化最终回答
+搜索成功后，调用 `final_answer(...)`，其中必须先包含且只包含一个 `<nl2a>...</nl2a>` wrapper，随后再输出用户可见说明：
+<code>
+final_answer(\"\"\"<nl2a>
+{"status":"success","recommendation_count":0,"recommendations":[]}
+</nl2a>
+已完成已安装工具搜索，没有找到合适的已安装工具。\"\"\")
+</code>
+有推荐工具时，用选中的完整推荐对象替换空数组。可见说明只能提及同一组选中工具。没有合适工具时保留空的 success 结果。搜索返回错误 Observation 时，将完整错误 JSON 原样放入 wrapper，并在 wrapper 外说明搜索失败。搜索前需要澄清需求时，不得输出 `<nl2a>` wrapper。不得使用 Markdown 围栏包裹 JSON，也不得声称已经执行推荐工具。""",
         ]
 
     return "\n\n".join(sections)
@@ -175,7 +193,6 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         params={},
         source="mcp",
         usage="outer-apis",
-        metadata={"emit_nl2a": True},
     )
 
     return AgentConfig(

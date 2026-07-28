@@ -244,6 +244,7 @@ class TestMessageObserver:
         observer_en = MessageObserver(lang="en")
         assert observer_en.lang == "en"
         assert observer_en.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+        assert observer_en.enable_nl2a_wrapper is False
 
         # Test Chinese
         observer_zh = MessageObserver(lang="zh")
@@ -356,6 +357,61 @@ class TestMessageObserver:
         messages = [json.loads(message) for message in observer.get_cached_message()]
         assert all(message["depth"] == 1 for message in messages)
         assert observer._current_depth.get() == 0
+
+    def test_final_answer_extracts_nl2a_before_visible_content(self):
+        """Extract NL2Agent JSON before enqueueing the visible final answer."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        payload = {
+            "status": "success",
+            "recommendation_count": 0,
+            "recommendations": [],
+        }
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.FINAL_ANSWER,
+            f"<nl2a>\n{json.dumps(payload)}\n</nl2a>\nSearch complete.",
+        )
+
+        messages = [
+            json.loads(message)
+            for message in observer.get_cached_message()
+        ]
+        assert [message["type"] for message in messages] == [
+            ProcessType.NL2A.value,
+            ProcessType.FINAL_ANSWER.value,
+        ]
+        assert json.loads(messages[0]["content"]) == payload
+        assert messages[1]["content"] == "Search complete."
+
+    def test_final_answer_keeps_wrapper_when_extraction_is_disabled(self):
+        """Leave ordinary final answers untouched by default."""
+        observer = MessageObserver(lang="en")
+        content = '<nl2a>{"status":"success"}</nl2a>\nVisible answer.'
+
+        observer.add_message("agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
+
+    def test_final_answer_drops_invalid_nl2a_without_emitting_chunk(self):
+        """Hide an invalid wrapper without emitting malformed structured data."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.FINAL_ANSWER,
+            "<nl2a>{invalid json}</nl2a>\nSearch failed.",
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": "Search failed.",
+        }
 
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""

@@ -7,6 +7,9 @@ from enum import Enum
 from typing import Any
 
 
+_NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
+
+
 class ProcessType(Enum):
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
@@ -106,12 +109,13 @@ class MessageObserver:
     # set the maximum buffer size, can be adjusted according to needs
     MAX_TOKEN_BUFFER_SIZE = 10
 
-    def __init__(self, lang="zh"):
+    def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # unified output to the front end string, changed to queue
         self.message_query = []
 
         # control output language
         self.lang = lang
+        self.enable_nl2a_wrapper = enable_nl2a_wrapper
 
         # initialize message transformer
         self._init_message_transformers()
@@ -301,12 +305,46 @@ class MessageObserver:
                 Message(self.current_mode, buffer_text).to_json())
             self.token_buffer.clear()
 
+    @staticmethod
+    def _extract_nl2a_wrapper(content):
+        """Extract one valid NL2Agent JSON wrapper from a final answer."""
+        if not isinstance(content, str):
+            return None, content
+
+        match = _NL2A_WRAPPER_PATTERN.search(content)
+        if match is None:
+            return None, content
+
+        visible_content = (
+            content[:match.start()] + content[match.end():]
+        ).strip()
+        try:
+            payload = json.loads(match.group(1))
+        except (json.JSONDecodeError, TypeError):
+            return None, visible_content
+
+        if not isinstance(payload, dict):
+            return None, visible_content
+        return json.dumps(payload, ensure_ascii=False), visible_content
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         """add message to the queue"""
         transformer = self.transformers.get(
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
+
+        if (
+            process_type == ProcessType.FINAL_ANSWER
+            and self.enable_nl2a_wrapper
+        ):
+            nl2a_content, formatted_content = self._extract_nl2a_wrapper(
+                formatted_content
+            )
+            if nl2a_content is not None:
+                self.message_query.append(
+                    Message(ProcessType.NL2A, nl2a_content).to_json()
+                )
 
         tool_name = kwargs.get("tool_name")
         tool_arguments = kwargs.get("tool_arguments")

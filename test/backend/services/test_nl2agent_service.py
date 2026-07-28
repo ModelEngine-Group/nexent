@@ -154,6 +154,7 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.sandbox_config is None
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
+    assert run_info.observer.enable_nl2a_wrapper is True
 
 
 @pytest.mark.asyncio
@@ -172,7 +173,6 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
         yield json.dumps(
             {
                 "type": "nl2a",
-                "tool_name": "search_installed_mcp_tools",
                 "content": json.dumps(
                     {
                         "status": "success",
@@ -207,7 +207,6 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
         'data: {"type": "tool", "content": "call"}\n\n',
         (
             'data: {"type": "nl2a", '
-            '"tool_name": "search_installed_mcp_tools", '
             '"content": "{\\"status\\": \\"success\\", '
             '\\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n'
         ),

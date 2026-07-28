@@ -44,6 +44,10 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert clear_example in prompt
     assert "<code>" in prompt
     assert "</code>" in prompt
+    assert "<nl2a>" in prompt
+    assert "</nl2a>" in prompt
+    assert 'final_answer("""<nl2a>' in prompt
+    assert "recommendation_count" in prompt
     assert 'result = runtime_search(keywords=[' in prompt
     assert prompt.count("print(result)") >= 2
 
@@ -59,5 +63,5 @@ def test_create_nl2agent_agent_config_has_only_runtime_tool():
     assert config.tools[0].source == "mcp"
     assert config.tools[0].usage == "outer-apis"
     assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    assert config.tools[0].metadata == {"emit_nl2a": True}
+    assert config.tools[0].metadata is None
     assert "不得创建" in config.instructions

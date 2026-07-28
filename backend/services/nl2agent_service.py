@@ -156,7 +156,10 @@ async def build_nl2agent_run_info(
     return AgentRunInfo(
         query=final_query,
         model_config_list=model_config_list,
-        observer=MessageObserver(lang=language),
+        observer=MessageObserver(
+            lang=language,
+            enable_nl2a_wrapper=True,
+        ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
         history=_convert_history(request.history),
