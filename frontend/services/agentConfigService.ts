@@ -572,9 +572,10 @@ const extractFilenameFromContentDisposition = (contentDisposition: string | null
     return null;
   }
 
-  const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+  const match = regex.exec(contentDisposition);
   if (match && match[1]) {
-    return match[1].replace(/['"]/g, "").trim();
+    return match[1]?.replace(/['"]/g, "").trim();
   }
 
   return null;
