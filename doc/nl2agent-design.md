@@ -6,10 +6,12 @@ The minimum verifiable implementation currently provides only these capabilities
 
 - Reuse the ordinary chat UI through `/newchat?mode=nl2agent` and its existing stream rendering.
 - Construct NL2Agent in backend memory for every request without saving an agent or conversation.
-- Bind only `search_installed_mcp_tools` and render a read-only recommendation card from assistant-ui metadata in its result.
-- Do not implement the final confirmation card, confirmation API, or target-agent creation.
+- Bind only `search_installed_mcp_tools` and render a selectable recommendation card from assistant-ui metadata in its result.
+- Select all recommendations by default, allow zero to all tools, and make the card read-only immediately after confirmation.
+- Send selected safe tool metadata through the next NL2Agent query and generate one visible `GeneratedAgentDraft` JSON with one few-shot per selected tool.
+- Do not implement the final creation confirmation card, confirmation API, draft revision flow, persistence, or target-agent creation.
 
-The flow after the recommendation card in Section 3, Section 5, Section 6.4, Section 7.3, Sections 8 through 9, and their full acceptance cases describe the later target design rather than currently implemented behavior.
+The persistence flow in Section 7.3, Sections 8 through 9, and its full acceptance cases describes the later target design rather than currently implemented behavior.
 
 ## 1. Design Goals
 
@@ -48,7 +50,13 @@ Request:
 }
 ```
 
-`query` is the current user input, `history` is assembled from the current frontend page state, and `minio_files` uses the existing attachment description format. The request does not contain an `agent_id` or `conversation_id`.
+`query` is normally the current user-visible input. When a user confirms a recommendation card, the local summary remains visible while the adapter serializes `metadata.custom.nl2agentToolSelection` as the current query:
+
+```json
+{"type":"nl2agent_tool_selection","tools":[]}
+```
+
+`history` is assembled from the current frontend page state, and `minio_files` uses the existing attachment description format. The request does not contain an `agent_id` or `conversation_id`.
 
 ### 2.2 Runtime Configuration
 
@@ -99,25 +107,14 @@ flowchart TD
     E --> C
     D -- Yes --> F[Generate ephemeral agent draft]
     F --> G[Call search_installed_mcp_tools]
-    G --> H[Render tool recommendation card from execution_logs]
-    H --> I{Enough information to create the agent?}
-    I -- No --> J[Continue conversation and collect requirements]
-    J --> C
-    I -- Yes --> K[Call present_creation_confirmation_card]
-    K --> L[Emit final confirmation card over SSE]
-    L --> M[User confirms]
-    M --> N[Atomically create agent draft and tool bindings]
-    N --> O[Direct user to the agent draft]
+    G --> H[Render selectable tool recommendation card]
+    H --> I[User confirms zero to all tools]
+    I --> J[Send nl2agent_tool_selection as the next query]
+    J --> K[Generate one visible GeneratedAgentDraft JSON]
+    K --> L[End without persistence]
 ```
 
-The model uses two independent readiness thresholds:
-
-1. It may search for tools once the available information is sufficient to identify required capabilities and search terms.
-2. It may present the final confirmation card once the available information is sufficient to generate a usable agent configuration.
-
-Tool search may happen before requirement collection is complete, and search results may inform later clarification. The final confirmation card requires a completed tool search **within the same run**: the ephemeral runtime keeps no state across requests, so `present_creation_confirmation_card` can only verify searches performed in the current ReAct run. If the model attempts to present the confirmation card in a run with no prior search, the tool returns an error Observation instructing it to call `search_installed_mcp_tools` first. This also guarantees the confirmation card is always based on a fresh search over the latest draft. The precondition is a product-quality guard, not a security control; authorization is enforced independently by the confirmation API's revalidation.
-
-After the final confirmation card is emitted, the flow enters `awaiting_confirmation`. The frontend stops accepting new requirement input, and the user may only confirm creation or leave the flow.
+The model searches once the available information is sufficient to identify required capabilities and search terms. On a tool-selection query it must not search again; it combines the selected tools with the preceding requirement history and emits only the draft JSON. This confirmation generates content only and does not create an agent.
 
 ## 4. Prompt and Runtime Tools
 
@@ -129,7 +126,8 @@ The duty prompt uses consistent stage-specific instructions:
 
 - `clarify`: Learn the agent's goals, usage scenario, inputs, outputs, constraints, and success criteria through free-form conversation. Do not require a fixed structure or emit a requirements confirmation card.
 - `tool_search`: Once there is enough information to identify required capabilities, generate 1 to 10 concise capability keywords, call `search_installed_mcp_tools`, and preserve the result with `print(result)`.
-- `ready_to_create` (later phase): Once the draft is sufficiently complete and a tool search has completed in the current run, call `present_creation_confirmation_card`. The current MVP explicitly prohibits entering this phase or claiming that an agent was created.
+- `tool_selection`: When the current query has `type="nl2agent_tool_selection"`, do not search again. Generate the complete draft JSON from the preceding requirements and selected tools.
+- `ready_to_create` (later phase): Persist or present a final creation confirmation. The current MVP explicitly prohibits entering this phase or claiming that an agent was created.
 - Tool Observations tell the model the search result and allowed next action.
 - The model must not generate or override user IDs, tenant IDs, authorization data, card IDs, or tool credentials.
 
@@ -180,6 +178,7 @@ class InstalledMcpToolRecommendation(BaseModel):
     source: Literal["mcp"]
     usage: str
     labels: list[str]
+    inputs: str
     score: float
 
 
@@ -213,6 +212,18 @@ An empty result is a successful completed search. Keyword validation, database, 
 ## 5. Ephemeral Agent Draft
 
 ```python
+class GeneratedAgentDraftTool(BaseModel):
+    tool_id: int
+    name: str
+    origin_name: str | None
+    description: str
+    source: Literal["mcp"]
+    usage: str
+    labels: list[str]
+    inputs: str
+    few_shots_prompt: str | None = None
+
+
 class GeneratedAgentDraft(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -225,6 +236,7 @@ class GeneratedAgentDraft(BaseModel):
     duty_prompt: str = Field(min_length=1)
     constraint_prompt: str = Field(min_length=1)
     few_shots_prompt: str | None = None
+    tools: list[GeneratedAgentDraftTool]
 ```
 
 Field requirements:
@@ -235,9 +247,10 @@ Field requirements:
 - `duty_prompt` defines responsibilities, task flow, and output requirements.
 - `constraint_prompt` defines boundaries, permissions, safety requirements, and failure handling.
 - `few_shots_prompt` is generated only when examples materially improve behavioral stability.
+- `tools` preserves the selected tools in recommendation order. Each tool keeps its safe metadata and raw `inputs` string, drops `score`, and receives a non-empty tool-level `few_shots_prompt`.
 - Unknown fields are rejected, and all strings are stripped of surrounding whitespace.
 
-The ephemeral draft exists only in the current frontend page state and SSE card payloads. It is not written to the database before final confirmation.
+The draft is returned as the only visible JSON in the model's final answer. It is not parsed by the backend or written to the database in this MVP.
 
 The resulting target agent has these properties:
 
@@ -263,7 +276,7 @@ The scope intentionally remains MCP-only. Local and statically discovered LangCh
 
 The model and frontend cannot access MCP tokens, request headers, secrets, or connection credentials.
 
-The backend search function obtains candidates from `query_all_tools(tenant_id)`, which already enforces tenant ownership and excludes soft-deleted rows, and then applies the `source` and availability filters above. The runtime search tool itself is absent from this query because it is never persisted. Only safe display metadata is copied into search documents and results; `params`, headers, tokens, and other executable configuration are excluded.
+The backend search function obtains candidates from `query_all_tools(tenant_id)`, which already enforces tenant ownership and excludes soft-deleted rows, and then applies the `source` and availability filters above. The runtime search tool itself is absent from this query because it is never persisted. Results include safe metadata and the raw `inputs` schema string needed to generate calls; `params`, headers, tokens, and other executable configuration are excluded.
 
 ### 6.2 Search Fields
 
@@ -298,7 +311,6 @@ Fixed rules:
 |---|---|
 | Minimum recommendation score | `0.45` |
 | Maximum recommendation count | `5` |
-| Default selection threshold | `0.65` |
 | Tie-break order | Ascending `tool_id` |
 
 Candidates below the minimum score are discarded. The remaining candidates are sorted by descending score and then ascending `tool_id`, truncated to five, and their scores are rounded to four decimal places in the tool Observation.
@@ -307,15 +319,13 @@ The score thresholds are initial values and are expected to be tuned with real u
 
 When no tool matches, the frontend renders an empty-state recommendation card from the successful Observation.
 
-### 6.4 Draft Revisions and Tool Selection
+### 6.4 Tool Selection
 
-- Each new draft generated for a search receives a new `draft_revision`.
-- The tool recommendation card selects tools scoring at least `0.65` by default.
-- Users may select or clear tools on the latest recommendation card.
-- When a new recommendation card arrives, the frontend marks all older recommendation cards and confirmation cards as `superseded`.
-- A new recommendation card uses its new default selection set and does not inherit selections from an older revision.
-- Because the confirmation card is always produced in the same run as a completed search, its `draft_revision` always equals the latest recommendation card's revision; no cross-revision matching is needed.
-- The final confirmation card always reads the latest selection state from the tool card with the same `draft_revision`.
+- Every successful recommendation card selects all returned tools by default.
+- Users may select zero to all tools, including continuing from an empty result.
+- Confirmation preserves recommendation order, removes `score`, and adds `few_shots_prompt: null`.
+- The card becomes read-only immediately and prevents duplicate submission.
+- Cross-message superseding and `draft_revision` management are deferred.
 
 ## 7. Tool Recommendation Card and Frontend State
 
@@ -338,10 +348,11 @@ The tool recommendation card contains:
 
 - Each recommended tool's `tool_id`, name, description, MCP source, labels, and match score.
 - Empty-result or search-failure state.
+- Native checkboxes, selected count, and a confirmation action for successful results.
 
-The current recommendation card is read-only.
+All successful recommendations are selected by default. Empty success results can continue without tools; failures cannot be confirmed. Confirmation appends a localized summary message while storing the full selection JSON in message metadata, then locks the card.
 
-### 7.3 Final Confirmation Card
+### 7.3 Final Creation Confirmation Card (Later Phase)
 
 The final confirmation card contains:
 
@@ -455,6 +466,8 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - Search normalization, fields, score threshold, Top 5 limit, score rounding, default selection, and tie-break order remain deterministic.
 - Success and error Observations carry fixed `_assistant_ui` metadata and expose no executable tool configuration.
 - The Chinese and English duty prompts contain clarification and MCP tool-call few-shots whose tool example preserves `print(result)`.
+- Tool-selection queries prohibit another search and require one non-empty, input-aware few-shot for every selected tool.
+- Generated drafts allow an empty tool list and are returned as plain JSON without an `<nl2a>` wrapper.
 - Empty search results count as successful searches, while backend failures return sanitized errors with presentation metadata.
 - The confirmation tool rejects calls when no tool search has completed in the current run, and its error Observation instructs the model to search first.
 - The confirmation API validates the draft, tool permissions, positive IDs, and stable deduplication.
@@ -468,6 +481,8 @@ Repeated submissions with the same idempotency key return the existing draft wit
 - Current-page history supports multi-turn clarification, while refresh or exit does not restore the flow.
 - Presentation metadata in `execution_logs` maps through `mapChunkType` to an assistant-ui data part.
 - The tool recommendation card renders recommendation, empty, and failed states.
+- Successful cards default to all tools selected, allow zero to all selections, and become read-only after one confirmation.
+- The NL2Agent adapter sends selection metadata as the query without changing ordinary-agent requests.
 - A new `draft_revision` supersedes older recommendation and confirmation cards.
 - The final confirmation card displays the draft summary and latest tool selection and exposes only confirmation.
 - Successful confirmation shows the draft entry point; failure does not show a success state.

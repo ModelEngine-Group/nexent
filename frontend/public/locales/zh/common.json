@@ -737,6 +737,12 @@
   "nl2agent.toolRecommendations.emptyDescription": "可以尝试描述其他能力，或进一步明确智能体需求。",
   "nl2agent.toolRecommendations.errorTitle": "工具搜索失败",
   "nl2agent.toolRecommendations.errorDescription": "暂时无法搜索已安装的工具，请调整需求后重试。",
+  "nl2agent.toolRecommendations.selectTool": "选择 {{name}}",
+  "nl2agent.toolRecommendations.selectedCount": "已选择 {{count}} 个工具",
+  "nl2agent.toolRecommendations.confirm": "确认工具",
+  "nl2agent.toolRecommendations.continueWithoutTools": "无工具继续",
+  "nl2agent.toolRecommendations.confirmed": "已确认",
+  "nl2agent.toolRecommendations.confirmedSummary": "已确认 {{count}} 个工具",
 
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",

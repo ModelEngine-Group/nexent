@@ -1,17 +1,22 @@
 "use client";
 
-import type { FC } from "react";
+import { useId, useRef, useState, type FC } from "react";
 import {
   AlertTriangleIcon,
+  CheckCircle2Icon,
   SearchXIcon,
   ServerIcon,
   SparklesIcon,
   WrenchIcon,
 } from "lucide-react";
+import { useAui } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type {
+  GeneratedAgentDraftTool,
+  Nl2AgentToolSelection,
   Nl2aMessage,
   Nl2aToolRecommendation,
 } from "../adapter/remote-chat-model-adapter";
@@ -62,10 +67,70 @@ const ToolRecommendationsError: FC = () => {
 
 export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
   const { t } = useTranslation("common");
+  const aui = useAui();
+  const checkboxIdPrefix = useId();
   const content = nl2a.content;
   const isSuccess = content.status === "success";
   const recommendations: Nl2aToolRecommendation[] =
     content.status === "success" ? content.recommendations : [];
+  const [selectedToolIds, setSelectedToolIds] = useState(
+    () => new Set(recommendations.map((tool) => tool.tool_id))
+  );
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const confirmationStarted = useRef(false);
+
+  const toggleTool = (toolId: number) => {
+    if (isConfirmed) return;
+    setSelectedToolIds((current) => {
+      const next = new Set(current);
+      if (next.has(toolId)) {
+        next.delete(toolId);
+      } else {
+        next.add(toolId);
+      }
+      return next;
+    });
+  };
+
+  const confirmSelection = () => {
+    if (!isSuccess || confirmationStarted.current) return;
+    confirmationStarted.current = true;
+    setIsConfirmed(true);
+
+    const tools: GeneratedAgentDraftTool[] = recommendations
+      .filter((tool) => selectedToolIds.has(tool.tool_id))
+      .map((tool) => ({
+        tool_id: tool.tool_id,
+        name: tool.name,
+        origin_name: tool.origin_name,
+        description: tool.description,
+        source: tool.source,
+        usage: tool.usage,
+        labels: tool.labels,
+        inputs: tool.inputs,
+        few_shots_prompt: null,
+      }));
+    const selection: Nl2AgentToolSelection = {
+      type: "nl2agent_tool_selection",
+      tools,
+    };
+
+    aui.thread().append({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: t("nl2agent.toolRecommendations.confirmedSummary", {
+            count: tools.length,
+          }),
+        },
+      ],
+      metadata: {
+        custom: { nl2agentToolSelection: selection },
+      },
+      startRun: true,
+    });
+  };
 
   return (
     <section
@@ -97,61 +162,105 @@ export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
           <ToolRecommendationsEmpty />
         ) : (
           <div className="space-y-3">
-            {recommendations.map((tool) => (
-              <article
-                key={tool.tool_id}
-                className="rounded-lg border bg-background p-4"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <WrenchIcon className="size-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <h4 className="truncate text-sm font-semibold text-foreground">
-                          {tool.name}
-                        </h4>
-                        {tool.origin_name && tool.origin_name !== tool.name && (
-                          <p className="truncate text-xs text-muted-foreground">
-                            {tool.origin_name}
-                          </p>
-                        )}
+            {recommendations.map((tool, index) => {
+              const checkboxId = `${checkboxIdPrefix}-${index}`;
+              return (
+                <label
+                  key={tool.tool_id}
+                  htmlFor={checkboxId}
+                  className="block rounded-lg border bg-background p-4 transition-colors has-checked:border-primary/50 has-checked:bg-primary/[0.03]"
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      id={checkboxId}
+                      type="checkbox"
+                      checked={selectedToolIds.has(tool.tool_id)}
+                      disabled={isConfirmed}
+                      onChange={() => toggleTool(tool.tool_id)}
+                      className="mt-2 size-4 shrink-0 accent-primary disabled:cursor-not-allowed"
+                      aria-label={t("nl2agent.toolRecommendations.selectTool", {
+                        name: tool.name,
+                      })}
+                    />
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                      <WrenchIcon className="size-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <h4 className="truncate text-sm font-semibold text-foreground">
+                            {tool.name}
+                          </h4>
+                          {tool.origin_name &&
+                            tool.origin_name !== tool.name && (
+                              <p className="truncate text-xs text-muted-foreground">
+                                {tool.origin_name}
+                              </p>
+                            )}
+                        </div>
+                        <Badge variant="success" size="sm">
+                          {t("nl2agent.toolRecommendations.match", {
+                            score: formatMatchScore(tool.score),
+                          })}
+                        </Badge>
                       </div>
-                      <Badge variant="success" size="sm">
-                        {t("nl2agent.toolRecommendations.match", {
-                          score: formatMatchScore(tool.score),
-                        })}
-                      </Badge>
-                    </div>
 
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {tool.description}
-                    </p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {tool.description}
+                      </p>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="info" size="sm">
-                        {tool.source.toUpperCase()}
-                      </Badge>
-                      {tool.usage && (
-                        <Badge variant="outline" size="sm">
-                          <ServerIcon />
-                          {tool.usage}
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="info" size="sm">
+                          {tool.source.toUpperCase()}
                         </Badge>
-                      )}
-                      {tool.labels.map((label) => (
-                        <Badge key={label} variant="muted" size="sm">
-                          {label}
-                        </Badge>
-                      ))}
+                        {tool.usage && (
+                          <Badge variant="outline" size="sm">
+                            <ServerIcon />
+                            {tool.usage}
+                          </Badge>
+                        )}
+                        {tool.labels.map((label) => (
+                          <Badge key={label} variant="muted" size="sm">
+                            {label}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </article>
-            ))}
+                </label>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {isSuccess && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {isConfirmed && (
+              <CheckCircle2Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+            )}
+            <span>
+              {isConfirmed
+                ? t("nl2agent.toolRecommendations.confirmed")
+                : t("nl2agent.toolRecommendations.selectedCount", {
+                    count: selectedToolIds.size,
+                  })}
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={isConfirmed}
+            onClick={confirmSelection}
+          >
+            <CheckCircle2Icon />
+            {selectedToolIds.size === 0
+              ? t("nl2agent.toolRecommendations.continueWithoutTools")
+              : t("nl2agent.toolRecommendations.confirm")}
+          </Button>
+        </div>
+      )}
     </section>
   );
 };

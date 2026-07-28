@@ -37,7 +37,25 @@ export interface Nl2aToolRecommendation {
   source: "mcp";
   usage: string;
   labels: string[];
+  inputs: string;
   score: number;
+}
+
+export interface GeneratedAgentDraftTool {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  inputs: string;
+  few_shots_prompt: string | null;
+}
+
+export interface Nl2AgentToolSelection {
+  type: "nl2agent_tool_selection";
+  tools: GeneratedAgentDraftTool[];
 }
 
 export type Nl2aPayload =
@@ -262,7 +280,9 @@ function extractTextContent(messages: readonly ThreadMessage[]): string {
  * successful MinIO upload, so we can read it back here without an extra
  * upload round-trip.
  */
-function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload[] {
+function extractMinioFiles(
+  message: ThreadMessage | undefined
+): MinioFilePayload[] {
   if (!message) return [];
   // Attachments are attached by the AttachmentAdapter via the message content
   // pipeline; the public ThreadMessage type does not declare them but they are
@@ -287,7 +307,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
     if (!objectName || !url) {
       log.warn(
         "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-        att.name,
+        att.name
       );
       continue;
     }
@@ -305,7 +325,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
 
 function parseSkillFileAttachments(
   content: string,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] {
   try {
     const payload = JSON.parse(content) as {
@@ -318,8 +338,7 @@ function parseSkillFileAttachments(
         const name = file.file_name || file.name || "Generated file";
         const contentType =
           file.mime_type || file.type || "application/octet-stream";
-        const url =
-          file.preview_url || file.presigned_url || file.url;
+        const url = file.preview_url || file.presigned_url || file.url;
 
         return {
           id: `${messageId}-skill-file-${index}`,
@@ -344,7 +363,7 @@ function parseSkillFileAttachments(
           presigned_url: file.presigned_url,
           size: file.file_size ?? file.size,
         } as unknown as CompleteAttachment;
-      },
+      }
     );
 
     return attachments;
@@ -525,10 +544,7 @@ function formatToolArguments(raw: unknown): string {
  * shared `ToolGroupRoot` / `ToolGroupTrigger` / `ToolGroupContent`
  * rendering defined in `thread.tsx`.
  */
-function appendToolCallPart(
-  contentParts: any[],
-  toolCallPart: any
-): any {
+function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
   contentParts.push(toolCallPart);
   return toolCallPart;
 }
@@ -594,7 +610,7 @@ export function attachSearchContentToTool(
   if (
     item.url &&
     !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url,
+      (source: { url: string }) => source.url === item.url
     )
   ) {
     targetToolCall.searchContent.push(item);
@@ -825,7 +841,9 @@ export function clearStepTokenCounts(): void {
  * Parse and build timing metadata from backend token_count chunk.
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
-function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimingResult> | null {
+function buildTimingFromTokenCount(
+  content: string
+): ReturnType<typeof buildTimingResult> | null {
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -845,10 +863,10 @@ function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimi
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
-    undefined,  // firstTokenTime - not available
-    0,         // toolCallCount - tracked separately
+    undefined, // firstTokenTime - not available
+    0, // toolCallCount - tracked separately
     parsed.totalOutputTokens,
-    totalDuration,
+    totalDuration
   );
 }
 
@@ -896,10 +914,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
 
-    const query =
-      lastUserIndex >= 0
-        ? extractTextContent([messages[lastUserIndex]])
-        : "";
+    const visibleQuery =
+      lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
+    const selectionMetadata =
+      isNl2Agent && lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+          )?.nl2agentToolSelection
+        : undefined;
+    const query = selectionMetadata
+      ? JSON.stringify(selectionMetadata)
+      : visibleQuery;
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -1015,7 +1041,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null = null;
+    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null =
+      null;
 
     const contentParts: any[] = [];
 
@@ -1322,7 +1349,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // the most recent tool call so the ToolFallback UI can render them.
             try {
               const searchResults = JSON.parse(chunk.content);
-              const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+              const results = Array.isArray(searchResults)
+                ? searchResults
+                : [searchResults];
               for (const result of results) {
                 const url = result.url || "";
                 const filename = result.filename || "";
@@ -1334,7 +1363,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   !searchSourcesAccumulator.some(
                     (source) =>
                       `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                      sourceKey,
+                      sourceKey
                   )
                 ) {
                   searchSourcesAccumulator.push({
@@ -1422,9 +1451,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (partType === "reasoning") {
               currentReasoningPart = makeReasoningPart(
                 (currentReasoningPart?.text ?? "") + chunk.content,
-                true,
+                true
               );
-              yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+              yield buildStreamResult([
+                ...contentParts,
+                currentReasoningPart,
+              ] as any);
             } else if (partType === "tool-call") {
               if (currentReasoningPart) {
                 currentReasoningPart.status = { type: "done" };
@@ -1461,7 +1493,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               try {
                 const searchResults = JSON.parse(chunk.content);
-                const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+                const results = Array.isArray(searchResults)
+                  ? searchResults
+                  : [searchResults];
                 for (const result of results) {
                   const url = result.url || "";
                   const filename = result.filename || "";
@@ -1473,7 +1507,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     !searchSourcesAccumulator.some(
                       (source) =>
                         `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                        sourceKey,
+                        sourceKey
                     )
                   ) {
                     searchSourcesAccumulator.push({
@@ -1496,7 +1530,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 );
                 }
               } catch (e) {
-                log.warn("[ChatModelAdapter] Failed to parse search_content:", e);
+                log.warn(
+                  "[ChatModelAdapter] Failed to parse search_content:",
+                  e
+                );
               }
             }
           }
@@ -1580,7 +1617,8 @@ function buildTimingResult(
   tokenCount: number = 0,
   duration: number = 0
 ) {
-  const totalStreamTime = duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
+  const totalStreamTime =
+    duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
 
   return {
     metadata: {
@@ -1589,7 +1627,8 @@ function buildTimingResult(
         firstTokenTime,
         totalStreamTime,
         tokenCount,
-        tokensPerSecond: duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
+        tokensPerSecond:
+          duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
         totalChunks: 1,
         toolCallCount,
       },

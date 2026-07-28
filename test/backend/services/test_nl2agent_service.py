@@ -23,6 +23,7 @@ def test_search_filters_catalog_and_returns_safe_metadata(mocker):
                 "source": "mcp",
                 "usage": "weather-server",
                 "labels": ["Weather", "Forecast"],
+                "inputs": '{"city":"string"}',
                 "is_available": True,
                 "params": {"token": "secret"},
             },
@@ -54,6 +55,7 @@ def test_search_filters_catalog_and_returns_safe_metadata(mocker):
     assert result[0].tool_id == 8
     assert result[0].source == "mcp"
     assert result[0].labels == ["Weather", "Forecast"]
+    assert result[0].inputs == '{"city":"string"}'
     assert "params" not in result[0].model_dump()
 
 

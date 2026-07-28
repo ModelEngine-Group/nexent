@@ -115,6 +115,7 @@ def search_installed_mcp_tools_by_query(
             description=str(tool.get("description") or ""),
             usage=str(tool.get("usage") or ""),
             labels=_normalize_labels(tool.get("labels")),
+            inputs=str(tool.get("inputs") or ""),
             score=round(score, 4),
         )
         for score, tool_id, tool in scored_tools[:result_limit]

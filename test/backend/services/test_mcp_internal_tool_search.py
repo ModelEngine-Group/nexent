@@ -42,6 +42,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
                 "source": "mcp",
                 "usage": "weather-server-b",
                 "labels": ["weather"],
+                "inputs": '{"city":"string"}',
                 "is_available": True,
                 "params": {"token": "must-not-leak"},
             },
@@ -53,6 +54,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
                 "source": "mcp",
                 "usage": "weather-server-a",
                 "labels": ["weather", "forecast"],
+                "inputs": '{"city":"string","days":"integer"}',
                 "is_available": True,
                 "request_headers": {"Authorization": "must-not-leak"},
             },
@@ -117,6 +119,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         "source": "mcp",
         "usage": "weather-server-a",
         "labels": ["weather", "forecast"],
+        "inputs": '{"city":"string","days":"integer"}',
         "score": 0.95,
     }
     safe_fields = {
@@ -127,6 +130,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         "source",
         "usage",
         "labels",
+        "inputs",
         "score",
     }
     assert all(set(item) == safe_fields for item in result["recommendations"])

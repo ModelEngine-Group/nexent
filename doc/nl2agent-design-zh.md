@@ -6,10 +6,12 @@
 
 - 通过 `/newchat?mode=nl2agent` 复用普通聊天界面和流式消息渲染。
 - 每次请求在后端内存中临时构建 NL2Agent，不保存智能体或会话。
-- 仅绑定 `search_installed_mcp_tools`，并根据工具结果中的 assistant-ui 元数据渲染只读推荐卡。
-- 不实现最终确认卡、确认接口或目标智能体创建。
+- 仅绑定 `search_installed_mcp_tools`，并根据工具结果中的 assistant-ui 元数据渲染可选择的推荐卡。
+- 默认全选推荐工具，允许选择零到全部工具，确认后立即将卡片设为只读。
+- 将选中的安全工具元数据作为下一轮 NL2Agent query 发送，并生成一个可见的 `GeneratedAgentDraft` JSON；每个已选工具包含一个 few-shot。
+- 不实现最终创建确认卡、确认接口、草稿 revision、持久化或目标智能体创建。
 
-本文第 3 节中推荐卡之后的流程、第 5 节、第 6.4 节、第 7.3 节、第 8 至 9 节以及对应的完整验收项描述后续目标设计，不代表当前版本已经实现。
+本文第 7.3 节、第 8 至 9 节及其完整验收项中的持久化流程描述后续目标设计，不代表当前版本已经实现。
 
 ## 1. 设计目标
 
@@ -48,7 +50,13 @@ POST /agent/nl2agent/run
 }
 ```
 
-`query` 为当前轮用户输入，`history` 由前端从当前页面状态组装，`minio_files` 沿用现有附件描述格式。请求不包含 `agent_id` 或 `conversation_id`。
+`query` 通常是当前轮用户可见输入。用户确认推荐卡时，本地摘要仍作为可见消息展示，而 adapter 将 `metadata.custom.nl2agentToolSelection` 序列化为当前 query：
+
+```json
+{"type":"nl2agent_tool_selection","tools":[]}
+```
+
+`history` 由前端从当前页面状态组装，`minio_files` 沿用现有附件描述格式。请求不包含 `agent_id` 或 `conversation_id`。
 
 ### 2.2 运行配置
 
@@ -99,25 +107,14 @@ flowchart TD
     E --> C
     D -- 是 --> F[生成临时智能体草稿]
     F --> G[调用 search_installed_mcp_tools]
-    G --> H[从 execution_logs 渲染工具推荐卡]
-    H --> I{信息是否足以创建智能体}
-    I -- 否 --> J[继续对话并补充需求]
-    J --> C
-    I -- 是 --> K[调用 present_creation_confirmation_card]
-    K --> L[通过 SSE 推送最终确认卡]
-    L --> M[用户确认]
-    M --> N[原子创建智能体草稿和工具绑定]
-    N --> O[提示用户进入草稿查看]
+    G --> H[渲染可选择的工具推荐卡]
+    H --> I[用户确认零到全部工具]
+    I --> J[将 nl2agent_tool_selection 作为下一轮 query]
+    J --> K[生成一个可见的 GeneratedAgentDraft JSON]
+    K --> L[结束且不持久化]
 ```
 
-模型使用两个独立判断阈值：
-
-1. 当现有信息足以判断所需能力和检索关键词时，可以开始搜索工具。
-2. 当现有信息足以生成可实际使用的智能体配置时，可以展示最终确认卡。
-
-工具搜索可以早于最终信息收集完成，搜索结果可帮助后续澄清。最终确认卡要求**同一次运行内**已完成一次工具搜索：临时运行实例不跨请求保留状态，`present_creation_confirmation_card` 只能校验当前 ReAct 运行内发生的搜索。如果模型在没有先搜索的运行中尝试生成确认卡，工具将返回错误 Observation，要求先调用 `search_installed_mcp_tools`。这同时保证确认卡始终基于最新草稿的最新搜索结果。该前置条件属于产品质量约束而非安全控制，授权由确认接口的重新校验独立保证。
-
-最终确认卡生成后，当前流程进入 `awaiting_confirmation` 状态。前端停止接受新的需求输入，用户只能确认创建或退出当前流程。
+当现有信息足以判断所需能力和检索关键词时，模型开始搜索工具。收到工具选择 query 后不得再次搜索；模型结合之前的需求历史与已选工具，只输出 Draft JSON。此次确认仅生成内容，不创建智能体。
 
 ## 4. 提示词与运行时工具
 
@@ -129,7 +126,8 @@ NL2Agent 不使用独立 YAML、数据库提示词记录或提示词加载器。
 
 - `clarify`：通过自由对话了解智能体目标、使用场景、输入、输出、约束和成功标准。不得要求用户填写固定结构，也不得生成需求确认卡。
 - `tool_search`：当信息足以判断所需能力时，生成 1 到 10 个简洁的能力关键词，调用 `search_installed_mcp_tools` 并原样 `print(result)`。
-- `ready_to_create`（后续阶段）：当草稿已经足够完整且本次运行内已完成工具搜索时，调用 `present_creation_confirmation_card`。当前 MVP 明确禁止进入该阶段或声称已经创建智能体。
+- `tool_selection`：当前 query 的 `type="nl2agent_tool_selection"` 时不得再次搜索，依据之前的需求和已选工具生成完整 Draft JSON。
+- `ready_to_create`（后续阶段）：持久化或展示最终创建确认。当前 MVP 明确禁止进入该阶段或声称已经创建智能体。
 - 工具返回的 Observation 用于告知搜索结果及下一步允许的行为。
 - 模型不得生成或覆盖用户 ID、租户 ID、授权信息、卡片 ID 和工具凭据。
 
@@ -180,6 +178,7 @@ class InstalledMcpToolRecommendation(BaseModel):
     source: Literal["mcp"]
     usage: str
     labels: list[str]
+    inputs: str
     score: float
 
 
@@ -213,6 +212,18 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
 ## 5. 临时智能体草稿
 
 ```python
+class GeneratedAgentDraftTool(BaseModel):
+    tool_id: int
+    name: str
+    origin_name: str | None
+    description: str
+    source: Literal["mcp"]
+    usage: str
+    labels: list[str]
+    inputs: str
+    few_shots_prompt: str | None = None
+
+
 class GeneratedAgentDraft(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -225,6 +236,7 @@ class GeneratedAgentDraft(BaseModel):
     duty_prompt: str = Field(min_length=1)
     constraint_prompt: str = Field(min_length=1)
     few_shots_prompt: str | None = None
+    tools: list[GeneratedAgentDraftTool]
 ```
 
 字段要求：
@@ -235,9 +247,10 @@ class GeneratedAgentDraft(BaseModel):
 - `duty_prompt` 描述职责、任务流程和输出要求。
 - `constraint_prompt` 描述边界、权限、安全要求和失败处理。
 - `few_shots_prompt` 仅在示例能显著提高行为稳定性时生成。
+- `tools` 按推荐顺序保留已选工具。每个工具保留安全元数据和原始 `inputs` 字符串，移除 `score`，并获得非空的工具级 `few_shots_prompt`。
 - 未知字段一律拒绝，所有字符串执行去空白处理。
 
-临时草稿只存在于当前前端页面状态和 SSE 卡片数据中，最终确认前不写入数据库。
+Draft 作为模型最终回答中唯一可见的 JSON 返回。本 MVP 不在后端解析它，也不写入数据库。
 
 最终创建的目标智能体属性：
 
@@ -263,7 +276,7 @@ is_available == true
 
 模型和前端不能访问 MCP Token、请求头、密钥或连接凭据。
 
-后端搜索函数从 `query_all_tools(tenant_id)` 获取候选项；该查询已经强制租户归属并排除软删除记录，随后再应用上述 `source` 和可用性过滤。运行时搜索工具从不持久化，因此不会出现在候选结果中。搜索文档和返回结果只复制安全的展示元数据，排除 `params`、请求头、Token 和其他可执行配置。
+后端搜索函数从 `query_all_tools(tenant_id)` 获取候选项；该查询已经强制租户归属并排除软删除记录，随后再应用上述 `source` 和可用性过滤。运行时搜索工具从不持久化，因此不会出现在候选结果中。返回结果包含安全元数据和生成工具调用所需的原始 `inputs` Schema 字符串；排除 `params`、请求头、Token 和其他可执行配置。
 
 ### 6.2 检索字段
 
@@ -298,7 +311,6 @@ score = max(
 |---|---|
 | 最低推荐分数 | `0.45` |
 | 最大推荐数量 | `5` |
-| 默认选中阈值 | `0.65` |
 | 同分排序 | `tool_id` 升序 |
 
 低于最低分数的候选项直接丢弃；其余结果先按分数降序、再按 `tool_id` 升序排列，截取前五项，并在工具 Observation 中把分数保留四位小数。
@@ -307,15 +319,13 @@ score = max(
 
 没有匹配结果时，前端根据成功 Observation 渲染空状态推荐卡。
 
-### 6.4 草稿修订与工具选择
+### 6.4 工具选择
 
-- 每次生成用于搜索的新草稿时创建新的 `draft_revision`。
-- 工具推荐卡默认选中分数不低于 `0.65` 的工具。
-- 用户可以在最新工具推荐卡中多选或取消选择工具。
-- 新工具推荐卡到达时，前端将所有旧推荐卡和旧确认卡标记为 `superseded`。
-- 新工具推荐卡使用新的默认选中集合，不继承旧修订的选择。
-- 确认卡始终与同一次运行内已完成的搜索配对，其 `draft_revision` 恒等于最新推荐卡的修订，无需跨修订匹配。
-- 最终确认卡始终读取同一 `draft_revision` 下最新工具卡的选择状态。
+- 每张成功推荐卡默认选中全部返回工具。
+- 用户可以选择零到全部工具，空结果也允许继续。
+- 确认时保持推荐顺序，移除 `score` 并加入 `few_shots_prompt: null`。
+- 卡片立即变为只读，并阻止重复提交。
+- 跨消息旧卡失效和 `draft_revision` 管理由后续阶段实现。
 
 ## 7. 工具推荐卡和前端状态
 
@@ -338,10 +348,11 @@ type AssistantUiMetadata = {
 
 - 推荐工具的 `tool_id`、名称、说明、MCP 来源、标签和匹配分数。
 - 空结果或搜索失败状态。
+- 成功结果中的原生复选框、已选数量和确认操作。
 
-当前推荐卡为只读展示。
+所有成功推荐默认全选。空成功结果允许“无工具继续”，错误结果不可确认。确认会追加本地化摘要消息，将完整选择 JSON 保存到消息 metadata，并锁定卡片。
 
-### 7.3 最终确认卡
+### 7.3 最终创建确认卡（后续阶段）
 
 最终确认卡包含：
 
@@ -455,6 +466,8 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 搜索规范化、检索字段、评分阈值、Top 5、分数取整、默认选择和同分排序保持确定性。
 - 成功和错误 Observation 均携带固定 `_assistant_ui`，且不暴露可执行工具配置。
 - 中英文职责提示词包含澄清和 MCP 工具调用 few-shot，工具调用示例原样 `print(result)`。
+- 工具选择 query 禁止再次搜索，并要求为每个已选工具生成一个非空且符合输入的 few-shot。
+- 生成的 Draft 允许工具列表为空，并以不含 `<nl2a>` wrapper 的纯 JSON 返回。
 - 空结果视为成功搜索；后端失败时返回带展示元数据的脱敏错误。
 - 最终确认工具在本次运行内没有已完成工具搜索时拒绝生成卡片，并通过错误 Observation 要求模型先搜索。
 - 确认接口正确校验草稿、工具权限、正整数 ID 和稳定去重。
@@ -468,6 +481,8 @@ TTL 内相同幂等键重复提交时返回已创建的草稿；TTL 之外由前
 - 当前页面历史支持多轮澄清，刷新或退出后不恢复流程。
 - `execution_logs` 中的展示元数据通过 `mapChunkType` 转换为 assistant-ui data part。
 - 工具推荐卡正确展示推荐列表、空状态和失败状态。
+- 成功卡默认全选，允许选择零到全部工具，并在一次确认后变为只读。
+- NL2Agent adapter 将选择 metadata 作为 query 发送，不改变普通 Agent 请求。
 - 新 `draft_revision` 正确取代旧推荐卡和旧确认卡。
 - 最终确认卡展示草稿摘要和最新工具选择，并且只提供确认按钮。
 - 确认成功后展示草稿入口，失败时不显示成功状态。
