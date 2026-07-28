@@ -112,7 +112,7 @@ export interface DebugPromptOptimizeResult {
 export const optimizePromptFromDebug = async (
   params: DebugPromptOptimizeParams
 ): Promise<DebugPromptOptimizeResult> => {
-  const response = await fetch("/api/prompt/optimize/from_debug", {
+  const response = await fetch(API_ENDPOINTS.prompt.optimizeFromDebug, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify(params),
