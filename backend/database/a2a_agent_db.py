@@ -145,6 +145,11 @@ def _extract_protocol_type(supported_interfaces: Optional[List[Dict[str, Any]]])
     return PROTOCOL_JSONRPC
 
 
+def _configured_security_scheme_ids(security_credentials: Optional[Dict[str, str]]) -> List[str]:
+    """Return credential scheme IDs without exposing their secret values."""
+    return sorted(scheme_id for scheme_id, value in (security_credentials or {}).items() if value)
+
+
 def create_external_agent_from_url(
     source_url: str,
     name: str,
@@ -157,6 +162,9 @@ def create_external_agent_from_url(
     streaming: bool = False,
     supported_interfaces: Optional[List[Dict[str, Any]]] = None,
     base_url: Optional[str] = None,
+    agent_card_headers: Optional[Dict[str, str]] = None,
+    security_schemes: Optional[Dict[str, Any]] = None,
+    security_requirements: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Create or update an external A2A agent discovered from URL.
 
@@ -172,6 +180,9 @@ def create_external_agent_from_url(
         streaming: Whether this agent supports SSE streaming.
         supported_interfaces: All supported protocol interfaces.
         base_url: Base URL for health checks (service root address).
+        agent_card_headers: Headers saved only for Agent Card discovery and refresh.
+        security_schemes: Security schemes declared by the Agent Card.
+        security_requirements: Security requirements declared by the Agent Card.
 
     Returns:
         Created agent information dict.
@@ -202,6 +213,10 @@ def create_external_agent_from_url(
             existing.streaming = streaming
             existing.supported_interfaces = supported_interfaces
             existing.raw_card = raw_card
+            existing.security_schemes = security_schemes
+            existing.security_requirements = security_requirements
+            if agent_card_headers is not None:
+                existing.agent_card_headers = agent_card_headers
             existing.cached_at = now
             existing.cache_expires_at = expires_at
             existing.updated_by = user_id
@@ -220,6 +235,11 @@ def create_external_agent_from_url(
                 supported_interfaces=supported_interfaces,
                 source_type="url",
                 source_url=source_url,
+                agent_card_headers=agent_card_headers,
+                security_schemes=security_schemes,
+                security_requirements=security_requirements,
+                security_credentials=None,
+                selected_security_requirement_index=None,
                 tenant_id=tenant_id,
                 created_by=user_id,
                 updated_by=user_id,
@@ -242,6 +262,10 @@ def create_external_agent_from_url(
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
+            "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
             "is_available": agent.is_available,
@@ -263,6 +287,8 @@ def create_external_agent_from_nacos(
     streaming: bool = False,
     supported_interfaces: Optional[List[Dict[str, Any]]] = None,
     base_url: Optional[str] = None,
+    security_schemes: Optional[Dict[str, Any]] = None,
+    security_requirements: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Create or update an external A2A agent discovered from Nacos.
 
@@ -279,6 +305,8 @@ def create_external_agent_from_nacos(
         streaming: Whether this agent supports SSE streaming.
         supported_interfaces: All supported protocol interfaces.
         base_url: Base URL for health checks (service root address).
+        security_schemes: Security schemes declared by the Agent Card.
+        security_requirements: Security requirements declared by the Agent Card.
 
     Returns:
         Created agent information dict.
@@ -309,6 +337,8 @@ def create_external_agent_from_nacos(
             existing.streaming = streaming
             existing.supported_interfaces = supported_interfaces
             existing.raw_card = raw_card
+            existing.security_schemes = security_schemes
+            existing.security_requirements = security_requirements
             existing.cached_at = now
             existing.cache_expires_at = expires_at
             existing.updated_by = user_id
@@ -327,6 +357,10 @@ def create_external_agent_from_nacos(
                 source_type="nacos",
                 nacos_config_id=nacos_config_id,
                 nacos_agent_name=nacos_agent_name,
+                security_schemes=security_schemes,
+                security_requirements=security_requirements,
+                security_credentials=None,
+                selected_security_requirement_index=None,
                 tenant_id=tenant_id,
                 created_by=user_id,
                 updated_by=user_id,
@@ -349,6 +383,10 @@ def create_external_agent_from_nacos(
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
+            "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
             "is_available": agent.is_available,
@@ -357,12 +395,19 @@ def create_external_agent_from_nacos(
         }
 
 
-def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+def get_external_agent_by_id(
+    external_agent_id: int,
+    tenant_id: str,
+    include_agent_card_headers: bool = False,
+    include_security_credentials: bool = False,
+) -> Optional[Dict[str, Any]]:
     """Get an external agent by its id.
 
     Args:
         external_agent_id: The external agent database ID.
         tenant_id: Tenant ID for isolation.
+        include_agent_card_headers: Include headers for internal Agent Card refresh only.
+        include_security_credentials: Include credentials for internal agent calls only.
 
     Returns:
         Agent information dict or None if not found.
@@ -377,7 +422,7 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
         if not agent:
             return None
 
-        return {
+        result = {
             "id": agent.id,
             "name": agent.name,
             "description": agent.description,
@@ -386,6 +431,10 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "streaming": agent.streaming,
             "protocol_type": agent.protocol_type,
             "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
+            "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
             "base_url": agent.base_url,
@@ -399,6 +448,11 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
             "create_time": agent.create_time.isoformat() if agent.create_time else None,
         }
+        if include_agent_card_headers:
+            result["agent_card_headers"] = agent.agent_card_headers
+        if include_security_credentials:
+            result["security_credentials"] = agent.security_credentials
+        return result
 
 
 def list_external_agents(
@@ -442,9 +496,13 @@ def list_external_agents(
                 "version": agent.version,
                 "agent_url": agent.agent_url,
                 "streaming": agent.streaming,
-                "protocol_type": agent.protocol_type,
-                "supported_interfaces": agent.supported_interfaces,
-                "source_type": agent.source_type,
+            "protocol_type": agent.protocol_type,
+            "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
+            "configured_security_scheme_ids": _configured_security_scheme_ids(agent.security_credentials),
+            "selected_security_requirement_index": agent.selected_security_requirement_index,
+            "source_type": agent.source_type,
                 "source_url": agent.source_url,
                 "base_url": agent.base_url,
                 "is_available": agent.is_available,
@@ -453,6 +511,33 @@ def list_external_agents(
             }
             for agent in agents
         ]
+
+
+def update_external_agent_security_credentials(
+    external_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    security_credentials: Dict[str, str],
+    selected_security_requirement_index: Optional[int] = None,
+) -> bool:
+    """Save configured security credential values for an external agent."""
+    with _get_db_session() as session:
+        agent = session.query(A2AExternalAgent).filter(
+            A2AExternalAgent.id == external_agent_id,
+            A2AExternalAgent.tenant_id == tenant_id,
+            A2AExternalAgent.delete_flag != 'Y'
+        ).first()
+        if not agent:
+            return False
+
+        existing_credentials = dict(agent.security_credentials or {})
+        existing_credentials.update(security_credentials)
+        agent.security_credentials = existing_credentials
+        if selected_security_requirement_index is not None:
+            agent.selected_security_requirement_index = selected_security_requirement_index
+        agent.updated_by = user_id
+        session.flush()
+        return True
 
 
 def delete_external_agent(external_agent_id: int, tenant_id: str) -> bool:
@@ -569,6 +654,8 @@ def update_external_agent_protocol(
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
+            "security_schemes": agent.security_schemes,
+            "security_requirements": agent.security_requirements,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
             "nacos_config_id": agent.nacos_config_id,
@@ -596,6 +683,8 @@ def refresh_external_agent_cache(
     new_streaming: Optional[bool] = None,
     new_supported_interfaces: Optional[List[Dict[str, Any]]] = None,
     new_protocol_type: Optional[str] = None,
+    new_security_schemes: Optional[Dict[str, Any]] = None,
+    new_security_requirements: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cache for an external agent.
 
@@ -611,6 +700,8 @@ def refresh_external_agent_cache(
         new_streaming: Updated streaming capability.
         new_supported_interfaces: Updated supported interfaces.
         new_protocol_type: Updated protocol type (JSONRPC, HTTP+JSON, or GRPC).
+        new_security_schemes: Updated Agent Card security schemes.
+        new_security_requirements: Updated Agent Card security requirements.
 
     Returns:
         Updated agent information dict or None if not found.
@@ -642,6 +733,10 @@ def refresh_external_agent_cache(
             agent.streaming = new_streaming
         if new_supported_interfaces is not None:
             agent.supported_interfaces = new_supported_interfaces
+        if new_security_schemes is not None:
+            agent.security_schemes = new_security_schemes
+        if new_security_requirements is not None:
+            agent.security_requirements = new_security_requirements
         if new_protocol_type is not None:
             agent.protocol_type = new_protocol_type
             # Update agent_url based on the selected protocol type
