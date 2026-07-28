@@ -13,7 +13,10 @@ class DreamingCandidate(BaseModel):
     tenant_id: str
     user_id: str
     agent_id: str
+    conversation_id: Optional[str] = None
     content: str
+    source_created_at: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None
     recall_count: int = 0
     daily_count: int = 0
     grounded_count: int = 0

@@ -52,6 +52,49 @@ def test_ac027_limit_is_applied_after_deterministic_ranking():
     assert [unit.unit_id for unit in units] == ["short-term:2", "short-term:3"]
 
 
+def test_ac038_source_metadata_is_preserved_and_legacy_units_remain_compatible():
+    decisions = select_candidates(
+        [
+            candidate(
+                conversation_id="conversation-1",
+                source_created_at=datetime(2026, 7, 20, 9),
+                source_updated_at=datetime(2026, 7, 22, 10),
+            )
+        ],
+        thresholds=DreamingThresholds(
+            min_score=0,
+            min_recall_count=0,
+            min_unique_queries=0,
+        ),
+        now=datetime(2026, 7, 23),
+    )
+
+    unit = units_from_decisions(decisions, source_limit=1)[0]
+    result = build_dreaming_version(
+        parent_units=[],
+        new_units=[unit],
+        max_chars=100,
+    )
+    serialized = result.published_units[0].model_dump(mode="json")
+
+    assert serialized["source_agent_id"] == "agent"
+    assert serialized["source_conversation_id"] == "conversation-1"
+    assert serialized["source_created_at"] == "2026-07-20T09:00:00"
+    assert serialized["source_updated_at"] == "2026-07-22T10:00:00"
+
+    legacy = DreamingMemoryUnit.model_validate(
+        {
+            "unit_id": "legacy:1",
+            "content": "legacy fact",
+            "evidence_ids": ["1"],
+        }
+    )
+    assert legacy.source_agent_id is None
+    assert legacy.source_conversation_id is None
+    assert legacy.source_created_at is None
+    assert legacy.source_updated_at is None
+
+
 def test_ac023_boundary_and_parent_are_preserved_without_model_call():
     calls = []
     parent = DreamingMemoryUnit(

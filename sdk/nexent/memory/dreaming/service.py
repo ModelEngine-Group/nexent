@@ -45,7 +45,14 @@ def build_candidate(record: Dict[str, Any], total_retrieval_score: float) -> Dre
         tenant_id=str(record["tenant_id"]),
         user_id=str(record["user_id"]),
         agent_id=str(record["agent_id"]),
+        conversation_id=(
+            str(record["conversation_id"])
+            if record.get("conversation_id") is not None
+            else None
+        ),
         content=str(record.get("content") or ""),
+        source_created_at=record.get("create_time"),
+        source_updated_at=record.get("update_time"),
         recall_count=int(record.get("recall_count") or 0),
         daily_count=int(record.get("daily_count") or 0),
         grounded_count=int(record.get("grounded_count") or 0),

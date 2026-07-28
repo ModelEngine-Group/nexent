@@ -43,7 +43,10 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "tenant_id": "t",
         "user_id": "u",
         "agent_id": "a",
+        "conversation_id": "conversation-7",
         "content": "Always prefer stable transaction rollback behavior",
+        "create_time": "2026-07-20T09:00:00",
+        "update_time": "2026-07-23T10:30:00",
         "recall_count": 3,
         "daily_count": 2,
         "grounded_count": 1,
@@ -135,6 +138,19 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     version_payload = create_version.call_args.kwargs
     assert version_payload["parent_version_id"] is None
     assert version_payload["published_units"][0]["evidence_ids"] == ["7"]
+    assert version_payload["published_units"][0]["source_agent_id"] == "a"
+    assert (
+        version_payload["published_units"][0]["source_conversation_id"]
+        == "conversation-7"
+    )
+    assert (
+        version_payload["published_units"][0]["source_created_at"]
+        == "2026-07-20T09:00:00"
+    )
+    assert (
+        version_payload["published_units"][0]["source_updated_at"]
+        == "2026-07-23T10:30:00"
+    )
     assert version_payload["source_evidence_ids"] == ["7"]
     assert version_payload["config_snapshot"]["min_score"] == 0
     assert version_payload["config_snapshot"]["source_limit"] == 10

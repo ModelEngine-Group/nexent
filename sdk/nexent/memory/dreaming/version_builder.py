@@ -19,6 +19,9 @@ class DreamingMemoryUnit(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     strong_constraint: bool = False
     is_new: bool = False
+    source_agent_id: Optional[str] = None
+    source_conversation_id: Optional[str] = None
+    source_created_at: Optional[datetime] = None
     source_updated_at: Optional[datetime] = None
     score: float = 0.0
     recall_count: int = 0
@@ -91,6 +94,10 @@ def units_from_decisions(
             content=decision.candidate.content,
             evidence_ids=[str(decision.candidate.memory_id)],
             is_new=True,
+            source_agent_id=decision.candidate.agent_id,
+            source_conversation_id=decision.candidate.conversation_id,
+            source_created_at=decision.candidate.source_created_at,
+            source_updated_at=decision.candidate.source_updated_at,
             score=decision.score,
             recall_count=decision.metrics.signal_count,
             query_diversity=decision.metrics.context_diversity,
