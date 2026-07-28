@@ -50,6 +50,8 @@ import {
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { ModelOption } from "../ui/model-selector";
+import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
   AssistantMessageAttachments,
   UserMessageAttachments,
@@ -563,6 +565,13 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
+                if (part.name === "automation-proposal") {
+                  return (
+                    <AutomationProposalMessage
+                      proposal={part.data as AgentAutomationProposalData}
+                    />
+                  );
+                }
                 // The `subagent-boundary` stamp part is the seat of the
                 // group's header information. We let the header renderer
                 // paint it instead of returning it inside the body, so
