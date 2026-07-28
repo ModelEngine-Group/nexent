@@ -91,7 +91,7 @@ export default function ProjectConfigTab() {
       message.success(t('project.config.update.success'));
     } catch (error) {
       console.log(`Failed to update:`, error);
-      message.success(t('errorCode.990202'));
+      message.error(t('errorCode.990202'));
     } finally {
       setLoading(false);
     }
@@ -133,9 +133,7 @@ export default function ProjectConfigTab() {
  
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Card
-        title={t("project.config")}
-      >
+      <Card>
         <Form
           form={form}
           layout="vertical"
