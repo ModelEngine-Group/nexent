@@ -135,6 +135,10 @@ def upsert_schedule(
             .with_for_update()
             .first()
         )
+        if row is not None and row.delete_flag == "Y":
+            session.delete(row)
+            session.flush()
+            row = None
         if row is None:
             row = MemoryDreamingSchedule(
                 tenant_id=tenant_id,
@@ -144,7 +148,6 @@ def upsert_schedule(
             )
             session.add(row)
         row.enabled = enabled
-        row.delete_flag = "N"
         row.rule_type = rule_type
         row.timezone = timezone_name
         row.start_at = start_at
@@ -612,8 +615,11 @@ def recover_stale() -> int:
 
 def delete_user_dreaming_history(tenant_id: str, user_id: str) -> None:
     with get_db_session() as session:
+        session.query(MemoryDreamingSchedule).filter(
+            MemoryDreamingSchedule.tenant_id == tenant_id,
+            MemoryDreamingSchedule.user_id == user_id,
+        ).delete(synchronize_session=False)
         for model in (
-            MemoryDreamingSchedule,
             MemoryDreamingAudit,
             MemoryDreamingVersion,
             MemoryDreamingActivationAudit,

@@ -21,13 +21,26 @@ def mock_consts(monkeypatch):
     )
 
 
+@pytest.fixture
+def inline_to_thread(monkeypatch):
+    """Keep adapter unit tests deterministic and free of executor threads."""
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.asyncio.to_thread",
+        run_inline,
+    )
+
+
 # ---------------------------------------------------------------------------
 # DreamingLeaseStore
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_lease_store_recover(monkeypatch):
+async def test_lease_store_recover(monkeypatch, inline_to_thread):
     from services.memory_dreaming_scheduler import DreamingLeaseStore
 
     mock_recover = MagicMock(return_value=3)
@@ -43,7 +56,7 @@ async def test_lease_store_recover(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lease_store_claim_due_returns_job(monkeypatch):
+async def test_lease_store_claim_due_returns_job(monkeypatch, inline_to_thread):
     from services.memory_dreaming_scheduler import DreamingLeaseStore
 
     row = {
@@ -73,7 +86,7 @@ async def test_lease_store_claim_due_returns_job(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lease_store_claim_due_returns_empty(monkeypatch):
+async def test_lease_store_claim_due_returns_empty(monkeypatch, inline_to_thread):
     from services.memory_dreaming_scheduler import DreamingLeaseStore
 
     monkeypatch.setattr(
@@ -92,7 +105,7 @@ async def test_lease_store_claim_due_returns_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lease_store_renew(monkeypatch):
+async def test_lease_store_renew(monkeypatch, inline_to_thread):
     from services.memory_dreaming_scheduler import DreamingLeaseStore
 
     mock_renew = MagicMock(return_value=True)
@@ -109,7 +122,7 @@ async def test_lease_store_renew(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lease_store_release(monkeypatch):
+async def test_lease_store_release(monkeypatch, inline_to_thread):
     from services.memory_dreaming_scheduler import DreamingLeaseStore
 
     mock_release = MagicMock(return_value=True)
@@ -131,7 +144,7 @@ async def test_lease_store_release(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_execute_dreaming_success(monkeypatch):
+async def test_execute_dreaming_success(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
     from services.memory_dreaming_scheduler import execute_dreaming
 
@@ -166,7 +179,7 @@ async def test_execute_dreaming_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_execute_dreaming_default_trigger_source(monkeypatch):
+async def test_execute_dreaming_default_trigger_source(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
     from services.memory_dreaming_scheduler import execute_dreaming
 
@@ -200,7 +213,7 @@ async def test_execute_dreaming_default_trigger_source(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_execute_dreaming_failure_raises(monkeypatch):
+async def test_execute_dreaming_failure_raises(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
     from services.memory_dreaming_scheduler import execute_dreaming
 

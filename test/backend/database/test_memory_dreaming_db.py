@@ -144,17 +144,24 @@ def test_create_audit_queued_status(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_upsert_schedule_revives_soft_deleted_row(monkeypatch):
+def test_ac037_upsert_schedule_replaces_soft_deleted_row(monkeypatch):
     session = _mock_session(monkeypatch)
-    row = MagicMock(spec=MemoryDreamingSchedule)
-    row.schedule_id = 2
-    row.agent_id = "__user__"
-    row.delete_flag = "Y"
-    row.fire_count = 0
-    row.last_fire_at = None
+    old_row = MagicMock(spec=MemoryDreamingSchedule)
+    old_row.schedule_id = 2
+    old_row.agent_id = "__user__"
+    old_row.delete_flag = "Y"
+    old_row.fire_count = 9
+    old_row.last_fire_at = datetime(2026, 7, 27, 2, 56)
     (
         session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value
-    ) = row
+    ) = old_row
+
+    def capture_add(row):
+        row.schedule_id = 3
+        row.fire_count = 0
+        row.last_fire_at = None
+
+    session.add.side_effect = capture_add
     start_at = datetime(2026, 7, 28, 10, 56)
     next_fire_at = datetime(2026, 7, 28, 2, 56)
 
@@ -172,12 +179,24 @@ def test_upsert_schedule_revives_soft_deleted_row(monkeypatch):
         actor_user_id="u",
     )
 
-    assert result["schedule_id"] == 2
-    assert row.delete_flag == "N"
-    assert row.enabled is True
-    assert row.next_fire_at == next_fire_at
-    session.add.assert_not_called()
-    session.flush.assert_called_once()
+    assert result["schedule_id"] == 3
+    assert result["fire_count"] == 0
+    assert result["last_fire_at"] is None
+    session.delete.assert_called_once_with(old_row)
+    session.add.assert_called_once()
+    assert session.flush.call_count == 2
+
+
+def test_ac037_delete_history_physically_deletes_schedule(monkeypatch):
+    session = _mock_session(monkeypatch)
+    query = session.query.return_value
+    query.filter.return_value = query
+
+    memory_dreaming_db.delete_user_dreaming_history("t", "u")
+
+    assert session.query.call_args_list[0].args == (MemoryDreamingSchedule,)
+    query.delete.assert_called_once_with(synchronize_session=False)
+    assert query.update.call_count == 4
 
 
 # ---------------------------------------------------------------------------
