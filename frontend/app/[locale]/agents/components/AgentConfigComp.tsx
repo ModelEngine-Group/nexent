@@ -17,6 +17,8 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
+import type { Skill } from "@/types/agentConfig";
+import type { MyEditableSkillItem } from "@/types/skillRepository";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 
@@ -53,6 +55,9 @@ export default function AgentConfigComp() {
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
 
   // Use tool list hook for data management
   const { invalidate, availableTools } = useToolList();
@@ -93,6 +98,30 @@ export default function AgentConfigComp() {
   const handleSkillBuildSuccess = useCallback(() => {
     invalidateSkills();
   }, [invalidateSkills]);
+
+  const handleOpenSkillEditor = useCallback((skill: Skill) => {
+    setEditingSkill({
+      skill_id: Number(skill.skill_id),
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      tags: skill.tags || [],
+      group_ids: skill.group_ids || [],
+      ingroup_permission: skill.ingroup_permission || "READ_ONLY",
+      created_by: skill.created_by,
+      updated_by: skill.updated_by,
+      create_time: skill.create_time,
+      update_time: skill.update_time,
+      permission: skill.permission,
+      repository_info: [],
+    });
+    setIsSkillModalOpen(true);
+  }, []);
+
+  const handleCloseSkillModal = useCallback(() => {
+    setIsSkillModalOpen(false);
+    setEditingSkill(null);
+  }, []);
 
   return (
     <>
@@ -278,7 +307,10 @@ export default function AgentConfigComp() {
                       type="text"
                       size="small"
                       icon={<BlocksIcon size={16} />}
-                      onClick={() => setIsSkillModalOpen(true)}
+                      onClick={() => {
+                        setEditingSkill(null);
+                        setIsSkillModalOpen(true);
+                      }}
                       className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
                       title={t("skillManagement.build.title")}
                     >
@@ -304,6 +336,7 @@ export default function AgentConfigComp() {
                   isCreatingMode={isCreatingMode}
                   currentAgentId={currentAgentId ?? undefined}
                   isReadOnly={isReadOnly}
+                  onEditSkill={handleOpenSkillEditor}
                 />
               </Col>
             </Row>
@@ -334,6 +367,10 @@ export default function AgentConfigComp() {
         open={isSkillSelectOpen}
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
+        onEditSkill={(skill) => {
+          setIsSkillSelectOpen(false);
+          handleOpenSkillEditor(skill);
+        }}
         isCreatingMode={isCreatingMode}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
@@ -346,8 +383,9 @@ export default function AgentConfigComp() {
 
       <SkillBuildModal
         isOpen={isSkillModalOpen}
-        onCancel={() => setIsSkillModalOpen(false)}
+        onCancel={handleCloseSkillModal}
         onSuccess={handleSkillBuildSuccess}
+        editingSkill={editingSkill}
       />
 
       {/* A2A Discovery Modal */}
