@@ -773,6 +773,7 @@
   "nl2agent.toolRecommendations.confirmed": "Selection confirmed",
   "nl2agent.toolRecommendations.confirmedSummary": "Confirmed {{count}} tool",
   "nl2agent.toolRecommendations.confirmedSummary_other": "Confirmed {{count}} tools",
+  "nl2agent.assistant.description": "Describe the agent you want to create. I will search installed tools and help generate its configuration.",
 
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main Agent ID is not set, cannot update tool status",

@@ -727,10 +727,12 @@ export default function AgentSelectorHeader({
                   size="middle"
                   onClick={onOpenGenerationAssistant}
                   disabled={isGenerationAssistantOpen}
-                  className="flex items-center gap-1"
+                  className="flex shrink-0 items-center gap-1 whitespace-nowrap"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>{t("agentConfig.button.generationAssistant")}</span>
+                  <span className="whitespace-nowrap">
+                    {t("agentConfig.button.generationAssistant")}
+                  </span>
                 </Button>
               </Flex>
 

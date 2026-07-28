@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { SubAgentContainer } from "../ui/subagent";
@@ -541,16 +542,13 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-tool":
                 return (
-                  <>
-                    <ToolGroupRoot variant="ghost">
-                      <ToolGroupTrigger
-                        count={part.indices.length}
-                        active={part.status.type === "running"}
-                      />
-                      <ToolGroupContent>{children}</ToolGroupContent>
-                    </ToolGroupRoot>
-                    {nl2a ? <ToolRecommendations nl2a={nl2a} /> : null}
-                  </>
+                  <ToolGroupRoot variant="ghost">
+                    <ToolGroupTrigger
+                      count={part.indices.length}
+                      active={part.status.type === "running"}
+                    />
+                    <ToolGroupContent>{children}</ToolGroupContent>
+                  </ToolGroupRoot>
                 );
               case "group-reasoning": {
                 const running = part.status.type === "running";
@@ -608,6 +606,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {nl2a ? <ToolRecommendations nl2a={nl2a} /> : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}

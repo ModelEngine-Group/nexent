@@ -743,6 +743,7 @@
   "nl2agent.toolRecommendations.continueWithoutTools": "无工具继续",
   "nl2agent.toolRecommendations.confirmed": "已确认",
   "nl2agent.toolRecommendations.confirmedSummary": "已确认 {{count}} 个工具",
+  "nl2agent.assistant.description": "请描述你想创建的智能体，我会搜索已安装的工具并协助生成智能体配置。",
 
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
