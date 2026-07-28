@@ -37,7 +37,7 @@ export interface Nl2aToolRecommendation {
   source: "mcp";
   usage: string;
   labels: string[];
-  inputs: string;
+  inputs: Record<string, unknown>;
   score: number;
 }
 

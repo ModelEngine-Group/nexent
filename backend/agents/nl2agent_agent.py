@@ -1,6 +1,6 @@
 """Build the ephemeral NL2Agent and its MCP tool configuration."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,7 +22,7 @@ class InstalledMcpToolRecommendation(BaseModel):
     source: Literal["mcp"] = "mcp"
     usage: str
     labels: list[str]
-    inputs: str
+    inputs: dict[str, Any]
     score: float
 
 
@@ -124,6 +124,7 @@ When this input is present:
             f"""## Constraints
 - `{tool_name}` is the only available business tool. Do not call any other tool or agent.
 - Build recommendations only from objects returned by `{tool_name}`. Copy every field of each selected object unchanged; only remove or reorder whole objects and update `recommendation_count`.
+- Keep each recommendation's `inputs` field as a JSON object. Never convert it into a quoted string.
 - Do not create, update, publish, or claim to have persisted an agent.
 - Do not present cards or ask for creation confirmation.
 - Never invent tenant IDs, user IDs, credentials, tool IDs, or search results.
@@ -206,6 +207,7 @@ print(result)
             f"""## 约束
 - `{tool_name}` 是唯一可用的业务工具，不得调用其他工具或智能体。
 - 推荐结果只能来自 `{tool_name}` 返回的对象。每个选中对象的全部字段必须原样复制；只能删除或重排完整对象，并同步更新 `recommendation_count`。
+- 每个推荐结果的 `inputs` 字段必须保持为 JSON 对象，不得转换为带引号的字符串。
 - 不得创建、更新、发布智能体，也不得声称已经持久化智能体。
 - 不得展示卡片或请求创建确认。
 - 不得编造租户 ID、用户 ID、凭据、工具 ID 或搜索结果。

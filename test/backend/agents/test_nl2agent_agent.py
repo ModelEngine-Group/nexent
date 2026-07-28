@@ -60,6 +60,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "Code:" in prompt
     assert "Do not search again" in prompt or "不得再次搜索" in prompt
     assert "valid JSON" in prompt or "合法 JSON" in prompt
+    assert "JSON object" in prompt or "JSON 对象" in prompt
     assert format_rule in prompt
     assert retry_rule in prompt
     assert unclear_example in prompt
@@ -84,7 +85,7 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
         description="Get weather forecasts",
         usage="weather-server",
         labels=["weather"],
-        inputs='{"city":"string"}',
+        inputs={"city": "string"},
         score=0.9,
     )
     draft = GeneratedAgentDraft(
@@ -95,7 +96,7 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
         constraint_prompt="Use only selected tools.",
     )
 
-    assert recommendation.inputs == '{"city":"string"}'
+    assert recommendation.inputs == {"city": "string"}
     assert draft.model_dump() == {
         "subtype": "agent_draft",
         "name": "weather_assistant",

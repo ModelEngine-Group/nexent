@@ -1,5 +1,6 @@
 """Business logic for the ephemeral NL2Agent runtime."""
 
+import ast
 import asyncio
 import json
 import logging
@@ -52,6 +53,42 @@ def _normalize_labels(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(label) for label in value if label is not None]
+
+
+def _collapse_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _normalize_input_strings(value: Any) -> Any:
+    if isinstance(value, str):
+        return _collapse_whitespace(value)
+    if isinstance(value, dict):
+        return {
+            key: _normalize_input_strings(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_input_strings(item) for item in value]
+    return value
+
+
+def _parse_tool_inputs(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            try:
+                parsed = ast.literal_eval(value)
+            except (SyntaxError, ValueError):
+                return {}
+    else:
+        return {}
+
+    if not isinstance(parsed, dict):
+        return {}
+    return _normalize_input_strings(parsed)
 
 
 def _build_tool_document(tool: dict[str, Any]) -> str:
@@ -116,10 +153,12 @@ def search_installed_mcp_tools_by_query(
                 if tool.get("origin_name") is not None
                 else None
             ),
-            description=str(tool.get("description") or ""),
+            description=_collapse_whitespace(
+                str(tool.get("description") or "")
+            ),
             usage=str(tool.get("usage") or ""),
             labels=_normalize_labels(tool.get("labels")),
-            inputs=str(tool.get("inputs") or ""),
+            inputs=_parse_tool_inputs(tool.get("inputs")),
             score=round(score, 4),
         )
         for score, tool_id, tool in scored_tools[:result_limit]

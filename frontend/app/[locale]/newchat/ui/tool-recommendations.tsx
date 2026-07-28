@@ -112,7 +112,7 @@ export const ToolRecommendations: FC<{
         source: tool.source,
         usage: tool.usage,
         labels: tool.labels,
-        inputs: tool.inputs,
+        inputs: JSON.stringify(tool.inputs),
       }));
     const agentTools: Tool[] = tools.map((tool) => ({
       id: String(tool.tool_id),

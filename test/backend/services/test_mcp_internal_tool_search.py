@@ -50,11 +50,16 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
                 "tool_id": 7,
                 "name": "primary_weather",
                 "origin_name": "primary-weather",
-                "description": "Primary weather forecast search",
+                "description": """Primary weather forecast search
+                    with hourly rain probability""",
                 "source": "mcp",
                 "usage": "weather-server-a",
                 "labels": ["weather", "forecast"],
-                "inputs": '{"city":"string","days":"integer"}',
+                "inputs": (
+                    "{'city': {'type': 'string', 'description': "
+                    "\"The city name,\\n translated to English when it isn't English.\"}, "
+                    "'include_forecast': {'type': 'boolean', 'default': False}}"
+                ),
                 "is_available": True,
                 "request_headers": {"Authorization": "must-not-leak"},
             },
@@ -121,11 +126,24 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         "tool_id": 7,
         "name": "primary_weather",
         "origin_name": "primary-weather",
-        "description": "Primary weather forecast search",
+        "description": (
+            "Primary weather forecast search with hourly rain probability"
+        ),
         "source": "mcp",
         "usage": "weather-server-a",
         "labels": ["weather", "forecast"],
-        "inputs": '{"city":"string","days":"integer"}',
+        "inputs": {
+            "city": {
+                "type": "string",
+                "description": (
+                    "The city name, translated to English when it isn't English."
+                ),
+            },
+            "include_forecast": {
+                "type": "boolean",
+                "default": False,
+            },
+        },
         "score": 0.95,
     }
     safe_fields = {
