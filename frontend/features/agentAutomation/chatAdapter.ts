@@ -35,8 +35,16 @@ export async function analyzeAutomationMessage({
 }
 
 export async function getAutomationConversationIds(): Promise<Set<number>> {
-  const tasks = await agentAutomationService.list();
-  return new Set(tasks.map((task) => task.conversation_id));
+  const conversationIds = new Set<number>();
+  let page = 1;
+  const pageSize = 100;
+  while (true) {
+    const result = await agentAutomationService.list({ page, pageSize });
+    result.items.forEach((task) => conversationIds.add(task.conversation_id));
+    if (page * pageSize >= result.total) break;
+    page += 1;
+  }
+  return conversationIds;
 }
 
 export async function hydrateAutomationProposalMessages(

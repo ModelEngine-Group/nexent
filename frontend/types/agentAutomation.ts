@@ -12,6 +12,13 @@ export type AutomationTaskListStatus =
   | "ENABLED"
   | "RUNNING";
 
+export interface AgentAutomationPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface ScheduleTrigger {
   mode: ScheduleMode;
   rule_type: ScheduleRuleType;

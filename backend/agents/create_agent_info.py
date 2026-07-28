@@ -57,7 +57,16 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    DATA_PROCESS_SERVICE,
+    LANGUAGE,
+    LOCAL_MCP_SERVER,
+    MINIO_DEFAULT_BUCKET,
+    MODEL_CONFIG_MAPPING,
+)
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
@@ -1277,6 +1286,41 @@ async def create_tool_config_list(
             override_params = agent_tool_overrides[tool.get("class_name")]
 
         param_dict = _merge_tool_params(tool, override_params)
+        if tool.get("class_name") == "AidpSearchTool":
+            # Credentials are backend-owned since the v7.1 permission
+            # redesign; populate them from the central constants (the
+            # database row may carry a stale value).
+            param_dict.pop("server_url", None)
+            param_dict.pop("api_key", None)
+            param_dict.pop("tenant_id", None)
+            param_dict.update({
+                "server_url": AIDP_SERVER_URL,
+                "api_key": AIDP_API_KEY,
+                "tenant_id": AIDP_TENANT_ID,
+            })
+
+        # v7.1: inject the runtime whitelist for AidpSearchTool. The
+        # permission service recomputes it on every agent call so per-KB
+        # permission changes take effect immediately without re-publishing
+        # the agent. Falls back to the configured ``kds_list`` when the
+        # whitelist lookup fails (defensive path).
+        _allowed_kds_set: set[str] = set()
+        if tool.get("class_name") == "AidpSearchTool":
+            try:
+                from ext_components.aidp.services import (
+                    aidp_permission_service as _aidp_perms,
+                )
+                _allowed_kds_set = set(
+                    _aidp_perms.get_allowed_kds_list(
+                        user_id=user_id, tenant_id=tenant_id,
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Aidp permission whitelist lookup failed; "
+                    "falling back to configured kds_list: %s", exc,
+                )
+
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
             name=tool.get("name"),
@@ -1288,7 +1332,27 @@ async def create_tool_config_list(
             usage=tool.get("usage")
         )
 
-        if tool.get("source") == "langchain":
+        if tool.get("class_name") == "AidpSearchTool":
+            # Carry over the runtime whitelist; merge into any existing
+            # metadata so langchain_tool references that may already be
+            # attached are preserved. ``tool_config.metadata`` defaults to
+            # None on ToolConfig, so guard the spread accordingly.
+            existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
+            tool_config.metadata = {
+                **existing,
+                "allowed_kds_set": _allowed_kds_set,
+            }
+            tool_class_name = tool.get("class_name")
+            for langchain_tool in langchain_tools:
+                if langchain_tool.name == tool_class_name:
+                    existing2 = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
+                    tool_config.metadata = {
+                        **existing2,
+                        "langchain_tool": langchain_tool,
+                    }
+                    break
+
+        if tool.get("source") == "langchain" and tool.get("class_name") != "AidpSearchTool":
             tool_class_name = tool.get("class_name")
             for langchain_tool in langchain_tools:
                 if langchain_tool.name == tool_class_name:

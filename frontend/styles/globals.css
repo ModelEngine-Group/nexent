@@ -533,6 +533,12 @@ tr.selected-row > td:first-child::before {
   @apply w-full;
 }
 
+/* The agent selector popup delegates scrolling to its list container. */
+.agent-selector-dropdown .ant-dropdown-menu {
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+
 /* Automation date-time picker */
 .automation-date-time-picker.ant-picker {
   min-height: 40px;

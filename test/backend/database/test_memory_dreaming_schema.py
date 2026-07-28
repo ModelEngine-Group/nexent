@@ -66,7 +66,7 @@ def test_ac023_ac026_version_orm_contract():
         assert name in activation_columns
 
 
-def test_ac010_migration_and_fresh_install_match():
+def test_ac010_dreaming_schema_is_owned_by_versioned_migrations():
     root = Path(__file__).resolve().parents[3]
     migration = (
         root / "deploy/sql/migrations/v2.4.0_0723_add_memory_dreaming_audit.sql"
@@ -79,7 +79,7 @@ def test_ac010_migration_and_fresh_install_match():
         "promoted_count",
     ):
         assert token in migration
-        assert token in init_sql
+        assert token not in init_sql
     assert "CREATE TABLE IF NOT EXISTS" in migration
     assert "CREATE INDEX IF NOT EXISTS" in migration
 
@@ -103,7 +103,7 @@ def test_ac010_migration_and_fresh_install_match():
         "trg_memory_dreaming_version_immutable",
     ):
         assert token in version_migration
-        assert token in init_sql
+        assert token not in init_sql
 
 
 def test_ac012_dreaming_scheduler_is_wired_for_deployment():
@@ -156,7 +156,7 @@ def test_ac033_schedule_orm_and_sql_contract():
         "interval_seconds >= 3600",
     ):
         assert token in migration
-        assert token in init_sql
+        assert token not in init_sql
 
 
 def test_ac002_dreaming_stats_filter_agent_scope(monkeypatch):

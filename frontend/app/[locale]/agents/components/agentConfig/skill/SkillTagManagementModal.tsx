@@ -6,7 +6,6 @@ import { App, Modal, Select, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { updateSkillById } from "@/services/agentConfigService";
 import type { Skill } from "@/types/agentConfig";
@@ -31,7 +30,6 @@ export default function SkillTagManagementModal({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const { user } = useAuthorizationContext();
   const { availableSkills } = useSkillList({ enabled: open });
   const [rows, setRows] = useState<SkillTagRow[]>([]);
   const builtRef = useRef(false);
@@ -44,7 +42,7 @@ export default function SkillTagManagementModal({
           name: skill.name,
           source: skill.source || "",
           tags: Array.isArray(skill.tags) ? [...skill.tags] : [],
-          editable: Boolean(user?.id && skill.created_by === user.id),
+          editable: skill.permission === "EDIT",
         }))
       );
       builtRef.current = true;
@@ -53,7 +51,7 @@ export default function SkillTagManagementModal({
       setRows([]);
       builtRef.current = false;
     }
-  }, [availableSkills, open, user?.id]);
+  }, [availableSkills, open]);
 
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();

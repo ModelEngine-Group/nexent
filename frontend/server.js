@@ -1,18 +1,25 @@
-const { createServer } = require("http");
-const fs = require("node:fs");
-const http = require("http");
-const https = require("https");
-const { parse } = require("url");
-const next = require("next");
-const { createProxyServer } = require("http-proxy");
-const cookie = require("cookie");
-const path = require("path");
-const multiparty = require("multiparty");
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { parse } from "node:url";
+import next from "next";
+import httpProxy from "http-proxy";
+import cookie from "cookie";
+import path from "node:path";
+import multiparty from "multiparty";
+import dotenv from "dotenv";
+import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+
+const { createProxyServer } = httpProxy;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
 // Using optional: true to avoid errors if .env file is not found
-require("dotenv").config({
+dotenv.config({
   path: path.resolve(__dirname, "../deploy/env/.env"),
   override: false, // Don't override existing environment variables (important for Docker)
 });
@@ -200,37 +207,9 @@ function isSuperAdminRequest(req) {
   return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
 }
 
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
 function renameFile(oldPath, newFileName) {
   ensureDir(ICON_UPLOAD_DIR);
   fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
-}
-
-function readLocaleConfig(lang) {
-  try {
-    const fileName = 'custom.json';
-    const filepath = path.join(LOCALES_CONFIG_DIR, lang === 'zh' ? 'zh' : 'en', fileName);
-    if (!fs.existsSync(filepath)) {
-      return {};
-    }
-    const data = JSON.parse(fs.readFileSync(filepath, "utf-8"))
-    return data;
-  } catch (error) {
-    console.log(error.message)
-  }
-}
-
-function saveLocaleConfig(fileData, lang) {
-  ensureDir(LOCALES_CONFIG_DIR);
-  const fileName = 'custom.json';
-  const filepath = path.join(LOCALES_CONFIG_DIR, lang, fileName);
-  fs.writeFileSync(filepath, fileData, "utf-8");
-  return fileName;
 }
 
 function updateLocalConfig(oldData, newData) {
