@@ -27,7 +27,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/lib/agentImportUtils";
+import { ImportAgentData, selectFile, parseAgentImportFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
@@ -146,44 +146,23 @@ export default function AgentSelectorHeader({
   );
 
   // Handle import agent
-  const handleImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
+  const handleImportAgent = async () => {
+    const file = await selectFile(".json,.zip");
+    if (!file) return;
 
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        setImportWizardData(agentData);
-        setImportWizardVisible(true);
-      } catch (error) {
+    const agentData = await parseAgentImportFile(file, {
+      onParseError: (msgKey) => message.error(t(msgKey)),
+      onValidationError: (msgKey) => message.error(t(msgKey)),
+      onGenericError: (error) => {
         log.error("Failed to read import file:", error);
         message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
+      },
+    });
 
-    fileInput.click();
+    if (!agentData) return;
+
+    setImportWizardData(agentData);
+    setImportWizardVisible(true);
   };
 
   // Handle view call relationship

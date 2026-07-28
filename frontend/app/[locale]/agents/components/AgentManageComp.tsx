@@ -39,7 +39,7 @@ export default function AgentManageComp() {
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = async () => {
-    const file = await selectFile(".json");
+    const file = await selectFile(".json,.zip");
     if (!file) return;
 
     const agentData = await parseAgentImportFile(file, {
