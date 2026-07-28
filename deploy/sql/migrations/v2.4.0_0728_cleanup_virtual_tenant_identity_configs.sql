@@ -8,3 +8,10 @@ WHERE tenant_id IN ('', 'tenant_id')
 DELETE FROM nexent.tenant_group_info_t
 WHERE tenant_id IN ('', 'tenant_id')
   AND created_by = 'system';
+
+UPDATE nexent.user_tenant_t
+SET delete_flag = 'Y',
+    updated_by = 'system_cleanup_virtual_tenant',
+    update_time = NOW()
+WHERE tenant_id IN ('', 'tenant_id')
+  AND delete_flag = 'N';
