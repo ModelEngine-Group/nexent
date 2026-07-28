@@ -131,7 +131,6 @@ def upsert_schedule(
                 MemoryDreamingSchedule.tenant_id == tenant_id,
                 MemoryDreamingSchedule.user_id == user_id,
                 MemoryDreamingSchedule.agent_id == agent_id,
-                MemoryDreamingSchedule.delete_flag == "N",
             )
             .with_for_update()
             .first()
@@ -145,6 +144,7 @@ def upsert_schedule(
             )
             session.add(row)
         row.enabled = enabled
+        row.delete_flag = "N"
         row.rule_type = rule_type
         row.timezone = timezone_name
         row.start_at = start_at

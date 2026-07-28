@@ -10,6 +10,7 @@ from database import memory_dreaming_db
 from database.db_models import (
     MemoryDreamingActivationAudit,
     MemoryDreamingAudit,
+    MemoryDreamingSchedule,
     MemoryDreamingVersion,
 )
 
@@ -136,6 +137,47 @@ def test_create_audit_queued_status(monkeypatch):
     assert added_row.trigger_source == "scheduler"
     assert added_row.status == "queued"
     assert added_row.current_phase is None
+
+
+# ---------------------------------------------------------------------------
+# schedules
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_schedule_revives_soft_deleted_row(monkeypatch):
+    session = _mock_session(monkeypatch)
+    row = MagicMock(spec=MemoryDreamingSchedule)
+    row.schedule_id = 2
+    row.agent_id = "__user__"
+    row.delete_flag = "Y"
+    row.fire_count = 0
+    row.last_fire_at = None
+    (
+        session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value
+    ) = row
+    start_at = datetime(2026, 7, 28, 10, 56)
+    next_fire_at = datetime(2026, 7, 28, 2, 56)
+
+    result = memory_dreaming_db.upsert_schedule(
+        "t",
+        "u",
+        "__user__",
+        enabled=True,
+        rule_type="cron",
+        timezone_name="Asia/Shanghai",
+        start_at=start_at,
+        cron_expr="56 10 * * *",
+        interval_seconds=None,
+        next_fire_at=next_fire_at,
+        actor_user_id="u",
+    )
+
+    assert result["schedule_id"] == 2
+    assert row.delete_flag == "N"
+    assert row.enabled is True
+    assert row.next_fire_at == next_fire_at
+    session.add.assert_not_called()
+    session.flush.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
