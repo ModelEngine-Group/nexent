@@ -107,10 +107,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
     } == {"weather forecast"}
     assert result["status"] == "success"
     assert result["recommendation_count"] == 2
-    assert result["_assistant_ui"] == {
-        "type": "data",
-        "name": "tool_recommendations",
-    }
+    assert set(result) == {"status", "recommendation_count", "recommendations"}
     assert [item["tool_id"] for item in result["recommendations"]] == [7, 12]
     assert result["recommendations"][0] == {
         "tool_id": 7,
@@ -146,10 +143,6 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
             "status": "error",
             "code": "invalid_keywords",
             "retryable": True,
-            "_assistant_ui": {
-                "type": "data",
-                "name": "tool_recommendations",
-            },
         }
 
     mocker.patch.object(
@@ -174,10 +167,6 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
         "status": "error",
         "code": "tool_search_failed",
         "retryable": True,
-        "_assistant_ui": {
-            "type": "data",
-            "name": "tool_recommendations",
-        },
     }
     assert "private-token" not in result_text
     assert "private database details" not in result_text
@@ -208,7 +197,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
 
 
 @pytest.mark.asyncio
-async def test_mcp_search_empty_result_keeps_assistant_ui_metadata(mocker):
+async def test_mcp_search_empty_result_returns_business_payload(mocker):
     mocker.patch.object(
         local_mcp_service_module,
         "get_http_request",
@@ -231,10 +220,6 @@ async def test_mcp_search_empty_result_keeps_assistant_ui_metadata(mocker):
         "status": "success",
         "recommendation_count": 0,
         "recommendations": [],
-        "_assistant_ui": {
-            "type": "data",
-            "name": "tool_recommendations",
-        },
     }
 
 

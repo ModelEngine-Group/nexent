@@ -18,10 +18,6 @@ logger = logging.getLogger(__name__)
 LOCAL_MCP_TOOL_NAME_OVERRIDES = {
     SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
 }
-TOOL_RECOMMENDATIONS_ASSISTANT_UI = {
-    "type": "data",
-    "name": "tool_recommendations",
-}
 
 # Create MCP server
 local_mcp_service = FastMCP("local")
@@ -31,11 +27,8 @@ def _serialize_tool_search_observation(
     observation: SearchInstalledMcpToolsObservation
     | SearchInstalledMcpToolsErrorObservation,
 ) -> str:
-    """Serialize one search result with generic assistant-ui presentation metadata."""
-
-    payload = observation.model_dump(mode="json")
-    payload["_assistant_ui"] = TOOL_RECOMMENDATIONS_ASSISTANT_UI
-    return json.dumps(payload, ensure_ascii=False)
+    """Serialize one tool search observation."""
+    return json.dumps(observation.model_dump(mode="json"), ensure_ascii=False)
 
 
 def _prepare_search_keywords(keywords: list[str]) -> list[str] | None:

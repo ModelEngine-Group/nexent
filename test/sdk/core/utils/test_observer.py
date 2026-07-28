@@ -1085,6 +1085,7 @@ class TestProcessTypeEnum:
             "PICTURE_WEB",
             "CARD",
             "TOOL",
+            "NL2A",
             "MEMORY_SEARCH",
             "MAX_STEPS_REACHED",
             "VERIFICATION",

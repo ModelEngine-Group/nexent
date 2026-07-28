@@ -59,5 +59,5 @@ def test_create_nl2agent_agent_config_has_only_runtime_tool():
     assert config.tools[0].source == "mcp"
     assert config.tools[0].usage == "outer-apis"
     assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    assert config.tools[0].metadata is None
+    assert config.tools[0].metadata == {"emit_nl2a": True}
     assert "不得创建" in config.instructions

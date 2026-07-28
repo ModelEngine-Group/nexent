@@ -175,6 +175,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         params={},
         source="mcp",
         usage="outer-apis",
+        metadata={"emit_nl2a": True},
     )
 
     return AgentConfig(

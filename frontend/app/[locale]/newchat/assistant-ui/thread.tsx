@@ -22,7 +22,6 @@ import {
   AuiIf,
   ErrorPrimitive,
   groupPartByType,
-  makeAssistantDataUI,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -65,10 +64,7 @@ import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
-import {
-  ToolRecommendations,
-  type ToolRecommendationsData,
-} from "../ui/tool-recommendations";
+import { ToolRecommendations } from "../ui/tool-recommendations";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -77,15 +73,10 @@ import {
 import {
   getAgentRunTime,
   skillFileUploadsRegistry,
+  type Nl2aMessage,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
-
-const ToolRecommendationsDataUI =
-  makeAssistantDataUI<ToolRecommendationsData>({
-    name: "tool_recommendations",
-    render: ToolRecommendations,
-  });
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -180,7 +171,6 @@ export const Thread: FC<ThreadProps> = ({
 
   return (
     <SourcesPanelProvider value={panelContextValue}>
-      <ToolRecommendationsDataUI />
       <ThreadView
         agent={agent}
         onBack={onBack}
@@ -432,6 +422,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   const agentName = agent.display_name || agent.name;
 
   const agentRunTime = getAgentRunTime();
+  const nl2a = useAuiState(
+    (s) =>
+      (
+        s.message.metadata?.custom as
+          | { nl2a?: Nl2aMessage }
+          | undefined
+      )?.nl2a,
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
@@ -541,13 +539,16 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-tool":
                 return (
-                  <ToolGroupRoot variant="ghost">
-                    <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
-                    />
-                    <ToolGroupContent>{children}</ToolGroupContent>
-                  </ToolGroupRoot>
+                  <>
+                    <ToolGroupRoot variant="ghost">
+                      <ToolGroupTrigger
+                        count={part.indices.length}
+                        active={part.status.type === "running"}
+                      />
+                      <ToolGroupContent>{children}</ToolGroupContent>
+                    </ToolGroupRoot>
+                    {nl2a ? <ToolRecommendations nl2a={nl2a} /> : null}
+                  </>
                 );
               case "group-reasoning": {
                 const running = part.status.type === "running";

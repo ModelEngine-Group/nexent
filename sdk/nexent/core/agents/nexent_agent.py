@@ -149,6 +149,25 @@ def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str) -> Any:
     return tool_obj
 
 
+def _wrap_mcp_tool_with_nl2a(tool_obj: Any, observer: MessageObserver) -> Any:
+    """Emit an NL2Agent runtime message after an MCP tool returns."""
+    original_forward = tool_obj.forward
+    tool_name = _tool_name(tool_obj)
+
+    def emitting_forward(*args, **kwargs):
+        result = original_forward(*args, **kwargs)
+        observer.add_message(
+            "",
+            ProcessType.NL2A,
+            result,
+            tool_name=tool_name,
+        )
+        return result
+
+    tool_obj.forward = emitting_forward
+    return tool_obj
+
+
 class NexentAgent:
     def __init__(self, observer: MessageObserver,
                  model_config_list: List[ModelConfig],
@@ -456,6 +475,11 @@ class NexentAgent:
                 tool_obj = self.create_local_tool(tool_config)
             elif source == "mcp":
                 tool_obj = self.create_mcp_tool(class_name)
+                if (tool_config.metadata or {}).get("emit_nl2a"):
+                    tool_obj = _wrap_mcp_tool_with_nl2a(
+                        tool_obj,
+                        self.observer,
+                    )
             elif source == "langchain":
                 tool_obj = self.create_langchain_tool(tool_config)
             elif source == "builtin":

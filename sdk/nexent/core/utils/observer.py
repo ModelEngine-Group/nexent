@@ -28,6 +28,7 @@ class ProcessType(Enum):
 
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
+    NL2A = "nl2a"  # structured NL2Agent runtime output
     SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
@@ -157,6 +158,7 @@ class MessageObserver:
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
+            ProcessType.NL2A: default_transformer,
             ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
             ProcessType.VERIFICATION: default_transformer,

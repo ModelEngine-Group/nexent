@@ -1,7 +1,6 @@
 "use client";
 
 import type { FC } from "react";
-import type { DataMessagePartProps } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
   SearchXIcon,
@@ -12,29 +11,10 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
-
-interface ToolRecommendation {
-  tool_id: number;
-  name: string;
-  origin_name?: string | null;
-  description: string;
-  source: "mcp";
-  usage: string;
-  labels: string[];
-  score: number;
-}
-
-export type ToolRecommendationsData =
-  | {
-      status: "success";
-      recommendation_count: number;
-      recommendations: ToolRecommendation[];
-    }
-  | {
-      status: "error";
-      code: "invalid_keywords" | "tool_search_failed";
-      retryable: true;
-    };
+import type {
+  Nl2aMessage,
+  Nl2aToolRecommendation,
+} from "../adapter/remote-chat-model-adapter";
 
 const formatMatchScore = (score: number): string => {
   const normalizedScore = Number.isFinite(score)
@@ -80,15 +60,12 @@ const ToolRecommendationsError: FC = () => {
   );
 };
 
-export const ToolRecommendations: FC<
-  DataMessagePartProps<ToolRecommendationsData>
-> = ({ data }) => {
+export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
   const { t } = useTranslation("common");
-  const isSuccess = data?.status === "success";
-  const recommendations: ToolRecommendation[] =
-    isSuccess && Array.isArray(data.recommendations)
-      ? (data.recommendations as ToolRecommendation[])
-      : [];
+  const content = nl2a.content;
+  const isSuccess = content.status === "success";
+  const recommendations: Nl2aToolRecommendation[] =
+    content.status === "success" ? content.recommendations : [];
 
   return (
     <section
@@ -103,10 +80,10 @@ export const ToolRecommendations: FC<
           <h3 className="text-sm font-semibold text-foreground">
             {t("nl2agent.toolRecommendations.title")}
           </h3>
-          {isSuccess && (
+          {content.status === "success" && (
             <p className="text-xs text-muted-foreground">
               {t("nl2agent.toolRecommendations.count", {
-                count: data.recommendation_count,
+                count: content.recommendation_count,
               })}
             </p>
           )}

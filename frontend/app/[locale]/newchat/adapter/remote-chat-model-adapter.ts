@@ -29,6 +29,35 @@ interface SseChunk {
   depth?: number;
 }
 
+export interface Nl2aToolRecommendation {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  score: number;
+}
+
+export type Nl2aPayload =
+  | {
+      status: "success";
+      recommendation_count: number;
+      recommendations: Nl2aToolRecommendation[];
+    }
+  | {
+      status: "error";
+      code: "invalid_keywords" | "tool_search_failed";
+      retryable: true;
+    };
+
+export interface Nl2aMessage {
+  type: "nl2a";
+  tool_name?: string;
+  content: Nl2aPayload;
+}
+
 interface NexentRunConfig {
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
@@ -375,6 +404,7 @@ function extractAgentRunTime(content: string): string | undefined {
  * | step_count                   | text         | Current execution step number       |
  * | parse                         | tool-call    | Code parsing result                |
  * | execution_logs                | (attach)     | Attached to preceding tool result  |
+ * | nl2a                          | (metadata)   | NL2Agent structured output         |
  * | agent_new_run                 | text         | Agent basic information            |
  * | agent_finish                 | text         | Sub-agent run completion marker    |
  * | subagent_start               | subagent     | Opens a nested sub-agent card      |
@@ -433,6 +463,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "step_count":
     case "parse":
     case "card":
+    case "nl2a":
     case "skill_files":
     case "memory_search":
     case "plan":
@@ -503,55 +534,23 @@ function appendToolCallPart(
 }
 
 /**
- * Converts assistant-ui presentation metadata from a complete tool result
- * into a named data part. The metadata is removed from the business data
- * passed to the renderer.
+ * Parses an NL2Agent SSE chunk into frontend message metadata.
  */
-function buildAssistantUiDataPart(content: string): any | null {
+function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
-    const result = JSON.parse(content) as Record<string, unknown>;
-    if (
-      typeof result !== "object" ||
-      result === null ||
-      Array.isArray(result)
-    ) {
-      return null;
-    }
-
-    const metadata = result._assistant_ui;
-    if (
-      typeof metadata !== "object" ||
-      metadata === null ||
-      Array.isArray(metadata)
-    ) {
-      return null;
-    }
-
-    const { type, name } = metadata as Record<string, unknown>;
-    if (
-      type !== "data" ||
-      typeof name !== "string" ||
-      name.length === 0
-    ) {
-      return null;
-    }
-
-    const data = { ...result };
-    delete data._assistant_ui;
     return {
-      type: "data" as const,
-      name,
-      data,
+      type: "nl2a",
+      tool_name: chunk.tool_name,
+      content: JSON.parse(chunk.content) as Nl2aPayload,
     };
-  } catch {
+  } catch (error) {
+    log.warn("[ChatModelAdapter] Failed to parse nl2a content:", error);
     return null;
   }
 }
 
 /**
  * Attaches an `execution_logs` chunk to its originating tool call.
- * Once the associated result is complete JSON, assistant-ui presentation
- * metadata is also converted into a separate named data part.
  *
  * Matching uses the stable `tool_call_id` emitted at the actual invocation
  * boundary. Legacy payloads without an ID attach to the most recent tool call.
@@ -576,10 +575,6 @@ export function attachExecutionLogsToTool(
   }
 
   targetToolCall.result = (targetToolCall.result ?? "") + chunk.content;
-  const dataPart = buildAssistantUiDataPart(targetToolCall.result);
-  if (dataPart) {
-    contentParts.push(dataPart);
-  }
   return true;
 }
 
@@ -1079,11 +1074,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: string[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
+    let nl2a: Nl2aMessage | undefined;
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
       content,
+      metadata: nl2a ? { custom: { nl2a } } : undefined,
     });
 
     const streamStartTime = Date.now();
@@ -1184,6 +1181,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
+            continue;
+          }
+
+          if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
             continue;
           }
 
@@ -1372,6 +1378,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
+          } else if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
           } else if (chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
@@ -1541,15 +1553,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
 
       const finalResult = buildStreamResult(contentParts);
-      if (storedTiming) {
-        yield { ...finalResult, messageId, ...storedTiming } as any;
-      } else {
-        yield {
-          ...finalResult,
-          messageId,
-          ...buildTimingResult(streamStartTime, firstTokenTime, toolCallCount),
-        } as any;
-      }
+      const timingResult =
+        storedTiming ??
+        buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
+      yield {
+        ...finalResult,
+        messageId,
+        metadata: {
+          ...finalResult.metadata,
+          ...timingResult.metadata,
+        },
+      } as any;
     } finally {
       reader.releaseLock();
     }

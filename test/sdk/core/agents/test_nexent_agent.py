@@ -119,6 +119,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    NL2A = "nl2a"
 
 
 @dataclass
@@ -2239,6 +2240,39 @@ class TestCreateMcpTool:
 
         with pytest.raises(ValueError, match="test_tool not found in MCP server"):
             nexent_agent_instance.create_mcp_tool("test_tool")
+
+    def test_create_tool_emits_nl2a_after_marked_mcp_tool_returns(
+        self,
+        nexent_agent_instance,
+    ):
+        result_text = '{"status":"success","recommendations":[]}'
+        mock_tool = MagicMock()
+        mock_tool.name = "search_installed_mcp_tools"
+        mock_tool.forward.return_value = result_text
+        mock_collection = MagicMock()
+        mock_collection.tools = [mock_tool]
+        nexent_agent_instance.mcp_tool_collection = mock_collection
+        tool_config = ToolConfig(
+            class_name="search_installed_mcp_tools",
+            name="search_installed_mcp_tools",
+            description="Search installed MCP tools",
+            inputs='{"keywords": "list[str]"}',
+            output_type="string",
+            params={},
+            source="mcp",
+            metadata={"emit_nl2a": True},
+        )
+
+        tool = nexent_agent_instance.create_tool(tool_config)
+        result = tool.forward(keywords=["weather"])
+
+        assert result == result_text
+        nexent_agent_instance.observer.add_message.assert_called_once_with(
+            "",
+            ProcessType.NL2A,
+            result_text,
+            tool_name="search_installed_mcp_tools",
+        )
 
 
 class TestCreateBuiltinTool:

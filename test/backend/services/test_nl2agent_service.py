@@ -169,7 +169,19 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     async def fake_agent_run(received_run_info):
         assert received_run_info is run_info
         yield json.dumps({"type": "tool", "content": "call"})
-        yield json.dumps({"type": "execution_logs", "content": "result"})
+        yield json.dumps(
+            {
+                "type": "nl2a",
+                "tool_name": "search_installed_mcp_tools",
+                "content": json.dumps(
+                    {
+                        "status": "success",
+                        "recommendation_count": 0,
+                        "recommendations": [],
+                    }
+                ),
+            }
+        )
 
     mocker.patch(
         "services.nl2agent_service.agent_run",
@@ -193,6 +205,11 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     )
     assert chunks == [
         'data: {"type": "tool", "content": "call"}\n\n',
-        'data: {"type": "execution_logs", "content": "result"}\n\n',
+        (
+            'data: {"type": "nl2a", '
+            '"tool_name": "search_installed_mcp_tools", '
+            '"content": "{\\"status\\": \\"success\\", '
+            '\\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n'
+        ),
     ]
     run_info.stop_event.set.assert_called_once_with()
