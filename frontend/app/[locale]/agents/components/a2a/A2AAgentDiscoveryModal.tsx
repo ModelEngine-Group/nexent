@@ -75,8 +75,25 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
   const schemes = agent.security_schemes || {};
   const requirements = agent.security_requirements || [];
   const entries = Object.entries(schemes).flatMap(([schemeId, scheme]) => {
-    const apiKeyScheme = (scheme as Record<string, any>).apiKeySecurityScheme;
-    return apiKeyScheme ? [{ schemeId, ...apiKeyScheme }] : [];
+    const securityScheme = scheme as Record<string, any>;
+    const apiKeyScheme = securityScheme.apiKeySecurityScheme;
+    if (apiKeyScheme) {
+      return [{ schemeId, ...apiKeyScheme }];
+    }
+
+    const httpAuthScheme = securityScheme.httpAuthSecurityScheme;
+    if (httpAuthScheme?.scheme?.toLowerCase() === "bearer") {
+      return [{
+        schemeId,
+        name: "Authorization",
+        location: "header",
+        description: httpAuthScheme.bearerFormat
+          ? `${httpAuthScheme.bearerFormat} token`
+          : "Bearer token value",
+      }];
+    }
+
+    return [];
   });
 
   useEffect(() => {

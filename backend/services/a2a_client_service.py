@@ -692,10 +692,22 @@ class A2AClientService:
             for scheme_id in required_schemes:
                 credential = credentials.get(scheme_id)
                 scheme = schemes.get(scheme_id, {})
-                api_key_scheme = scheme.get("apiKeySecurityScheme", {}) if isinstance(scheme, dict) else {}
+                if not isinstance(scheme, dict) or not credential:
+                    valid = False
+                    break
+
+                http_auth_scheme = scheme.get("httpAuthSecurityScheme", {})
+                if http_auth_scheme:
+                    if http_auth_scheme.get("scheme", "").lower() != "bearer":
+                        valid = False
+                        break
+                    headers["Authorization"] = f"Bearer {credential}"
+                    continue
+
+                api_key_scheme = scheme.get("apiKeySecurityScheme", {})
                 location = api_key_scheme.get("location")
                 parameter_name = api_key_scheme.get("name")
-                if not credential or not parameter_name or location not in {"header", "query", "cookie"}:
+                if not parameter_name or location not in {"header", "query", "cookie"}:
                     valid = False
                     break
                 if location == "header":

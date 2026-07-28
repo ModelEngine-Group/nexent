@@ -1227,6 +1227,51 @@ class TestCallAgent:
         assert args.kwargs["cookies"] == {"session": "cookie-token"}
 
     @pytest.mark.asyncio
+    async def test_forwards_http_bearer_security_credential_as_authorization_header(self):
+        """Test an HTTP Bearer scheme maps its credential to the Authorization header."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": "JSONRPC",
+            "is_available": True,
+            "security_schemes": {
+                "jwtAuth": {
+                    "httpAuthSecurityScheme": {"scheme": "Bearer", "bearerFormat": "JWT"},
+                },
+            },
+            "security_requirements": [{"schemes": {"jwtAuth": {}}}],
+            "security_credentials": {"jwtAuth": "eyJhbGciOiJIUzI1NiJ9"},
+        }
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_json = AsyncMock(return_value={"result": {}})
+
+                await service.call_agent(1, "tenant-1", {"role": "user", "parts": []})
+
+        headers = mock_client.post_json.call_args.args[2]
+        assert headers["Authorization"] == "Bearer eyJhbGciOiJIUzI1NiJ9"
+
+    def test_rejects_unsupported_http_auth_scheme(self):
+        """Test non-Bearer HTTP authentication schemes are rejected before requests."""
+        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+
+        service = A2AClientService()
+        agent = {
+            "security_schemes": {"basicAuth": {"httpAuthSecurityScheme": {"scheme": "Basic"}}},
+            "security_requirements": [{"schemes": {"basicAuth": {}}}],
+            "security_credentials": {"basicAuth": "credential"},
+        }
+
+        with pytest.raises(AgentCallError, match="do not satisfy"):
+            service._build_security_request_parts(agent)
+
+    @pytest.mark.asyncio
     async def test_rejects_unsatisfied_security_requirements(self):
         """Test calls fail before the external request when credentials are missing."""
         from backend.services.a2a_client_service import A2AClientService, AgentCallError
@@ -1560,6 +1605,44 @@ class TestCallAgent:
 
 class TestCallAgentStreaming:
     """Test class for call_agent_streaming async method."""
+
+    @pytest.mark.asyncio
+    async def test_forwards_http_bearer_security_credential_for_streaming(self):
+        """Test streaming calls send HTTP Bearer credentials in the Authorization header."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/a2a",
+            "protocol_type": "JSONRPC",
+            "is_available": True,
+            "security_schemes": {
+                "jwtAuth": {
+                    "httpAuthSecurityScheme": {"scheme": "Bearer", "bearerFormat": "JWT"},
+                },
+            },
+            "security_requirements": [{"schemes": {"jwtAuth": {}}}],
+            "security_credentials": {"jwtAuth": "eyJhbGciOiJIUzI1NiJ9"},
+        }
+
+        async def mock_stream(*args, **kwargs):
+            yield {"done": True}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.post_stream = MagicMock(side_effect=mock_stream)
+
+                events = [
+                    event async for event in service.call_agent_streaming(
+                        1, "tenant-1", {"role": "user", "parts": []}
+                    )
+                ]
+
+        assert events == [{"done": True}]
+        assert mock_client.post_stream.call_args.args[2]["Authorization"] == "Bearer eyJhbGciOiJIUzI1NiJ9"
 
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_not_found(self):
