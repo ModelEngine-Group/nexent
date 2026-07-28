@@ -1283,7 +1283,7 @@ class TestCallAgent:
             "is_available": True,
             "security_schemes": {
                 "jwtAuth": {
-                    "httpAuthSecurityScheme": {"scheme": "Bearer", "bearerFormat": "JWT"},
+                    "httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"},
                 },
             },
             "security_requirements": [{"schemes": {"jwtAuth": {}}}],
@@ -1555,7 +1555,7 @@ class TestCallAgent:
     async def test_raises_authentication_error_on_unauthorized_response(self):
         """Test unauthorized responses explain that configured credentials failed."""
         from backend.services.a2a_client_service import A2AClientService, AgentCallError
-        from backend.utils.a2a_http_client import A2AHttpStatusError
+        from utils.a2a_http_client import A2AHttpStatusError
 
         service = A2AClientService()
         mock_agent = {
@@ -1706,7 +1706,7 @@ class TestCallAgentStreaming:
             "is_available": True,
             "security_schemes": {
                 "jwtAuth": {
-                    "httpAuthSecurityScheme": {"scheme": "Bearer", "bearerFormat": "JWT"},
+                    "httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "jwt"},
                 },
             },
             "security_requirements": [{"schemes": {"jwtAuth": {}}}],

@@ -12,7 +12,7 @@ import aiohttp
 
 from database import a2a_agent_db
 from database.a2a_agent_db import _extract_protocol_type, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from backend.utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +709,9 @@ class A2AClientService:
                     if not isinstance(auth_scheme, str) or not auth_scheme.strip():
                         valid = False
                         break
+                    bearer_format = http_auth_scheme.get("bearerFormat")
+                    if isinstance(bearer_format, str) and bearer_format.lower() == "jwt":
+                        auth_scheme = "Bearer"
                     headers["Authorization"] = f"{auth_scheme} {credential}"
                     continue
 
