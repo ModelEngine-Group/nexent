@@ -72,13 +72,12 @@ export function pickReviewDisplayRepositoryInfo(
   const rejected = pickLatestRepositoryInfo(
     items.filter((item) => item.status === "rejected")
   );
+  if (rejected) return rejected;
 
   const shared = pickLatestRepositoryInfo(
     items.filter((item) => item.status === "shared")
   );
-  if (shared) return shared;
-
-  return rejected;
+  return shared;
 }
 
 export function isCancelableRepositoryStatus(

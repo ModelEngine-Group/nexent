@@ -27,6 +27,7 @@ from nexent.core.agents.context.formatting import (
     _format_skills_description,
     _format_tools_description,
 )
+from nexent.core.agents.context.llm_summary import _strip_code_fences
 from nexent.core.agents.context.rendering import ContextItemRenderer, ContextItemRenderingError
 from nexent.core.agents.context.step_renderer import StepRenderer
 from nexent.core.context_runtime.contracts import (
@@ -42,10 +43,11 @@ class _Role(Enum):
 
 def test_summary_output_normalization_and_fallback(caplog):
     assert format_summary_output("   ") is None
-    assert format_summary_output('```json\n{"fact": "保留"}\n```') == '{\n  "fact": "保留"\n}'
+
+    assert format_summary_output('```markdown\n# Summary\n\ntext\n```') == "# Summary\n\ntext"
+    assert format_summary_output('```json\n{"fact": "保留"}\n```') == '{"fact": "保留"}'
 
     assert format_summary_output("plain summary") == "plain summary"
-    assert "not valid JSON" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -294,8 +296,192 @@ def test_renderer_current_action_without_raw_messages():
         {"step_number": 1, "result": "done"},
     )
     message = ContextItemRenderer().render([action])[0]
-    assert message["role"] == "assistant"
-    assert '"result": "done"' in message["content"][0]["text"]
+    assert message["role"] == "user"
+    text = message["content"][0]["text"]
+    assert '<completed_action_history read_only="true">' in text
+    assert "index: 1" in text
+    assert "recorded_result:\ndone" in text
+    assert "Step 1:" not in text
+    assert not text.lstrip().startswith("{")
+
+
+def test_renderer_current_action_preserves_raw_messages():
+    messages = [{"role": "assistant", "content": [{"type": "text", "text": "raw action"}]}]
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {"messages": messages},
+    )
+
+    assert ContextItemRenderer().render([action]) == messages
+
+
+def test_renderer_current_action_compact_with_tool_calls():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 3,
+            "tool_calls": [{"name": "search", "arguments": {"q": "foo"}}],
+            "observations": "found 5 results",
+            "error": None,
+            "result": "answer is 42",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "index: 3" in text
+    assert "tool: search" in text
+    assert '"q": "foo"' in text
+    assert "outcome:\nfound 5 results" in text
+    assert "recorded_result:\nanswer is 42" in text
+    assert "Called tool" not in text
+    assert not text.lstrip().startswith("{")
+
+
+def test_renderer_current_action_compact_with_single_tool_call_dict():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 2,
+            "tool_calls": {"name": "execute", "arguments": {"code": "print(1)"}},
+            "result": "1",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "tool: execute" in text
+    assert '"code": "print(1)"' in text
+
+
+def test_renderer_current_action_preserves_string_tool_arguments():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 2,
+            "tool_calls": [{
+                "name": "python_interpreter",
+                "arguments": "result = search(query='GAIA')\nprint(result)",
+            }],
+            "observations": "evidence",
+        },
+    )
+
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+
+    assert message["role"] == "user"
+    assert "tool: python_interpreter" in text
+    assert "result = search(query='GAIA')\nprint(result)" in text
+    assert "python_interpreter'()" not in text
+
+
+def test_renderer_current_action_without_step_number():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "tool_calls": [{"name": "search", "arguments": {"q": "GAIA"}}],
+            "result": "done",
+        },
+    )
+
+    text = ContextItemRenderer().render([action])[0]["content"][0]["text"]
+
+    assert "index:" not in text
+    assert "tool: search" in text
+    assert "recorded_result:\ndone" in text
+
+
+def test_renderer_summary_legacy_dict_renders_markdown():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {"task_overview": "did work", "completed_work": "finished"},
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "## Task Overview" in text
+    assert "did work" in text
+    assert "## Completed Work" in text
+
+
+def test_strip_code_fences():
+    assert _strip_code_fences("plain text") == "plain text"
+    assert _strip_code_fences("```markdown\n# Title\n```") == "# Title"
+    assert _strip_code_fences("```\ncontent\n```") == "content"
+    assert _strip_code_fences("") is None
+    assert _strip_code_fences("   ") is None
+
+
+def test_renderer_summary_legacy_dict_list_values():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {
+                "key_decisions": ["decision A", "decision B"],
+                "pending_items": [],
+                "context_to_preserve": None,
+                "custom_field": 42,
+            },
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "- decision A" in text
+    assert "- decision B" in text
+    assert "42" in text
+
+
+def test_renderer_summary_legacy_dict_all_empty_falls_back_to_json():
+    summary = _direct_item(
+        "summary",
+        ContextItemType.HISTORY_SUMMARY,
+        {
+            "summary": {"task_overview": "", "completed_work": None},
+            "covered_through_message_id": 10,
+        },
+    )
+    message = ContextItemRenderer().render([summary])[0]
+    text = message["content"][0]["text"]
+    assert "task_overview" in text
+
+
+def test_renderer_current_action_compact_non_standard_tool_calls():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 4,
+            "tool_calls": "raw_tool_call_string",
+            "result": "done",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "tool_records:" in text
+
+
+def test_renderer_current_action_compact_list_tool_call_non_dict():
+    action = _direct_item(
+        "action",
+        ContextItemType.CURRENT_ACTION,
+        {
+            "step_number": 5,
+            "tool_calls": ["not_a_dict_tool_call"],
+            "result": "done",
+        },
+    )
+    message = ContextItemRenderer().render([action])[0]
+    text = message["content"][0]["text"]
+    assert "tool_record:" in text
 
 
 def test_context_manager_management_and_diagnostic_helpers():

@@ -156,6 +156,17 @@ class _SkillServiceMock:
             )
         return skills
 
+    def list_visible_skill_permission_summaries(
+        self,
+        *,
+        tenant_id=None,
+        user_id,
+    ):
+        return self.list_visible_skills(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
 
 _skill_service_module_mock = MagicMock()
 _skill_service_module_mock.SkillService = _SkillServiceMock
@@ -237,7 +248,11 @@ def setup_function():
     }
 
 
-def _repository_record(status="not_shared", publisher_user_id="user-1"):
+def _repository_record(
+    status="not_shared",
+    publisher_user_id="user-1",
+    created_by="user-1",
+):
     return {
         "skill_repository_id": 1,
         "skill_id": 10,
@@ -253,7 +268,7 @@ def _repository_record(status="not_shared", publisher_user_id="user-1"):
         "skill_info_json": {
             "content": "content",
             "tags": ["tag"],
-            "created_by": "user-1",
+            "created_by": created_by,
         },
         "create_time": None,
         "update_time": None,
@@ -483,7 +498,11 @@ def test_update_status_dev_cannot_approve_review():
 
 def test_update_status_dev_cannot_update_other_users_listing():
     _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="shared", publisher_user_id="someone-else")
+        _repository_record(
+            status="shared",
+            publisher_user_id="someone-else",
+            created_by="someone-else",
+        )
     )
 
     with pytest.raises(ForbiddenError):
@@ -493,6 +512,32 @@ def test_update_status_dev_cannot_update_other_users_listing():
             user_id="user-1",
             tenant_id="tenant-1",
         )
+
+
+@pytest.mark.parametrize("initial_status", ["pending_review", "shared"])
+def test_update_status_skill_creator_can_update_admin_listing(initial_status):
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
+        _repository_record(
+            status=initial_status,
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+        _repository_record(
+            status="not_shared",
+            publisher_user_id="admin-1",
+            created_by="user-1",
+        ),
+    ]
+
+    result = srs.update_skill_repository_status_impl(
+        skill_repository_id=1,
+        status="not_shared",
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+    assert result["status"] == "not_shared"
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
 
 
 def test_install_skill_from_repository_success_increments_downloads():
@@ -628,6 +673,31 @@ def test_mine_ownership_uses_creator_not_edit_permission():
     assert others_result["items"][0]["permission"] == "EDIT"
     assert created_result["items"][0]["can_publish"] is True
     assert others_result["items"][0]["can_publish"] is False
+
+
+def test_count_my_editable_skills_uses_lightweight_visible_summaries():
+    list_visible = MagicMock(return_value=[
+        {"skill_id": 1, "created_by": "user-1"},
+        {"skill_id": 2, "created_by": "user-2"},
+    ])
+
+    class CountSkillService:
+        def __init__(self, tenant_id=None):
+            self.tenant_id = tenant_id
+
+        list_visible_skill_permission_summaries = list_visible
+
+    with patch.object(srs, "SkillService", CountSkillService):
+        result = srs.count_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+
+    assert result == {"counts": {"all": 2, "created": 1, "others": 1}}
+    list_visible.assert_called_once_with(
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
 
 
 def test_list_repository_listings_validates_status():

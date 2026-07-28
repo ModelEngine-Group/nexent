@@ -7,13 +7,13 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Space,
   Spin,
   Tag,
   Typography,
   message,
 } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
@@ -27,8 +27,6 @@ interface AidpKnowledgeSelectorModalProps {
   readonly onClose: () => void;
   readonly onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
   readonly selectedDatasetIds: string[];
-  readonly serverUrl: string;
-  readonly apiKey: string;
   readonly title?: string;
   readonly maxSelect?: number;
 }
@@ -40,8 +38,6 @@ export default function AidpKnowledgeSelectorModal({
   onClose,
   onConfirm,
   selectedDatasetIds,
-  serverUrl,
-  apiKey,
   title,
   maxSelect = 10,
 }: AidpKnowledgeSelectorModalProps) {
@@ -49,7 +45,7 @@ export default function AidpKnowledgeSelectorModal({
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageItems, setPageItems] = useState<AidpKnowledgeBaseItem[]>([]);
-  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
@@ -71,7 +67,7 @@ export default function AidpKnowledgeSelectorModal({
     }
     setCurrentPage(1);
     setPageItems([]);
-    setNextLink(null);
+    setTotalCount(0);
     setKeyword("");
     setTempSelectedIds(selectedDatasetIds);
     initialSelectedIdsRef.current = selectedDatasetIds;
@@ -104,41 +100,26 @@ export default function AidpKnowledgeSelectorModal({
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------
-  // Fetch a single page (page 1 on open/credentials change; next/prev on nav)
-  // Use refs to ensure we always use the latest credentials
+  // Fetch a single page (page 1 on open; arbitrary page via antd Pagination)
   // ------------------------------------------------------------------
-  const serverUrlRef = useRef(serverUrl);
-  const apiKeyRef = useRef(apiKey);
-  serverUrlRef.current = serverUrl;
-  apiKeyRef.current = apiKey;
-
   const loadPage = useCallback(
-    async (pageNum: number, nextUrl: string | null = null) => {
-      const currentServerUrl = serverUrlRef.current;
-      const currentApiKey = apiKeyRef.current;
-
-      if (!currentServerUrl || !currentApiKey) {
-        setPageItems([]);
-        setNextLink(null);
-        return;
-      }
-
+    async (pageNum: number) => {
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          currentServerUrl,
-          currentApiKey,
           pageNum,
           DEFAULT_PAGE_SIZE
         );
 
         const items: AidpKnowledgeBaseItem[] = result.value || [];
 
-        if (nextUrl) {
-          setNextLink(result.next_link ?? null);
-        } else {
-          setNextLink(result.next_link ?? null);
-        }
+        // Total count reflects only KBs the caller can actually see
+        // (the mgmt endpoint applies permission filtering server-side).
+        setTotalCount(
+          typeof result.total_count === "number"
+            ? result.total_count
+            : items.length
+        );
 
         for (const item of items) {
           const id = String(item.kds_id);
@@ -153,7 +134,7 @@ export default function AidpKnowledgeSelectorModal({
         log.error("Failed to load AIDP knowledge bases:", error);
         message.error(t("toolConfig.aidp.selector.loadFailed"));
         setPageItems([]);
-        setNextLink(null);
+        setTotalCount(0);
       } finally {
         setLoading(false);
       }
@@ -162,12 +143,12 @@ export default function AidpKnowledgeSelectorModal({
   );
 
   // ------------------------------------------------------------------
-  // Load first page when modal opens or credentials change
+  // Load first page when modal opens
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     loadPage(1);
-  }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
   // Keyword filter (client-side on current page)
@@ -248,19 +229,7 @@ export default function AidpKnowledgeSelectorModal({
               <Text type="secondary" className="break-words">{item.description}</Text>
             )}
           </div>
-          <Space size={8} className="shrink-0">
-            <Tag>
-              {t(
-                "toolConfig.aidp.selector.documentCount",
-                { count: item.document_count || 0 }
-              )}
-            </Tag>
-            <Tag>
-              {t("toolConfig.aidp.selector.chunkCount", {
-                count: item.chunk_count || 0,
-              })}
-            </Tag>
-          </Space>
+
         </div>
       </div>
     );
@@ -346,22 +315,19 @@ export default function AidpKnowledgeSelectorModal({
           {renderListContent()}
         </div>
 
-        <div className="flex items-center justify-center gap-4">
-          <Button
-            icon={<LeftOutlined />}
-            disabled={currentPage === 1 || loading}
-            onClick={() => loadPage(currentPage - 1)}
-          >
-            {t("filePreview.pdf.previousPage")}
-          </Button>
-          <Text type="secondary">{currentPage}</Text>
-          <Button
-            icon={<RightOutlined />}
-            disabled={!nextLink || loading}
-            onClick={() => loadPage(currentPage + 1)}
-          >
-            {t("filePreview.pdf.nextPage")}
-          </Button>
+        <div className="flex items-center justify-center">
+          <Pagination
+            current={currentPage}
+            pageSize={DEFAULT_PAGE_SIZE}
+            total={Math.max(totalCount, 1)}
+            onChange={(p) => loadPage(p)}
+            showSizeChanger={false}
+            showTotal={(total) =>
+              t("toolConfig.aidp.selector.showTotal", { count: total })
+            }
+            size="small"
+            disabled={loading}
+          />
         </div>
       </Space>
     </Modal>

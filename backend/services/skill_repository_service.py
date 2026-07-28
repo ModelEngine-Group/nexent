@@ -586,8 +586,11 @@ def _validate_publisher_status_transition(
 ) -> Optional[Dict[str, str]]:
     if record.get("publisher_tenant_id") != tenant_id:
         raise ForbiddenError("Not authorized to update this repository listing")
-    if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-        raise ForbiddenError("Not authorized to update this repository listing")
+    if user_role == "DEV":
+        snapshot = _as_dict(record.get("skill_info_json"))
+        owner_user_id = snapshot.get("created_by") or record.get("publisher_user_id")
+        if str(owner_user_id) != str(user_id):
+            raise ForbiddenError("Not authorized to update this repository listing")
     if user_role == "ADMIN" and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
         return None
     if transition not in _PUBLISHER_STATUS_TRANSITIONS:
@@ -996,6 +999,21 @@ def list_my_editable_skills_impl(
             "total_pages": math.ceil(total / safe_page_size) if total else 0,
         },
     }
+
+
+def count_my_editable_skills_impl(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Count visible skills without loading content, tool relations, or YAML files."""
+    skills = SkillService(
+        tenant_id=tenant_id
+    ).list_visible_skill_permission_summaries(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return {"counts": _count_skills_by_ownership(skills, user_id)}
 
 
 def list_skill_repository_listings_impl(

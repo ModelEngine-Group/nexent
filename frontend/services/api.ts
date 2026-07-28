@@ -153,6 +153,7 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -334,6 +335,17 @@ export const API_ENDPOINTS = {
   aidp: {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
+  },
+  aidpMgmt: {
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
+    /** PATCH endpoint for the per-KB in-group permission. */
+    kbPermission: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
@@ -577,6 +589,7 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
     install: (skillRepositoryId: number) =>

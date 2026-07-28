@@ -213,7 +213,6 @@ class AgentAutomationRun(TableBase):
     duration_ms = Column(BigInteger, nullable=True, doc="Run duration in milliseconds")
     error_code = Column(String(64), nullable=True, doc="Automation error code")
     error_message = Column(Text, nullable=True, doc="Automation error message")
-    capability_check = Column(JSONB, nullable=True, doc="Capability check result before execution")
 
 
 class AgentAutomationProposal(TableBase):
@@ -1374,12 +1373,31 @@ class SkillInfo(TableBase):
     Skill information table - stores skill metadata and content.
     """
     __tablename__ = "ag_skill_info_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "uq_skill_info_tenant_name_active",
+            "tenant_id",
+            "skill_name",
+            unique=True,
+            postgresql_where=text(
+                "tenant_id IS NOT NULL AND delete_flag = 'N'"
+            ),
+        ),
+        Index(
+            "uq_skill_info_global_name_active",
+            "skill_name",
+            unique=True,
+            postgresql_where=text(
+                "tenant_id IS NULL AND delete_flag = 'N'"
+            ),
+        ),
+        {"schema": SCHEMA},
+    )
 
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
     skill_name = Column(String(100), nullable=False,
-                        unique=True, doc="Unique skill name")
+                        doc="Skill name, unique among active skills within its tenant scope")
     tenant_id = Column(String(100), nullable=True,
                        doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")

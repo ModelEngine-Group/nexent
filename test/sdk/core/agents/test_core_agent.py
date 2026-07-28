@@ -961,6 +961,51 @@ def test_final_answer_error_creation():
         raise error
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Step 2:\nCalled tool 'python_interpreter'()",
+        "### Step 2:\n- Called tool 'python_interpreter'()",
+        "Observation: previous result",
+        '{"tool_calls":[{"name":"python_interpreter","arguments":"print(1)"}]}',
+        '```json\n{"action":"search","arguments":{"q":"GAIA"}}\n```',
+        "<code>print('missing closing tag')",
+    ],
+)
+def test_action_like_non_executable_output_is_not_a_final_answer(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        None,
+        42,
+        "",
+        "   ",
+        "The answer is 42.",
+        "I could not find enough evidence to answer.",
+        '{"answer":"42"}',
+        "{not valid json",
+        "```json```",
+        '["not an action record"]',
+    ],
+)
+def test_plain_answer_does_not_look_like_invalid_action(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "```<RUN>print('missing closing fence')",
+        '[{"action":"search","arguments":{"q":"GAIA"}}]',
+    ],
+)
+def test_additional_action_protocol_variants_are_invalid(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
+
+
 # ----------------------------------------------------------------------------
 # Additional edge case tests for parse_code_blobs
 # ----------------------------------------------------------------------------

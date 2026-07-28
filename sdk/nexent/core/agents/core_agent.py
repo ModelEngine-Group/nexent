@@ -1,6 +1,7 @@
 import json
 import ast
 import logging
+import re
 import time
 import uuid
 import threading
@@ -188,6 +189,44 @@ def convert_code_format(text):
 class FinalAnswerError(Exception):
     """Raised when agent output directly."""
     pass
+
+
+class InvalidActionFormatError(AgentExecutionError):
+    """Raised when model output resembles an action but is not executable."""
+
+
+_ACTION_RECORD_LINE_RE = re.compile(
+    r"(?im)^\s*(?:[-*#>]\s*)*(?:step\s+\d+\s*:|called\s+tool\b|observation\s*:|tool_calls?\s*:)"
+)
+_ACTION_JSON_KEYS = frozenset({"action", "tool_call", "tool_calls", "arguments"})
+
+
+def _looks_like_invalid_action_output(text: Any) -> bool:
+    """Return whether non-executable output appears to be an action protocol record."""
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if _ACTION_RECORD_LINE_RE.search(stripped):
+        return True
+    if "<code>" in stripped or "</code>" in stripped or "```<RUN>" in stripped:
+        return True
+    if stripped.startswith("```") and stripped.endswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:-3].strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            payload = json.loads(stripped)
+        except (TypeError, ValueError):
+            return False
+        records = payload if isinstance(payload, list) else [payload]
+        return any(
+            isinstance(record, dict) and bool(_ACTION_JSON_KEYS.intersection(record))
+            for record in records
+        )
+    return False
 
 
 class ToolInputBlockedError(AgentExecutionError):
@@ -796,6 +835,13 @@ Additional Args:
         except AgentExecutionError:
             raise
         except Exception:
+            if _looks_like_invalid_action_output(model_output):
+                raise InvalidActionFormatError(
+                    "The previous response resembled a historical or malformed action record and was not "
+                    "executable. Do not copy historical records. Emit executable Python inside <code>...</code>, "
+                    "or return the actual user-facing final answer.",
+                    self.logger,
+                )
             self.logger.log_markdown(
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
