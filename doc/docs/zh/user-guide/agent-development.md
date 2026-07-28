@@ -61,9 +61,12 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 1. 在外部 A2A Agent 列表中，点击"添加外部 Agent"按钮
 2. 选择"URL 发现"页签
 3. 填写 Agent Card URL 地址，例如：`https://example.com/.well-known/agent.json`
-4. 点击"发现"按钮，系统会自动获取 Agent 的相关信息
-5. 发现成功后，可以查看 Agent 的名称、描述、能力等信息
-6. 点击"添加到列表"完成添加
+4. 如果目标 Agent Card 需要认证，在"自定义请求头"中填写 JSON 对象，例如：`{"Authorization": "Bearer <token>"}`
+5. 点击"发现"按钮，系统会自动获取 Agent 的相关信息
+6. 发现成功后，可以查看 Agent 的名称、描述、能力等信息
+7. 点击"添加到列表"完成添加
+
+> 💡 **提示**：自定义请求头会随该外部 Agent 保存，仅用于获取和刷新 Agent Card，不会用于后续调用 Agent。再次发现同一 URL 时，留空会保留现有配置，填写 `{}` 可清空配置。
 
 > 💡 **提示**：Agent Card 是符合 A2A 1.0 规范的 Agent 描述文件，包含了 Agent 的名称、描述、调用地址、能力等信息。
 
@@ -105,8 +108,9 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 4. **配置调用协议**：点击"协议配置"按钮，可以选择该 Agent 的调用协议：
    - **HTTP + JSON**：使用 REST API 风格调用
    - **JSON-RPC**：使用 JSON-RPC 协议调用
-5. **刷新 Agent 信息**：如果 Agent 信息发生变化，可以点击"刷新"按钮重新获取最新的 Agent Card
-6. **移除 Agent**：点击"移除"按钮，可以将该 Agent 从已发现列表中删除
+5. **配置调用认证**：如果 Agent Card 声明了 `securitySchemes` 和 `securityRequirements`，点击"Agent 认证"按钮，填写所需认证值。系统会按 Card 声明将值放入请求头、查询参数或 Cookie；同一认证组合中的字段必须同时填写。
+6. **刷新 Agent 信息**：如果 Agent 信息发生变化，可以点击"刷新"按钮重新获取最新的 Agent Card
+7. **移除 Agent**：点击"移除"按钮，可以将该 Agent 从已发现列表中删除
 
 > 💡 **使用场景**：
 > - 通过 URL 发现快速接入已知的第三方 Agent 服务
