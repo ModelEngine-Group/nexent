@@ -1000,10 +1000,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
     """Test update_mcp_service with custom_headers parameter."""
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_custom_headers(self, mock_get, mock_update):
+    def test_update_with_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes custom_headers to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         custom_headers = {"X-Update-Custom": "value123"}
         update_mcp_service(
@@ -1019,10 +1021,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['custom_headers'], custom_headers)
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_none_custom_headers(self, mock_get, mock_update):
+    def test_update_with_none_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service when custom_headers is None."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1037,10 +1041,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertIsNone(call_kwargs['custom_headers'])
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_group_ids(self, mock_get, mock_update):
+    def test_update_with_group_ids(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes group_ids to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1055,10 +1061,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['group_ids'], "2,4")
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_ingroup_permission(self, mock_get, mock_update):
+    def test_update_with_ingroup_permission(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes ingroup_permission to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1073,10 +1081,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_shared_fields(self, mock_get, mock_update):
+    def test_update_with_shared_fields(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes shared_fields to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         shared = {"serverUrl": True, "authorizationToken": False}
         update_mcp_service(
@@ -1093,6 +1103,66 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['group_ids'], "2")
         self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
         self.assertEqual(call_kwargs['shared_fields'], shared)
+
+
+# ============================================================================
+# update_mcp_service - name conflict tests
+# ============================================================================
+
+class TestUpdateMcpServiceNameConflict(unittest.TestCase):
+    """Test update_mcp_service name uniqueness check."""
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_conflict_raises_error(self, mock_get, mock_check, mock_update):
+        """Renaming to an existing name in same tenant should raise McpNameConflictError."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = True  # name already exists
+
+        with self.assertRaises(McpNameConflictError):
+            update_mcp_service(
+                tenant_id='tid', user_id='uid', mcp_id=1,
+                new_name='existing-name', description='desc',
+                server_url='https://url', authorization_token=None,
+                custom_headers=None, tags=[], config_json=None, market_id=None,
+            )
+
+        mock_update.assert_not_called()  # should not proceed to update
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_unchanged_skips_check(self, mock_get, mock_check, mock_update):
+        """Not changing the name should skip the uniqueness check."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "same-name", "source": "local", "config_json": None}
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='same-name', description='desc',
+            server_url='https://url', authorization_token=None,
+            custom_headers=None, tags=[], config_json=None, market_id=None,
+        )
+
+        mock_check.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_unique_allows_update(self, mock_get, mock_check, mock_update):
+        """Renaming to a unique name should proceed with the update."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False  # name is available
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='new-unique-name', description='desc',
+            server_url='https://url', authorization_token=None,
+            custom_headers=None, tags=[], config_json=None, market_id=None,
+        )
+
+        mock_check.assert_called_once_with(mcp_name='new-unique-name', tenant_id='tid')
+        mock_update.assert_called_once()
 
 
 # ============================================================================

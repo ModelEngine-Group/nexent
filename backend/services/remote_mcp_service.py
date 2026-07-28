@@ -714,7 +714,6 @@ def update_mcp_service(
     if new_name != current_record.get("mcp_name"):
         if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):
             logger.error(f"MCP name already exists: {new_name} in tenant {tenant_id}")
-            from consts.exceptions import McpNameConflictError
             raise McpNameConflictError("MCP name already exists")
 
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
