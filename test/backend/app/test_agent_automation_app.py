@@ -39,25 +39,30 @@ def test_list_tasks_http_smoke(monkeypatch):
     monkeypatch.setattr(
         agent_automation_app.agent_automation_facade,
         "list_tasks",
-        lambda tenant_id, user_id, status=None, search=None, agent_name=None: [
-            {
-                "task_id": 1,
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "status": status or "ACTIVE",
-                "search": search,
-                "agent_name": agent_name,
-            }
-        ],
+        lambda tenant_id, user_id, status=None, search=None, agent_name=None, page=1, page_size=20: {
+            "items": [
+                {
+                    "task_id": 1,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "status": status or "ACTIVE",
+                    "search": search,
+                    "agent_name": agent_name,
+                }
+            ],
+            "total": 1,
+            "page": page,
+            "page_size": page_size,
+        },
     )
 
     response = _client().get(
-        "/agent/automations?status=PAUSED&search=%E5%A4%A9%E6%B0%94&agent_name=%E5%8A%A9%E6%89%8B",
+        "/agent/automations?status=PAUSED&search=%E5%A4%A9%E6%B0%94&agent_name=%E5%8A%A9%E6%89%8B&page=2&page_size=5",
         headers={"Authorization": "Bearer token"},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"][0] == {
+    assert response.json()["data"]["items"][0] == {
         "task_id": 1,
         "tenant_id": "tenant",
         "user_id": "user",
@@ -65,6 +70,9 @@ def test_list_tasks_http_smoke(monkeypatch):
         "search": "天气",
         "agent_name": "助手",
     }
+    assert response.json()["data"]["total"] == 1
+    assert response.json()["data"]["page"] == 2
+    assert response.json()["data"]["page_size"] == 5
 
 
 def test_direct_task_creation_endpoint_is_not_exposed():
@@ -241,7 +249,11 @@ async def test_management_handlers_delegate_to_authenticated_facade(monkeypatch)
     monkeypatch.setattr(facade, "resume_task", MagicMock(return_value={"status": "ACTIVE"}))
     monkeypatch.setattr(facade, "run_task_now", AsyncMock(return_value={"run_id": 2}))
     monkeypatch.setattr(facade, "delete_task", MagicMock(return_value=True))
-    monkeypatch.setattr(facade, "list_runs", MagicMock(return_value=[{"run_id": 2}]))
+    monkeypatch.setattr(
+        facade,
+        "list_runs",
+        MagicMock(return_value={"items": [{"run_id": 2}], "total": 1, "page": 1, "page_size": 20}),
+    )
     monkeypatch.setattr(facade, "cancel_run", MagicMock(return_value={"status": "CANCELED"}))
     monkeypatch.setattr(
         facade,
@@ -262,7 +274,12 @@ async def test_management_handlers_delegate_to_authenticated_facade(monkeypatch)
     assert (await agent_automation_app.resume_task(1, "token")).data == {"status": "ACTIVE"}
     assert (await agent_automation_app.run_task_now(1, "token")).data == {"run_id": 2}
     assert (await agent_automation_app.delete_task(1, "token")).data is True
-    assert (await agent_automation_app.list_runs(1, "token")).data == [{"run_id": 2}]
+    assert (await agent_automation_app.list_runs(1, "token")).data == {
+        "items": [{"run_id": 2}],
+        "total": 1,
+        "page": 1,
+        "page_size": 20,
+    }
     assert (await agent_automation_app.cancel_run(2, "token")).data == {"status": "CANCELED"}
     assert (await agent_automation_app.get_conversation_automation(9, "token")).data == {
         "conversation_id": 9
@@ -271,6 +288,7 @@ async def test_management_handlers_delegate_to_authenticated_facade(monkeypatch)
     facade.confirm_proposal.assert_awaited_once()
     facade.patch_task.assert_awaited_once()
     facade.run_task_now.assert_awaited_once_with(1, "tenant", "user")
+    facade.list_runs.assert_called_once_with(1, "tenant", "user", 1, 20)
 
 
 @pytest.mark.parametrize(

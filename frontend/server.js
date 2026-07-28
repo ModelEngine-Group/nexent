@@ -1,23 +1,28 @@
-const { createServer } = require("http");
-const fs = require("node:fs");
-const http = require("http");
-const https = require("https");
-const { parse } = require("url");
-const next = require("next");
-const { createProxyServer } = require("http-proxy");
-const cookie = require("cookie");
-const path = require("path");
-const multiparty = require("multiparty");
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { parse } from "node:url";
+import next from "next";
+import httpProxy from "http-proxy";
+import cookie from "cookie";
+import path from "node:path";
+import multiparty from "multiparty";
+import dotenv from "dotenv";
+import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+
+const { createProxyServer } = httpProxy;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
 // Using optional: true to avoid errors if .env file is not found
-require("dotenv").config({
+dotenv.config({
   path: path.resolve(__dirname, "../deploy/env/.env"),
   override: false, // Don't override existing environment variables (important for Docker)
 });
-
-const { ensureDir, readLocaleConfig, saveLocaleConfig } = require("./build-config");
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({
