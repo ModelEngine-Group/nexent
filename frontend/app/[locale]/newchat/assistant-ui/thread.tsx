@@ -66,6 +66,7 @@ import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
+import { AgentDraftCard } from "../ui/agent-draft-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -606,7 +607,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             }
           }}
         </MessagePrimitive.GroupedParts>
-        {nl2a ? <ToolRecommendations nl2a={nl2a} /> : null}
+        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} />
+        ) : nl2a?.content.subtype === "agent_draft" ? (
+          <AgentDraftCard draft={nl2a.content} />
+        ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}

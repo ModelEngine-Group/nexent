@@ -26,34 +26,18 @@ class InstalledMcpToolRecommendation(BaseModel):
     score: float
 
 
-class GeneratedAgentDraftTool(BaseModel):
-    """Selected tool metadata included in an ephemeral agent draft."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tool_id: int
-    name: str
-    origin_name: str | None = None
-    description: str
-    source: Literal["mcp"] = "mcp"
-    usage: str
-    labels: list[str]
-    inputs: str
-    few_shots_prompt: str | None = None
-
-
 class GeneratedAgentDraft(BaseModel):
     """Complete in-memory agent draft for the agent creation flow."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    subtype: Literal["agent_draft"] = "agent_draft"
     name: str = Field(min_length=1, max_length=100)
     display_name: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1)
     duty_prompt: str = Field(min_length=1)
     constraint_prompt: str = Field(min_length=1)
     few_shots_prompt: str | None = None
-    tools: list[GeneratedAgentDraftTool]
 
 
 class SearchInstalledMcpToolsObservation(BaseModel):
@@ -132,24 +116,9 @@ The current user input has this compact protocol:
 
 When this input is present:
 - Do not search again. Use the preceding conversation to recover the user's requirements.
-- Generate one complete agent draft. An empty `tools` array is valid.
-- Copy every selected tool field, field order, and array order unchanged. Keep every value unchanged except `few_shots_prompt`.
-- Replace each selected tool's null `few_shots_prompt` with a non-empty, tool-specific example based on that tool's `inputs`. Do not add or remove fields.
-- Do not invent an Observation or any tool return value.
-
-Each tool-level `few_shots_prompt` must use this structure:
-### Examples
-**Example 1**
-User Input: A concrete user request
-Assistant:
-Thought: A concrete reason to call this selected tool.
-Code:
-<code>
-result = selected_tool_name(argument="value")
-print(result)
-</code>
-
-The executable call must follow the tool's `inputs`. Use `<code>...</code>` and `print(result)` exactly as shown.""",
+- Use the selected tools as context when defining the agent's responsibilities and constraints.
+- Generate one complete agent draft containing only the fields shown in the Generated Draft Response.
+- Do not invent an Observation or any tool return value.""",
             f"""## Constraints
 - `{tool_name}` is the only available business tool. Do not call any other tool or agent.
 - Build recommendations only from objects returned by `{tool_name}`. Copy every field of each selected object unchanged; only remove or reorder whole objects and update `recommendation_count`.
@@ -158,19 +127,23 @@ The executable call must follow the tool's `inputs`. Use `<code>...</code>` and 
 - Never invent tenant IDs, user IDs, credentials, tool IDs, or search results.
 - Treat a structured error observation as a tool failure and explain it without exposing internal details.""",
             """## Generated Draft Response
-For a tool-selection input, call `final_answer(...)` with only one valid JSON object matching this compact example:
-{"name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"tools":[]}
-
-The user-visible answer must contain only that JSON object: no Markdown fence, explanation, `<nl2a>` wrapper, or other text. When tools are selected, include them in their original order and populate every tool-level `few_shots_prompt` with a non-empty string. Do not dynamically reproduce or discuss a schema.""",
+For a tool-selection input, call `final_answer(...)` with exactly one `<nl2a>...</nl2a>` wrapper followed by a brief completion message:
+<code>
+final_answer(\"\"\"<nl2a>
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null}
+</nl2a>
+The agent draft is ready. Review and confirm it below.\"\"\")
+</code>
+The wrapper must contain one valid JSON object with exactly the fields shown above. Do not include selected tools in the draft payload or expose the full prompts in the completion message.""",
             """## Structured Final Response
 After a successful search, call `final_answer(...)` with exactly one `<nl2a>...</nl2a>` wrapper followed by the user-visible response:
 <code>
 final_answer(\"\"\"<nl2a>
-{"status":"success","recommendation_count":0,"recommendations":[]}
+{"subtype":"local_mcp_recommendation","status":"success","recommendation_count":0,"recommendations":[]}
 </nl2a>
 The installed tool search is complete. No suitable installed tools were found.\"\"\")
 </code>
-Replace the empty recommendation list with the selected recommendation objects. The visible response must mention only the same selected tools. If no tool is suitable, keep the empty success payload. If the search returns an error observation, copy that complete error JSON into the wrapper and explain the failure outside it. For a clarifying question before any search, do not output an `<nl2a>` wrapper. Do not wrap the JSON in Markdown fences or claim that recommended tools were executed.""",
+Replace the empty recommendation list with the selected recommendation objects. The visible response must mention only the same selected tools. If no tool is suitable, keep the empty success payload. If the search returns an error observation, add `subtype` with value `local_mcp_recommendation` to the error object in the wrapper and explain the failure outside it. For a clarifying question before any search, do not output an `<nl2a>` wrapper. Do not wrap the JSON in Markdown fences or claim that recommended tools were executed.""",
         ]
     else:
         sections = [
@@ -225,24 +198,9 @@ print(result)
 
 收到该输入时：
 - 不得再次搜索。结合之前的对话恢复用户需求。
-- 生成一个完整的智能体草稿。允许 `tools` 为空数组。
-- 每个已选工具的字段、字段顺序和数组顺序都必须保持不变；除 `few_shots_prompt` 外，所有值也必须保持不变。
-- 将每个已选工具中为 null 的 `few_shots_prompt` 替换为依据该工具 `inputs` 编写的非空、工具专属示例，不得增加或删除字段。
-- 不得编造 Observation 或任何工具返回值。
-
-每个工具级 `few_shots_prompt` 必须使用以下结构：
-### Examples
-**Example 1**
-User Input: 一个具体的用户请求
-Assistant:
-Thought: 调用这个已选工具的具体理由。
-Code:
-<code>
-result = selected_tool_name(argument="value")
-print(result)
-</code>
-
-可执行调用必须符合工具的 `inputs`，并严格使用 `<code>...</code>` 和 `print(result)`。""",
+- 将已选工具作为定义智能体职责与约束的上下文。
+- 生成一个完整的智能体草稿，且只包含“生成草稿回答”中展示的字段。
+- 不得编造 Observation 或任何工具返回值。""",
             f"""## 约束
 - `{tool_name}` 是唯一可用的业务工具，不得调用其他工具或智能体。
 - 推荐结果只能来自 `{tool_name}` 返回的对象。每个选中对象的全部字段必须原样复制；只能删除或重排完整对象，并同步更新 `recommendation_count`。
@@ -251,19 +209,23 @@ print(result)
 - 不得编造租户 ID、用户 ID、凭据、工具 ID 或搜索结果。
 - 收到结构化错误 Observation 时，将其作为工具失败处理，不得暴露内部错误细节。""",
             """## 生成草稿回答
-收到工具选择输入时，调用 `final_answer(...)`，其内容只能是符合以下紧凑示例的一个合法 JSON 对象：
-{"name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"tools":[]}
-
-用户可见回答只能包含该 JSON 对象：不得包含 Markdown 围栏、解释文字、`<nl2a>` wrapper 或其他文本。存在已选工具时，按原顺序放入 `tools`，并为每个工具填入非空的工具级 `few_shots_prompt`。不得动态复述或讨论 Schema。""",
+收到工具选择输入时，调用 `final_answer(...)`，其中必须先包含且只包含一个 `<nl2a>...</nl2a>` wrapper，随后输出简短的完成说明：
+<code>
+final_answer(\"\"\"<nl2a>
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null}
+</nl2a>
+智能体草稿已经生成，请在下方检查并确认。\"\"\")
+</code>
+wrapper 内必须是一个合法 JSON 对象，且只能包含示例中的字段。不得在草稿 payload 中包含已选工具，也不得在完成说明中展示完整提示词。""",
             """## 结构化最终回答
 搜索成功后，调用 `final_answer(...)`，其中必须先包含且只包含一个 `<nl2a>...</nl2a>` wrapper，随后再输出用户可见说明：
 <code>
 final_answer(\"\"\"<nl2a>
-{"status":"success","recommendation_count":0,"recommendations":[]}
+{"subtype":"local_mcp_recommendation","status":"success","recommendation_count":0,"recommendations":[]}
 </nl2a>
 已完成已安装工具搜索，没有找到合适的已安装工具。\"\"\")
 </code>
-有推荐工具时，用选中的完整推荐对象替换空数组。可见说明只能提及同一组选中工具。没有合适工具时保留空的 success 结果。搜索返回错误 Observation 时，将完整错误 JSON 原样放入 wrapper，并在 wrapper 外说明搜索失败。搜索前需要澄清需求时，不得输出 `<nl2a>` wrapper。不得使用 Markdown 围栏包裹 JSON，也不得声称已经执行推荐工具。""",
+有推荐工具时，用选中的完整推荐对象替换空数组。可见说明只能提及同一组选中工具。没有合适工具时保留空的 success 结果。搜索返回错误 Observation 时，在错误对象中增加值为 `local_mcp_recommendation` 的 `subtype` 后放入 wrapper，并在 wrapper 外说明搜索失败。搜索前需要澄清需求时，不得输出 `<nl2a>` wrapper。不得使用 Markdown 围栏包裹 JSON，也不得声称已经执行推荐工具。""",
         ]
 
     return "\n\n".join(sections)

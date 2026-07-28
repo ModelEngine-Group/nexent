@@ -41,7 +41,7 @@ export interface Nl2aToolRecommendation {
   score: number;
 }
 
-export interface GeneratedAgentDraftTool {
+export interface Nl2AgentSelectedTool {
   tool_id: number;
   name: string;
   origin_name?: string | null;
@@ -50,25 +50,39 @@ export interface GeneratedAgentDraftTool {
   usage: string;
   labels: string[];
   inputs: string;
-  few_shots_prompt: string | null;
 }
 
 export interface Nl2AgentToolSelection {
   type: "nl2agent_tool_selection";
-  tools: GeneratedAgentDraftTool[];
+  tools: Nl2AgentSelectedTool[];
 }
 
-export type Nl2aPayload =
+export type Nl2aLocalMcpRecommendationPayload =
   | {
+      subtype: "local_mcp_recommendation";
       status: "success";
       recommendation_count: number;
       recommendations: Nl2aToolRecommendation[];
     }
   | {
+      subtype: "local_mcp_recommendation";
       status: "error";
       code: "invalid_keywords" | "tool_search_failed";
       retryable: true;
     };
+
+export interface Nl2aAgentDraftPayload {
+  subtype: "agent_draft";
+  name: string;
+  display_name: string;
+  description: string;
+  duty_prompt: string;
+  constraint_prompt: string;
+  few_shots_prompt: string | null;
+}
+
+export type Nl2aPayload =
+  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";

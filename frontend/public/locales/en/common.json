@@ -773,6 +773,10 @@
   "nl2agent.toolRecommendations.confirmed": "Selection confirmed",
   "nl2agent.toolRecommendations.confirmedSummary": "Confirmed {{count}} tool",
   "nl2agent.toolRecommendations.confirmedSummary_other": "Confirmed {{count}} tools",
+  "nl2agent.agentDraft.title": "Agent draft",
+  "nl2agent.agentDraft.ready": "The agent configuration is ready",
+  "nl2agent.agentDraft.apply": "Apply to draft",
+  "nl2agent.agentDraft.applied": "Applied",
   "nl2agent.assistant.description": "Describe the agent you want to create. I will search installed tools and help generate its configuration.",
 
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",

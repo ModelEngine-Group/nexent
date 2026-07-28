@@ -2,7 +2,6 @@ import pytest
 
 from agents.nl2agent_agent import (
     GeneratedAgentDraft,
-    GeneratedAgentDraftTool,
     InstalledMcpToolRecommendation,
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
@@ -57,10 +56,6 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "keywords" in prompt
     assert "nl2agent_tool_selection" in prompt
     assert "few_shots_prompt" in prompt
-    assert "### Examples" in prompt
-    assert "**Example 1**" in prompt
-    assert "User Input:" in prompt
-    assert "Assistant:" in prompt
     assert "Thought:" in prompt
     assert "Code:" in prompt
     assert "Do not search again" in prompt or "不得再次搜索" in prompt
@@ -75,11 +70,13 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "</nl2a>" in prompt
     assert 'final_answer("""<nl2a>' in prompt
     assert "recommendation_count" in prompt
+    assert '"subtype":"local_mcp_recommendation"' in prompt
+    assert '"subtype":"agent_draft"' in prompt
     assert 'result = runtime_search(keywords=[' in prompt
     assert prompt.count("print(result)") >= 3
 
 
-def test_nl2agent_models_preserve_tool_inputs_and_allow_empty_draft_tools():
+def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
     recommendation = InstalledMcpToolRecommendation(
         tool_id=10,
         name="weather_forecast",
@@ -90,23 +87,24 @@ def test_nl2agent_models_preserve_tool_inputs_and_allow_empty_draft_tools():
         inputs='{"city":"string"}',
         score=0.9,
     )
-    draft_tool = GeneratedAgentDraftTool(
-        **recommendation.model_dump(exclude={"score"}),
-        few_shots_prompt=None,
-    )
     draft = GeneratedAgentDraft(
         name="weather_assistant",
         display_name="Weather Assistant",
         description="Weather help",
         duty_prompt="Answer weather questions.",
         constraint_prompt="Use only selected tools.",
-        tools=[],
     )
 
     assert recommendation.inputs == '{"city":"string"}'
-    assert draft_tool.inputs == '{"city":"string"}'
-    assert draft_tool.few_shots_prompt is None
-    assert draft.tools == []
+    assert draft.model_dump() == {
+        "subtype": "agent_draft",
+        "name": "weather_assistant",
+        "display_name": "Weather Assistant",
+        "description": "Weather help",
+        "duty_prompt": "Answer weather questions.",
+        "constraint_prompt": "Use only selected tools.",
+        "few_shots_prompt": None,
+    }
 
 
 def test_create_nl2agent_agent_config_has_only_runtime_tool():

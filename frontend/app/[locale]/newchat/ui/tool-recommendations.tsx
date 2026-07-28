@@ -14,10 +14,12 @@ import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import type { Tool } from "@/types/agentConfig";
 import type {
-  GeneratedAgentDraftTool,
   Nl2AgentToolSelection,
-  Nl2aMessage,
+  Nl2AgentSelectedTool,
+  Nl2aLocalMcpRecommendationPayload,
   Nl2aToolRecommendation,
 } from "../adapter/remote-chat-model-adapter";
 
@@ -65,11 +67,14 @@ const ToolRecommendationsError: FC = () => {
   );
 };
 
-export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
+export const ToolRecommendations: FC<{
+  payload: Nl2aLocalMcpRecommendationPayload;
+}> = ({ payload }) => {
   const { t } = useTranslation("common");
   const aui = useAui();
+  const updateTools = useAgentConfigStore((state) => state.updateTools);
   const checkboxIdPrefix = useId();
-  const content = nl2a.content;
+  const content = payload;
   const isSuccess = content.status === "success";
   const recommendations: Nl2aToolRecommendation[] =
     content.status === "success" ? content.recommendations : [];
@@ -97,7 +102,7 @@ export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
     confirmationStarted.current = true;
     setIsConfirmed(true);
 
-    const tools: GeneratedAgentDraftTool[] = recommendations
+    const tools: Nl2AgentSelectedTool[] = recommendations
       .filter((tool) => selectedToolIds.has(tool.tool_id))
       .map((tool) => ({
         tool_id: tool.tool_id,
@@ -108,13 +113,24 @@ export const ToolRecommendations: FC<{ nl2a: Nl2aMessage }> = ({ nl2a }) => {
         usage: tool.usage,
         labels: tool.labels,
         inputs: tool.inputs,
-        few_shots_prompt: null,
       }));
+    const agentTools: Tool[] = tools.map((tool) => ({
+      id: String(tool.tool_id),
+      name: tool.name,
+      origin_name: tool.origin_name ?? undefined,
+      description: tool.description,
+      source: tool.source,
+      initParams: [],
+      usage: tool.usage,
+      inputs: tool.inputs,
+      labels: tool.labels,
+    }));
     const selection: Nl2AgentToolSelection = {
       type: "nl2agent_tool_selection",
       tools,
     };
 
+    updateTools(agentTools);
     aui.thread().append({
       role: "user",
       content: [
