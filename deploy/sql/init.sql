@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS "conversation_message_unit_t" (
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "updated_by" varchar(100) COLLATE "pg_catalog"."default",
   "created_by" varchar(100) COLLATE "pg_catalog"."default",
-  "step_index" int4,
   CONSTRAINT "conversation_message_unit_t_pk" PRIMARY KEY ("unit_id")
 );
 ALTER TABLE "conversation_message_unit_t" OWNER TO "root";
@@ -59,7 +58,6 @@ COMMENT ON COLUMN "conversation_message_unit_t"."create_time" IS 'Creation time,
 COMMENT ON COLUMN "conversation_message_unit_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "conversation_message_unit_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "conversation_message_unit_t"."created_by" IS 'Creator ID, audit field';
-COMMENT ON COLUMN "conversation_message_unit_t"."step_index" IS 'ReAct step sequence number within this message. Increments on step_count chunks';
 COMMENT ON TABLE "conversation_message_unit_t" IS 'Carries agent output content in each message';
 
 CREATE TABLE IF NOT EXISTS "conversation_record_t" (
@@ -298,7 +296,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
-    is_main_agent BOOLEAN NOT NULL DEFAULT TRUE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
     context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -336,7 +333,6 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.max_steps IS 'Maximum number of steps
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.parent_agent_id IS 'Parent Agent ID';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.tenant_id IS 'Belonging tenant';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enabled IS 'Enable flag';
-COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_main_agent IS 'Whether this agent is a main agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.provide_run_summary IS 'Whether to provide the running summary to the manager agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.update_time IS 'Update time';

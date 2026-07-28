@@ -1,0 +1,503 @@
+"""Unit tests for ``aidp_permission_service``.
+
+Exercises the v7.1 permission matrix by stubbing the local DB helpers
+(``aidp_permission_db``, ``user_tenant_db``, ``group_db``). This lets us
+verify the resolution order without standing up a real database.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import types
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
+BACKEND_ROOT = str(Path(PROJECT_ROOT) / "backend")
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
+
+
+# --- Stub nexent SDK and backend.storage.client ----------------------------
+
+
+if "nexent" not in sys.modules:
+    nexent_pkg = types.ModuleType("nexent")
+    nexent_pkg.__path__ = []
+    sys.modules["nexent"] = nexent_pkg
+    nexent_utils_pkg = types.ModuleType("nexent.utils")
+    nexent_utils_pkg.__path__ = []
+    sys.modules["nexent.utils"] = nexent_utils_pkg
+    http_client_mod = types.ModuleType("nexent.utils.http_client_manager")
+    http_client_mod.http_client_manager = MagicMock()
+    sys.modules["nexent.utils.http_client_manager"] = http_client_mod
+    nexent_storage_pkg = types.ModuleType("nexent.storage")
+    nexent_storage_pkg.__path__ = []
+    sys.modules["nexent.storage"] = nexent_storage_pkg
+    storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")
+    storage_factory_mod.create_storage_client_from_config = MagicMock()
+
+    class _MinIOStorageConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    storage_factory_mod.MinIOStorageConfig = _MinIOStorageConfig
+    sys.modules["nexent.storage.storage_client_factory"] = storage_factory_mod
+
+# Force fresh import of the service under test so per-test patching works.
+sys.modules.pop("ext_components.aidp.services.aidp_permission_service", None)
+sys.modules.pop("ext_components.aidp.database.aidp_permission_db", None)
+
+from ext_components.aidp.services import aidp_permission_service as svc  # noqa: E402
+from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
+    AidpKbNotFoundError,
+    AidpKbPermissionDeniedError,
+    AidpGroupValidationError,
+)
+from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
+
+
+# --- Helpers --------------------------------------------------------------
+
+
+def _record(**overrides) -> dict:
+    base = {
+        "kb_id": "kb-1",
+        "tenant_id": "tenant-a",
+        "owner_user_id": "owner",
+        "ingroup_permission": "READ_ONLY",
+        "group_ids": [1, 2],
+        "resource_status": "ACTIVE",
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.fixture
+def patched(monkeypatch):
+    """Patch every external collaborator on the permission service."""
+    get_role = MagicMock(return_value="USER")
+    get_groups = MagicMock(return_value=[])
+    get_perm = MagicMock(return_value=None)
+
+    from unittest.mock import patch
+
+    with patch.object(svc, "_get_user_role", get_role), \
+         patch.object(svc, "_get_user_groups", get_groups), \
+         patch.object(svc.aidp_permission_db, "get_permission_by_kb_id", get_perm):
+        yield {
+            "get_role": get_role,
+            "get_groups": get_groups,
+            "get_perm": get_perm,
+        }
+
+
+# --- _resolve_permission ---------------------------------------------------
+
+
+class TestResolvePermission:
+    def test_management_role_bypasses_group_check(self, patched):
+        patched["get_role"].return_value = "ADMIN"
+        decision = svc._resolve_permission(_record(ingroup_permission="PRIVATE"), "u", "t")
+        assert decision.permission == "EDIT"
+        assert decision.is_management_role is True
+
+    def test_su_role_is_management(self, patched):
+        patched["get_role"].return_value = "SU"
+        decision = svc._resolve_permission(_record(), "u", "t")
+        assert decision.permission == "EDIT"
+        assert decision.is_management_role is True
+
+    def test_asset_owner_is_management(self, patched):
+        patched["get_role"].return_value = "ASSET_OWNER"
+        decision = svc._resolve_permission(_record(ingroup_permission="PRIVATE"), "u", "t")
+        assert decision.permission == "EDIT"
+        assert decision.is_management_role is True
+
+    def test_creator_is_edit(self, patched):
+        record = _record(owner_user_id="creator")
+        decision = svc._resolve_permission(record, user_id="creator", tenant_id="t")
+        assert decision.permission == "EDIT"
+        assert decision.is_management_role is False
+        patched["get_role"].assert_called_once()
+
+    def test_private_blocks_non_creator(self, patched):
+        decision = svc._resolve_permission(_record(ingroup_permission="PRIVATE"), "u", "t")
+        assert decision.permission is None
+
+    def test_empty_groups_blocks_user(self, patched):
+        decision = svc._resolve_permission(
+            _record(ingroup_permission="READ_ONLY", group_ids=[]), "u", "t",
+        )
+        assert decision.permission is None
+
+    def test_group_intersection_grants_read_only(self, patched):
+        decision = svc._resolve_permission(
+            _record(ingroup_permission="READ_ONLY", group_ids=[1, 2, 3]),
+            "u", "t",
+            user_groups=[2],
+        )
+        assert decision.permission == "READ_ONLY"
+        assert decision.matched_group_ids == (2,)
+
+    def test_group_intersection_grants_edit(self, patched):
+        decision = svc._resolve_permission(
+            _record(ingroup_permission="EDIT", group_ids=[1, 2]),
+            "u", "t",
+            user_groups=[1, 2],
+        )
+        assert decision.permission == "EDIT"
+        assert sorted(decision.matched_group_ids) == [1, 2]
+
+    def test_no_intersection_blocks_user(self, patched):
+        decision = svc._resolve_permission(
+            _record(group_ids=[1, 2]),
+            "u", "t",
+            user_groups=[5],
+        )
+        assert decision.permission is None
+        assert decision.matched_group_ids == ()
+
+    def test_missing_record_raises_not_found(self, patched):
+        with pytest.raises(AidpKbNotFoundError):
+            svc._resolve_permission(record={}, user_id="u", tenant_id="t")
+
+
+# --- require_permission ---------------------------------------------------
+
+
+class TestRequirePermissionRewritten:
+    def test_edit_allowed_for_management_role(self):
+        record = {"kb_id": "kb-1", "owner_user_id": "other",
+                  "ingroup_permission": "READ_ONLY", "group_ids": [1]}
+        with patch.object(svc, "_get_permission_record",
+                          return_value=record), \
+             patch.object(svc, "_get_user_role", return_value="ADMIN"):
+            decision = svc.require_permission("kb-1", "u", "t", required="EDIT")
+        assert decision.permission == "EDIT"
+
+    def test_edit_denied_for_read_only_user(self):
+        record = {"kb_id": "kb-1", "owner_user_id": "other",
+                  "ingroup_permission": "READ_ONLY", "group_ids": [1]}
+        with patch.object(svc, "_get_permission_record",
+                          return_value=record), \
+             patch.object(svc, "_get_user_role", return_value="USER"), \
+             patch.object(svc, "_get_user_groups", return_value=[1]):
+            with pytest.raises(AidpKbPermissionDeniedError):
+                svc.require_permission("kb-1", "u", "t", required="EDIT")
+
+    def test_read_allowed_when_group_intersects(self):
+        record = {"kb_id": "kb-1", "owner_user_id": "other",
+                  "ingroup_permission": "READ_ONLY", "group_ids": [2]}
+        with patch.object(svc, "_get_permission_record",
+                          return_value=record), \
+             patch.object(svc, "_get_user_role", return_value="USER"), \
+             patch.object(svc, "_get_user_groups", return_value=[2]):
+            decision = svc.require_permission("kb-1", "u", "t", required="READ")
+        assert decision.permission == "READ_ONLY"
+
+    def test_missing_record_raises_not_found(self):
+        with patch.object(svc, "_get_permission_record",
+                          return_value=None):
+            with pytest.raises(AidpKbNotFoundError):
+                svc.require_permission("kb-1", "u", "t", required="READ")
+
+
+
+# --- _validate_group_ids_strict --------------------------------------------
+
+
+class TestValidateGroupIdsStrict:
+    def test_returns_input_when_all_valid(self, monkeypatch):
+        monkeypatch.setattr(
+            svc.group_db_module, "filter_tenant_group_ids",
+            lambda ids, tenant: list(ids),
+        )
+        result = svc._validate_group_ids_strict([1, 2], "tenant")
+        assert result == [1, 2]
+
+    def test_raises_on_invalid_id(self, monkeypatch):
+        monkeypatch.setattr(
+            svc.group_db_module, "filter_tenant_group_ids",
+            lambda ids, tenant: [g for g in ids if g != 999],
+        )
+        with pytest.raises(AidpGroupValidationError) as exc:
+            svc._validate_group_ids_strict([1, 999], "tenant")
+        assert exc.value.invalid_ids == [999]
+
+    def test_empty_returns_empty(self, monkeypatch):
+        assert svc._validate_group_ids_strict([], "tenant") == []
+
+
+# --- Filter / whitelist helpers -------------------------------------------
+
+
+class TestFilterAndWhitelist:
+    def test_filter_accessible_kds_drops_unknown_and_denied(self, monkeypatch):
+        rows = {
+            "allowed": _record(kb_id="allowed", ingroup_permission="EDIT"),
+            "readonly": _record(kb_id="readonly", ingroup_permission="READ_ONLY"),
+            "private": _record(kb_id="private", ingroup_permission="PRIVATE"),
+        }
+
+        def fake_get(*, kb_id, tenant_id):
+            if kb_id == "other-tenant":
+                return None
+            return rows.get(kb_id)
+
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id", fake_get)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.filter_accessible_kds(
+            ["allowed", "readonly", "private", "other-tenant"], "u", "tenant",
+        )
+        # other-tenant is missing (treated as 404), private has no creator hit.
+        assert result == ["allowed", "readonly"]
+
+    def test_filter_accessible_kds_keeps_order(self, monkeypatch):
+        def fake_get(*, kb_id, tenant_id):
+            return _record(kb_id=kb_id, ingroup_permission="EDIT")
+
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id", fake_get)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.filter_accessible_kds(["z", "a", "m"], "u", "t")
+        assert result == ["z", "a", "m"]
+
+    def test_get_allowed_kds_list_returns_readable_kbs(self, monkeypatch):
+        rows = [
+            _record(kb_id="edit-1", ingroup_permission="EDIT"),
+            _record(kb_id="read-1", ingroup_permission="READ_ONLY"),
+            _record(kb_id="priv-1", ingroup_permission="PRIVATE"),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_permissions_by_tenant",
+                            lambda tenant_id, page=1, page_size=200: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_allowed_kds_list("u", "t")
+        assert "edit-1" in result
+        assert "read-1" in result
+        assert "priv-1" not in result
+
+    def test_get_allowed_kds_list_management_sees_everything(self, monkeypatch):
+        rows = [
+            _record(kb_id="p", ingroup_permission="PRIVATE"),
+            _record(kb_id="e", ingroup_permission="EDIT"),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_permissions_by_tenant",
+                            lambda tenant_id, page=1, page_size=200: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
+
+        result = svc.get_allowed_kds_list("u", "t")
+        assert sorted(result) == ["e", "p"]
+
+
+# --- get_accessible_kbs ---------------------------------------------------
+
+
+class TestGetAccessibleKbs:
+    def test_marks_permission_per_row(self, monkeypatch):
+        rows = [
+            _record(kb_id="creator-kb", owner_user_id="u", ingroup_permission="PRIVATE"),
+            _record(kb_id="group-kb", owner_user_id="other", ingroup_permission="READ_ONLY"),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        out = svc.get_accessible_kbs("u", "t")
+        # Both rows are accessible:
+        #   - creator-kb: owner_user_id == user_id -> EDIT (PRIVATE ignored for owner)
+        #   - group-kb:   ingroup_permission=READ_ONLY + no group intersection (user_groups=[1],
+        #                 record group_ids default is [1,2]) -> READ_ONLY since 1 is in [1,2]
+        assert len(out) == 2
+        assert out[0]["permission"] == "EDIT"        # creator -> EDIT regardless of PRIVATE
+        assert out[1]["permission"] == "READ_ONLY"   # group intersection grants READ_ONLY
+
+    def test_filters_out_inaccessible_rows(self, monkeypatch):
+        # Regression guard: rows where the user has no access (PRIVATE / not-in-group)
+        # must be dropped, not leaked with ``permission=None``.
+        rows = [
+            _record(kb_id="editable",   owner_user_id="other", ingroup_permission="EDIT",      group_ids=[1]),
+            _record(kb_id="private-kb", owner_user_id="other", ingroup_permission="PRIVATE",   group_ids=[1]),
+            _record(kb_id="no-access",  owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[99]),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        out = svc.get_accessible_kbs("u", "t")
+        assert [r["kb_id"] for r in out] == ["editable"]
+
+    def test_count_matches_visible_rows(self, monkeypatch):
+        rows = [
+            _record(kb_id="public",  owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[1]),
+            _record(kb_id="private", owner_user_id="other", ingroup_permission="PRIVATE",   group_ids=[1]),
+            _record(kb_id="no-access", owner_user_id="other", ingroup_permission="READ_ONLY", group_ids=[99]),
+        ]
+        monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
+                            lambda tenant_id: rows)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        assert svc.count_accessible_kbs("u", "t") == 1
+
+
+# ---------------------------------------------------------------------------
+# _parse_group_ids gap coverage (lines 100-108)
+# ---------------------------------------------------------------------------
+
+
+class TestParseGroupIds:
+    def test_none_returns_empty(self):
+        assert svc._parse_group_ids(None) == []
+
+    def test_empty_string_returns_empty(self):
+        assert svc._parse_group_ids("") == []
+
+    def test_comma_separated_string(self):
+        assert svc._parse_group_ids("1, 2, 3") == [1, 2, 3]
+
+    def test_list_of_ints(self):
+        assert svc._parse_group_ids([10, 20]) == [10, 20]
+
+    def test_generator_yields_list(self):
+        gen = (x for x in [5, 6])
+        assert svc._parse_group_ids(gen) == [5, 6]
+
+    def test_unsupported_type_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unsupported group_ids payload"):
+            svc._parse_group_ids(12345)
+
+
+# ---------------------------------------------------------------------------
+# Direct DB passthrough helpers (lines 241-254)
+# ---------------------------------------------------------------------------
+
+
+class TestDbPassthroughHelpers:
+    def test_create_permission_delegates_to_db(self, monkeypatch):
+        mock_create = MagicMock(return_value=42)
+        monkeypatch.setattr(svc.aidp_permission_db, "create_permission", mock_create)
+        result = svc.create_permission(kb_id="kb-1", owner_user_id="u", tenant_id="t")
+        assert result == 42
+        mock_create.assert_called_once()
+
+    def test_update_permission_delegates_to_db(self, monkeypatch):
+        mock_update = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "update_permission", mock_update)
+        result = svc.update_permission(kb_id="kb-1", tenant_id="t", ingroup_permission="EDIT")
+        assert result is True
+        mock_update.assert_called_once()
+
+    def test_soft_delete_permission_delegates_to_db(self, monkeypatch):
+        mock_delete = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "soft_delete_permission", mock_delete)
+        result = svc.soft_delete_permission(kb_id="kb-1", tenant_id="t")
+        assert result is True
+        mock_delete.assert_called_once()
+
+    def test_update_resource_status_delegates_to_db(self, monkeypatch):
+        mock_status = MagicMock(return_value=True)
+        monkeypatch.setattr(svc.aidp_permission_db, "update_resource_status", mock_status)
+        result = svc.update_resource_status(kb_id="kb-1", tenant_id="t", status="ACTIVE")
+        assert result is True
+        mock_status.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _get_user_role / _get_user_groups direct calls (lines 129, 133)
+# ---------------------------------------------------------------------------
+
+
+class TestUserLookupHelpers:
+    def test_get_user_role_calls_db(self, monkeypatch):
+        mock_role = MagicMock(return_value="ADMIN")
+        monkeypatch.setattr(svc.user_tenant_db_module, "get_user_role_by_tenant", mock_role)
+        result = svc._get_user_role("user-1", "tenant-a")
+        assert result == "ADMIN"
+        mock_role.assert_called_once_with("user-1", "tenant-a")
+
+    def test_get_user_groups_calls_db(self, monkeypatch):
+        mock_groups = MagicMock(return_value=[1, 2, 3])
+        monkeypatch.setattr(svc.group_db_module, "query_group_ids_by_user_in_tenant", mock_groups)
+        result = svc._get_user_groups("user-1", "tenant-a")
+        assert result == [1, 2, 3]
+        mock_groups.assert_called_once_with("user-1", "tenant-a")
+
+
+# ---------------------------------------------------------------------------
+# _decision_meets ValueError (line 233)
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionMeets:
+    def test_unsupported_required_raises_value_error(self):
+        decision = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission="EDIT", is_management_role=False, matched_group_ids=(),
+        )
+        with pytest.raises(ValueError, match="Unsupported required permission"):
+            svc._decision_meets(decision, required="INVALID")
+
+    def test_read_requires_read_only_or_higher(self):
+        decision_ro = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission="READ_ONLY", is_management_role=False, matched_group_ids=(),
+        )
+        decision_none = svc.AidpPermissionDecision(
+            kb_id="kb-1", tenant_id="t", user_id="u",
+            permission=None, is_management_role=False, matched_group_ids=(),
+        )
+        assert svc._decision_meets(decision_ro, "READ") is True
+        assert svc._decision_meets(decision_none, "READ") is False
+
+
+# ---------------------------------------------------------------------------
+# filter_accessible_kds gap coverage (lines 337, 348-349)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterAccessibleKdsGaps:
+    def test_empty_kds_ids_returns_empty(self, monkeypatch):
+        # Early exit: empty kds_ids
+        assert svc.filter_accessible_kds([], "u", "t") == []
+
+    def test_management_role_allows_all_records(self, monkeypatch):
+        record = {"kb_id": "kb-priv", "owner_user_id": "other",
+                  "ingroup_permission": "PRIVATE", "group_ids": [99]}
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id",
+                            lambda *, kb_id, tenant_id: record)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
+        result = svc.filter_accessible_kds(["kb-priv"], "admin-user", "t")
+        assert result == ["kb-priv"]
+
+    def test_owner_allows_own_record(self, monkeypatch):
+        record = {"kb_id": "kb-own", "owner_user_id": "owner-u",
+                  "ingroup_permission": "PRIVATE", "group_ids": [99]}
+        monkeypatch.setattr(svc.aidp_permission_db, "get_permission_by_kb_id",
+                            lambda *, kb_id, tenant_id: record)
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+        result = svc.filter_accessible_kds(["kb-own"], "owner-u", "t")
+        assert result == ["kb-own"]
+
+
+# ---------------------------------------------------------------------------
+# require_permission ValueError for unsupported required (line 395)
+# ---------------------------------------------------------------------------
+
+
+class TestRequirePermissionInvalidRequired:
+    def test_unsupported_required_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unsupported required permission"):
+            svc.require_permission("kb-1", "u", "t", required="INVALID")

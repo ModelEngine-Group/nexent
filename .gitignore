@@ -76,6 +76,7 @@ sdk/benchmark/.env
 .venv
 
 .pytest-tmp
+test/ext_components/aidp/mock_servers/_state/
 doc/mermaid
 _doc/
 
@@ -84,7 +85,6 @@ _doc/
 /deploy/env/.env.bak
 
 agent_repository_frontend
-
+.omo/
 .tokensave
-
 .playwright-mcp/
