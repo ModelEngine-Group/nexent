@@ -5,6 +5,7 @@ import { Form, Input, Button, message, Card, UploadFile, Upload, Radio, Row, Col
 import { useTranslation } from "react-i18next";
 import { useGlobalConfigStore, useGlobalConfigStoreAllLanguage } from "@/stores/global";
 import { API_ENDPOINTS, ApiError } from "@/services/api";
+import { publicAsset } from "@/lib/publicAsset";
 
 export default function ProjectConfigTab() {
   const { t } = useTranslation("common");
@@ -91,7 +92,7 @@ export default function ProjectConfigTab() {
       message.success(t('project.config.update.success'));
     } catch (error) {
       console.log(`Failed to update:`, error);
-      message.success(t('errorCode.990202'));
+      message.error(t('errorCode.990202'));
     } finally {
       setLoading(false);
     }
@@ -133,9 +134,7 @@ export default function ProjectConfigTab() {
  
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Card
-        title={t("project.config")}
-      >
+      <Card>
         <Form
           form={form}
           layout="vertical"
@@ -191,7 +190,7 @@ export default function ProjectConfigTab() {
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
               <span>{t('project.config.page.simple.log')}</span>
-              <img className="h-7" src="/modelengine-logo.png" alt={"old logo2"}></img>
+              <img className="h-7" src={publicAsset("/modelengine-logo.png")} alt={"old logo2"}></img>
               { previewUrl2 && <img className="h-7" src={previewUrl2} alt={"new logo2"}></img>}
             </div>
             <Upload

@@ -20,6 +20,7 @@ import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications 
 import type { MonitoringStatus } from "@/types/monitoring";
 import { USER_ROLES } from "@/const/auth";
 import { useGlobalConfigStore } from "@/stores/global";
+import { publicAsset } from "@/lib/publicAsset";
 
 const { Header } = Layout;
 
@@ -87,7 +88,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
         style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
       >
         <Flex align="center" gap={8}>
-          <img src="/modelengine-logo.png" alt="logo" className="h-7" />
+          <img src={publicAsset("/modelengine-logo.png")} alt="logo" className="h-7" />
           <span
             className="text-blue-600 dark:text-blue-500 font-bold"
             style={{
