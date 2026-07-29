@@ -1,4 +1,4 @@
-const configuredBasePath = "/";
+const configuredBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/";
 
 function normalizeBasePath(value) {
   const trimmed = value.trim();

@@ -95,6 +95,13 @@ docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images
 # 🌐 构建前端镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
+# 在自定义子路径部署前端（请按需替换 /your-subpath）
+# CONFIGURED_BASE_PATH 必须为 / 或以 / 开头且不含结尾斜杠的路径
+docker build --progress=plain --build-arg CONFIGURED_BASE_PATH=/your-subpath -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
+
+# Windows Git Bash 会转换以 / 开头的参数；为保留自定义子路径，禁用该转换
+MSYS_NO_PATHCONV=1 docker build --progress=plain --build-arg CONFIGURED_BASE_PATH=/your-subpath -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
+
 # 📚 构建文档镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 

@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH
+ARG CONFIGURED_BASE_PATH=/
+
+ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
 
 # Build Next.js application
 WORKDIR /opt/frontend
@@ -51,6 +54,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
 FROM node:20-alpine
 ARG APK_MIRROR
 ARG TARGETARCH
+ARG CONFIGURED_BASE_PATH=/
 LABEL authors="nexent"
 
 # Configure Alpine mirrors if specified
@@ -74,6 +78,7 @@ COPY --from=builder /opt/frontend-dist .
 
 ENV NODE_ENV=production
 ENV HOSTNAME=localhost
+ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
 
 # Expose the service port
 EXPOSE 3000
