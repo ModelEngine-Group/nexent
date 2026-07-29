@@ -79,6 +79,8 @@ export interface Nl2aAgentDraftPayload {
   duty_prompt: string;
   constraint_prompt: string;
   few_shots_prompt: string | null;
+  greeting_message: string;
+  example_questions: string[];
 }
 
 export type Nl2aPayload =

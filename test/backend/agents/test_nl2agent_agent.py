@@ -52,6 +52,8 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "keywords" in prompt
     assert "nl2agent_tool_selection" in prompt
     assert "few_shots_prompt" in prompt
+    assert "greeting_message" in prompt
+    assert "example_questions" in prompt
     assert "Think:" in prompt or "思考：" in prompt
     assert "Code:" in prompt or "代码：" in prompt
     assert "JSON object" in prompt or "JSON 对象" in prompt
@@ -88,6 +90,12 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
         description="Weather help",
         duty_prompt="Answer weather questions.",
         constraint_prompt="Use only selected tools.",
+        greeting_message="Hello! I can help with weather questions.",
+        example_questions=[
+            "Will it rain tomorrow?",
+            "What should I wear today?",
+            "Is it a good day for hiking?",
+        ],
     )
 
     assert recommendation.inputs == {"city": "string"}
@@ -99,6 +107,12 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
         "duty_prompt": "Answer weather questions.",
         "constraint_prompt": "Use only selected tools.",
         "few_shots_prompt": None,
+        "greeting_message": "Hello! I can help with weather questions.",
+        "example_questions": [
+            "Will it rain tomorrow?",
+            "What should I wear today?",
+            "Is it a good day for hiking?",
+        ],
     }
 
 

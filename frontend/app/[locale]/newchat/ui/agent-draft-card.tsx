@@ -27,6 +27,8 @@ export const AgentDraftCard: FC<{ draft: Nl2aAgentDraftPayload }> = ({
       duty_prompt: draft.duty_prompt,
       constraint_prompt: draft.constraint_prompt,
       few_shots_prompt: draft.few_shots_prompt ?? "",
+      greeting_message: draft.greeting_message,
+      example_questions: draft.example_questions,
     });
     setIsApplied(true);
   };

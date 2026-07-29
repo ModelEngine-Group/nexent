@@ -38,6 +38,8 @@ class GeneratedAgentDraft(BaseModel):
     duty_prompt: str = Field(min_length=1)
     constraint_prompt: str = Field(min_length=1)
     few_shots_prompt: str | None = None
+    greeting_message: str = Field(min_length=1)
+    example_questions: list[str] = Field(min_length=1, max_length=6)
 
 
 class SearchInstalledMcpToolsObservation(BaseModel):
@@ -97,11 +99,11 @@ After thinking, return the final response directly without a code action and sto
 
 For a selection input, return exactly one draft object inside the wrapper:
 <nl2a>
-{"subtype":"agent_draft","name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null}
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"greeting_message":"Hello! I'm your weather assistant. I can check forecasts and help you plan around the conditions.","example_questions":["Will it rain in Shanghai tomorrow?","What should I wear in Beijing this weekend?","Is the weather suitable for hiking in Hangzhou today?"]}
 </nl2a>
 The agent draft is ready.
 
-The draft object uses exactly the fields shown. Selected tools inform the prompts but are not fields in this payload.
+The draft object uses exactly the fields shown. Write a concise greeting that introduces the agent's purpose and exactly three distinct example questions grounded in the user's requirements. Selected tools inform the prompts but are not fields in this payload.
 
 After a search, return the filtered observation inside the wrapper:
 <nl2a>
@@ -143,11 +145,11 @@ print(result)
 
 收到工具选择输入时，在 wrapper 中返回且只返回一个草稿对象：
 <nl2a>
-{"subtype":"agent_draft","name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null}
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"greeting_message":"你好！我是天气助手，可以查询天气预报并根据天气情况提供出行建议。","example_questions":["上海明天会下雨吗？","北京这个周末适合穿什么？","杭州今天的天气适合徒步吗？"]}
 </nl2a>
 智能体草稿已经生成。
 
-草稿对象只使用示例中的字段。已选工具用于生成提示词，但不是该 payload 的字段。
+草稿对象只使用示例中的字段。生成一条简洁的问候语，说明智能体用途；再根据用户需求生成三个不同且具体的示例问题。已选工具用于生成提示词，但不是该 payload 的字段。
 
 搜索完成后，将筛选后的 Observation 放入 wrapper：
 <nl2a>
