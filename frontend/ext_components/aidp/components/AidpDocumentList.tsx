@@ -7,6 +7,8 @@ import { UploadOutlined, InboxOutlined, ReloadOutlined } from "@ant-design/icons
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import { partitionAidpFiles } from "@/services/uploadService";
 
 const { Dragger } = Upload;
 
@@ -41,10 +43,14 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
 }) => {
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
-  // Antd Dragger fires beforeUpload once per file in a multi-select batch,
-  // each time passing the SAME fileList ref. Use it as a dedup key so we
-  // only kick off one upload per user action.
-  const batchRef = useRef<unknown>(null);
+  // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
+  // The `fileList` array may-or-may-not be the same reference across the N
+  // calls (behavior differs between <Upload> and <Dragger> and antd versions),
+  // so we cannot rely on reference-equality for dedup. Instead, we collect
+  // each file in beforeUpload and schedule a single requestAnimationFrame
+  // flush: validation + upload run exactly ONCE per user selection.
+  const pendingFilesRef = useRef<File[]>([]);
+  const rafIdRef = useRef<number | null>(null);
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
@@ -249,24 +255,26 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           }
           return (
             <Dragger
+              accept={AIDP_ACCEPT_STRING}
               multiple
               showUploadList={false}
-              beforeUpload={(_file, fileList) => {
-                // Dedupe: antd calls beforeUpload N times for N selected files,
-                // passing the same `fileList` reference each time. Only process
-                // the FIRST invocation per batch to prevent duplicate uploads.
-                if (batchRef.current === fileList) return false;
-                batchRef.current = fileList;
+              beforeUpload={(_file) => {
+                // Queue the file and defer validation + upload until the
+                // synchronous batch of beforeUpload calls finishes. Each batch
+                // flushes in a single frame so toasts and handleUpload run once.
+                pendingFilesRef.current.push(_file);
+                if (rafIdRef.current === null) {
+                  rafIdRef.current = requestAnimationFrame(() => {
+                    const batch = pendingFilesRef.current;
+                    pendingFilesRef.current = [];
+                    rafIdRef.current = null;
 
-                const allFiles = fileList
-                  .map((f) => f as unknown as File)
-                  .filter(Boolean);
-
-                // Defer to avoid blocking antd
-                setTimeout(() => {
-                  handleUpload(allFiles);
-                  batchRef.current = null;
-                }, 0);
+                    const { valid } = partitionAidpFiles(batch, t, message);
+                    if (valid.length > 0) {
+                      handleUpload(valid);
+                    }
+                  });
+                }
                 return false;
               }}
               disabled={uploading}

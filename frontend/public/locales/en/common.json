@@ -3839,7 +3839,7 @@
   "aidpKnowledge.uploadFailed": "Upload failed",
   "aidpKnowledge.uploading": "Uploading...",
   "aidpKnowledge.uploadHint": "Click or drag files here to upload",
-  "aidpKnowledge.uploadHintDetail": "Multiple files supported",
+  "aidpKnowledge.uploadHintDetail": "Text (txt/json/markdown), Web (html), Docs (pdf/docx/doc/ppt/pptx), Sheets (xlsx/xls/csv), Images (png/jpeg/jpg/bmp)",
   "aidpKnowledge.uploadNoKb": "Please select a knowledge base first",
   "aidpKnowledge.uploadKbUnavailable": "The knowledge base is currently unavailable; uploads are disabled",
   "aidpKnowledge.uploadReadOnly": "You have read-only access and cannot upload files",
@@ -3880,6 +3880,7 @@
   "aidpKnowledge.createAccessGroups": "Accessible User Groups",
   "aidpKnowledge.createAccessGroupsPlaceholder": "Select user groups that can access this knowledge base",
   "aidpKnowledge.createAccessGroupsRequired": "Please select at least one user group, or switch to private",
+  "aidpKnowledge.invalidFileType": "{{count}} file(s) with unsupported format have been filtered. Only Text (txt/json/markdown), Web (html), Docs (pdf/docx/doc/ppt/pptx), Sheets (xlsx/xls/csv), Images (png/jpeg/jpg/bmp) are supported",
   "aidpKnowledge.showTotal": "Total {{count}} items",
 
   "project.config": "System config",
