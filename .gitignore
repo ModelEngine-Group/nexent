@@ -85,3 +85,6 @@ _doc/
 /deploy/env/.env.bak
 
 agent_repository_frontend
+model-assets.tmp.2006/
+nul
+.workbuddy/

@@ -140,6 +140,53 @@ export async function fetchMarketAgentDetail(
 }
 
 /**
+ * Instantiate a new agent from a market template.
+ *
+ * Sends the Recipe variable values to the backend, which substitutes
+ * `<<TO_CONFIG:xxx>>` placeholders, injects IndustryRule into the duty
+ * prompt, and imports the agent tree into the current tenant.
+ *
+ * @param agentRepositoryId - The market template (agent_repository_id) to instantiate from.
+ * @param variableValues - Recipe variable values keyed by variable key.
+ * @param forceImport - When true, proceed even if precheck reports missing deps.
+ * @returns `{ agent_id, precheck }` — agent_id is null when a precheck blocks.
+ */
+export async function instantiateMarketAgent(
+  agentRepositoryId: number,
+  variableValues: Record<string, any>,
+  forceImport: boolean = false
+): Promise<{ agent_id: number | null; precheck?: any; message?: string }> {
+  try {
+    const url = API_ENDPOINTS.market.instantiate(agentRepositoryId);
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variable_values: variableValues,
+          force_import: forceImport,
+        }),
+      },
+      30000 // instantiation may take a few seconds (skill import etc.)
+    );
+
+    if (!response.ok) {
+      throw new MarketApiError(
+        `Failed to instantiate agent: ${response.statusText}`,
+        'server',
+        response.status
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    log.error('Error instantiating market agent:', error);
+    throw error;
+  }
+}
+
+/**
  * Fetch all categories from market
  */
 export async function fetchMarketCategories(): Promise<MarketCategory[]> {
@@ -228,12 +275,50 @@ export async function fetchMarketAgentMcpServers(
   }
 }
 
+/**
+ * Launch a solution straight into a conversation (WorkBuddy-style).
+ *
+ * Get-or-creates a runnable Agent from the solution template on the backend
+ * (reuses an existing same-named agent if present, otherwise instantiates with
+ * the solution's default Recipe values). Returns the agent_id to chat with.
+ */
+export async function launchMarketAgent(
+  agentRepositoryId: number
+): Promise<{ agent_id: number | null; reused?: boolean; precheck?: any; message?: string }> {
+  try {
+    const url = API_ENDPOINTS.market.launch(agentRepositoryId);
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      },
+      30000 // instantiation may take a few seconds (skill import etc.)
+    );
+
+    if (!response.ok) {
+      throw new MarketApiError(
+        `Failed to launch solution: ${response.statusText}`,
+        'server',
+        response.status
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    log.error('Error launching market agent:', error);
+    throw error;
+  }
+}
+
 const marketService = {
   fetchMarketAgentList,
   fetchMarketAgentDetail,
   fetchMarketCategories,
   fetchMarketTags,
   fetchMarketAgentMcpServers,
+  instantiateMarketAgent,
+  launchMarketAgent,
 };
 
 export default marketService;

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "math", "cmath", "statistics", "decimal", "fractions", "random",
     "collections", "itertools", "functools", "heapq", "bisect", "array", "copy",
-    "re", "string", "textwrap", "unicodedata",
+    "re", "string", "textwrap", "unicodedata", "difflib",
     "datetime", "time", "calendar",
     "base64", "hashlib", "hmac",
     "json", "csv",
@@ -430,13 +430,24 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
-                tool_list = [
-                    _wrap_tool_with_monitoring(
-                        self.create_tool(tool_config),
-                        agent_config.name,
-                    )
-                    for tool_config in agent_config.tools
-                ]
+                # Build tools one-by-one so a single broken tool (e.g. a search
+                # tool missing its API key) is skipped with a warning instead
+                # of failing the whole agent. The agent still runs with the
+                # remaining tools.
+                tool_list = []
+                for tool_config in agent_config.tools:
+                    try:
+                        tool_obj = self.create_tool(tool_config)
+                        tool_list.append(
+                            _wrap_tool_with_monitoring(tool_obj, agent_config.name)
+                        )
+                    except Exception as tool_err:  # noqa: BLE001
+                        logger.warning(
+                            "Skipping tool %s for agent %s due to init error: %s",
+                            getattr(tool_config, "class_name", tool_config),
+                            agent_config.name,
+                            tool_err,
+                        )
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 

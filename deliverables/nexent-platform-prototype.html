@@ -1,0 +1,2297 @@
+<!DOCTYPE html>
+<!--
+  Nexent 平台高保真原型
+  设计系统：Nexent Dark Theme（深蓝黑 #0F172A 基底）
+  原型类型：dashboard + saas-landing 混合（多页单文件应用）
+  生成者：筑原型（Zhu）· 原型构建师
+  日期：2026-07-28
+  说明：4 个核心页面通过顶部导航 Tab 切换，纯 HTML + 内联 CSS + 原生 JS，无外部依赖
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexent — 零代码创建 AI Agent</title>
+<style>
+/* ============================================================
+   设计令牌（Design Tokens）
+   ============================================================ */
+:root {
+  /* 色彩 - 背景 */
+  --bg-primary: #0F172A;      /* Slate 900 主背景 */
+  --bg-secondary: #1E293B;   /* Slate 800 卡片/面板 */
+  --bg-tertiary: #334155;    /* Slate 700 边框/分隔 */
+  --bg-elevated: #1E293B;    /* 卡片悬浮态背景 */
+
+  /* 色彩 - 文字 */
+  --text-primary: #F1F5F9;   /* Slate 100 主文字 */
+  --text-secondary: #94A3B8; /* Slate 400 次文字 */
+  --text-tertiary: #64748B;  /* Slate 500 辅助文字 */
+
+  /* 色彩 - 品牌 */
+  --color-brand: #3B82F6;    /* Blue 500 品牌色 */
+  --color-action: #06B6D4;   /* Cyan 500 行动色 */
+  --color-action-hover: #0891B2; /* Cyan 600 */
+
+  /* 7 大能力域辅助色 */
+  --domain-0: #8B5CF6;  /* 代码与研发 Violet */
+  --domain-1: #06B6D4;  /* 信息监测 Cyan */
+  --domain-2: #10B981;  /* 知识问答 Emerald */
+  --domain-3: #F59E0B;  /* 文档处理 Amber */
+  --domain-4: #3B82F6;  /* 数据分析 Blue */
+  --domain-5: #EF4444;  /* 流程自动化 Red */
+  --domain-6: #EC4899;  /* 多角色协作 Pink */
+
+  /* config_status 三档 */
+  --status-ready: #10B981;        /* ready 绿 */
+  --status-light: #F59E0B;        /* light_config 琥珀 */
+  --status-heavy: #EF4444;        /* heavy_config 红 */
+
+  /* 排版 */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* 间距（4px 基础单位） */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* 圆角 */
+  --radius-card: 12px;
+  --radius-button: 8px;
+  --radius-badge: 4px;
+  --radius-input: 8px;
+
+  /* 阴影 */
+  --shadow-light: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-card: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-hover: 0 8px 24px rgba(0,0,0,0.35);
+
+  /* 边框 */
+  --border-color: #334155;
+  --border-color-hover: #06B6D4;
+
+  /* 容器 */
+  --container-max: 1200px;
+}
+
+/* ============================================================
+   基础重置
+   ============================================================ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+a { color: var(--color-action); text-decoration: none; transition: color 0.15s; }
+a:hover { color: var(--color-action-hover); }
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+
+/* ============================================================
+   全局导航栏
+   ============================================================ */
+.global-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-color);
+  height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-xl);
+}
+
+.global-nav-inner {
+  max-width: var(--container-max);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xl);
+}
+
+.nav-logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.nav-logo .logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--color-brand), var(--color-action));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-logo .logo-mark svg { width: 16px; height: 16px; }
+
+.nav-links {
+  display: flex;
+  gap: var(--space-lg);
+  list-style: none;
+  flex: 1;
+}
+
+.nav-links li a {
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-button);
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.nav-links li a:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.nav-links li a.active {
+  color: var(--color-action);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.nav-search {
+  position: relative;
+  width: 200px;
+}
+
+.nav-search input {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  padding: 8px 12px 8px 32px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.nav-search input:focus { border-color: var(--color-action); }
+.nav-search input::placeholder { color: var(--text-tertiary); }
+
+.nav-search .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--domain-0), var(--domain-6));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  border: 2px solid var(--bg-tertiary);
+  transition: border-color 0.15s;
+}
+
+.user-avatar:hover { border-color: var(--color-action); }
+
+/* ============================================================
+   页面容器
+   ============================================================ */
+.page-container {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--space-2xl) var(--space-xl);
+}
+
+.page { display: none; }
+.page.active { display: block; animation: fadeIn 0.3s ease; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   通用组件
+   ============================================================ */
+
+/* 徽章/标签 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-badge);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.badge-domain-0 { background: rgba(139, 92, 246, 0.1); color: var(--domain-0); }
+.badge-domain-1 { background: rgba(6, 182, 212, 0.1); color: var(--domain-1); }
+.badge-domain-2 { background: rgba(16, 185, 129, 0.1); color: var(--domain-2); }
+.badge-domain-3 { background: rgba(245, 158, 11, 0.1); color: var(--domain-3); }
+.badge-domain-4 { background: rgba(59, 130, 246, 0.1); color: var(--domain-4); }
+.badge-domain-5 { background: rgba(239, 68, 68, 0.1); color: var(--domain-5); }
+.badge-domain-6 { background: rgba(236, 72, 153, 0.1); color: var(--domain-6); }
+
+/* 状态指示灯 */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.ready { background: var(--status-ready); box-shadow: 0 0 8px rgba(16,185,129,0.4); }
+.status-dot.light { background: var(--status-light); box-shadow: 0 0 8px rgba(245,158,11,0.4); }
+.status-dot.heavy { background: var(--status-heavy); box-shadow: 0 0 8px rgba(239,68,68,0.4); }
+
+.status-ready-text { color: var(--status-ready); }
+.status-light-text { color: var(--status-light); }
+.status-heavy-text { color: var(--status-heavy); }
+
+/* 按钮 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: 10px 20px;
+  border-radius: var(--radius-button);
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--color-action);
+  color: white;
+}
+.btn-primary:hover { background: var(--color-action-hover); transform: translateY(-1px); box-shadow: var(--shadow-card); }
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+.btn-secondary:hover { background: var(--bg-secondary); border-color: var(--text-secondary); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+}
+.btn-ghost:hover { color: var(--text-primary); background: var(--bg-secondary); }
+
+.btn-large {
+  padding: 14px 32px;
+  font-size: 15px;
+  width: 100%;
+}
+
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+
+/* 卡片 */
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  transition: all 0.2s ease;
+}
+
+/* 输入框 */
+.input-field {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input-field:focus { border-color: var(--color-action); }
+.input-field::placeholder { color: var(--text-tertiary); }
+
+/* 代码块 */
+.code-block {
+  background: #0D1117;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  padding: var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.code-block .ck-key { color: #79C0FF; }
+.code-block .ck-str { color: #A5D6FF; }
+.code-block .ck-num { color: #FFA657; }
+.code-block .ck-com { color: #64748B; }
+
+/* 页面标题 */
+.page-header {
+  margin-bottom: var(--space-xl);
+}
+
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: var(--space-sm);
+  letter-spacing: -0.5px;
+}
+
+.page-subtitle {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ============================================================
+   P1: 方案市场页
+   ============================================================ */
+
+/* 筛选栏 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-2xl);
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-chip:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+.filter-chip.active { background: rgba(6,182,212,0.1); border-color: var(--color-action); color: var(--color-action); }
+
+.filter-chip .chip-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+
+/* 能力域分组 */
+.domain-group { margin-bottom: var(--space-2xl); }
+
+.domain-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.domain-group-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.domain-group-count {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* 方案卡片网格 */
+.solution-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-lg);
+}
+
+.solution-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.solution-card:hover {
+  border-color: var(--color-action);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+
+.solution-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.solution-card-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.solution-card-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.solution-card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-tag {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-badge);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.solution-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-color);
+}
+
+.solution-card-footer .btn { padding: 6px 14px; font-size: 13px; }
+
+/* ============================================================
+   P2: 方案详情页
+   ============================================================ */
+.detail-layout {
+  display: grid;
+  grid-template-columns: 60% 40%;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+.detail-left { padding-right: var(--space-sm); }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.detail-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.detail-section { margin-bottom: var(--space-xl); }
+
+.detail-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.detail-desc p {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: var(--space-md);
+  font-size: 14px;
+}
+
+/* 工作流图 */
+.workflow-diagram {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  padding: var(--space-lg);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+}
+
+.workflow-step {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.workflow-arrow { color: var(--text-tertiary); font-size: 18px; }
+
+/* 工具组合列表 */
+.tool-list { display: flex; flex-direction: column; gap: var(--space-md); }
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+}
+
+.tool-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-info { flex: 1; }
+.tool-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.tool-purpose { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+/* RecipeForm 右侧 */
+.recipe-form {
+  position: sticky;
+  top: 80px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-xl);
+}
+
+.recipe-form-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: var(--space-xs);
+}
+
+.recipe-form-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-lg);
+}
+
+.form-group { margin-bottom: var(--space-lg); }
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: var(--space-xs);
+}
+
+/* 下拉选择 */
+.select-field {
+  position: relative;
+  width: 100%;
+}
+
+.select-field select {
+  appearance: none;
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  padding: 10px 36px 10px 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+}
+
+.select-field select:focus { border-color: var(--color-action); }
+
+.select-field::after {
+  content: '';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+/* 多选标签 */
+.tag-group { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+
+.tag-option {
+  padding: 6px 14px;
+  border-radius: var(--radius-button);
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tag-option:hover { border-color: var(--text-secondary); }
+.tag-option.selected {
+  background: rgba(6,182,212,0.1);
+  border-color: var(--color-action);
+  color: var(--color-action);
+}
+
+/* 单选组 */
+.radio-group { display: flex; gap: var(--space-sm); }
+
+.radio-option {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.radio-option:hover { border-color: var(--text-secondary); }
+.radio-option.selected {
+  background: rgba(6,182,212,0.1);
+  border-color: var(--color-action);
+  color: var(--color-action);
+}
+
+.radio-option .radio-label { font-weight: 600; display: block; }
+.radio-option .radio-desc { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+/* config 提示框 */
+.config-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: var(--radius-input);
+  margin-bottom: var(--space-lg);
+  font-size: 13px;
+}
+
+.config-notice.ready { background: rgba(16,185,129,0.08); color: var(--status-ready); border: 1px solid rgba(16,185,129,0.2); }
+.config-notice.light { background: rgba(245,158,11,0.08); color: var(--status-light); border: 1px solid rgba(245,158,11,0.2); }
+.config-notice.heavy { background: rgba(239,68,68,0.08); color: var(--status-heavy); border: 1px solid rgba(239,68,68,0.2); }
+
+/* ============================================================
+   P3: Agent 对话页
+   ============================================================ */
+.chat-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr 200px;
+  gap: 1px;
+  background: var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  height: calc(100vh - 140px);
+  min-height: 600px;
+}
+
+.chat-sidebar {
+  background: var(--bg-secondary);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  overflow-y: auto;
+}
+
+.agent-info-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+  padding: var(--space-md);
+}
+
+.agent-info-name { font-size: 15px; font-weight: 600; margin-bottom: var(--space-sm); }
+.agent-info-meta { font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
+
+.sidebar-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-sm);
+}
+
+.conversation-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+
+.conversation-item {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-button);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.conversation-item:hover { background: var(--bg-primary); color: var(--text-primary); }
+.conversation-item.active { background: var(--bg-primary); color: var(--color-action); }
+
+.conversation-item .conv-time { font-size: 11px; color: var(--text-tertiary); }
+
+/* 对话主体 */
+.chat-main {
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-header {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-header-title { font-size: 15px; font-weight: 600; }
+.chat-header-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.message { display: flex; gap: var(--space-md); max-width: 80%; }
+
+.message.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600;
+}
+
+.message.agent .message-avatar { background: linear-gradient(135deg, var(--domain-0), var(--color-brand)); color: white; }
+.message.user .message-avatar { background: var(--bg-tertiary); color: var(--text-primary); }
+
+.message-bubble {
+  padding: var(--space-md);
+  border-radius: var(--radius-card);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.message.agent .message-bubble {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.message.user .message-bubble {
+  background: var(--color-brand);
+  color: white;
+}
+
+.message-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+/* Agent 回复中的结构化内容 - 审查报告表格 */
+.review-table {
+  margin-top: var(--space-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  overflow: hidden;
+}
+
+.review-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+.review-table th {
+  background: var(--bg-tertiary);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.review-table td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.severity-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+.severity-critical { background: rgba(239,68,68,0.15); color: var(--status-heavy); }
+.severity-major { background: rgba(245,158,11,0.15); color: var(--status-light); }
+.severity-minor { background: rgba(16,185,129,0.15); color: var(--status-ready); }
+
+/* 输入框 */
+.chat-input-area {
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.chat-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+  padding: 8px 12px;
+}
+
+.chat-input-wrapper:focus-within { border-color: var(--color-action); }
+
+.chat-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.chat-input::placeholder { color: var(--text-tertiary); }
+
+.icon-btn {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-button);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.icon-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+.send-btn {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-button);
+  background: var(--color-action);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+
+.send-btn:hover { background: var(--color-action-hover); }
+
+/* 右侧边栏 - 运行状态 */
+.chat-right-sidebar {
+  background: var(--bg-secondary);
+  padding: var(--space-md);
+  overflow-y: auto;
+}
+
+.run-log { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+.log-item {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-sm);
+  border-radius: var(--radius-button);
+  background: var(--bg-primary);
+}
+
+.log-item-header { display: flex; align-items: center; gap: 6px; }
+.log-item-time { font-size: 10px; color: var(--text-tertiary); }
+.log-item-text { color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+
+.log-status-dot { width: 6px; height: 6px; border-radius: 50%; }
+.log-status-dot.done { background: var(--status-ready); }
+.log-status-dot.run { background: var(--status-light); animation: pulse 1.5s infinite; }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ============================================================
+   P4: 我的 Agent 仪表盘
+   ============================================================ */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-xl);
+}
+
+.view-toggle {
+  display: flex;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-button);
+  padding: 2px;
+}
+
+.view-toggle button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+
+.view-toggle button.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* 统计栏 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-lg);
+  margin-bottom: var(--space-2xl);
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+}
+
+.stat-label { font-size: 12px; color: var(--text-secondary); margin-bottom: var(--space-sm); }
+.stat-value { font-size: 28px; font-weight: 700; color: var(--text-primary); }
+.stat-trend { font-size: 12px; margin-top: var(--space-xs); }
+
+.stat-trend.up { color: var(--status-ready); }
+.stat-trend.neutral { color: var(--text-tertiary); }
+
+/* Agent 列表 - 表格视图 */
+.agent-table {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.agent-table table { width: 100%; border-collapse: collapse; }
+
+.agent-table th {
+  text-align: left;
+  padding: var(--space-md) var(--space-lg);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.agent-table td {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+}
+
+.agent-table tr:last-child td { border-bottom: none; }
+.agent-table tr:hover { background: var(--bg-primary); }
+
+.agent-name-cell { font-weight: 600; color: var(--text-primary); }
+.agent-time-cell { color: var(--text-secondary); font-size: 13px; }
+
+.agent-actions { display: flex; gap: var(--space-sm); }
+.agent-actions button { padding: 6px 10px; }
+
+/* 卡片视图 */
+.agent-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-lg);
+}
+
+.agent-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  transition: all 0.2s;
+}
+
+.agent-card:hover { border-color: var(--text-secondary); }
+
+.agent-card-header { display: flex; align-items: flex-start; justify-content: space-between; }
+
+.agent-card-name { font-size: 16px; font-weight: 600; }
+.agent-card-meta { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+.agent-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-color);
+}
+
+/* 运行状态 */
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.run-status .status-dot.running { background: var(--status-ready); box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+.run-status .status-dot.stopped { background: var(--text-tertiary); }
+.run-status.running { color: var(--status-ready); }
+.run-status.stopped { color: var(--text-tertiary); }
+
+/* ============================================================
+   响应式
+   ============================================================ */
+@media (max-width: 1024px) {
+  .solution-grid, .agent-card-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .detail-layout { grid-template-columns: 1fr; }
+  .chat-layout { grid-template-columns: 200px 1fr; }
+  .chat-right-sidebar { display: none; }
+}
+
+@media (max-width: 768px) {
+  .solution-grid, .agent-card-grid, .stats-grid { grid-template-columns: 1fr; }
+  .chat-layout { grid-template-columns: 1fr; height: auto; }
+  .chat-sidebar, .chat-right-sidebar { display: none; }
+  .nav-search { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     全局导航
+     ============================================================ -->
+<nav class="global-nav">
+  <div class="global-nav-inner">
+    <div class="nav-logo">
+      <div class="logo-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      Nexent
+    </div>
+    <ul class="nav-links">
+      <li><a href="#" data-page="marketplace" class="active" onclick="switchPage('marketplace');return false;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        方案市场
+      </a></li>
+      <li><a href="#" data-page="dashboard" onclick="switchPage('dashboard');return false;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        我的 Agent
+      </a></li>
+      <li><a href="#" onclick="return false;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        文档
+      </a></li>
+    </ul>
+    <div class="nav-actions">
+      <div class="nav-search">
+        <span class="search-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </span>
+        <input type="text" placeholder="搜索方案或 Agent">
+      </div>
+      <div class="user-avatar" title="用户中心">Z</div>
+    </div>
+  </div>
+</nav>
+
+<!-- ============================================================
+     P1: 方案市场页
+     ============================================================ -->
+<div class="page-container">
+<div class="page active" id="page-marketplace">
+
+  <div class="page-header">
+    <h1 class="page-title">方案市场</h1>
+    <p class="page-subtitle">选择一个方案，5 分钟创建你的 AI Agent</p>
+  </div>
+
+  <!-- 筛选栏 -->
+  <div class="filter-bar">
+    <span class="filter-chip active" onclick="filterDomain(this, 'all')">
+      全部 <span style="color:var(--text-tertiary);">9</span>
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd0')">
+      <span class="chip-dot" style="background:var(--domain-0)"></span> 代码与研发
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd1')">
+      <span class="chip-dot" style="background:var(--domain-1)"></span> 信息监测
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd2')">
+      <span class="chip-dot" style="background:var(--domain-2)"></span> 知识问答
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd3')">
+      <span class="chip-dot" style="background:var(--domain-3)"></span> 文档处理
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd4')">
+      <span class="chip-dot" style="background:var(--domain-4)"></span> 数据分析
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd5')">
+      <span class="chip-dot" style="background:var(--domain-5)"></span> 流程自动化
+    </span>
+    <span class="filter-chip" onclick="filterDomain(this, 'd6')">
+      <span class="chip-dot" style="background:var(--domain-6)"></span> 多角色协作
+    </span>
+  </div>
+
+  <!-- 域0: 代码与研发 -->
+  <div class="domain-group" data-domain="d0">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-0">域0</span>
+      <span class="domain-group-title">代码与研发</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案0: 智能代码审查官 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-0">域0 代码与研发</span>
+          <span class="status-indicator">
+            <span class="status-dot ready"></span>
+            <span class="status-ready-text">零配置</span>
+          </span>
+        </div>
+        <div>
+          <div class="solution-card-name">智能代码审查官</div>
+          <p class="solution-card-desc" style="margin-top:8px;">读源码 + 跑 lint + 检查红线 + 输出审查报告</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">AST 解析</span>
+          <span class="tool-tag">ESLint</span>
+          <span class="tool-tag">红线规则</span>
+          <span class="tool-tag">Markdown</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-code-review</span>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();switchPage('detail');">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域1: 信息监测 -->
+  <div class="domain-group" data-domain="d1">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-1">域1</span>
+      <span class="domain-group-title">信息监测</span>
+      <span class="domain-group-count">3 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案1: AI 资讯日报 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-1">域1 信息监测</span>
+          <span class="status-indicator"><span class="status-dot ready"></span><span class="status-ready-text">零配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">AI 资讯日报</div>
+          <p class="solution-card-desc" style="margin-top:8px;">每天定时搜索 AI 新闻 → 去重 → 生成日报</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">定时触发</span>
+          <span class="tool-tag">Web 搜索</span>
+          <span class="tool-tag">去重</span>
+          <span class="tool-tag">日报模板</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-ai-news-daily</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+
+      <!-- 方案2: ArXiv 论文追踪 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-1">域1 信息监测</span>
+          <span class="status-indicator"><span class="status-dot ready"></span><span class="status-ready-text">零配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">ArXiv 论文追踪</div>
+          <p class="solution-card-desc" style="margin-top:8px;">追踪领域最新论文 → 摘要 → 分类 → 周报</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">ArXiv API</span>
+          <span class="tool-tag">摘要生成</span>
+          <span class="tool-tag">分类</span>
+          <span class="tool-tag">周报</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-arxiv-tracker</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+
+      <!-- 方案3: GitHub 热门监控 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-1">域1 信息监测</span>
+          <span class="status-indicator"><span class="status-dot ready"></span><span class="status-ready-text">零配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">GitHub 热门监控</div>
+          <p class="solution-card-desc" style="margin-top:8px;">监控 GitHub 趋势 → 新项目 → 技术栈变化</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">GitHub API</span>
+          <span class="tool-tag">趋势分析</span>
+          <span class="tool-tag">技术栈</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-github-trending</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域2: 知识问答 -->
+  <div class="domain-group" data-domain="d2">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-2">域2</span>
+      <span class="domain-group-title">知识问答</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案4: 智能客服 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-2">域2 知识问答</span>
+          <span class="status-indicator"><span class="status-dot light"></span><span class="status-light-text">轻配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">智能客服</div>
+          <p class="solution-card-desc" style="margin-top:8px;">RAG 检索 + 置信度评分 + 转人工规则</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">RAG</span>
+          <span class="tool-tag">向量检索</span>
+          <span class="tool-tag">置信度</span>
+          <span class="tool-tag">转人工</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-smart-support</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域3: 文档处理 -->
+  <div class="domain-group" data-domain="d3">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-3">域3</span>
+      <span class="domain-group-title">文档处理</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案5: 文档审阅官 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-3">域3 文档处理</span>
+          <span class="status-indicator"><span class="status-dot ready"></span><span class="status-ready-text">零配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">文档审阅官</div>
+          <p class="solution-card-desc" style="margin-top:8px;">多模态分析合同/发票 → 结构化输出</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">OCR</span>
+          <span class="tool-tag">多模态</span>
+          <span class="tool-tag">结构化</span>
+          <span class="tool-tag">JSON</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-doc-reviewer</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域4: 数据分析 -->
+  <div class="domain-group" data-domain="d4">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-4">域4</span>
+      <span class="domain-group-title">数据分析</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案6: 数据洞察分析师 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-4">域4 数据分析</span>
+          <span class="status-indicator"><span class="status-dot heavy"></span><span class="status-heavy-text">需配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">数据洞察分析师</div>
+          <p class="solution-card-desc" style="margin-top:8px;">SQL 执行 + 安全审计 + 图表生成 + 趋势分析</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">SQL 执行</span>
+          <span class="tool-tag">安全审计</span>
+          <span class="tool-tag">图表</span>
+          <span class="tool-tag">趋势</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-data-analyst</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域5: 流程自动化 -->
+  <div class="domain-group" data-domain="d5">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-5">域5</span>
+      <span class="domain-group-title">流程自动化</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案7: 运维巡检 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-5">域5 流程自动化</span>
+          <span class="status-indicator"><span class="status-dot heavy"></span><span class="status-heavy-text">需配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">运维巡检</div>
+          <p class="solution-card-desc" style="margin-top:8px;">定时触发 + 条件路由 + HTTP 请求 + 告警推送</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">定时触发</span>
+          <span class="tool-tag">条件路由</span>
+          <span class="tool-tag">HTTP</span>
+          <span class="tool-tag">告警</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-ops-patrol</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 域6: 多角色协作 -->
+  <div class="domain-group" data-domain="d6">
+    <div class="domain-group-header">
+      <span class="badge badge-domain-6">域6</span>
+      <span class="domain-group-title">多角色协作</span>
+      <span class="domain-group-count">1 个方案</span>
+    </div>
+    <div class="solution-grid">
+      <!-- 方案8: 深度研究团队 -->
+      <div class="solution-card" onclick="switchPage('detail')">
+        <div class="solution-card-top">
+          <span class="badge badge-domain-6">域6 多角色协作</span>
+          <span class="status-indicator"><span class="status-dot light"></span><span class="status-light-text">轻配置</span></span>
+        </div>
+        <div>
+          <div class="solution-card-name">深度研究团队</div>
+          <p class="solution-card-desc" style="margin-top:8px;">6 人 Agent 按 5 阶段 SOP 输出带引用报告</p>
+        </div>
+        <div class="solution-card-tools">
+          <span class="tool-tag">6 角色协作</span>
+          <span class="tool-tag">5 阶段 SOP</span>
+          <span class="tool-tag">引用标注</span>
+          <span class="tool-tag">报告</span>
+        </div>
+        <div class="solution-card-footer">
+          <span style="font-size:12px;color:var(--text-tertiary);">ID: sol-research-team</span>
+          <button class="btn btn-secondary btn-sm">了解详情 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page-marketplace -->
+
+<!-- ============================================================
+     P2: 方案详情页
+     ============================================================ -->
+<div class="page" id="page-detail">
+
+  <div style="margin-bottom:var(--space-lg);">
+    <button class="btn btn-ghost" onclick="switchPage('marketplace')">
+      ← 返回方案市场
+    </button>
+  </div>
+
+  <div class="detail-layout">
+    <!-- 左侧: 方案说明 -->
+    <div class="detail-left">
+      <div class="detail-header">
+        <h1 class="detail-title">智能代码审查官</h1>
+        <span class="badge badge-domain-0">域0 代码与研发</span>
+        <span class="status-indicator"><span class="status-dot ready"></span><span class="status-ready-text">零配置 · 可直接创建</span></span>
+      </div>
+
+      <div class="detail-desc">
+        <p>智能代码审查官是一个开箱即用的代码质量守护 Agent。它读取你的项目源码，自动执行 AST 语法分析、ESLint 规则检查和团队红线规则扫描，最终输出结构化的审查报告。</p>
+        <p>该方案预置了通用的代码审查最佳实践规则集，无需任何额外配置即可创建 Agent 实例。创建后你只需将项目路径或 Git 仓库地址发给 Agent，它会在每次代码变更时自动审查并反馈结果。</p>
+        <p>审查报告支持 Markdown、JSON、HTML 三种输出格式，可直接集成到 CI/CD 流水线或 PR Review 流程中。</p>
+      </div>
+
+      <!-- 工作流图 -->
+      <div class="detail-section">
+        <div class="detail-section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-action)" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          工作流程
+        </div>
+        <div class="workflow-diagram">
+          <div class="workflow-step">读取源码</div>
+          <span class="workflow-arrow">→</span>
+          <div class="workflow-step">AST 语法分析</div>
+          <span class="workflow-arrow">→</span>
+          <div class="workflow-step">ESLint 规则检查</div>
+          <span class="workflow-arrow">→</span>
+          <div class="workflow-step">红线规则扫描</div>
+          <span class="workflow-arrow">→</span>
+          <div class="workflow-step">生成审查报告</div>
+        </div>
+      </div>
+
+      <!-- 工具组合 -->
+      <div class="detail-section">
+        <div class="detail-section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-action)" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          工具组合
+        </div>
+        <div class="tool-list">
+          <div class="tool-item">
+            <div class="tool-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--domain-0)" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div class="tool-info">
+              <div class="tool-name">AST Parser</div>
+              <div class="tool-purpose">语法树解析，识别代码结构与潜在问题</div>
+            </div>
+          </div>
+          <div class="tool-item">
+            <div class="tool-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--domain-3)" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg>
+            </div>
+            <div class="tool-info">
+              <div class="tool-name">ESLint Engine</div>
+              <div class="tool-purpose">执行代码风格与质量规则检查</div>
+            </div>
+          </div>
+          <div class="tool-item">
+            <div class="tool-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--status-heavy)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="tool-info">
+              <div class="tool-name">Redline Rules</div>
+              <div class="tool-purpose">团队红线规则集，拦截安全与合规问题</div>
+            </div>
+          </div>
+          <div class="tool-item">
+            <div class="tool-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-action)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="tool-info">
+              <div class="tool-name">Report Generator</div>
+              <div class="tool-purpose">结构化审查报告生成，支持多格式输出</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入输出示例 -->
+      <div class="detail-section">
+        <div class="detail-section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-action)" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          输入输出示例
+        </div>
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-sm);">输入（项目路径）：</div>
+        <div class="code-block"><span class="ck-com"># 用户消息示例</span>
+<span class="ck-str">"请审查 /home/project/payment-service 这个微服务项目"</span></div>
+        <div style="font-size:13px;color:var(--text-secondary);margin:var(--space-md) 0 var(--space-sm);">输出（审查报告摘要）：</div>
+        <div class="code-block">{
+  <span class="ck-key">"summary"</span>: {
+    <span class="ck-key">"files_scanned"</span>: <span class="ck-num">47</span>,
+    <span class="ck-key">"issues_found"</span>: <span class="ck-num">12</span>,
+    <span class="ck-key">"critical"</span>: <span class="ck-num">2</span>,
+    <span class="ck-key">"major"</span>: <span class="ck-num">5</span>,
+    <span class="ck-key">"minor"</span>: <span class="ck-num">5</span>
+  },
+  <span class="ck-key">"redline_violations"</span>: [
+    <span class="ck-str">"SQL 注入风险: payment_controller.py:34"</span>,
+    <span class="ck-str">"硬编码密钥: config.py:8"</span>
+  ]
+}</div>
+      </div>
+    </div>
+
+    <!-- 右侧: RecipeForm -->
+    <div class="recipe-form">
+      <div class="recipe-form-title">配置你的 Agent</div>
+      <div class="recipe-form-subtitle">方案「智能代码审查官」的 Recipe 变量配置</div>
+
+      <div class="config-notice ready">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+        零配置方案，所有字段已预置默认值，可直接创建
+      </div>
+
+      <form onsubmit="event.preventDefault(); switchPage('conversation');">
+        <!-- 模型选择 -->
+        <div class="form-group">
+          <label class="form-label">模型选择</label>
+          <div class="select-field">
+            <select>
+              <option>GPT-4o（推荐，平衡质量与速度）</option>
+              <option>Claude 3.5 Sonnet</option>
+              <option>DeepSeek V3</option>
+              <option>Qwen2.5-72B</option>
+            </select>
+          </div>
+          <div class="form-hint">Agent 使用的底层大语言模型</div>
+        </div>
+
+        <!-- 项目路径 -->
+        <div class="form-group">
+          <label class="form-label">项目路径</label>
+          <input type="text" class="input-field" value="/home/project/payment-service" placeholder="输入项目根路径">
+          <div class="form-hint">Agent 审查的项目根目录或 Git 仓库地址</div>
+        </div>
+
+        <!-- 审查语言 -->
+        <div class="form-group">
+          <label class="form-label">审查语言</label>
+          <div class="tag-group">
+            <span class="tag-option selected" onclick="toggleTag(this)">Python</span>
+            <span class="tag-option selected" onclick="toggleTag(this)">JavaScript</span>
+            <span class="tag-option" onclick="toggleTag(this)">Java</span>
+            <span class="tag-option" onclick="toggleTag(this)">Go</span>
+          </div>
+          <div class="form-hint">选择需要审查的编程语言（可多选）</div>
+        </div>
+
+        <!-- 审查深度 -->
+        <div class="form-group">
+          <label class="form-label">审查深度</label>
+          <div class="radio-group">
+            <div class="radio-option" onclick="selectRadio(this)">
+              <span class="radio-label">快速</span>
+              <span class="radio-desc">仅红线检查</span>
+            </div>
+            <div class="radio-option selected" onclick="selectRadio(this)">
+              <span class="radio-label">标准</span>
+              <span class="radio-desc">Lint + 红线</span>
+            </div>
+            <div class="radio-option" onclick="selectRadio(this)">
+              <span class="radio-label">深度</span>
+              <span class="radio-desc">全量分析</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 严重级别 -->
+        <div class="form-group">
+          <label class="form-label">严重级别阈值</label>
+          <div class="select-field">
+            <select>
+              <option>Critical（仅报告严重问题）</option>
+              <option selected>Major（报告严重+主要问题）</option>
+              <option>Minor（报告全部问题）</option>
+            </select>
+          </div>
+          <div class="form-hint">低于此级别的问题不会出现在报告中</div>
+        </div>
+
+        <!-- 输出格式 -->
+        <div class="form-group">
+          <label class="form-label">输出格式</label>
+          <div class="radio-group">
+            <div class="radio-option selected" onclick="selectRadio(this)">
+              <span class="radio-label">Markdown</span>
+              <span class="radio-desc">可读性强</span>
+            </div>
+            <div class="radio-option" onclick="selectRadio(this)">
+              <span class="radio-label">JSON</span>
+              <span class="radio-desc">机器可读</span>
+            </div>
+            <div class="radio-option" onclick="selectRadio(this)">
+              <span class="radio-label">HTML</span>
+              <span class="radio-desc">可直接展示</span>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-large">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          创建 Agent
+        </button>
+      </form>
+    </div>
+  </div>
+
+</div><!-- /page-detail -->
+
+<!-- ============================================================
+     P3: Agent 对话页
+     ============================================================ -->
+<div class="page" id="page-conversation">
+  <div style="margin-bottom:var(--space-md);">
+    <button class="btn btn-ghost" onclick="switchPage('dashboard')">
+      ← 返回我的 Agent
+    </button>
+  </div>
+
+  <div class="chat-layout">
+    <!-- 左侧边栏 -->
+    <aside class="chat-sidebar">
+      <!-- Agent 信息卡片 -->
+      <div class="agent-info-card">
+        <div class="agent-info-name">代码审查官 #001</div>
+        <div class="agent-info-meta">
+          <span><span class="badge badge-domain-0" style="font-size:10px;">来源: 智能代码审查官</span></span>
+          <span style="margin-top:4px;">模型: GPT-4o</span>
+          <span>深度: 标准 · 语言: Python/JS</span>
+          <span>输出: Markdown</span>
+        </div>
+      </div>
+
+      <!-- 历史会话 -->
+      <div>
+        <div class="sidebar-section-title">历史会话</div>
+        <div class="conversation-list">
+          <div class="conversation-item active">
+            <span>payment-service 审查</span>
+            <span class="conv-time">刚刚</span>
+          </div>
+          <div class="conversation-item">
+            <span>auth-module 审查</span>
+            <span class="conv-time">2h前</span>
+          </div>
+          <div class="conversation-item">
+            <span>user-api 审查</span>
+            <span class="conv-time">昨天</span>
+          </div>
+          <div class="conversation-item">
+            <span>order-service 审查</span>
+            <span class="conv-time">3天前</span>
+          </div>
+          <div class="conversation-item">
+            <span>inventory-handler 审查</span>
+            <span class="conv-time">1周前</span>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新建会话
+      </button>
+    </aside>
+
+    <!-- 对话主体 -->
+    <div class="chat-main">
+      <div class="chat-header">
+        <div>
+          <div class="chat-header-title">payment-service 审查</div>
+          <div class="chat-header-sub">代码审查官 #001 · GPT-4o · 标准深度</div>
+        </div>
+        <div class="run-status running">
+          <span class="status-dot running"></span> 运行中
+        </div>
+      </div>
+
+      <div class="chat-messages">
+        <!-- 用户消息 -->
+        <div class="message user">
+          <div class="message-avatar">我</div>
+          <div>
+            <div class="message-bubble">请审查 /home/project/payment-service 这个微服务项目，重点关注支付相关逻辑的安全性。</div>
+            <div class="message-meta" style="text-align:right;">14:32</div>
+          </div>
+        </div>
+
+        <!-- Agent 消息 -->
+        <div class="message agent">
+          <div class="message-avatar">CR</div>
+          <div>
+            <div class="message-bubble">
+              好的，我正在审查 <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-primary);padding:1px 4px;border-radius:3px;">payment-service</code> 项目。已扫描 47 个文件，发现 12 个问题，其中 2 个为严重级别红线违规。
+              <div class="review-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>文件</th><th>行</th><th>问题</th><th>严重度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>payment_controller.py</td><td>:34</td>
+                      <td>SQL 注入风险：直接拼接用户输入</td>
+                      <td><span class="severity-badge severity-critical">Critical</span></td>
+                    </tr>
+                    <tr>
+                      <td>config.py</td><td>:8</td>
+                      <td>硬编码 API 密钥</td>
+                      <td><span class="severity-badge severity-critical">Critical</span></td>
+                    </tr>
+                    <tr>
+                      <td>refund_service.py</td><td>:112</td>
+                      <td>退款金额未做正数校验</td>
+                      <td><span class="severity-badge severity-major">Major</span></td>
+                    </tr>
+                    <tr>
+                      <td>transaction.py</td><td>:67</td>
+                      <td>事务回滚逻辑不完整</td>
+                      <td><span class="severity-badge severity-major">Major</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
+                <strong style="color:var(--status-heavy);">建议立即修复 2 个 Critical 问题</strong>，它们涉及支付安全红线。SQL 注入可通过参数化查询解决，硬编码密钥应迁移到环境变量。
+              </div>
+            </div>
+            <div class="message-meta">代码审查官 · 14:32</div>
+          </div>
+        </div>
+
+        <!-- 用户追问 -->
+        <div class="message user">
+          <div class="message-avatar">我</div>
+          <div>
+            <div class="message-bubble">帮我详细看看 payment_controller.py:34 的 SQL 注入问题，给出修复建议。</div>
+            <div class="message-meta" style="text-align:right;">14:35</div>
+          </div>
+        </div>
+
+        <!-- Agent 回复 -->
+        <div class="message agent">
+          <div class="message-avatar">CR</div>
+          <div>
+            <div class="message-bubble">
+              <strong>问题定位：</strong><code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-primary);padding:1px 4px;border-radius:3px;">payment_controller.py</code> 第 34 行，使用字符串拼接构造 SQL 查询：
+              <div style="margin-top:8px;">
+                <div class="code-block" style="font-size:12px;"><span style="color:var(--status-heavy);">- query = f"SELECT * FROM orders WHERE id = '{user_input}'"</span>
+<span style="color:var(--status-ready);">+ query = "SELECT * FROM orders WHERE id = %s"</span>
+<span style="color:var(--status-ready);">+ cursor.execute(query, (user_input,))</span></div>
+              </div>
+              <div style="margin-top:12px;">
+                <strong>修复方案：</strong>使用参数化查询，将 <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-primary);padding:1px 4px;border-radius:3px;">user_input</code> 作为参数传入 <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-primary);padding:1px 4px;border-radius:3px;">cursor.execute()</code>，数据库驱动会自动处理转义。
+              </div>
+            </div>
+            <div class="message-meta">代码审查官 · 14:35</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入框 -->
+      <div class="chat-input-area">
+        <button class="icon-btn" title="上传附件">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+        </button>
+        <div class="chat-input-wrapper">
+          <input type="text" class="chat-input" placeholder="输入消息，与 Agent 对话...">
+        </div>
+        <button class="send-btn" title="发送">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 右侧边栏: 运行状态 -->
+    <aside class="chat-right-sidebar">
+      <div class="sidebar-section-title" style="margin-bottom:var(--space-md);">运行状态</div>
+      <div class="run-log">
+        <div class="log-item">
+          <div class="log-item-header">
+            <span class="log-status-dot done"></span>
+            <span class="log-item-time">14:32:01</span>
+          </div>
+          <div class="log-item-text">AST 解析完成（47 文件）</div>
+        </div>
+        <div class="log-item">
+          <div class="log-item-header">
+            <span class="log-status-dot done"></span>
+            <span class="log-item-time">14:32:03</span>
+          </div>
+          <div class="log-item-text">ESLint 规则检查完成</div>
+        </div>
+        <div class="log-item">
+          <div class="log-item-header">
+            <span class="log-status-dot done"></span>
+            <span class="log-item-time">14:32:05</span>
+          </div>
+          <div class="log-item-text">红线规则扫描完成</div>
+        </div>
+        <div class="log-item">
+          <div class="log-item-header">
+            <span class="log-status-dot done"></span>
+            <span class="log-item-time">14:32:06</span>
+          </div>
+          <div class="log-item-text">报告生成完成</div>
+        </div>
+        <div class="log-item">
+          <div class="log-item-header">
+            <span class="log-status-dot run"></span>
+            <span class="log-item-time">14:35:00</span>
+          </div>
+          <div class="log-item-text">正在分析 SQL 注入修复方案...</div>
+        </div>
+      </div>
+
+      <div style="margin-top:var(--space-lg);padding-top:var(--space-md);border-top:1px solid var(--border-color);">
+        <div class="sidebar-section-title" style="margin-bottom:var(--space-sm);">Token 消耗</div>
+        <div style="font-size:12px;color:var(--text-secondary);">
+          输入: 3,284<br>
+          输出: 1,742<br>
+          合计: 5,026
+        </div>
+      </div>
+    </aside>
+  </div>
+</div><!-- /page-conversation -->
+
+<!-- ============================================================
+     P4: 我的 Agent 仪表盘
+     ============================================================ -->
+<div class="page" id="page-dashboard">
+
+  <div class="dashboard-header">
+    <div>
+      <h1 class="page-title">我的 Agent</h1>
+      <p class="page-subtitle">管理你创建的所有 Agent 实例</p>
+    </div>
+    <div style="display:flex;gap:var(--space-md);align-items:center;">
+      <div class="nav-search" style="width:240px;">
+        <span class="search-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </span>
+        <input type="text" placeholder="搜索 Agent 名称">
+      </div>
+      <div class="view-toggle">
+        <button class="active" id="view-table" onclick="switchView('table')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          列表
+        </button>
+        <button id="view-card" onclick="switchView('card')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          卡片
+        </button>
+      </div>
+      <button class="btn btn-primary" onclick="switchPage('marketplace')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        创建新 Agent
+      </button>
+    </div>
+  </div>
+
+  <!-- 统计栏 -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">总 Agent 数</div>
+      <div class="stat-value">6</div>
+      <div class="stat-trend neutral">全部来源</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">运行中</div>
+      <div class="stat-value">4</div>
+      <div class="stat-trend up">● 正在服务</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">已停止</div>
+      <div class="stat-value">2</div>
+      <div class="stat-trend neutral">手动停止</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">本月新建</div>
+      <div class="stat-value">3</div>
+      <div class="stat-trend up">↑ 较上月 +2</div>
+    </div>
+  </div>
+
+  <!-- 列表视图 -->
+  <div id="agent-list-view">
+    <div class="agent-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Agent 名称</th>
+            <th>来源方案</th>
+            <th>创建时间</th>
+            <th>最近活跃</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="agent-name-cell">代码审查官 #001</td>
+            <td><span class="badge badge-domain-0">智能代码审查官</span></td>
+            <td class="agent-time-cell">2026-07-26</td>
+            <td class="agent-time-cell">刚刚</td>
+            <td><span class="run-status running"><span class="status-dot running"></span> 运行中</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="agent-name-cell">AI 日报助手</td>
+            <td><span class="badge badge-domain-1">AI 资讯日报</span></td>
+            <td class="agent-time-cell">2026-07-25</td>
+            <td class="agent-time-cell">2 小时前</td>
+            <td><span class="run-status running"><span class="status-dot running"></span> 运行中</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="agent-name-cell">论文追踪器</td>
+            <td><span class="badge badge-domain-1">ArXiv 论文追踪</span></td>
+            <td class="agent-time-cell">2026-07-24</td>
+            <td class="agent-time-cell">今天 09:00</td>
+            <td><span class="run-status running"><span class="status-dot running"></span> 运行中</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="agent-name-cell">合同审阅员</td>
+            <td><span class="badge badge-domain-3">文档审阅官</span></td>
+            <td class="agent-time-cell">2026-07-22</td>
+            <td class="agent-time-cell">昨天 16:30</td>
+            <td><span class="run-status stopped"><span class="status-dot stopped"></span> 已停止</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="agent-name-cell">研究团队 Alpha</td>
+            <td><span class="badge badge-domain-6">深度研究团队</span></td>
+            <td class="agent-time-cell">2026-07-20</td>
+            <td class="agent-time-cell">3 天前</td>
+            <td><span class="run-status running"><span class="status-dot running"></span> 运行中</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="agent-name-cell">运维巡检 Bot</td>
+            <td><span class="badge badge-domain-5">运维巡检</span></td>
+            <td class="agent-time-cell">2026-07-15</td>
+            <td class="agent-time-cell">1 周前</td>
+            <td><span class="run-status stopped"><span class="status-dot stopped"></span> 已停止</span></td>
+            <td class="agent-actions">
+              <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话</button>
+              <button class="btn btn-secondary btn-sm">编辑</button>
+              <button class="btn btn-ghost btn-sm">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 卡片视图 -->
+  <div id="agent-card-view" style="display:none;">
+    <div class="agent-card-grid">
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">代码审查官 #001</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-0" style="font-size:10px;">智能代码审查官</span></div>
+          </div>
+          <span class="run-status running"><span class="status-dot running"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-26<br>活跃: 刚刚<br>模型: GPT-4o
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status running"><span class="status-dot running"></span> 运行中</span>
+          <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话 →</button>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">AI 日报助手</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-1" style="font-size:10px;">AI 资讯日报</span></div>
+          </div>
+          <span class="run-status running"><span class="status-dot running"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-25<br>活跃: 2 小时前<br>模型: Claude 3.5
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status running"><span class="status-dot running"></span> 运行中</span>
+          <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话 →</button>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">论文追踪器</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-1" style="font-size:10px;">ArXiv 论文追踪</span></div>
+          </div>
+          <span class="run-status running"><span class="status-dot running"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-24<br>活跃: 今天 09:00<br>模型: DeepSeek V3
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status running"><span class="status-dot running"></span> 运行中</span>
+          <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话 →</button>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">合同审阅员</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-3" style="font-size:10px;">文档审阅官</span></div>
+          </div>
+          <span class="run-status stopped"><span class="status-dot stopped"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-22<br>活跃: 昨天 16:30<br>模型: GPT-4o
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status stopped"><span class="status-dot stopped"></span> 已停止</span>
+          <button class="btn btn-secondary btn-sm">启动</button>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">研究团队 Alpha</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-6" style="font-size:10px;">深度研究团队</span></div>
+          </div>
+          <span class="run-status running"><span class="status-dot running"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-20<br>活跃: 3 天前<br>模型: 6 角色 × GPT-4o
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status running"><span class="status-dot running"></span> 运行中</span>
+          <button class="btn btn-primary btn-sm" onclick="switchPage('conversation')">对话 →</button>
+        </div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">运维巡检 Bot</div>
+            <div class="agent-card-meta"><span class="badge badge-domain-5" style="font-size:10px;">运维巡检</span></div>
+          </div>
+          <span class="run-status stopped"><span class="status-dot stopped"></span></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          创建: 2026-07-15<br>活跃: 1 周前<br>模型: Qwen2.5-72B
+        </div>
+        <div class="agent-card-footer">
+          <span class="run-status stopped"><span class="status-dot stopped"></span> 已停止</span>
+          <button class="btn btn-secondary btn-sm">启动</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page-dashboard -->
+
+</div><!-- /page-container -->
+
+<!-- ============================================================
+     JavaScript: 页面切换与交互
+     ============================================================ -->
+<script>
+// 页面切换
+function switchPage(pageName) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('page-' + pageName);
+  if (target) target.classList.add('active');
+
+  // 更新导航高亮
+  document.querySelectorAll('.nav-links li a').forEach(a => a.classList.remove('active'));
+  const navMap = { marketplace: 'marketplace', detail: 'marketplace', conversation: 'dashboard', dashboard: 'dashboard' };
+  const navPage = navMap[pageName] || 'marketplace';
+  document.querySelectorAll('.nav-links li a').forEach(a => {
+    if (a.dataset.page === navPage) a.classList.add('active');
+  });
+
+  window.scrollTo(0, 0);
+}
+
+// 能力域筛选
+function filterDomain(chip, domain) {
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+
+  if (domain === 'all') {
+    document.querySelectorAll('.domain-group').forEach(g => g.style.display = '');
+  } else {
+    document.querySelectorAll('.domain-group').forEach(g => {
+      g.style.display = (g.dataset.domain === domain) ? '' : 'none';
+    });
+  }
+}
+
+// 标签多选
+function toggleTag(el) {
+  el.classList.toggle('selected');
+}
+
+// 单选组
+function selectRadio(el) {
+  const siblings = el.parentElement.querySelectorAll('.radio-option');
+  siblings.forEach(s => s.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// 视图切换
+function switchView(view) {
+  document.getElementById('view-table').classList.toggle('active', view === 'table');
+  document.getElementById('view-card').classList.toggle('active', view === 'card');
+  document.getElementById('agent-list-view').style.display = view === 'table' ? '' : 'none';
+  document.getElementById('agent-card-view').style.display = view === 'card' ? '' : 'none';
+}
+
+// 输入框发送（模拟）
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.target.classList.contains('chat-input')) {
+    e.preventDefault();
+    if (e.target.value.trim()) {
+      const messages = document.querySelector('.chat-messages');
+      const userMsg = document.createElement('div');
+      userMsg.className = 'message user';
+      userMsg.innerHTML = '<div class="message-avatar">我</div><div><div class="message-bubble">' + e.target.value + '</div><div class="message-meta" style="text-align:right;">刚刚</div></div>';
+      messages.appendChild(userMsg);
+      e.target.value = '';
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+});
+</script>
+
+</body>
+</html>

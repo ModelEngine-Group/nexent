@@ -2512,6 +2512,19 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Lazy seed: if the tenant has zero enabled agents, auto-create the
+        # built-in preset agents so the market-v2 page always has clickable
+        # solution cards.  This covers existing tenants that were created
+        # before the preset-seed feature was added.
+        if not any(a.get("enabled") for a in agent_list):
+            try:
+                from services.preset_agent_service import init_preset_agents_for_tenant
+                init_preset_agents_for_tenant(tenant_id, user_id)
+                # Re-query after seeding
+                agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+            except Exception as e:
+                logger.warning(f"Lazy preset agent seed failed for tenant {tenant_id}: {str(e)}")
+
         # Get all agent IDs that are registered as A2A Server agents
         a2a_server_agent_ids = get_server_agent_ids(tenant_id)
 

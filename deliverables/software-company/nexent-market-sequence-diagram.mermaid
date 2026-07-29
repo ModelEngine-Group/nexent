@@ -1,0 +1,174 @@
+%% ===== 1. 模板实例化流程 =====
+sequenceDiagram
+    participant U as 用户
+    participant FE as 前端 /agents/template/[id]
+    participant API as agent_app (FastAPI)
+    participant RS as recipe_service
+    participant AS as agent_service
+    participant DB as PostgreSQL
+
+    U->>FE: 选择模板，查看详情
+    FE->>API: GET /market/agents/{id}
+    API->>DB: get_agent_repository_by_id()
+    DB-->>API: AgentRepositorySnapshot (含 recipe 字段)
+    API-->>FE: 模板详情 + Recipe 变量定义
+    FE->>U: 渲染 RecipeForm 动态表单
+
+    U->>FE: 填写 Recipe 变量，点击"一键创建"
+    FE->>API: POST /agent/instantiate {template_id, recipe_vars}
+    API->>RS: instantiate_from_template_impl(template_id, vars, auth)
+
+    RS->>DB: get_agent_repository_by_id(template_id)
+    DB-->>RS: AgentRepositorySnapshot
+
+    RS->>RS: apply_recipe_variables(snapshot, vars)
+    Note over RS: 深度遍历 agent_info<br/>替换所有 &lt;TO_CONFIG:xxx&gt;
+
+    RS->>RS: precheck_dependencies(snapshot, tenant_id)
+    Note over RS: 检查模型/KB/MCP/Skill 可用性
+
+    alt 依赖缺失
+        RS-->>API: PrecheckResponse (has_abnormal=True)
+        API-->>FE: 422 + 缺失项列表
+        FE->>U: 显示缺失依赖 + 补配引导
+    else 依赖满足
+        RS->>AS: import_agent_with_skills_impl(snapshot, skills, auth)
+        Note over AS: DFS 重建 Agent 树<br/>创建 Skill 实例<br/>建立 Agent 关系
+        AS->>DB: INSERT agents + relations + skills
+        DB-->>AS: agent_id_mapping
+        AS-->>RS: {main_agent_id: new_id}
+
+        RS->>RS: execute_post_actions(snapshot, agent_id_mapping)
+        Note over RS: 如：挂载 MCP、更新 IndustryRule
+
+        RS->>DB: increment_agent_repository_downloads(template_id)
+        RS-->>API: {agent_id, agent_name, success: true}
+        API-->>FE: 200 + 实例化结果
+        FE->>U: 跳转到 /agents?agent_id=new_id 或 /newchat
+    end
+
+%% ===== 2. 专家包安装流程 =====
+sequenceDiagram
+    participant U as 用户
+    participant FE as 前端 ExpertCard
+    participant API as expert_app (FastAPI)
+    participant ES as expert_service
+    participant P as ExpertPackageParser
+    participant AS as agent_service
+    participant DB as PostgreSQL
+
+    U->>FE: 点击"安装专家包"
+    FE->>API: POST /expert/{id}/install
+    API->>ES: install_expert(expert_id, authorization)
+
+    ES->>DB: get_agent_repository_by_id(expert_id)
+    DB-->>ES: AgentRepository record (expert_type='team')
+
+    Note over ES: record.agent_info_json 包含<br/>完整专家包快照
+
+    ES->>P: parse(record.agent_info_json)
+    P->>P: _parse_expert_json(meta)
+    P->>P: _parse_agent_md(agents/*.md) ×N
+    Note over P: YAML frontmatter → ExportAndImportAgentInfo<br/>markdown body → duty_prompt
+
+    P->>P: _build_snapshot(meta, agents, skills)
+    P-->>ES: AgentRepositorySnapshot (含 managed_agents 树)
+
+    ES->>ES: precheck_dependencies(snapshot, tenant_id)
+
+    alt Team 型 (expert_type='team')
+        ES->>AS: import_agent_with_skills_impl(snapshot, skills, auth)
+        Note over AS: DFS 重建 6 角色树<br/>主理人 → 团员 关系
+        AS->>DB: INSERT agents + relations + skills
+        DB-->>AS: agent_id_mapping
+        AS-->>ES: {main_agent_id: 主理人agent_id}
+    else Agent 型 (expert_type='agent')
+        ES->>AS: import_agent_with_skills_impl(snapshot, skills, auth)
+        AS->>DB: INSERT single agent
+        DB-->>AS: agent_id_mapping
+        AS-->>ES: {main_agent_id}
+    end
+
+    ES->>DB: increment_agent_repository_downloads(expert_id)
+    ES-->>API: {main_agent_id, role_count, success: true}
+    API-->>FE: 200 + 安装结果
+    FE->>U: 安装成功提示 → 跳转 /agents
+
+%% ===== 3. 统一市场列表查询流程 =====
+sequenceDiagram
+    participant U as 用户
+    participant FE as 前端 /market
+    participant API as market_app (FastAPI)
+    participant MS as market_service
+    participant MDB as market_db
+    participant ARDB as agent_repository_db
+    participant SRDB as skill_repository_db
+    participant MMDB as market_mcp_db
+    participant DB as PostgreSQL
+
+    U->>FE: 访问 /market，选择 Tab (Agent/Skill/MCP)
+    FE->>API: GET /market/agents?page=1&page_size=20&search=xxx&category=yyy
+
+    API->>MS: list_market_agents(filters, lang)
+    MS->>MS: determine_source_filter(filters)
+    Note over MS: 合并 source='official'<br/>(is_official_template=True)<br/>+ source='community'<br/>(status='shared')
+
+    MS->>MDB: list_unified_market_agents(filters)
+    MDB->>ARDB: list_agent_repository_summaries(...)
+    ARDB->>DB: SELECT FROM ag_agent_repository_t<br/>WHERE status='shared'<br/>OR is_official_template=True
+    DB-->>ARDB: rows
+    ARDB-->>MDB: agent_list
+
+    MDB->>MDB: _enrich_with_rating(entity_type='agent', ids)
+    MDB->>DB: SELECT FROM market_rating_summary_t<br/>WHERE entity_type='agent'
+    DB-->>MDB: ratings
+    MDB->>MDB: _enrich_with_category(ids)
+    MDB->>DB: SELECT FROM market_category_t
+    DB-->>MDB: categories
+
+    MDB-->>MS: enriched_agent_list
+    MS-->>API: {items, total, page, page_size}
+    API-->>FE: 200 + JSON
+
+    FE->>U: 渲染 AgentMarketCard 列表
+
+%% ===== 4. 预置内容 Seeding 流程（启动时） =====
+sequenceDiagram
+    participant App as config_app startup
+    participant Svc as agent_service
+    participant Seeder as PresetMarketSeeder
+    participant DB as PostgreSQL
+
+    App->>Svc: load_default_agents_json_file(path)
+    Note over Svc: 原为死代码，现激活
+    Svc->>Seeder: PresetMarketSeeder().seed_all()
+
+    Seeder->>Seeder: _seed_categories()
+    Seeder->>DB: INSERT INTO market_category_t<br/>ON CONFLICT DO NOTHING
+
+    Seeder->>Seeder: _seed_agents()
+    loop 10 个预置 Agent
+        Seeder->>DB: 检查 name + is_official_template 是否已存在
+        alt 不存在
+            Seeder->>DB: INSERT INTO ag_agent_repository_t<br/>(is_official_template=True, status='shared')
+        else 已存在
+            Note over Seeder: 跳过（幂等）
+        end
+    end
+
+    Seeder->>Seeder: _seed_skills()
+    loop 9 个预置 Skill
+        Seeder->>DB: INSERT INTO ag_skill_repository_t<br/>(source='official', status='shared')
+    end
+
+    Seeder->>Seeder: _seed_mcps()
+    loop 6 个预置 MCP
+        Seeder->>DB: INSERT INTO mcp_market_record_t<br/>(source='official', review_status='shared')
+    end
+
+    Seeder->>Seeder: _seed_experts()
+    loop 5 个预置专家包
+        Seeder->>DB: INSERT INTO ag_agent_repository_t<br/>(expert_type='team'/'agent', is_official_template=True)
+    end
+
+    Seeder-->>Svc: void

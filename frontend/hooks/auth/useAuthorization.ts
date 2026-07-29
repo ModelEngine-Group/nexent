@@ -188,6 +188,15 @@ export function useAuthorization(): AuthorizationContextType {
   const isAgentEvaluationPage =
     /^\/[^/]+\/space\/agents\/\d+\/evaluate(?:\/|$)/.test(cleanPath);
 
+  // UI preview routes for new market & template pages — temporarily bypass
+  // authz so designers/developers can review the prototype before the DB
+  // permission entries are added.
+  // NOTE: cleanPath already has the locale prefix stripped (e.g. "/market-v2"),
+  // so the regex must match single-segment paths, not "/<locale>/market-v2".
+  const isPreviewRoute =
+    /^\/market-v2(?:\/|$)/.test(cleanPath) ||
+    /^\/agents\/template(?:\/|$)/.test(cleanPath);
+
   // Support prefix matching so nested routes such as
   // /space/agents/{id}/evaluate (agent evaluator) are covered by /space.
   const isWithinAccessiblePrefix = accessibleRoutes.some(
@@ -197,12 +206,13 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     isSharePage ||
     isAgentEvaluationPage ||
+    isPreviewRoute ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;
 
   // Route guard
   useLayoutEffect(() => {
-    if (isSharePage || isAgentEvaluationPage) {
+    if (isSharePage || isAgentEvaluationPage || isPreviewRoute) {
       return;
     }
 

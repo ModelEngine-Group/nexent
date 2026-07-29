@@ -11,6 +11,7 @@ from .aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
+from .web_search_tool import WebSearchTool
 from .create_file_tool import CreateFileTool
 from .read_file_tool import ReadFileTool
 from .delete_file_tool import DeleteFileTool
@@ -47,6 +48,7 @@ __all__ = [
     "GetEmailTool",
     "TavilySearchTool",
     "LinkupSearchTool",
+    "WebSearchTool",
     "CreateFileTool",
     "ReadFileTool",
     "DeleteFileTool",

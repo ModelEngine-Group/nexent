@@ -471,9 +471,16 @@ app.prepare().then(() => {
         const target = HTTP_BACKEND;
         forwardAuthRequest(req, res, target);
       } else if (pathname.startsWith("/api/market/")) {
-        // Route market endpoints to market backend
-        req.url = req.url.replace("/api/market", "");
-        proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
+        // Route market endpoints to the local config backend, which serves the
+        // unified market router (official templates + shared listings + the
+        // /market/agents/{id}/instantiate endpoint). Do NOT strip the prefix —
+        // the local backend routes are mounted under /api/market.
+        proxy.web(req, res, {
+          target: HTTP_BACKEND,
+          changeOrigin: true,
+          proxyTimeout: PROXY_TIMEOUT_MS,
+          timeout: PROXY_TIMEOUT_MS,
+        });
       } else {
         // Route runtime endpoints to runtime backend, others to config backend
         const isRuntime =

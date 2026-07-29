@@ -35,6 +35,10 @@ export interface MarketAgentListItem {
   created_at: string;
   tool_count?: number;
   is_featured: boolean;
+  // Solution composition: how many Agents/Skills/MCPs this package bundles.
+  agent_count?: number;
+  skill_count?: number;
+  mcp_count?: number;
 }
 
 export interface MarketAgentTool {

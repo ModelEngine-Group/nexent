@@ -201,7 +201,7 @@ def get_local_tools() -> List[ToolInfo]:
             source=ToolSourceEnum.LOCAL.value,
             inputs=json.dumps(processed_inputs, ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
-            category=getattr(tool_class, 'category'),
+            category=getattr(tool_class, 'category', None),
             labels=getattr(tool_class, 'labels', None),
             class_name=tool_class.__name__,
             usage=None,

@@ -3,9 +3,9 @@ import inspect
 from typing import List, Dict
 
 
-def get_local_tools_classes() -> List[type]:
+def get_local_tools_classes() -> List:
     """
-    Get all tool classes from the nexent.core.tools package.
+    Get all tool classes and decorated functions from the nexent.core.tools package.
 
     Tools whose class-level ``category`` attribute is one of the SDK-internal
     categories (see ``ToolCategory``) are filtered out so they do not appear
@@ -13,13 +13,19 @@ def get_local_tools_classes() -> List[type]:
     itself at agent construction time and must not be user-configurable.
 
     Returns:
-        List of tool class objects
+        List of tool class objects (for class-based tools) or tool instances
+        (for ``@tool``-decorated function tools like ``read_skill_md``).
     """
     tools_package = importlib.import_module('nexent.core.tools')
     tools_classes = []
     for name in dir(tools_package):
         obj = getattr(tools_package, name)
+        # Class-based tools (e.g. TerminalTool, CreateFileTool)
         if inspect.isclass(obj) and not _is_internal_tool(obj):
+            tools_classes.append(obj)
+        # @tool-decorated function tools (e.g. read_skill_md, run_skill_script)
+        # smolagents @tool returns a SimpleTool instance with .name and .description
+        elif not inspect.isclass(obj) and hasattr(obj, "name") and hasattr(obj, "description"):
             tools_classes.append(obj)
     return tools_classes
 

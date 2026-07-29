@@ -70,8 +70,10 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 )
 
 
-# Container-internal skills storage path
-CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
+# Container-internal skills storage path. Defaults to the shared skills volume
+# mounted in both the config and runtime containers so skill packages persist
+# across restarts even when SKILLS_PATH is not explicitly set.
+CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH", "/mnt/nexent-data/skills")
 
 # Container-internal official skills ZIP directory
 OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"

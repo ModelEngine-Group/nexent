@@ -1,0 +1,226 @@
+classDiagram
+    %% ===== Pydantic 数据模型层 =====
+
+    class IndustryRule {
+        +Dict guardrails
+        +Dict tool_routing
+        +List scene_mappings
+        +String fallback_strategy
+    }
+
+    class RecipeVariable {
+        +String key
+        +String label
+        +String var_type
+        +String description
+        +String default_value
+        +List options
+        +bool required
+    }
+
+    class RecipeDefinition {
+        +List~RecipeVariable~ variables
+        +List~RecipeLayer~ layers
+        +List~Dict~ post_actions
+    }
+
+    class RecipeLayer {
+        +String layer_type
+        +String entity_type
+        +int entity_id
+        +String entity_name
+        +Dict overrides
+    }
+
+    class AgentRepositorySnapshot {
+        +int agent_id
+        +Dict agent_info
+        +List mcp_info
+        +List skills
+        +Optional~IndustryRule~ industry_rule
+        +Optional~RecipeDefinition~ recipe
+    }
+
+    class ExpertPackageMeta {
+        +String expert_id
+        +String name
+        +String display_name
+        +String description
+        +String expert_type
+        +String version
+        +String locale
+        +List~ExpertMemberInfo~ members
+        +String main_agent_id
+        +String icon
+        +List~String~ tags
+        +String category_id
+    }
+
+    class ExpertMemberInfo {
+        +String role
+        +String agent_file
+        +String display_name
+        +String description
+        +String avatar
+    }
+
+    AgentRepositorySnapshot --> IndustryRule : industry_rule
+    AgentRepositorySnapshot --> RecipeDefinition : recipe
+    RecipeDefinition --> RecipeVariable : variables
+    RecipeDefinition --> RecipeLayer : layers
+
+    %% ===== 后端 Service 层 =====
+
+    class MarketService {
+        +list_market_agents(filters, lang) Dict
+        +list_market_skills(filters, lang) Dict
+        +list_market_mcps(filters, lang) Dict
+        +list_featured(locale) List
+        +list_categories(entity_type) List
+    }
+
+    class ExpertService {
+        +ExpertPackageParser parser
+        +get_expert_detail(expert_id) Dict
+        +install_expert(expert_id, authorization) Dict
+    }
+
+    class ExpertPackageParser {
+        +parse(zip_bytes) ExpertPackageParseResult
+        +_parse_expert_json(data) ExpertPackageMeta
+        +_parse_agent_md(content) ExportAndImportAgentInfo
+        +_build_snapshot(meta, agents, skills) AgentRepositorySnapshot
+    }
+
+    class RecipeService {
+        +instantiate_from_template(template_id, recipe_vars, authorization) Dict
+        +apply_recipe_variables(snapshot, vars) AgentRepositorySnapshot
+        +precheck_dependencies(snapshot, tenant_id) RepositoryImportPrecheckResponse
+        +publish_recipe(recipe_data, authorization) int
+        +instantiate_recipe(recipe_id, authorization) Dict
+    }
+
+    class PresetMarketSeeder {
+        +PRESET_AGENTS list
+        +PRESET_SKILLS list
+        +PRESET_MCPS list
+        +seed_all() void
+        +_seed_agents() void
+        +_seed_skills() void
+        +_seed_mcps() void
+        +_seed_categories() void
+        +_seed_experts() void
+    }
+
+    class ExpertRouter {
+        +route(query, expert_id) String
+        +_semantic_match(query, role_descriptions) String
+    }
+
+    ExpertService --> ExpertPackageParser
+    ExpertService --> AgentRepositorySnapshot : builds
+    RecipeService --> AgentRepositorySnapshot : transforms
+    PresetMarketSeeder --> MarketService : seeds into
+
+    %% ===== SDK 层 =====
+
+    class ExpertTeam {
+        +NexentAgent main_agent
+        +subagent_factory factory
+        +List~NexentAgent~ members
+        +SOPDefinition sop
+        +run(input) str
+        +_dispatch_phase(phase, context) str
+        +_aggregate_outputs(member_outputs) str
+    }
+
+    class AgentContextLoader {
+        +int agent_id
+        +str tenant_id
+        +load_metadata() Dict
+        +load_core() Dict
+        +load_on_demand(query) Dict
+    }
+
+    ExpertTeam --> AgentContextLoader : uses
+
+    %% ===== DB 模型层（新增表） =====
+
+    class MarketReview {
+        +int review_id
+        +String entity_type
+        +int entity_id
+        +String tenant_id
+        +String user_id
+        +int rating
+        +String comment
+        +int parent_review_id
+        +String status
+    }
+
+    class MarketRatingSummary {
+        +String entity_type
+        +int entity_id
+        +Decimal avg_rating
+        +int rating_count
+        +int review_count
+    }
+
+    class MarketSubscription {
+        +int subscription_id
+        +String entity_type
+        +int entity_id
+        +String tenant_id
+        +String user_id
+        +String action
+    }
+
+    class MarketCategory {
+        +int category_id
+        +String entity_type
+        +String name
+        +int parent_id
+        +String icon
+        +int sort_order
+        +bool is_active
+    }
+
+    class MarketRecipe {
+        +int recipe_id
+        +String name
+        +String description
+        +String publisher_tenant_id
+        +String publisher_user_id
+        +JSONB recipe_json
+        +List~String~ tags
+        +int category_id
+        +String status
+        +int downloads
+    }
+
+    class MarketReport {
+        +int report_id
+        +String entity_type
+        +int entity_id
+        +String reporter_user_id
+        +String reason
+        +String description
+        +String status
+        +String handler_user_id
+    }
+
+    class MarketPublisherProfile {
+        +String user_id
+        +String tenant_id
+        +String display_name
+        +String avatar
+        +String bio
+        +int total_publishes
+        +int total_downloads
+        +Decimal avg_rating
+        +bool verified
+    }
+
+    MarketReview --> MarketRatingSummary : aggregates
+    MarketSubscription --> MarketCategory : optionally
+    MarketRecipe --> MarketCategory : belongs to

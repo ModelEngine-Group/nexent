@@ -414,6 +414,8 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from services.tool_configuration_service import init_tool_list_for_tenant
+    from services.skill_service import init_skill_list_for_tenant
+    from services.preset_agent_service import init_preset_agents_for_tenant
     from services.user_management_service import generate_tts_stt_4_admin
     from utils.auth_utils import calculate_expires_at, generate_session_jwt
 
@@ -495,6 +497,12 @@ async def complete_pending_oauth_account(
         await generate_tts_stt_4_admin(tenant_id, supabase_user_id)
     if not is_asset_owner_registration:
         await init_tool_list_for_tenant(tenant_id, supabase_user_id)
+        try:
+            init_preset_agents_for_tenant(tenant_id, supabase_user_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                f"Failed to seed preset agents for tenant {tenant_id}: {str(e)}")
 
     create_or_update_oauth_account(
         user_id=supabase_user_id,

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexent Market UI - Interactive Prototype</title>
+<style>
+  :root {
+    --c-purple-50: #EEEDFE;
+    --c-purple-100: #CECBF6;
+    --c-purple-400: #7F77DD;
+    --c-purple-500: #534AB7;
+    --c-purple-800: #3C3489;
+    --c-purple-900: #26215C;
+    --c-teal-50: #E1F5EE;
+    --c-teal-500: #1D9E75;
+    --c-amber-50: #FAEEDA;
+    --c-amber-600: #BA7517;
+    --c-blue-50: #E6F1FB;
+    --c-blue-500: #378ADD;
+    --c-gray-50: #F1EFE8;
+    --c-gray-400: #888780;
+    --c-gray-600: #5F5E5A;
+    --c-gray-800: #444441;
+    --c-amber-star: #EF9F27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #FAFAFB;
+    color: var(--c-gray-800);
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 20px; font-weight: 700; color: var(--c-purple-500); margin-bottom: 4px; }
+  h2 { font-size: 16px; font-weight: 600; color: var(--c-purple-900); margin-bottom: 8px; margin-top: 24px; }
+  .subtitle { font-size: 13px; color: var(--c-gray-400); margin-bottom: 16px; }
+  .section { margin-bottom: 32px; }
+
+  /* Tab navigation */
+  .tab-nav { display: flex; gap: 24px; border-bottom: 1px solid var(--c-gray-50); margin-bottom: 16px; padding-bottom: 0; }
+  .tab-item { font-size: 13px; font-weight: 400; color: var(--c-gray-400); cursor: pointer; padding-bottom: 8px; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; transition: all 0.15s ease; }
+  .tab-item:hover { color: var(--c-purple-400); }
+  .tab-item.active { color: var(--c-purple-500); font-weight: 500; border-bottom-color: var(--c-purple-500); }
+  .tab-badge { font-size: 10px; font-weight: 500; background: var(--c-gray-50); color: var(--c-gray-400); padding: 1px 6px; border-radius: 7px; }
+  .tab-item.active .tab-badge { background: var(--c-purple-50); color: var(--c-purple-500); }
+
+  /* Featured banner */
+  .featured-banner { background: var(--c-purple-50); border: 0.5px solid var(--c-purple-100); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+  .featured-title { font-size: 13px; font-weight: 600; color: var(--c-purple-800); }
+  .featured-desc { font-size: 12px; color: var(--c-gray-600); margin-top: 2px; }
+  .featured-btn { margin-left: auto; background: var(--c-purple-500); color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
+
+  /* Card grid */
+  .card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .market-card { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 10px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; min-height: 280px; }
+  .market-card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border-color: var(--c-purple-100); }
+  .card-top-bar { height: 3px; background: var(--c-purple-500); opacity: 0.08; }
+  .card-top-bar.teal { background: var(--c-teal-500); opacity: 0.08; }
+  .card-top-bar.amber { background: var(--c-amber-600); opacity: 0.08; }
+  .card-top-bar.blue { background: var(--c-blue-500); opacity: 0.08; }
+  .card-header { padding: 12px 16px; border-bottom: 0.5px solid var(--c-gray-50); display: flex; justify-content: space-between; align-items: center; }
+  .card-cat { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--c-purple-500); }
+  .card-cat.teal { color: var(--c-teal-500); }
+  .card-cat.amber { color: var(--c-amber-600); }
+  .card-cat.blue { color: var(--c-blue-500); }
+  .card-icon { font-size: 18px; }
+  .card-download { font-size: 11px; color: var(--c-gray-400); display: flex; align-items: center; gap: 4px; }
+  .card-body { padding: 12px 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .card-title { font-size: 15px; font-weight: 600; color: var(--c-purple-900); }
+  .card-author { font-size: 11px; color: var(--c-gray-400); }
+  .card-desc { font-size: 12px; color: var(--c-gray-600); line-height: 1.5; flex: 1; }
+  .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 10px; background: var(--c-gray-50); color: var(--c-gray-600); padding: 2px 8px; border-radius: 8px; }
+  .card-footer { padding: 8px 16px 12px; border-top: 0.5px solid var(--c-gray-50); }
+  .download-btn { width: 100%; padding: 8px; background: var(--c-purple-500); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .download-btn.teal { background: var(--c-teal-500); }
+  .download-btn.amber { background: var(--c-amber-600); }
+  .download-btn.blue { background: var(--c-blue-500); }
+  .download-btn:hover { filter: brightness(1.1); }
+
+  /* Expert card */
+  .expert-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .expert-card { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; }
+  .expert-card:hover { transform: translateY(-2px); box-shadow: 0 8px 12px -4px rgba(0,0,0,0.1); }
+  .expert-top { height: 3px; background: var(--c-purple-500); }
+  .expert-top.agent { opacity: 0.6; }
+  .expert-content { padding: 16px 20px; }
+  .expert-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .expert-avatar { width: 48px; height: 48px; border-radius: 50%; background: var(--c-purple-50); border: 1.5px solid var(--c-purple-500); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .expert-badges { display: flex; gap: 6px; }
+  .badge-official { background: var(--c-purple-500); color: #fff; font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 9px; display: inline-flex; align-items: center; gap: 4px; }
+  .badge-official::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #fff; }
+  .badge-type { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 9px; }
+  .badge-type.team { background: var(--c-purple-50); color: var(--c-purple-500); border: 0.5px solid var(--c-purple-500); }
+  .badge-type.agent { background: var(--c-gray-50); color: var(--c-gray-400); border: 0.5px solid var(--c-gray-400); }
+  .expert-name { font-size: 16px; font-weight: 600; color: var(--c-purple-900); }
+  .expert-meta { font-size: 11px; color: var(--c-gray-400); margin-top: 2px; }
+  .expert-desc { font-size: 13px; color: var(--c-gray-600); margin: 8px 0 12px; line-height: 1.5; }
+  .member-section { margin: 12px 0; }
+  .member-label { font-size: 11px; color: var(--c-gray-400); margin-bottom: 6px; }
+  .member-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 10px; font-size: 10px; }
+  .chip.main { background: var(--c-purple-50); border: 0.5px solid var(--c-purple-100); color: var(--c-purple-500); }
+  .chip.member { background: var(--c-gray-50); border: 0.5px solid var(--c-gray-50); color: var(--c-gray-600); }
+  .chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+  .chip.main::before { background: var(--c-purple-400); }
+  .chip.member::before { background: var(--c-gray-400); }
+  .guardrail-badge { display: inline-block; background: var(--c-teal-50); border: 0.5px solid var(--c-teal-500); color: var(--c-teal-500); font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 4px; margin-top: 8px; }
+  .expert-tags { display: flex; gap: 6px; margin-top: 8px; }
+  .expert-footer { padding: 12px 20px; border-top: 0.5px solid var(--c-gray-50); display: flex; justify-content: flex-end; }
+  .install-btn { background: var(--c-purple-500); color: #fff; border: none; padding: 8px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .install-btn:hover { background: var(--c-purple-400); }
+
+  /* Preset cards */
+  .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .preset-card { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 10px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; }
+  .preset-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px -4px rgba(0,0,0,0.08); }
+  .preset-top { height: 3px; background: var(--c-purple-500); }
+  .preset-top.secondary { opacity: 0.7; }
+  .preset-header { padding: 8px 12px 4px; display: flex; justify-content: space-between; align-items: center; }
+  .preset-badge { background: var(--c-purple-500); color: #fff; font-size: 9px; font-weight: 500; padding: 2px 6px; border-radius: 8px; display: inline-flex; align-items: center; gap: 3px; }
+  .preset-badge::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #fff; }
+  .preset-zap { width: 20px; height: 20px; border-radius: 50%; background: var(--c-purple-50); display: flex; align-items: center; justify-content: center; font-size: 10px; }
+  .preset-body { padding: 4px 12px 8px; display: flex; align-items: center; gap: 10px; }
+  .preset-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--c-purple-50); border: 1px solid var(--c-purple-500); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .preset-info { flex: 1; }
+  .preset-title { font-size: 13px; font-weight: 500; color: var(--c-purple-900); }
+  .preset-desc { font-size: 11px; color: var(--c-gray-400); line-height: 1.4; }
+  .preset-prompt { margin: 0 12px 12px; padding: 8px 12px; background: #FAFAFB; border: 0.5px solid var(--c-purple-100); border-radius: 8px; font-size: 10px; color: var(--c-purple-500); }
+
+  /* Recipe visualizer */
+  .recipe-viz { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 12px; padding: 16px; margin: 8px 0; }
+  .recipe-nodes { display: flex; justify-content: center; gap: 24px; margin: 12px 0; }
+  .recipe-node { padding: 8px 16px; border-radius: 8px; display: flex; align-items: center; gap: 8px; }
+  .recipe-node.agent { background: var(--c-purple-50); border: 1px solid var(--c-purple-500); }
+  .recipe-node.skill { background: var(--c-teal-50); border: 0.5px solid var(--c-teal-500); }
+  .recipe-node.mcp { background: var(--c-amber-50); border: 0.5px solid var(--c-amber-600); }
+  .recipe-node-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: #fff; }
+  .recipe-node.agent .recipe-node-icon { background: var(--c-purple-500); }
+  .recipe-node.skill .recipe-node-icon { background: var(--c-teal-500); }
+  .recipe-node.mcp .recipe-node-icon { background: var(--c-amber-600); }
+  .recipe-node-text { font-size: 11px; font-weight: 500; color: var(--c-purple-900); }
+  .recipe-node-label { font-size: 10px; color: var(--c-gray-400); }
+  .recipe-legend { display: flex; gap: 16px; font-size: 11px; color: var(--c-gray-400); margin-top: 8px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 4px; }
+
+  /* Recipe form */
+  .recipe-form { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 12px; padding: 16px; margin: 8px 0; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-field { display: flex; flex-direction: column; gap: 4px; }
+  .form-label { font-size: 12px; font-weight: 500; color: var(--c-purple-800); }
+  .form-desc { font-size: 11px; color: var(--c-gray-400); }
+  .form-input { background: #FAFAFB; border: 0.5px solid var(--c-gray-50); border-radius: 6px; padding: 8px 12px; font-size: 13px; color: var(--c-gray-800); }
+  .required-tag { display: inline-block; background: var(--c-purple-50); color: var(--c-purple-500); font-size: 9px; padding: 1px 6px; border-radius: 4px; margin-left: 8px; }
+  .radio-group { display: flex; gap: 16px; align-items: center; }
+  .radio-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+
+  /* Star rating */
+  .stars { color: var(--c-amber-star); font-size: 12px; letter-spacing: 1px; }
+  .review-summary { font-size: 11px; color: var(--c-gray-400); margin-left: 8px; }
+  .review-item { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 8px; padding: 12px 16px; margin-top: 8px; display: flex; gap: 12px; }
+  .review-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--c-purple-50); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--c-purple-500); flex-shrink: 0; }
+  .review-content { flex: 1; }
+  .review-text { font-size: 13px; color: var(--c-gray-600); }
+  .review-meta { font-size: 11px; color: var(--c-gray-400); margin-top: 4px; }
+  .write-review-btn { background: #fff; border: 1px solid var(--c-purple-500); color: var(--c-purple-500); padding: 6px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+
+  /* Template header */
+  .template-header { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 12px; padding: 16px 20px; display: flex; align-items: center; gap: 16px; border-left: 4px solid var(--c-purple-500); }
+  .template-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--c-purple-50); border: 1.5px solid var(--c-purple-500); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .template-info { flex: 1; }
+  .template-title { font-size: 16px; font-weight: 600; color: var(--c-purple-500); }
+  .template-meta { font-size: 11px; color: var(--c-gray-400); margin-top: 2px; }
+  .template-badges { display: flex; gap: 6px; margin-bottom: 4px; }
+  .create-btn { background: var(--c-purple-500); color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .create-btn:hover { background: var(--c-purple-400); }
+
+  /* Chat input mock */
+  .chat-input { background: #fff; border: 0.5px solid var(--c-gray-50); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .chat-input-text { flex: 1; font-size: 13px; color: var(--c-gray-400); }
+  .chat-send { width: 28px; height: 28px; border-radius: 50%; background: var(--c-purple-500); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; cursor: pointer; }
+
+  /* Section dividers */
+  .section-title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .section-title { font-size: 16px; font-weight: 600; color: var(--c-purple-900); }
+  .section-line { width: 60px; height: 2px; background: var(--c-purple-500); }
+  .section-hint { font-size: 11px; color: var(--c-gray-400); }
+
+  .bottom-hint { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; font-size: 11px; color: var(--c-gray-400); }
+  .browse-all { background: var(--c-purple-50); border: 0.5px solid var(--c-purple-100); color: var(--c-purple-500); padding: 4px 12px; border-radius: 10px; font-size: 11px; font-weight: 500; cursor: pointer; }
+
+  .demo-label { font-size: 10px; color: var(--c-gray-400); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .demo-divider { border: none; border-top: 2px dashed var(--c-purple-100); margin: 40px 0; }
+</style>
+</head>
+<body>
+
+<h1>Nexent Market UI — Interactive Prototype</h1>
+<p class="subtitle">基于 nexent-market-architecture-2026-07-25.md 设计的交互式原型</p>
+
+<!-- ===================== 1. 统一市场页 ===================== -->
+<hr class="demo-divider">
+<h2>1. 统一市场页 — 三 Tab 设计</h2>
+<p class="subtitle">Agent + Skill + MCP + Recipe + Expert 五类型统一市场</p>
+
+<div class="tab-nav">
+  <div class="tab-item active" onclick="switchTab(this)">Agents <span class="tab-badge">142</span></div>
+  <div class="tab-item" onclick="switchTab(this)">Skills <span class="tab-badge">86</span></div>
+  <div class="tab-item" onclick="switchTab(this)">MCPs <span class="tab-badge">24</span></div>
+  <div class="tab-item" onclick="switchTab(this)">Recipes <span class="tab-badge">18</span></div>
+  <div class="tab-item" onclick="switchTab(this)">Experts <span class="tab-badge">5</span></div>
+</div>
+
+<!-- Featured banner -->
+<div class="featured-banner">
+  <div>
+    <div class="featured-title">★ Featured this week</div>
+    <div class="featured-desc">Deep Research Team — 6-role expert package with semantic routing</div>
+    <div style="margin-top:4px"><span class="badge-official">Official</span></div>
+  </div>
+  <button class="featured-btn">View →</button>
+</div>
+
+<!-- Card grid -->
+<div class="card-grid" id="cardGrid">
+  <!-- Agent cards -->
+  <div class="market-card">
+    <div class="card-top-bar"></div>
+    <div class="card-header">
+      <div class="card-cat"><span class="card-icon">🔬</span> Research</div>
+      <div class="card-download">↓ 1.2k</div>
+    </div>
+    <div class="card-body">
+      <div class="card-title">Deep Researcher</div>
+      <div class="card-author">By Nexent Team</div>
+      <div class="card-desc">Multi-source research agent with citation tracking</div>
+      <div class="card-tags"><span class="tag">research</span><span class="tag">analysis</span></div>
+    </div>
+    <div class="card-footer"><button class="download-btn">Download</button></div>
+  </div>
+
+  <div class="market-card">
+    <div class="card-top-bar"></div>
+    <div class="card-header">
+      <div class="card-cat"><span class="card-icon">✍️</span> Writing</div>
+      <div class="card-download">↓ 856</div>
+    </div>
+    <div class="card-body">
+      <div class="card-title">Content Writer</div>
+      <div class="card-author">By Community</div>
+      <div class="card-desc">SEO-optimized content with tone adaptation</div>
+      <div class="card-tags"><span class="tag">writing</span><span class="tag">SEO</span></div>
+    </div>
+    <div class="card-footer"><button class="download-btn">Download</button></div>
+  </div>
+
+  <div class="market-card">
+    <div class="card-top-bar"></div>
+    <div class="card-header">
+      <div class="card-cat"><span class="card-icon">💻</span> Coding</div>
+      <div class="card-download">↓ 2.1k</div>
+    </div>
+    <div class="card-body">
+      <div class="card-title">Code Reviewer</div>
+      <div class="card-author">By Nexent Team</div>
+      <div class="card-desc">Automated code review with security analysis</div>
+      <div class="card-tags"><span class="tag">code</span><span class="tag">security</span></div>
+    </div>
+    <div class="card-footer"><button class="download-btn">Download</button></div>
+  </div>
+
+  <div class="market-card">
+    <div class="card-top-bar"></div>
+    <div class="card-header">
+      <div class="card-cat"><span class="card-icon">📊</span> Data</div>
+      <div class="card-download">↓ 634</div>
+    </div>
+    <div class="card-body">
+      <div class="card-title">Data Analyst</div>
+      <div class="card-author">By Community</div>
+      <div class="card-desc">Transform raw data into insightful reports</div>
+      <div class="card-tags"><span class="tag">data</span><span class="tag">report</span></div>
+    </div>
+    <div class="card-footer"><button class="download-btn">Download</button></div>
+  </div>
+</div>
+
+<!-- ===================== 2. 专家包卡片 ===================== -->
+<hr class="demo-divider">
+<h2>2. 专家包卡片 — Team 型 vs Agent 型</h2>
+<p class="subtitle">官方预置专家包，支持多角色团队与单角色两种模式</p>
+
+<div class="expert-grid">
+  <!-- Team Type -->
+  <div class="expert-card">
+    <div class="expert-top"></div>
+    <div class="expert-content">
+      <div class="expert-header">
+        <div class="expert-avatar">🔬</div>
+        <div class="expert-badges">
+          <span class="badge-official">Official</span>
+          <span class="badge-type team">Team</span>
+        </div>
+      </div>
+      <div class="expert-name">深度研究团队</div>
+      <div class="expert-meta">Deep Research Team · v1.0.0</div>
+      <div class="expert-desc">6-role expert package with SOP-driven semantic routing for research tasks</div>
+      <div class="member-section">
+        <div class="member-label">Team members (6)</div>
+        <div class="member-chips">
+          <span class="chip main">主理人</span>
+          <span class="chip member">研究员</span>
+          <span class="chip member">撰写者</span>
+          <span class="chip member">编辑者</span>
+          <span class="chip member">审校者</span>
+          <span class="chip member">发布者</span>
+        </div>
+      </div>
+      <div class="expert-tags"><span class="tag">研究</span><span class="tag">analysis</span></div>
+    </div>
+    <div class="expert-footer">
+      <button class="install-btn">Install Team</button>
+    </div>
+  </div>
+
+  <!-- Agent Type -->
+  <div class="expert-card">
+    <div class="expert-top agent"></div>
+    <div class="expert-content">
+      <div class="expert-header">
+        <div class="expert-avatar">📈</div>
+        <div class="expert-badges">
+          <span class="badge-official">Official</span>
+          <span class="badge-type agent">Agent</span>
+        </div>
+      </div>
+      <div class="expert-name">金融分析师</div>
+      <div class="expert-meta">Financial Analyst · v1.0.0</div>
+      <div class="expert-desc">Single-role expert with industry guardrails for financial analysis</div>
+      <div class="member-section">
+        <div class="member-label">Role</div>
+        <div class="member-chips">
+          <span class="chip main">分析师</span>
+        </div>
+      </div>
+      <div class="guardrail-badge">Finance guardrails active</div>
+      <div class="expert-tags" style="margin-top:8px"><span class="tag">金融</span><span class="tag">分析</span></div>
+    </div>
+    <div class="expert-footer">
+      <button class="install-btn">Install expert</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 3. 模板详情页 ===================== -->
+<hr class="demo-divider">
+<h2>3. 模板详情页 — Recipe 可视化与表单</h2>
+<p class="subtitle">TemplateHeader + RecipeVisualizer + RecipeForm + ReviewSection</p>
+
+<!-- Template Header -->
+<div class="template-header">
+  <div class="template-avatar">🔬</div>
+  <div class="template-info">
+    <div class="template-badges">
+      <span class="badge-official">Official</span>
+      <span class="badge-type team">Template</span>
+    </div>
+    <div class="template-title">Deep Researcher Template</div>
+    <div class="template-meta">v1.2.0 · 1,234 downloads · Updated 3 days ago</div>
+  </div>
+  <button class="create-btn">One-click create</button>
+</div>
+
+<!-- Recipe Visualizer -->
+<h2 style="font-size:14px;margin-top:20px">Recipe composition</h2>
+<p class="subtitle" style="margin-bottom:4px">Agent + Skills + MCPs combined in this template</p>
+<div class="recipe-viz">
+  <div class="recipe-nodes">
+    <div class="recipe-node agent">
+      <div class="recipe-node-icon">A</div>
+      <div>
+        <div class="recipe-node-text">Deep Researcher</div>
+        <div class="recipe-node-label">main agent</div>
+      </div>
+    </div>
+    <div class="recipe-node skill">
+      <div class="recipe-node-icon">S</div>
+      <div>
+        <div class="recipe-node-text">Web Search</div>
+        <div class="recipe-node-label">skill · official</div>
+      </div>
+    </div>
+    <div class="recipe-node skill">
+      <div class="recipe-node-icon">S</div>
+      <div>
+        <div class="recipe-node-text">Citation Tracker</div>
+        <div class="recipe-node-label">skill · community</div>
+      </div>
+    </div>
+    <div class="recipe-node mcp">
+      <div class="recipe-node-icon">M</div>
+      <div>
+        <div class="recipe-node-text">Tavily MCP</div>
+        <div class="recipe-node-label">mcp · official</div>
+      </div>
+    </div>
+  </div>
+  <div class="recipe-legend">
+    <span><span class="legend-dot" style="background:var(--c-purple-500)"></span>Agent</span>
+    <span><span class="legend-dot" style="background:var(--c-teal-500)"></span>Skill</span>
+    <span><span class="legend-dot" style="background:var(--c-amber-600)"></span>MCP</span>
+  </div>
+</div>
+
+<!-- Recipe Form -->
+<h2 style="font-size:14px;margin-top:20px">Configure recipe variables</h2>
+<p class="subtitle" style="margin-bottom:4px">Fill in the variables below, then click "One-click create"</p>
+<div class="recipe-form">
+  <div class="form-grid">
+    <div class="form-field">
+      <label class="form-label">Search depth <span class="required-tag">required</span></label>
+      <span class="form-desc">How deep should the agent search?</span>
+      <select class="form-input"><option>Comprehensive</option><option>Standard</option><option>Quick</option></select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Output language <span class="required-tag">required</span></label>
+      <span class="form-desc">Language for the research report</span>
+      <input class="form-input" value="中文">
+    </div>
+    <div class="form-field">
+      <label class="form-label">Max sources</label>
+      <span class="form-desc">Maximum number of sources to cite</span>
+      <input class="form-input" type="number" value="10">
+    </div>
+    <div class="form-field">
+      <label class="form-label">Citation style</label>
+      <span class="form-desc">Format for citations</span>
+      <div class="radio-group" style="padding:8px 0">
+        <label class="radio-item"><input type="radio" name="cite" checked> APA</label>
+        <label class="radio-item"><input type="radio" name="cite"> MLA</label>
+        <label class="radio-item"><input type="radio" name="cite"> Chicago</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Review Section -->
+<h2 style="font-size:14px;margin-top:20px">Reviews <span class="review-summary">4.8 · 23 reviews</span></h2>
+<div class="review-item">
+  <div class="review-avatar">张</div>
+  <div class="review-content">
+    <div class="review-text">Excellent template, saved me hours of research setup time <span class="stars">★★★★★</span></div>
+    <div class="review-meta">张三 · 2 days ago</div>
+  </div>
+  <button class="write-review-btn">Write review</button>
+</div>
+
+<!-- ===================== 4. 预置 Agent 入口 ===================== -->
+<hr class="demo-divider">
+<h2>4. 预置 Agent 入口卡片 — 零配置启动</h2>
+<p class="subtitle">Newchat 落地页的快捷启动入口</p>
+
+<div class="chat-input">
+  <span class="chat-input-text">Ask anything or select a preset agent below...</span>
+  <div class="chat-send">↑</div>
+</div>
+
+<div class="section-title-row">
+  <span class="section-title">Quick start with presets</span>
+  <span class="section-line"></span>
+  <span class="section-hint">No configuration needed</span>
+</div>
+
+<div class="preset-grid">
+  <div class="preset-card">
+    <div class="preset-top"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">🔬</div>
+      <div class="preset-info"><div class="preset-title">Deep Researcher</div><div class="preset-desc">Multi-source research with citation tracking</div></div>
+    </div>
+    <div class="preset-prompt">"Research the latest AI trends..."</div>
+  </div>
+  <div class="preset-card">
+    <div class="preset-top"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">💻</div>
+      <div class="preset-info"><div class="preset-title">Code Reviewer</div><div class="preset-desc">Automated code review with security analysis</div></div>
+    </div>
+    <div class="preset-prompt">"Review this code for bugs..."</div>
+  </div>
+  <div class="preset-card">
+    <div class="preset-top"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">✍️</div>
+      <div class="preset-info"><div class="preset-title">Content Writer</div><div class="preset-desc">SEO-optimized content with tone adaptation</div></div>
+    </div>
+    <div class="preset-prompt">"Write a blog post about..."</div>
+  </div>
+  <div class="preset-card">
+    <div class="preset-top secondary"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">📊</div>
+      <div class="preset-info"><div class="preset-title">Data Analyst</div><div class="preset-desc">Transform raw data into insightful reports</div></div>
+    </div>
+    <div class="preset-prompt">"Analyze this sales dataset..."</div>
+  </div>
+  <div class="preset-card">
+    <div class="preset-top secondary"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">🎨</div>
+      <div class="preset-info"><div class="preset-title">UI Designer</div><div class="preset-desc">Design system generation from brand guidelines</div></div>
+    </div>
+    <div class="preset-prompt">"Create a design system for..."</div>
+  </div>
+  <div class="preset-card">
+    <div class="preset-top secondary"></div>
+    <div class="preset-header"><span class="preset-badge">Official</span><span class="preset-zap">⚡</span></div>
+    <div class="preset-body">
+      <div class="preset-avatar">📝</div>
+      <div class="preset-info"><div class="preset-title">Email Assistant</div><div class="preset-desc">Draft, reply, and schedule professional emails</div></div>
+    </div>
+    <div class="preset-prompt">"Draft a reply to this email..."</div>
+  </div>
+</div>
+
+<div class="bottom-hint">
+  <span>⚡ = Zero config · Platform-managed API key · No setup required</span>
+  <button class="browse-all">Browse all →</button>
+</div>
+
+<script>
+function switchTab(el) {
+  document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  
+  // Swap card content based on tab
+  const grid = document.getElementById('cardGrid');
+  const isSkill = el.textContent.includes('Skills');
+  const isMcp = el.textContent.includes('MCPs');
+  const isRecipe = el.textContent.includes('Recipes');
+  
+  grid.querySelectorAll('.market-card').forEach(card => {
+    const topBar = card.querySelector('.card-top-bar');
+    const cat = card.querySelector('.card-cat');
+    const btn = card.querySelector('.download-btn');
+    topBar.className = 'card-top-bar';
+    cat.className = 'card-cat';
+    btn.className = 'download-btn';
+    
+    if (isSkill) { topBar.classList.add('teal'); cat.classList.add('teal'); btn.classList.add('teal'); }
+    else if (isMcp) { topBar.classList.add('amber'); cat.classList.add('amber'); btn.classList.add('amber'); }
+    else if (isRecipe) { topBar.classList.add('blue'); cat.classList.add('blue'); btn.classList.add('blue'); }
+  });
+}
+</script>
+
+</body>
+</html>

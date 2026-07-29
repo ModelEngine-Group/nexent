@@ -32,11 +32,11 @@ export function usePublishedAgentList({
 	const agents = query.data ?? [];
 
 	const availableAgents = useMemo(() => {
-		return agents.filter((a) => a.is_available !== false);
+		return agents;
 	}, [agents]);
 
 	const availableMainAgents = useMemo(() => {
-		return agents.filter((agent) => agent.is_available !== false && agent.is_main_agent !== false);
+		return agents.filter((agent) => agent.is_main_agent !== false);
 	}, [agents]);
 
 	const filteredAgents = useMemo(() => {

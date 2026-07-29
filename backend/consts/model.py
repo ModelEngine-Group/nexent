@@ -1618,3 +1618,78 @@ class CommunityStatusUpdateRequest(BaseModel):
 class DeleteMcpServiceRequest(BaseModel):
     """Request model for deleting an MCP service"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")
+
+
+# ============================================================================
+# Unified market models (v2.4.0) — Recipe / IndustryRule for template detail
+# ============================================================================
+
+class RecipeVariableOption(BaseModel):
+    """A single option for a select-type recipe variable."""
+    label: str
+    value: str
+
+
+class RecipeVariable(BaseModel):
+    """A single variable definition extracted from a template/recipe snapshot."""
+    key: str
+    label: str
+    description: Optional[str] = None
+    type: str = "string"
+    required: bool = True
+    default: Optional[Any] = None
+    options: Optional[List[RecipeVariableOption]] = None
+
+
+class RecipeLayer(BaseModel):
+    """A single layer in a recipe definition (agent / skill / mcp)."""
+    layer_type: str
+    entity_type: str
+    entity_name: str
+    source: str = "official"
+
+
+class RecipePostAction(BaseModel):
+    """A post-instantiation action defined in a recipe."""
+    action_type: str
+    description: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+
+
+class RecipeDefinition(BaseModel):
+    """Full recipe definition extracted from a template snapshot."""
+    variables: List[RecipeVariable] = Field(default_factory=list)
+    layers: List[RecipeLayer] = Field(default_factory=list)
+    post_actions: List[RecipePostAction] = Field(default_factory=list)
+
+
+class IndustryRuleGuardrail(BaseModel):
+    """A single guardrail rule for an industry."""
+    rule: str
+    description: Optional[str] = None
+
+
+class IndustryRuleToolRouting(BaseModel):
+    """A tool routing mapping for an industry."""
+    scene: str
+    preferred_tools: List[str] = Field(default_factory=list)
+
+
+class IndustryRuleSceneMapping(BaseModel):
+    """A scene-to-behavior mapping for an industry."""
+    scene: str
+    behavior: str
+
+
+class IndustryRule(BaseModel):
+    """Industry-specific rules for an expert/template."""
+    guardrails: List[IndustryRuleGuardrail] = Field(default_factory=list)
+    tool_routing: List[IndustryRuleToolRouting] = Field(default_factory=list)
+    scene_mappings: List[IndustryRuleSceneMapping] = Field(default_factory=list)
+    fallback_strategy: Optional[str] = None
+
+
+class MarketReviewCreateRequest(BaseModel):
+    """Request body for creating a market review."""
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
+    comment: str = Field("", description="Review comment text")

@@ -165,9 +165,12 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           />
         </Sider>
 
-        {/* Don't render children until authorization is complete (except home page) */}
+        {/* Don't render children until authorization is complete (except home page & preview routes) */}
         <Content style={contentStyle}>
-          {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
+          {isHomePage || isOAuthCompletePage || isSharePage ||
+            /^\/[^/]+\/market-v2(?:\/|$)/.test(pathname || "") ||
+            /^\/[^/]+\/agents\/template(?:\/|$)/.test(pathname || "") ||
+            isAuthorized ? (
             children
           ) : (
             <div className="flex items-center justify-center h-full w-full">

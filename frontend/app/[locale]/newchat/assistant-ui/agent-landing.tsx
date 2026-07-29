@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC } from "react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { SparklesIcon, CodeIcon, SearchIcon, FileTextIcon, History, ChevronLeft, ChevronRight, LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +59,16 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
   useEffect(() => {
     setLastUsedAgentIdState(getLastUsedAgentId());
   }, []);
+
+  // Auto-select last used agent when landing page mounts (e.g. coming from market-v2)
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectedRef.current) return;
+    if (lastUsedAgent && availableMainAgents.length > 0) {
+      autoSelectedRef.current = true;
+      onSelectAgent(lastUsedAgent as unknown as PublishedAgent);
+    }
+  }, [lastUsedAgent, availableMainAgents, onSelectAgent]);
 
   const handleSelectAgent = (agent: PublishedAgent) => {
     const agentKey = agent.agent_id;

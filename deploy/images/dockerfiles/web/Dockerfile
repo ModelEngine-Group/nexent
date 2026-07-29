@@ -10,7 +10,7 @@ COPY frontend/package.json ./package.json
 # Use BuildKit named cache for npm downloads across builds.
 RUN --mount=type=cache,id=nexent-web-npm-${TARGETARCH},target=/root/.npm,sharing=locked \
     if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
-    npm install --verbose
+    npm install --legacy-peer-deps --verbose
 
 COPY frontend /opt/frontend
 

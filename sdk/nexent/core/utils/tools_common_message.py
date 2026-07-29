@@ -16,6 +16,7 @@ class ToolSign(Enum):
     HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
     RAGFLOW_SEARCH = "k"  # RAGFlow search tool identifier
     AIDP_SEARCH = "j"  # AIDP search tool identifier
+    WEB_SEARCH = "w"  # Zero-config web search (scrapes search engines) identifier
     MEMORY_OPERATION = "n"      # Memory operation tool identifier
     SKILL_OPERATION = "s"     # Skill script / file tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
@@ -36,6 +37,7 @@ TOOL_SIGN_MAPPING = {
     "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
     "ragflow_search": ToolSign.RAGFLOW_SEARCH.value,
     "aidp_search": ToolSign.AIDP_SEARCH.value,
+    "web_search": ToolSign.WEB_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
@@ -91,4 +93,4 @@ class SearchResultTextMessage:
 
     def to_model_dict(self) -> Dict[str, Any]:
         """Format for input to the large model summary."""
-        return {"title": self.title, "text": self.text, "index": f"{self.tool_sign}{self.cite_index}"}
+        return {"title": self.title, "url": self.url, "text": self.text, "index": f"{self.tool_sign}{self.cite_index}"}
