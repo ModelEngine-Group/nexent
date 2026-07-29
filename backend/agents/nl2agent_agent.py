@@ -435,7 +435,7 @@ The confirmed requirements and selected tools define the complete draft. Execute
 - `constraint_prompt`: selected-tool usage requirements numbered from 1; use an empty string for an empty tool selection.
 - `greeting_message`: a friendly, concise opening of 1 to 2 sentences.
 - `example_questions`: 3 to 5 practical and specific user questions. Prefer the questions used in `few_shot_examples`.
-- `few_shot_examples`: selected tools produce 3 to 5 concrete tasks in the ordinary Agent format; an empty tool selection uses `None`. Each example contains `user_input`, one or more `steps`, `final_reasoning`, and `final_answer`. Each step contains `reasoning`, `tool_calls`, and `observation`. Tool calls use exact names, declared keyword arguments, result variables, and `print()`.""",
+- `few_shot_examples`: selected tools produce 3 to 5 concrete tasks in the ordinary Agent format; an empty tool selection uses `None`. Each example contains `user_input`, one or more `steps`, `final_reasoning`, and `final_answer`. Each step contains `reasoning`, `tool_calls`, and `observation`. Each tool call contains `name` and `arguments`, where `arguments` maps declared keyword argument names to concrete values. The wrapper renders result variables, `print()`, and executable code tags.""",
             f"""## Recommendation Action
 After the search Observation, package the selected candidates:
 Thought: I will package the relevant tool recommendations.
@@ -512,7 +512,7 @@ print(search_result)
 - `constraint_prompt`：从序号 1 开始列出已选工具的使用要求；空工具选择对应空字符串。
 - `greeting_message`：友好、简洁的 1 到 2 句话开场白。
 - `example_questions`：生成 3 到 5 个具体、实用的用户问题，优先使用 `few_shot_examples` 中的问题。
-- `few_shot_examples`：选择工具时生成 3 到 5 个具体任务；空工具选择对应 `None`。每个示例包含 `user_input`、一个或多个 `steps`、`final_reasoning` 和 `final_answer`；每个步骤包含 `reasoning`、`tool_calls` 和 `observation`。工具调用使用准确名称、已声明的关键字参数、结果变量和 `print()`。""",
+- `few_shot_examples`：选择工具时生成 3 到 5 个具体任务；空工具选择对应 `None`。每个示例包含 `user_input`、一个或多个 `steps`、`final_reasoning` 和 `final_answer`；每个步骤包含 `reasoning`、`tool_calls` 和 `observation`；每个工具调用包含 `name` 和 `arguments`，其中 `arguments` 将已声明的关键字参数名映射到具体值。结果变量、`print()` 和可执行代码标签由 wrapper 渲染。""",
             f"""## 推荐组装动作
 搜索 Observation 返回后，组装选中的候选工具：
 Thought: 我将组装相关工具推荐。
