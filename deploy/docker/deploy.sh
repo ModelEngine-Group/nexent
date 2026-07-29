@@ -1533,6 +1533,14 @@ create_default_super_admin_user() {
   # Make sure the script is executable
   chmod +x "$script_path"
 
+  # Export the database configuration before either the create or repair path.
+  export SUPABASE_KEY
+  export POSTGRES_USER
+  export POSTGRES_DB
+  export DEPLOYMENT_VERSION
+  export SUPABASE_POSTGRES_DB
+  export DEPLOYMENT_MODE
+
   # Check if super admin user already exists
   echo ""
   echo "🔍 Checking if super admin user exists..."
@@ -1542,8 +1550,11 @@ create_default_super_admin_user() {
 
   if [ $check_result -eq 0 ]; then
     echo "   ✅ Super admin user (${email}) already exists."
-    echo "   💡 Skipping user creation. If you need to reset the password, please do so manually."
-    return 0
+    echo "   🔧 Ensuring the tenant relationship exists."
+    if bash "$script_path"; then
+      return 0
+    fi
+    return 1
   elif [ $check_result -eq 1 ]; then
     echo "   ℹ️  Super admin user (${email}) does not exist. Proceeding with creation..."
   else
@@ -1561,14 +1572,6 @@ create_default_super_admin_user() {
   else
     password="$(deployment_super_admin_password)"
   fi
-
-  # Export necessary environment variables for the script
-  export SUPABASE_KEY
-  export POSTGRES_USER
-  export POSTGRES_DB
-  export DEPLOYMENT_VERSION
-  export SUPABASE_POSTGRES_DB
-  export DEPLOYMENT_MODE
 
   # Execute the script with password as argument
   if bash "$script_path" "$password" "$display_password"; then
