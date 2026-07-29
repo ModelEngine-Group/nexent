@@ -697,8 +697,38 @@ class _DockerKernelLease:
         return RemotePythonExecutor.install_packages(self, additional_imports)
 
     def _patch_final_answer_with_exception(self, final_answer_tool: Any) -> None:
-        from smolagents.remote_executors import RemotePythonExecutor
-        RemotePythonExecutor._patch_final_answer_with_exception(self, final_answer_tool)
+        """Patch final_answer while preserving its class-defined implementation."""
+        import inspect
+
+        instance_forward = final_answer_tool.forward
+        original_forward = getattr(instance_forward, "__func__", None)
+        wrapped_instance_forward = original_forward is None
+        if wrapped_instance_forward:
+            original_forward = getattr(type(final_answer_tool), "forward", None)
+        if not callable(original_forward):
+            raise TypeError("final_answer tool must define a callable forward method")
+
+        class _FinalAnswerTool(final_answer_tool.__class__):
+            pass
+
+        def forward(self, *args, **kwargs) -> Any:
+            import base64
+            import pickle
+
+            class FinalAnswerException(Exception):
+                def __init__(self, value):
+                    self.value = value
+
+            raise FinalAnswerException(base64.b64encode(pickle.dumps(self._forward(*args, **kwargs))).decode())
+
+        _FinalAnswerTool.forward = forward
+        _FinalAnswerTool._forward = original_forward
+        _FinalAnswerTool._forward.__source__ = inspect.getsource(original_forward).replace(
+            "def forward(", "def _forward("
+        )
+        if wrapped_instance_forward:
+            del final_answer_tool.forward
+        final_answer_tool.__class__ = _FinalAnswerTool
 
     def send_tools(self, tools: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
