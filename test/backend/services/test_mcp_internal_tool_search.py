@@ -299,11 +299,20 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
     examples = [
         {
             "user_input": question,
-            "reasoning": f"Query weather for {city}.",
-            "tool_calls": [
-                {"name": "weather_forecast", "arguments": {"city": city}}
+            "steps": [
+                {
+                    "reasoning": f"Query weather for {city}.",
+                    "tool_calls": [
+                        {
+                            "name": "weather_forecast",
+                            "arguments": {"city": city},
+                        }
+                    ],
+                    "observation": f"{city} has mild and dry weather.",
+                }
             ],
-            "response_guidance": "Answer using the real observation.",
+            "final_reasoning": "The observation answers the question.",
+            "final_answer": "The weather is mild and dry.",
         }
         for question, city in [
             ("上海明天会下雨吗？", "上海"),
@@ -334,7 +343,10 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         "杭州今天适合徒步吗？",
     ]
     assert result["few_shots_prompt"].count("<code>") == 3
-    assert "result = weather_forecast(city='上海')" in result["few_shots_prompt"]
+    assert "任务1" in result["few_shots_prompt"]
+    assert "result_1 = weather_forecast(city='上海')" in result["few_shots_prompt"]
+    assert "# 系统返回 Observation: 上海 has mild and dry weather." in result["few_shots_prompt"]
+    assert "The weather is mild and dry." in result["few_shots_prompt"]
     assert "selected_tool_names" not in result
     assert "few_shot_examples" not in result
 
@@ -342,10 +354,10 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         subtype="agent_draft",
         language="en",
         name="writing_assistant",
-        display_name="Writing Assistant",
+        display_name="WritingAssistant",
         description="Helps improve writing.",
         duty_prompt="Improve user-provided text.",
-        constraint_prompt="Preserve the user's meaning.",
+        constraint_prompt="",
         greeting_message="Hello, I can help improve your writing.",
         example_questions=[
             "Can you improve this paragraph?",
@@ -356,6 +368,7 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         few_shot_examples=None,
     )
     no_tool_result = _unwrap_nl2a(await nl2a_wrapper.fn(no_tool_payload))
+    assert no_tool_result["constraint_prompt"] == ""
     assert no_tool_result["few_shots_prompt"] is None
 
 
@@ -364,7 +377,7 @@ def test_agent_draft_wrapper_rejects_missing_or_unknown_few_shot_tools():
         "subtype": "agent_draft",
         "language": "en",
         "name": "weather_assistant",
-        "display_name": "Weather Assistant",
+        "display_name": "WeatherAssistant",
         "description": "Weather help.",
         "duty_prompt": "Answer weather questions.",
         "constraint_prompt": "Use real observations.",
@@ -378,14 +391,53 @@ def test_agent_draft_wrapper_rejects_missing_or_unknown_few_shot_tools():
     invalid_examples = [
         {
             "user_input": f"Question {index}?",
-            "reasoning": "Use a tool.",
-            "tool_calls": [{"name": "invented_tool", "arguments": {}}],
-            "response_guidance": "Use the observation.",
+            "steps": [
+                {
+                    "reasoning": "Use a tool.",
+                    "tool_calls": [
+                        {"name": "invented_tool", "arguments": {}}
+                    ],
+                    "observation": "A tool result.",
+                }
+            ],
+            "final_reasoning": "Use the observation.",
+            "final_answer": "A concrete answer.",
         }
         for index in range(3)
     ]
     with pytest.raises(ValidationError, match="must use selected tool names"):
         Nl2aAgentDraftInput(**common, few_shot_examples=invalid_examples)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "weather", "ending with _assistant"),
+        ("display_name", "Weather Assistant", "one word ending with Assistant"),
+    ],
+)
+def test_agent_draft_wrapper_enforces_ordinary_agent_name_rules(
+    field,
+    value,
+    message,
+):
+    payload = {
+        "subtype": "agent_draft",
+        "language": "en",
+        "name": "writing_assistant",
+        "display_name": "WritingAssistant",
+        "description": "You are a writing assistant.",
+        "duty_prompt": "Improve user-provided text.",
+        "constraint_prompt": "",
+        "greeting_message": "Hello, I can help improve your writing.",
+        "example_questions": ["Question one?", "Question two?", "Question three?"],
+        "selected_tool_names": [],
+        "few_shot_examples": None,
+    }
+    payload[field] = value
+
+    with pytest.raises(ValidationError, match=message):
+        Nl2aAgentDraftInput(**payload)
 
 
 @pytest.mark.asyncio

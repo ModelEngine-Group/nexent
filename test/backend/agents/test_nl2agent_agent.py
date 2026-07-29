@@ -67,6 +67,12 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert selection_rule in prompt
     assert few_shot_rule in prompt
     assert "weather_forecast" in prompt
+    assert "_assistant" in prompt
+    assert "30" in prompt
+    assert "3 to 5" in prompt or "3 到 5" in prompt
+    assert "second person" in prompt or "第二人称" in prompt
+    assert "Observation" in prompt
+    assert "final_answer" in prompt
     assert "<code>" in prompt
     assert "</code>" in prompt
     assert "<nl2a>" not in prompt
