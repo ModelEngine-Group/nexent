@@ -99,11 +99,11 @@ After thinking, return the final response directly without a code action and sto
 
 For a selection input, return exactly one draft object inside the wrapper:
 <nl2a>
-{"subtype":"agent_draft","name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"greeting_message":"Hello! I'm your weather assistant. I can check forecasts and help you plan around the conditions.","example_questions":["Will it rain in Shanghai tomorrow?","What should I wear in Beijing this weekend?","Is the weather suitable for hiking in Hangzhou today?"]}
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"Weather Assistant","description":"Checks weather and provides travel advice","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":"Example 1\\nUser: Will it rain in Shanghai tomorrow?\\nThink: Get Shanghai's forecast.\\nCode: <code>result = weather_forecast(city=\\\"Shanghai\\\")\\nprint(result)</code>\\nAssistant: Answer using the real tool observation.\\n\\nExample 2\\nUser: What should I wear in Beijing this weekend?\\nThink: Get Beijing's forecast before suggesting clothing.\\nCode: <code>result = weather_forecast(city=\\\"Beijing\\\")\\nprint(result)</code>\\nAssistant: Give advice based on the real tool observation.\\n\\nExample 3\\nUser: Is the weather suitable for hiking in Hangzhou today?\\nThink: Get Hangzhou's forecast before assessing conditions.\\nCode: <code>result = weather_forecast(city=\\\"Hangzhou\\\")\\nprint(result)</code>\\nAssistant: Assess suitability using the real tool observation.","greeting_message":"Hello! I'm your weather assistant. I can check forecasts and help you plan around the conditions.","example_questions":["Will it rain in Shanghai tomorrow?","What should I wear in Beijing this weekend?","Is the weather suitable for hiking in Hangzhou today?"]}
 </nl2a>
 The agent draft is ready.
 
-The draft object uses exactly the fields shown. Write a concise greeting that introduces the agent's purpose and exactly three distinct example questions grounded in the user's requirements. Selected tools inform the prompts but are not fields in this payload.
+The draft object uses exactly the fields shown. When `tools` is non-empty, `few_shots_prompt` must be a non-empty string with 3 to 5 concrete user examples. Examples that need a tool must demonstrate the correct call using the selected tool's exact `name`, its documented inputs as keyword arguments, and `<code>...</code>` tags; never invent tools or inputs. When `tools` is empty, return `null` for `few_shots_prompt`. Write a concise greeting that introduces the agent's purpose and exactly three distinct example questions grounded in the user's requirements. Selected tools inform the prompts but are not fields in this payload.
 
 After a search, return the filtered observation inside the wrapper:
 <nl2a>
@@ -145,11 +145,11 @@ print(result)
 
 收到工具选择输入时，在 wrapper 中返回且只返回一个草稿对象：
 <nl2a>
-{"subtype":"agent_draft","name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":null,"greeting_message":"你好！我是天气助手，可以查询天气预报并根据天气情况提供出行建议。","example_questions":["上海明天会下雨吗？","北京这个周末适合穿什么？","杭州今天的天气适合徒步吗？"]}
+{"subtype":"agent_draft","name":"weather_assistant","display_name":"天气助手","description":"查询天气并提供出行建议","duty_prompt":"...","constraint_prompt":"...","few_shots_prompt":"示例 1\\n用户：上海明天会下雨吗？\\n思考：先查询上海天气。\\n代码：<code>result = weather_forecast(city=\\\"上海\\\")\\nprint(result)</code>\\n助手：根据工具返回的真实 Observation 回答。\\n\\n示例 2\\n用户：北京这个周末适合穿什么？\\n思考：先查询北京天气，再给出穿衣建议。\\n代码：<code>result = weather_forecast(city=\\\"北京\\\")\\nprint(result)</code>\\n助手：根据工具返回的真实 Observation 给出建议。\\n\\n示例 3\\n用户：杭州今天的天气适合徒步吗？\\n思考：先查询杭州天气，再判断徒步条件。\\n代码：<code>result = weather_forecast(city=\\\"杭州\\\")\\nprint(result)</code>\\n助手：根据工具返回的真实 Observation 判断是否适合。","greeting_message":"你好！我是天气助手，可以查询天气预报并根据天气情况提供出行建议。","example_questions":["上海明天会下雨吗？","北京这个周末适合穿什么？","杭州今天的天气适合徒步吗？"]}
 </nl2a>
 智能体草稿已经生成。
 
-草稿对象只使用示例中的字段。生成一条简洁的问候语，说明智能体用途；再根据用户需求生成三个不同且具体的示例问题。已选工具用于生成提示词，但不是该 payload 的字段。
+草稿对象只使用示例中的字段。`tools` 非空时，`few_shots_prompt` 必须是非空字符串，并包含 3 到 5 个具体的用户问题示例。需要调用工具的示例必须使用已选工具的真实 `name`，按照其已声明的输入参数使用关键字传参，并使用 `<code>...</code>` 标签；不得编造工具或参数。`tools` 为空时，`few_shots_prompt` 返回 `null`。生成一条简洁的问候语，说明智能体用途；再根据用户需求生成三个不同且具体的示例问题。已选工具用于生成提示词，但不是该 payload 的字段。
 
 搜索完成后，将筛选后的 Observation 放入 wrapper：
 <nl2a>

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agents.nl2agent_agent import (
@@ -15,6 +17,7 @@ from agents.nl2agent_agent import (
         "format_rule",
         "retry_rule",
         "selection_rule",
+        "few_shot_rule",
     ),
     [
         (
@@ -23,6 +26,7 @@ from agents.nl2agent_agent import (
             "可执行动作使用",
             "翻译为英文并重试一次",
             "结合此前对话",
+            "`tools` 非空时",
         ),
         (
             "en",
@@ -30,6 +34,7 @@ from agents.nl2agent_agent import (
             "Executable actions use",
             "once in English",
             "Use the preceding conversation",
+            "When `tools` is non-empty",
         ),
     ],
 )
@@ -39,6 +44,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     format_rule,
     retry_rule,
     selection_rule,
+    few_shot_rule,
 ):
     prompt = build_nl2agent_system_prompt(
         language,
@@ -60,6 +66,8 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert format_rule in prompt
     assert retry_rule in prompt
     assert selection_rule in prompt
+    assert few_shot_rule in prompt
+    assert "weather_forecast" in prompt
     assert "<code>" in prompt
     assert "</code>" in prompt
     assert "<nl2a>" in prompt
@@ -71,6 +79,10 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert 'result = runtime_search(keywords=[' in prompt
     assert "print(result)" in prompt
     assert "<code>\n<nl2a>" not in prompt
+
+    draft_json = prompt.split("<nl2a>\n", 1)[1].split("\n</nl2a>", 1)[0]
+    draft = json.loads(draft_json)
+    assert draft["few_shots_prompt"]
 
 
 def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
