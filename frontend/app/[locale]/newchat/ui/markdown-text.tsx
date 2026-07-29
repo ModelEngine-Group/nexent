@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
 
+import { MermaidDiagram } from "./mermaid-diagram";
+
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
@@ -173,6 +175,11 @@ const MarkdownTextImpl = () => {
       remarkPlugins={[remarkGfm, remarkCite]}
       className="aui-md"
       components={defaultComponents}
+      componentsByLanguage={{
+        mermaid: {
+          SyntaxHighlighter: MermaidDiagram,
+        },
+      }}
     />
   );
 };
