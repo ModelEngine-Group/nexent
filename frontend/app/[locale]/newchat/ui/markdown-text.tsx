@@ -11,6 +11,7 @@ import {
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
 import { type FC, memo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
 
@@ -179,6 +180,7 @@ const MarkdownTextImpl = () => {
 export const MarkdownText = memo(MarkdownTextImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  const { t } = useTranslation();
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   const onCopy = () => {
     if (!code || isCopied) return;
@@ -191,7 +193,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         {language}
       </span>
       <TooltipIconButton
-        tooltip="Copy"
+        tooltip={t("chat.thread.copy")}
         tooltipDelayDuration={0}
         className="size-6 p-1"
         onClick={onCopy}

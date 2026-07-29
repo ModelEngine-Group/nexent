@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
   storageService,
@@ -59,6 +60,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   className,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<PanelTab>(
     sources.length > 0 ? "sources" : "images",
   );
@@ -85,15 +87,15 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         "flex h-full w-80 shrink-0 flex-col border-l bg-background",
         className,
       )}
-      aria-label="Sources panel"
+      aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <h2 className="text-sm font-semibold text-foreground">Sources</h2>
+        <h2 className="text-sm font-semibold text-foreground">{t("chat.sources.title")}</h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
-          aria-label="Close sources panel"
+          aria-label={t("chat.sources.close")}
         >
           <XIcon className="size-4" />
         </Button>
@@ -101,18 +103,18 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 
       <div
         role="tablist"
-        aria-label="Sources panel tabs"
+        aria-label={t("chat.sources.tabs")}
         className="flex items-center gap-1 border-b px-2 py-2"
       >
         <TabButton
-          label="Sources"
+          label={t("chat.sources.sources")}
           count={sources.length}
           icon={<FileTextIcon className="size-3.5" />}
           active={showSources}
           onClick={() => setActiveTab("sources")}
         />
         <TabButton
-          label="Images"
+          label={t("chat.sources.images")}
           count={images.length}
           icon={<ImageIcon className="size-3.5" />}
           active={!showSources}
@@ -123,7 +125,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {showSources ? "No sources available." : "No images available."}
+            {showSources ? t("chat.sources.noSources") : t("chat.sources.noImages")}
           </p>
         ) : showSources ? (
           <ul className="flex flex-col gap-2">
@@ -207,6 +209,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   item,
   selected,
 }) => {
+  const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -248,7 +251,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
       }
       await storageService.downloadFile(objectName, filename);
     } catch {
-      setDownloadError("Download failed. Please try again.");
+      setDownloadError(t("chat.sources.downloadError"));
     } finally {
       setIsDownloading(false);
     }
@@ -266,13 +269,13 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
           onClick={handleDocumentDownload}
           disabled={isDownloading}
           className="group flex w-full items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent/40 disabled:cursor-wait disabled:opacity-70"
-          aria-label={`Download ${item.filename || item.title || "document"}`}
+          aria-label={t("chat.sources.download", { name: item.filename || item.title || t("chat.sources.document") })}
         >
           <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2">
               <span className="min-w-0 flex-1 wrap-break-word font-medium text-foreground">
-                {item.title || item.filename || "Document"}
+                {item.title || item.filename || t("chat.sources.document")}
               </span>
               {isDownloading ? (
                 <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
@@ -281,7 +284,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
               )}
             </div>
             <span className="block truncate text-xs text-muted-foreground">
-              知识库
+              {t("chat.sources.knowledgeBase")}
             </span>
             <SourceSummary text={item.text} />
             {downloadError && (
@@ -327,7 +330,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
         selectedClassName,
       )}
     >
-      <span className="font-medium">{item.title || "Untitled source"}</span>
+      <span className="font-medium">{item.title || t("chat.sources.untitled")}</span>
       <SourceSummary text={item.text} />
     </li>
   );

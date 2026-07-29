@@ -38,7 +38,7 @@ const ConversationStatusIndicator: FC<{
     return (
       <div
         className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"
-        title={t("chatLeftSidebar.running")}
+        title={t("chat.threadList.running")}
       />
     );
   }
@@ -47,7 +47,7 @@ const ConversationStatusIndicator: FC<{
     return (
       <div
         className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full mr-2"
-        title={t("chatLeftSidebar.completed")}
+        title={t("chat.threadList.completed")}
       />
     );
   }
@@ -88,16 +88,12 @@ const ThreadListEmpty: FC = () => {
   return (
     <div className="space-y-1 px-2 py-4">
       <p className="px-2 text-sm font-medium text-muted-foreground">
-        {t("chatLeftSidebar.recentConversations")}
+        {t("chat.threadList.recentConversations")}
       </p>
-      <Button
-        type="text"
-        size="middle"
-        className="w-full justify-start flex items-center px-3 py-2 h-auto hover:bg-slate-50 transition-colors duration-200"
-      >
+      <div className="flex items-center px-3 py-2 text-left text-muted-foreground">
         <Clock className="mr-2 h-5 w-5" />
-        {t("chatLeftSidebar.noHistory")}
-      </Button>
+        {t("chat.threadList.noHistory")}
+      </div>
     </div>
   );
 };
@@ -179,11 +175,11 @@ const dateGroupLabel = (
   date: Date | undefined,
   startOfToday: number,
 ): string => {
-  if (!date || date.getTime() >= startOfToday) return "chatLeftSidebar.today";
+  if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
   if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
-    return "chatLeftSidebar.last7Days";
+    return "chat.threadList.last7Days";
   }
-  return "chatLeftSidebar.older";
+  return "chat.threadList.older";
 };
 
 // Build ordered recency groups for the current thread list. Returns null when
@@ -234,13 +230,15 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
 };
 
 const ThreadListSkeleton: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <div className="flex flex-col gap-0.5">
       {Array.from({ length: 5 }, (_, i) => (
         <div
           key={i}
           role="status"
-          aria-label="Loading threads"
+          aria-label={t("chat.threadList.loading")}
           data-slot="aui_thread-list-skeleton-wrapper"
           className="flex h-8 items-center px-2.5"
         >
@@ -283,9 +281,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   generatedTitles,
 }) => {
   const aui = useAui();
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const thread = aui.threadListItem().getState();
-  const title = generatedTitles?.get(thread.id) ?? thread.title ?? "New Chat";
+  const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
   const handleRename = useCallback(async (newTitle: string) => {
     try {
@@ -294,9 +293,9 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       setIsEditing(false);
     } catch (error) {
       log.error("[ThreadList] Failed to rename thread:", error);
-      message.error("Failed to rename thread");
+      message.error(t("chat.threadList.renameFailed"));
     }
-  }, [aui]);
+  }, [aui, t]);
 
   const handleRenameClick = useCallback(() => {
     setIsEditing(true);
@@ -349,12 +348,12 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
             >
               <PencilIcon className="size-4" />
-              Rename
+              {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
             <ThreadListItemPrimitive.Delete asChild>
               <ThreadListItemMorePrimitive.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10">
                 <TrashIcon className="size-4" />
-                Delete
+                {t("chat.threadList.delete")}
               </ThreadListItemMorePrimitive.Item>
             </ThreadListItemPrimitive.Delete>
           </ThreadListItemMorePrimitive.Content>
