@@ -144,7 +144,17 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
                 "source": "mcp",
                 "usage": "weather-server",
                 "labels": ["weather", None],
-                "inputs": ["not", "an", "object"],
+                "inputs": '["not", "an", "object"]',
+                "is_available": True,
+            },
+            {
+                "tool_id": 4,
+                "name": "weather_options",
+                "description": "Weather query options",
+                "source": "mcp",
+                "usage": "weather-server",
+                "labels": [],
+                "inputs": {"conditions": (" rainy ", " sunny ")},
                 "is_available": True,
             },
         ],
@@ -155,18 +165,19 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
     result = search_installed_mcp_tools_by_query(
         "tenant-a",
         "weather",
-        limit=2,
+        limit=3,
     )
 
-    assert [item.tool_id for item in result] == [2, 3]
+    assert [item.tool_id for item in result] == [2, 3, 4]
     assert result[0].description == "Current weather"
     assert result[0].labels == []
     assert result[0].inputs == {}
     assert result[1].labels == ["weather"]
     assert result[1].inputs == {}
+    assert result[2].inputs == {"conditions": ["rainy", "sunny"]}
     assert search_installed_mcp_tools_by_query(
         "tenant-a",
-        "weather",
+        None,
         limit=-1,
     ) == []
 

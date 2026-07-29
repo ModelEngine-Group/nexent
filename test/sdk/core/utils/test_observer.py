@@ -413,6 +413,37 @@ class TestMessageObserver:
             "content": "Wrapper failed.",
         }
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            {"status": "success"},
+            "Ordinary execution output without a wrapper.",
+        ],
+    )
+    def test_nl2a_extractor_preserves_content_without_a_string_wrapper(
+        self,
+        content,
+    ):
+        payload, visible_content = MessageObserver._extract_nl2a_wrapper(content)
+
+        assert payload is None
+        assert visible_content == content
+
+    def test_execution_logs_reject_nl2a_json_that_is_not_an_object(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            '<nl2a>["not", "an", "object"]</nl2a>\nWrapper rejected.',
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper rejected.",
+        }
+
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
         observer = MessageObserver()

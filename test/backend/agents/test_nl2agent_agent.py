@@ -3,13 +3,65 @@ import json
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from agents.nl2agent_agent import (
     GeneratedAgentDraft,
     InstalledMcpToolRecommendation,
+    Nl2aAgentDraftInput,
+    Nl2aFewShotToolCall,
+    build_nl2a_wrapper,
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )
+
+
+def _few_shot_examples(tool_name="weather_forecast"):
+    return [
+        {
+            "user_input": question,
+            "steps": [
+                {
+                    "reasoning": f"Look up the forecast for {city}.",
+                    "tool_calls": [
+                        {
+                            "name": tool_name,
+                            "arguments": {"city": city},
+                        }
+                    ],
+                    "observation": f"{city} will be dry and mild.",
+                }
+            ],
+            "final_reasoning": "The forecast is sufficient to answer.",
+            "final_answer": f"{city} will be dry and mild.",
+        }
+        for question, city in [
+            ("Will it rain in Paris?", "Paris"),
+            ("What is the weather in Rome?", "Rome"),
+        ]
+    ]
+
+
+def _agent_draft_input(**overrides):
+    payload = {
+        "subtype": "agent_draft",
+        "language": "en",
+        "name": "weather_assistant",
+        "display_name": "WeatherAssistant",
+        "description": "You can get weather guidance.",
+        "duty_prompt": "Answer weather questions.",
+        "constraint_prompt": "1. Use the selected weather tool.",
+        "greeting_message": "Hello, I can help with weather.",
+        "example_questions": [
+            "Will it rain in Paris?",
+            "What is the weather in Rome?",
+            "Is it suitable for hiking?",
+        ],
+        "selected_tool_names": ["weather_forecast"],
+        "few_shot_examples": _few_shot_examples(),
+    }
+    payload.update(overrides)
+    return payload
 
 
 @pytest.mark.parametrize(
@@ -166,3 +218,134 @@ def test_create_nl2agent_agent_config_has_only_runtime_tools():
     )
     assert all(tool.metadata is None for tool in config.tools)
     assert "持久化由产品流程完成" in config.instructions
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "message"),
+    [
+        ("weather-tool", {"city": "Paris"}, "tool call name"),
+        ("weather_forecast", {"city-name": "Paris"}, "tool argument names"),
+        ("weather_forecast", {"class": "Paris"}, "tool argument names"),
+    ],
+)
+def test_few_shot_tool_calls_require_executable_python_names(
+    name,
+    arguments,
+    message,
+):
+    with pytest.raises(ValidationError, match=message):
+        Nl2aFewShotToolCall(name=name, arguments=arguments)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"language": "zh", "display_name": "WeatherAssistant"},
+            "Chinese display_name must end with",
+        ),
+        (
+            {"selected_tool_names": ["weather_forecast", "weather_forecast"]},
+            "selected_tool_names must be unique",
+        ),
+        (
+            {"selected_tool_names": ["weather-tool"]},
+            "selected tool names must be valid Python identifiers",
+        ),
+        (
+            {"few_shot_examples": None},
+            "few_shot_examples are required",
+        ),
+        (
+            {"constraint_prompt": ""},
+            "constraint_prompt is required",
+        ),
+        (
+            {"selected_tool_names": [], "constraint_prompt": ""},
+            "few_shot_examples require selected tools",
+        ),
+        (
+            {
+                "selected_tool_names": [],
+                "constraint_prompt": "Must use a tool.",
+                "few_shot_examples": None,
+            },
+            "constraint_prompt must be empty",
+        ),
+    ],
+)
+def test_agent_draft_rejects_invalid_tool_binding_contract(overrides, message):
+    with pytest.raises(ValidationError, match=message):
+        Nl2aAgentDraftInput(**_agent_draft_input(**overrides))
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            {"subtype": "local_mcp_recommendation"},
+            "requires search_result and selected_tool_ids",
+        ),
+        (
+            {
+                "subtype": "local_mcp_recommendation",
+                "search_result": {
+                    "subtype": "local_mcp_recommendation",
+                    "status": "error",
+                    "code": "tool_search_failed",
+                    "retryable": True,
+                },
+                "selected_tool_ids": [7],
+            },
+            "must be empty for a search error",
+        ),
+        (
+            {
+                "subtype": "local_mcp_recommendation",
+                "search_result": {"status": "pending"},
+                "selected_tool_ids": [],
+            },
+            "unsupported status",
+        ),
+        (
+            {"subtype": "agent_draft"},
+            "agent_draft requires parameters",
+        ),
+        (
+            {"subtype": "unsupported"},
+            "unsupported nl2a subtype",
+        ),
+    ],
+)
+def test_wrapper_rejects_invalid_workflow_contracts(arguments, message):
+    with pytest.raises(ValueError, match=message):
+        build_nl2a_wrapper(**arguments)
+
+
+def test_wrapper_renders_english_multi_tool_steps_as_executable_few_shots():
+    examples = _few_shot_examples()
+    examples[0]["steps"][0]["tool_calls"].append(
+        {
+            "name": "weather_alerts",
+            "arguments": {"city": "Paris", "severe_only": True},
+        }
+    )
+    wrapped = build_nl2a_wrapper(
+        **_agent_draft_input(
+            selected_tool_names=["weather_forecast", "weather_alerts"],
+            few_shot_examples=examples,
+        )
+    )
+
+    serialized = wrapped.split("<nl2a>\n", 1)[1].split("\n</nl2a>", 1)[0]
+    payload = json.loads(serialized)
+    few_shots = payload["few_shots_prompt"]
+
+    assert 'Task 1: "Will it rain in Paris?"' in few_shots
+    assert "result_1_1 = weather_forecast(city='Paris')" in few_shots
+    assert (
+        "result_1_2 = weather_alerts(city='Paris', severe_only=True)"
+        in few_shots
+    )
+    assert "# System returns Observation: Paris will be dry and mild." in few_shots
+    assert few_shots.count("<code>") == 2
