@@ -427,7 +427,16 @@ What task should the assistant handle, and what result should it produce?""",
 The selection input uses this protocol:
 {{"type":"nl2agent_tool_selection","tools":[]}}
 
-Use the preceding conversation and selected tools to define the complete draft, then call `{wrapper_name}`. This path does not call the search tool. Use each selected tool's exact `name`; never invent tools or inputs. When tools are selected, provide 3 to 5 structured `few_shot_examples`. When no tools are selected, use an empty `constraint_prompt`, an empty `selected_tool_names` list, and `few_shot_examples` set to `None`.""",
+Use the preceding conversation and selected tools to define the complete draft, then call `{wrapper_name}`. This path does not call the search tool. Use each selected tool's exact `name`; never invent tools or inputs. When tools are selected, provide a numbered `constraint_prompt` and 3 to 5 structured `few_shot_examples`. When no tools are selected, set `constraint_prompt` to an empty string, `selected_tool_names` to an empty list, and `few_shot_examples` to `None`.""",
+            """## Draft Field Rules
+- `name`: only letters, numbers, and underscores; start with a letter or underscore; end with `_assistant`; at most 30 characters.
+- `display_name`: one word ending with `Assistant`; at most 30 characters; summarize the responsibility without a tool name.
+- `description`: at most 3 natural sentences in the second person, covering who the assistant is, its capabilities, and what it can do.
+- `duty_prompt`: at most 3 sentences covering identity, capabilities, and responsibilities. Summarize the overall business logic without tool names or implementation details.
+- `constraint_prompt`: only selected-tool usage restrictions, numbered from 1. Leave it empty when there are no selected tools.
+- `greeting_message`: a friendly, concise opening of 1 to 2 sentences.
+- `example_questions`: 3 to 5 practical and specific user questions. Prefer the questions used in `few_shot_examples`.
+- `few_shot_examples`: only when tools are selected. Provide 3 to 5 concrete hypothetical tasks in the ordinary Agent format: one or more Think-Code-Observation steps followed by a final Think and a concrete final answer. Use exact tool names and keyword arguments, save and print results, and do not put `if` or `for` in calls.""",
             f"""## Wrapper Action
 `{wrapper_name}` is the only way to produce structured output. Never compose, copy, or return the wrapper JSON yourself.
 
@@ -444,7 +453,7 @@ print(wrapped)
 </code>
 For an error Observation, use the same call with an empty ID list.
 
-For a tool selection input, call it with every required draft field. Do not put code tags in any wrapper argument. `few_shot_examples` use structured steps and tool calls, and the wrapper renders the executable examples:
+For a tool selection input, call it with every required draft field. Do not put code tags in any wrapper argument. Each structured few-shot step contains reasoning, exact tool calls, and a representative Observation; each example ends with final reasoning and a concrete final answer. The wrapper renders the ordinary Agent example format:
 Think: I will validate and wrap the complete agent draft.
 Code:
 <code>
@@ -453,16 +462,16 @@ wrapped = {wrapper_name}(
     language="en",
     name="weather_assistant",
     display_name="WeatherAssistant",
-    description="Checks weather and provides travel advice.",
-    duty_prompt="Answer weather questions and provide practical advice.",
-    constraint_prompt="1. Use selected weather tools and base answers on their real observations.",
+    description="You are a weather assistant that checks forecasts and provides practical travel advice.",
+    duty_prompt="You are a weather assistant that answers weather questions and provides practical travel advice.",
+    constraint_prompt="1. Use the selected weather tool when current conditions or forecasts are needed.\\n2. Base weather claims on the returned Observation.",
     greeting_message="Hello! I can check forecasts and help you plan for the weather.",
     example_questions=["Will it rain in Shanghai tomorrow?", "What should I wear in Beijing?", "Is Hangzhou suitable for hiking today?"],
     selected_tool_names=["weather_forecast"],
     few_shot_examples=[
-        {{"user_input": "Will it rain in Shanghai tomorrow?", "steps": [{{"reasoning": "Get Shanghai's forecast.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Shanghai"}}}}], "observation": "Shanghai will be cloudy with light rain."}}], "final_reasoning": "Use the forecast to answer the question.", "final_answer": "Light rain is expected in Shanghai tomorrow."}},
-        {{"user_input": "What should I wear in Beijing?", "steps": [{{"reasoning": "Get Beijing's forecast first.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Beijing"}}}}], "observation": "Beijing will be cool and windy."}}], "final_reasoning": "Turn the forecast into practical clothing advice.", "final_answer": "Wear a jacket and bring a windproof outer layer."}},
-        {{"user_input": "Is Hangzhou suitable for hiking today?", "steps": [{{"reasoning": "Check Hangzhou's conditions.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Hangzhou"}}}}], "observation": "Hangzhou will be dry with mild temperatures."}}], "final_reasoning": "Assess hiking suitability from the conditions.", "final_answer": "The mild, dry weather is suitable for hiking today."}},
+        {{"user_input": "Will it rain in Shanghai tomorrow?", "steps": [{{"reasoning": "Get Shanghai's forecast.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Shanghai"}}}}], "observation": "The forecast reports rain tomorrow."}}], "final_reasoning": "The forecast directly answers the question.", "final_answer": "Yes. Rain is forecast in Shanghai tomorrow, so bring an umbrella."}},
+        {{"user_input": "What should I wear in Beijing?", "steps": [{{"reasoning": "Get Beijing's forecast first.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Beijing"}}}}], "observation": "Beijing will be cool and windy today."}}], "final_reasoning": "The conditions support layered clothing.", "final_answer": "Wear layers and a wind-resistant jacket today."}},
+        {{"user_input": "Is Hangzhou suitable for hiking today?", "steps": [{{"reasoning": "Check Hangzhou's current conditions.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Hangzhou"}}}}], "observation": "Conditions are dry with mild temperatures."}}], "final_reasoning": "Dry and mild weather is suitable for hiking.", "final_answer": "Yes. Today's dry, mild conditions are suitable for hiking."}},
     ],
 )
 print(wrapped)
@@ -496,7 +505,16 @@ print(result)
 工具选择输入使用以下协议：
 {{"type":"nl2agent_tool_selection","tools":[]}}
 
-结合此前对话和已选工具生成完整草稿，然后调用 `{wrapper_name}`。此流程不调用搜索工具。只使用已选工具的真实 `name`，不得编造工具或参数。选择了工具时生成 3 到 5 个结构化 `few_shot_examples`；未选择工具时传入空的 `constraint_prompt`、空的 `selected_tool_names`，并将 `few_shot_examples` 设为 `None`。""",
+结合此前对话和已选工具生成完整草稿，然后调用 `{wrapper_name}`。此流程不调用搜索工具。只使用已选工具的真实 `name`，不得编造工具或参数。选择了工具时生成从序号 1 开始的 `constraint_prompt` 和 3 到 5 个结构化 `few_shot_examples`；未选择工具时将 `constraint_prompt` 设为空字符串、`selected_tool_names` 设为空列表，并将 `few_shot_examples` 设为 `None`。""",
+            """## 草稿字段规则
+- `name`：只能包含字母、数字和下划线，以字母或下划线开头，以 `_assistant` 结尾，长度不超过 30 个字符。
+- `display_name`：使用一个以“助手”结尾的词语，长度不超过 30 个字符；概括职责，不包含工具名。
+- `description`：使用第二人称，不超过 3 句话，说明是什么助手、具备什么能力、可以做什么。
+- `duty_prompt`：不超过 3 句话，概括身份、能力、职责和整体业务逻辑，不出现工具名或实现细节。
+- `constraint_prompt`：只描述已选工具的使用限制，从序号 1 开始逐条列出；没有已选工具时留空。
+- `greeting_message`：友好、简洁的 1 到 2 句话开场白。
+- `example_questions`：生成 3 到 5 个具体、实用的用户问题，优先使用 `few_shot_examples` 中的问题。
+- `few_shot_examples`：仅在选择了工具时生成 3 到 5 个具体的假设任务。严格采用普通 Agent 格式：一个或多个“思考-代码-Observation”步骤，随后是最终思考和具体最终回答。使用真实工具名和关键字参数，保存并打印结果，调用中不使用 `if` 或 `for`。""",
             f"""## Wrapper 动作
 `{wrapper_name}` 是生成结构化输出的唯一方式。不得自行拼装、复制或返回 wrapper JSON。
 
@@ -513,7 +531,7 @@ print(wrapped)
 </code>
 如果 Observation 是错误结果，使用相同调用并传入空 ID 列表。
 
-收到工具选择输入后，传入所有必填草稿字段。任何 wrapper 参数中都不得包含代码标签；`few_shot_examples` 使用结构化步骤和工具调用，可执行示例由 wrapper 生成：
+收到工具选择输入后，传入所有必填草稿字段。任何 wrapper 参数中都不得包含代码标签。每个结构化 few-shot 步骤包含思考、真实工具调用和具有代表性的 Observation；每个示例以最终思考和具体最终回答结束。普通 Agent 示例格式由 wrapper 生成：
 思考：校验并包装完整的智能体草稿。
 代码：
 <code>
@@ -522,16 +540,16 @@ wrapped = {wrapper_name}(
     language="zh",
     name="weather_assistant",
     display_name="天气助手",
-    description="查询天气并提供出行建议。",
-    duty_prompt="回答天气问题并提供实用建议。",
-    constraint_prompt="1. 使用已选天气工具，并根据真实 Observation 回答。",
+    description="你是一个天气助手，可以查询天气并提供实用的出行建议。",
+    duty_prompt="你是一个天气助手，负责回答天气问题并提供实用的出行建议。",
+    constraint_prompt="1. 需要当前天气或预报时使用已选天气工具。\\n2. 天气结论必须基于工具返回的 Observation。",
     greeting_message="你好！我可以查询天气预报并帮助你规划出行。",
     example_questions=["上海明天会下雨吗？", "北京今天适合穿什么？", "杭州今天适合徒步吗？"],
     selected_tool_names=["weather_forecast"],
     few_shot_examples=[
-        {{"user_input": "上海明天会下雨吗？", "steps": [{{"reasoning": "先查询上海天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "上海"}}}}], "observation": "上海明天多云有小雨。"}}], "final_reasoning": "根据天气结果回答是否下雨。", "final_answer": "上海明天预计有小雨。"}},
-        {{"user_input": "北京今天适合穿什么？", "steps": [{{"reasoning": "先查询北京天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "北京"}}}}], "observation": "北京今天气温较低并伴有风。"}}], "final_reasoning": "根据天气结果给出穿衣建议。", "final_answer": "建议穿外套并准备一件防风衣。"}},
-        {{"user_input": "杭州今天适合徒步吗？", "steps": [{{"reasoning": "查询杭州今天的天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "杭州"}}}}], "observation": "杭州今天天气温和且无降雨。"}}], "final_reasoning": "根据天气结果判断徒步条件。", "final_answer": "杭州今天气候温和干燥，适合徒步。"}},
+        {{"user_input": "上海明天会下雨吗？", "steps": [{{"reasoning": "先查询上海天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "上海"}}}}], "observation": "预报显示上海明天有雨。"}}], "final_reasoning": "预报结果可以直接回答问题。", "final_answer": "会。上海明天有雨，出门建议带伞。"}},
+        {{"user_input": "北京今天适合穿什么？", "steps": [{{"reasoning": "先查询北京天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "北京"}}}}], "observation": "北京今天气温较低并伴有风。"}}], "final_reasoning": "低温和风适合分层穿着。", "final_answer": "建议分层穿着，并加一件防风外套。"}},
+        {{"user_input": "杭州今天适合徒步吗？", "steps": [{{"reasoning": "查询杭州当前天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "杭州"}}}}], "observation": "杭州今天干燥，气温温和。"}}], "final_reasoning": "干燥温和的天气适合徒步。", "final_answer": "适合。今天杭州天气干燥温和，可以安排徒步。"}},
     ],
 )
 print(wrapped)
