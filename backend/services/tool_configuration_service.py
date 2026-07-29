@@ -58,6 +58,16 @@ from utils.tool_utils import get_local_tools_classes, get_local_tools_descriptio
 logger = logging.getLogger("tool_configuration_service")
 
 
+def _snake_to_pascal_tool(name: str) -> str:
+    """Convert a snake_case tool name to the PascalCase + 'Tool' class_name
+    used by the SDK agent constructor for dispatch.
+
+    e.g. read_skill_md -> ReadSkillMdTool
+    """
+    parts = name.split("_")
+    return "".join(p.capitalize() for p in parts) + "Tool"
+
+
 def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
     """
     Create appropriate MCP transport based on URL ending.
@@ -132,57 +142,67 @@ def get_local_tools() -> List[ToolInfo]:
     tools_info = []
     tools_classes = get_local_tools_classes()
     for tool_class in tools_classes:
-        # Get class-level init_param_descriptions for fallback
-        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
-
-        init_params_list = []
-        sig = inspect.signature(tool_class.__init__)
-        for param_name, param in sig.parameters.items():
-            if param_name == "self":
-                continue
-
-            # Check if parameter has a default value and if it should be excluded
-            if param.default != inspect.Parameter.empty:
-                if hasattr(param.default, 'exclude') and param.default.exclude:
+        # @tool-decorated functions become SimpleTool instances (not classes).
+        # They have no __init__ signature to inspect and no __name__ attribute.
+        # Use the tool's .name for class_name (matches SDK dispatch convention:
+        # snake_case name → PascalCase + "Tool", e.g. read_skill_md → ReadSkillMdTool).
+        is_tool_instance = not inspect.isclass(tool_class)
+        if is_tool_instance:
+            tool_name = getattr(tool_class, 'name', '')
+            class_name = _snake_to_pascal_tool(tool_name)
+            init_params_list = []
+        else:
+            # Class-based tool: inspect __init__ for param schema
+            class_name = tool_class.__name__
+            init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
+            init_params_list = []
+            sig = inspect.signature(tool_class.__init__)
+            for param_name, param in sig.parameters.items():
+                if param_name == "self":
                     continue
 
-            # Check if default is a Pydantic FieldInfo (has .default attribute)
-            is_pydantic_field = hasattr(param.default, 'default')
+                # Check if parameter has a default value and if it should be excluded
+                if param.default != inspect.Parameter.empty:
+                    if hasattr(param.default, 'exclude') and param.default.exclude:
+                        continue
 
-            # Get description in both languages
-            param_description = param.default.description if is_pydantic_field else ""
+                # Check if default is a Pydantic FieldInfo (has .default attribute)
+                is_pydantic_field = hasattr(param.default, 'default')
 
-            # First try to get from param.default.description_zh (FieldInfo)
-            # Note: Pydantic Field doesn't have description_zh attribute, so use getattr with default
-            param_description_zh = getattr(param.default, 'description_zh', None) if is_pydantic_field else None
+                # Get description in both languages
+                param_description = param.default.description if is_pydantic_field else ""
 
-            # Fallback to init_param_descriptions if not found
-            if param_description_zh is None and param_name in init_param_descriptions:
-                param_description_zh = init_param_descriptions[param_name].get('description_zh')
+                # First try to get from param.default.description_zh (FieldInfo)
+                # Note: Pydantic Field doesn't have description_zh attribute, so use getattr with default
+                param_description_zh = getattr(param.default, 'description_zh', None) if is_pydantic_field else None
 
-            param_info = {
-                "type": python_type_to_json_schema(param.annotation),
-                "name": param_name,
-                "description": param_description,
-                "description_zh": param_description_zh
-            }
+                # Fallback to init_param_descriptions if not found
+                if param_description_zh is None and param_name in init_param_descriptions:
+                    param_description_zh = init_param_descriptions[param_name].get('description_zh')
 
-            # Handle both Pydantic FieldInfo and simple defaults
-            if is_pydantic_field:
-                if param.default.default is PydanticUndefined:
-                    param_info["optional"] = False
+                param_info = {
+                    "type": python_type_to_json_schema(param.annotation),
+                    "name": param_name,
+                    "description": param_description,
+                    "description_zh": param_description_zh
+                }
+
+                # Handle both Pydantic FieldInfo and simple defaults
+                if is_pydantic_field:
+                    if param.default.default is PydanticUndefined:
+                        param_info["optional"] = False
+                    else:
+                        param_info["default"] = param.default.default
+                        param_info["optional"] = True
                 else:
-                    param_info["default"] = param.default.default
-                    param_info["optional"] = True
-            else:
-                # Simple default value (not a FieldInfo)
-                if param.default == inspect.Parameter.empty:
-                    param_info["optional"] = False
-                else:
-                    param_info["default"] = param.default
-                    param_info["optional"] = True
+                    # Simple default value (not a FieldInfo)
+                    if param.default == inspect.Parameter.empty:
+                        param_info["optional"] = False
+                    else:
+                        param_info["default"] = param.default
+                        param_info["optional"] = True
 
-            init_params_list.append(param_info)
+                init_params_list.append(param_info)
 
         # Get tool fixed attributes with bilingual support
         tool_description_zh = getattr(tool_class, 'description_zh', None)
@@ -210,7 +230,7 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
-            class_name=tool_class.__name__,
+            class_name=class_name,
             usage=None,
             origin_name=getattr(tool_class, 'name')
         )

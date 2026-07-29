@@ -1,24 +1,17 @@
 """Skill config reading tool."""
 import logging
 import os
-from typing import Any, Optional
+from contextvars import ContextVar
+from typing import Any, Dict, Optional
 
 import yaml
-
-from smolagents.tools import Tool
+from smolagents import tool
 
 logger = logging.getLogger(__name__)
 
 
-class ReadSkillConfigTool(Tool):
+class ReadSkillConfigTool:
     """Tool for reading the config.yaml file of a skill directory."""
-
-    name = "read_skill_config"
-    description = "Read config.yaml from a tenant-scoped skill directory."
-    inputs = {
-        "skill_name": {"type": "string", "description": "Name of the skill whose config should be read."},
-    }
-    output_type = "string"
 
     def __init__(
         self,
@@ -35,7 +28,6 @@ class ReadSkillConfigTool(Tool):
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
         """
-        super().__init__()
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
@@ -53,10 +45,10 @@ class ReadSkillConfigTool(Tool):
         if not skill_name:
             return "[Error] skill_name is required"
 
-        from nexent.skills import SkillManager
+        if self.local_skills_dir is None:
+            return "[Error] local_skills_dir is not configured"
 
-        manager = SkillManager(self.local_skills_dir)
-        skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
+        skill_dir = os.path.join(self.local_skills_dir, skill_name)
         if not os.path.isdir(skill_dir):
             return f"[Error] Skill directory not found: {skill_name}"
 
@@ -81,32 +73,64 @@ class ReadSkillConfigTool(Tool):
         except Exception as e:
             return f"[Error] Failed to read config.yaml: {e}"
 
-    def forward(self, skill_name: str) -> str:
-        """Read tenant-scoped skill configuration."""
-        return self.execute(skill_name)
+
+# Global fallback instance supports direct calls outside an agent execution
+# context. During agent execution, get_read_skill_config_tool() stores a
+# per-context instance in _read_config_tool_context so each agent gets its own
+# tool with the correct local_skills_dir / tenant_id.
+_global_tool_instance: Optional["ReadSkillConfigTool"] = None
+_read_config_tool_context: ContextVar[Optional["ReadSkillConfigTool"]] = ContextVar(
+    "read_skill_config_tool_context",
+    default=None,
+)
 
 
-def _uncached_read_skill_config_tool(
+def get_read_skill_config_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> ReadSkillConfigTool:
+) -> "ReadSkillConfigTool":
     """Get or create the read skill config tool instance.
+
+    When called with context parameters, a new instance is created and stored
+    in a ContextVar so the @tool-decorated ``read_skill_config`` function picks
+    it up within the same execution context. When called without parameters,
+    the ContextVar value is used, falling back to a global default instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
-
-    Returns:
-        Tool instance cached by tenant_id for tenant isolation.
     """
-    return ReadSkillConfigTool(local_skills_dir, agent_id, tenant_id, version_no)
+    global _global_tool_instance
+    has_context = any(
+        value is not None
+        for value in (local_skills_dir, agent_id, tenant_id)
+    )
+
+    if has_context:
+        context_tool = ReadSkillConfigTool(
+            local_skills_dir,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        _read_config_tool_context.set(context_tool)
+        return context_tool
+
+    context_tool = _read_config_tool_context.get()
+    if context_tool is not None:
+        return context_tool
+
+    if _global_tool_instance is None:
+        _global_tool_instance = ReadSkillConfigTool()
+    return _global_tool_instance
 
 
-def _read_skill_config_without_context(skill_name: str) -> str:
+@tool
+def read_skill_config(skill_name: str) -> str:
     """Read the config.yaml file from a skill directory.
 
     Use this tool to read configuration variables (such as temporary file paths)
@@ -123,5 +147,5 @@ def _read_skill_config_without_context(skill_name: str) -> str:
         read_skill_config("skill-creator")
         # Returns: {"path": {"temp_skill": "/mnt/nexent/skills/tmp/"}}
     """
-    tool_instance = _uncached_read_skill_config_tool()
+    tool_instance = get_read_skill_config_tool()
     return tool_instance.execute(skill_name)

@@ -3735,18 +3735,25 @@ async def import_agent_with_skills_impl(
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    # Build name → skill_id map for reuse when force_import is True
+    existing_skill_name_to_id = {s.get("name"): s.get("skill_id") for s in existing_skills}
+    existing_skill_names = set(existing_skill_name_to_id.keys())
 
     import_skill_names = set(skill_name_to_zip_base64.keys())
     duplicate_names = list(import_skill_names & existing_skill_names)
 
-    if duplicate_names:
+    if duplicate_names and not force_import:
         raise SkillDuplicateError(duplicate_names)
 
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        # When force_import=True and the skill already exists, reuse the
+        # existing skill_id instead of creating a duplicate.
+        if force_import and skill_name in existing_skill_name_to_id:
+            skill_name_to_id[skill_name] = existing_skill_name_to_id[skill_name]
+            continue
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
