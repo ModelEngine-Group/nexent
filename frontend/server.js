@@ -4,17 +4,28 @@ import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { parse } from "node:url";
-import next from "next";
 import httpProxy from "http-proxy";
 import cookie from "cookie";
 import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
+import { BASE_PATH } from "./base-path.mjs";
 import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const dev = process.env.NODE_ENV !== "production";
+let nextConfig;
+
+if (!dev) {
+  nextConfig = JSON.parse(
+    fs.readFileSync(path.join(__dirname, ".next", "required-server-files.json"), "utf8")
+  ).config;
+  process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
+}
+
+const { default: next } = await import("next");
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
@@ -24,9 +35,9 @@ dotenv.config({
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
-const dev = process.env.NODE_ENV !== "production";
 const app = next({
   dev,
+  ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
 
@@ -44,6 +55,18 @@ const SHARE_BASE_URL =
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
 const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
 const PORT = 3000;
+
+function withoutBasePath(pathname) {
+  if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {
+    return pathname;
+  }
+
+  return pathname.slice(BASE_PATH.length) || "/";
+}
+
+function withBasePath(pathname) {
+  return BASE_PATH ? `${BASE_PATH}${pathname}` : pathname;
+}
 
 function parseTimeout(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -82,7 +105,7 @@ function buildCookieOptions(httpOnly) {
     httpOnly,
     secure: false, // cookie can be send through http
     sameSite: "lax",
-    path: "/",
+    path: BASE_PATH || "/",
   };
 }
 
@@ -365,7 +388,7 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: `/${locale}/oauth/complete` });
+                res.writeHead(302, { Location: withBasePath(`/${locale}/oauth/complete`) });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -379,13 +402,13 @@ function forwardAuthRequest(req, res, targetUrl) {
                 const isCasRenewCallback =
                   req.parsedPathname === "/api/user/cas/renew_callback";
                 if (isOAuthCallback) {
-                  res.writeHead(302, { Location: "/" });
+                  res.writeHead(302, { Location: withBasePath("/") });
                   res.end();
                   return;
                 }
                 if (isCasCallback) {
                   res.writeHead(302, {
-                    Location: data.data.redirect_url || "/",
+                    Location: data.data.redirect_url || withBasePath("/"),
                   });
                   res.end();
                   return;
@@ -432,7 +455,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+                res.writeHead(302, { Location: `${withBasePath("/")}?${errorParams.toString()}` });
                 res.end();
                 return;
               }
@@ -509,21 +532,33 @@ app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
-    req.parsedPathname = pathname;
+    const internalPathname = withoutBasePath(pathname);
+    req.parsedPathname = internalPathname;
 
-    // 路由分发入口，扁平化逻辑，无深层嵌套
-    if (handleFrontendConfigApi(pathname, req, res)) return;
-    if (await handleProjectConfigApi(pathname, req, res)) return;
-    if (handleAttachmentProxy(pathname, req, res)) return;
-    if (handleAllApiProxy(pathname, req, res)) return;
+    const isProxyRequest =
+      internalPathname.startsWith("/api/") ||
+      (internalPathname.includes("/attachments/") && !internalPathname.startsWith("/api/"));
+    if (isProxyRequest && BASE_PATH) {
+      req.url = req.url.slice(BASE_PATH.length) || "/";
+    }
 
-    // 兜底：交给 Next.js 渲染页面
+    // Route dispatch uses paths without the Next.js base path.
+    if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (await handleProjectConfigApi(internalPathname, req, res)) return;
+    if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleAllApiProxy(internalPathname, req, res)) return;
+
+    // Fallback: let Next.js render pages and framework resources with basePath intact.
     handle(req, res, parsedUrl);
   });
     // Proxy WebSocket upgrade requests
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
-    if (pathname.startsWith("/api/voice/")) {
+    const internalPathname = withoutBasePath(pathname);
+    if (internalPathname.startsWith("/api/voice/")) {
+      if (BASE_PATH) {
+        req.url = req.url.slice(BASE_PATH.length) || "/";
+      }
       proxy.ws(
         req,
         socket,

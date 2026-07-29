@@ -16,6 +16,7 @@ import {
   ModelSource,
 } from "@/types/modelConfig";
 import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
 
 import { ModelEditDialog, ProviderConfigEditDialog } from "./ModelEditDialog";
 import {
@@ -286,12 +287,12 @@ export const ModelDeleteDialog = ({
     switch (source) {
       case MODEL_SOURCES.SILICON:
         return (
-          <img src="/siliconflow.png" alt="SiliconFlow" className="w-5 h-5" />
+          <img src={publicAsset("/siliconflow.png")} alt="SiliconFlow" className="w-5 h-5" />
         );
       case MODEL_SOURCES.MODELENGINE:
         return (
           <img
-            src="/modelengine-logo.png"
+            src={publicAsset("/modelengine-logo.png")}
             alt="ModelEngine"
             className="w-5 h-5"
           />
@@ -309,12 +310,12 @@ export const ModelDeleteDialog = ({
           </span>
         );
       case MODEL_SOURCES.DASHSCOPE:
-        return <img src="/aliyuncs.png" alt="DashScope" className="w-5 h-5" />;
+        return <img src={publicAsset("/aliyuncs.png")} alt="DashScope" className="w-5 h-5" />;
       case MODEL_SOURCES.TOKENPONY:
-        return <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />;
+        return <img src={publicAsset("/tokenpony.png")} alt="TokenPony" className="w-5 h-5" />;
       case MODEL_SOURCES.VOLCENGINE:
         return (
-          <img src="/volcengine.png" alt="VolcEngine" className="w-5 h-5" />
+          <img src={publicAsset("/volcengine.png")} alt="VolcEngine" className="w-5 h-5" />
         );
       default:
         return (

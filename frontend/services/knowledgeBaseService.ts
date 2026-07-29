@@ -1399,7 +1399,7 @@ class KnowledgeBaseService {
   }
 
   async fetchSummaryFrequencyOptions(): Promise<{ value: string; label: string }[]> {
-    const response = await fetch("/api/indices/summary_frequency_options", {
+    const response = await fetch(API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions, {
       headers: getAuthHeaders(),
     });
     const data = await response.json();

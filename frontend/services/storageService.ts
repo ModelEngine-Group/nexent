@@ -1,6 +1,7 @@
-import { API_ENDPOINTS } from "./api";
+import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
+import { withBasePath } from "@/lib/basePath";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -112,8 +113,13 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
 
-  if (url.startsWith("/api/share/")) {
+  if (url.startsWith(`${API_BASE_URL}/share/`)) {
     return url;
+  }
+
+  // Backend share URLs do not include the frontend base path.
+  if (url.startsWith("/api/share/")) {
+    return withBasePath(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues
@@ -124,8 +130,8 @@ export function convertImageUrlToApiUrl(url: string): string {
   // For external http/https URLs, use proxy to avoid CORS issues
   if (
     isHttpUrl &&
-    !url.includes("/api/file/download/") &&
-    !url.includes("/api/image")
+    !url.includes(`${API_BASE_URL}/file/download/`) &&
+    !url.includes(`${API_BASE_URL}/image`)
   ) {
     return API_ENDPOINTS.proxy.image(url);
   }
