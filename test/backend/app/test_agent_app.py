@@ -1023,11 +1023,9 @@ def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_heade
     )
 
     assert response.status_code == 200
-    assert mock_list_all_agent.call_count == 2
-    mock_list_all_agent.assert_any_call(
-        tenant_id="auth_tenant", user_id="test_user")
-    mock_list_all_agent.assert_any_call(
-        tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
+    mock_list_all_agent.assert_called_once_with(
+        tenant_id=explicit_tenant_id, user_id="test_user")
+    assert response.json() == [{"agent_id": 3, "name": "Agent 3"}]
 
 
 def test_list_all_agent_info_api_asset_owner_tenant_single_query(mocker, mock_auth_header):
@@ -1088,12 +1086,9 @@ def test_list_all_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_
     assert response.status_code == 500
     mock_get_user_info.assert_called_once_with(
         mock_auth_header["Authorization"], ANY)
-    # list_all_agent_info_impl is expected to be called twice:
-    # - once for explicit tenant_id
-    # - once for asset owner tenant_id
-    assert mock_list_all_agent.call_count == 1
-    mock_list_all_agent.assert_any_call(
-        tenant_id="auth_tenant", user_id="test_user")
+    # With explicit tenant_id, list_all_agent_info_impl is called once (no ASSET_OWNER merge)
+    mock_list_all_agent.assert_called_once_with(
+        tenant_id=explicit_tenant_id, user_id="test_user")
     assert "Agent list error" in response.json()["detail"]
 
 

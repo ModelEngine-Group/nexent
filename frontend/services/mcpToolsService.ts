@@ -297,6 +297,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       source: s.source as McpSource,
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
+      createTime: s.create_time,
       tags: s.tags || [],
       transportType:
         s.config_json && typeof s.config_json === "object" && "openapi" in s.config_json

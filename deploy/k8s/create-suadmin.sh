@@ -70,23 +70,30 @@ prompt_super_admin_password() {
   return 1
 }
 
-# Wait for PostgreSQL pod to be ready
-wait_for_nexent_postgresql_ready() {
-  local retries=0
-  local max_retries=${1:-30}
+# Wait until migrations have created the table and every column used below.
+wait_for_user_tenant_schema_ready() {
+  local timeout="${NEXENT_SQL_MIGRATION_WAIT_TIMEOUT_SECONDS:-300}"
+  local interval="${NEXENT_SQL_MIGRATION_WAIT_INTERVAL_SECONDS:-2}"
+  local start
+  local contract_sql="SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;"
 
-  while [ $retries -lt $max_retries ]; do
-    if kubectl exec -n $NAMESPACE deploy/nexent-postgresql -- pg_isready -U root -d nexent >/dev/null 2>&1; then
-      echo "   ✅ PostgreSQL is now ready!"
+  start="$(date +%s)"
+  while true; do
+    if kubectl exec -n "$NAMESPACE" deploy/nexent-postgresql -- \
+      psql -U root -d nexent -X -v ON_ERROR_STOP=1 \
+      -c "$contract_sql" >/dev/null 2>&1; then
+      echo "   ✅ user_tenant_t schema is ready."
       return 0
     fi
-    echo "   ⏳ Waiting for PostgreSQL to become ready... (attempt $((retries + 1))/$max_retries)"
-    sleep 10
-    retries=$((retries + 1))
-  done
 
-  echo "   ⚠️  Warning: PostgreSQL did not become ready within expected time"
-  return 1
+    if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
+      echo "   ❌ user_tenant_t schema did not become ready within ${timeout}s."
+      return 1
+    fi
+
+    echo "   ⏳ Waiting for user_tenant_t schema migration to complete..."
+    sleep "$interval"
+  done
 }
 
 decode_base64() {
@@ -141,9 +148,15 @@ extract_supabase_user_id() {
 
 get_existing_super_admin_user_id() {
   local email="$1"
-  kubectl exec -n "$NAMESPACE" deploy/nexent-supabase-db -- \
+  local result
+
+  if ! result="$(kubectl exec -n "$NAMESPACE" deploy/nexent-supabase-db -- \
     psql -U postgres -d supabase -X -A -t -v ON_ERROR_STOP=1 \
-      -c "SELECT id FROM auth.users WHERE email = '${email}' LIMIT 1;" 2>/dev/null | tr -d '[:space:]'
+      -c "SELECT id FROM auth.users WHERE email = '${email}' LIMIT 1;" 2>/dev/null)"; then
+    return 1
+  fi
+
+  printf '%s' "$result" | tr -d '[:space:]'
 }
 
 wait_for_supabase_auth_table_ready() {
@@ -173,24 +186,23 @@ insert_super_admin_tenant_record() {
   local postgres_pod="nexent-postgresql"
 
   if [ -z "$user_id" ]; then
-    echo "   ⚠️  Warning: user_id is empty. Skipping database insertion."
-    return 0
+    echo "   ❌ Cannot insert super admin tenant record: user_id is empty."
+    return 1
   fi
 
-  echo "   ⏳ Waiting for PostgreSQL to be ready..."
-  if ! wait_for_nexent_postgresql_ready; then
-    echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
-    return 0
-  fi
+  wait_for_user_tenant_schema_ready || return 1
 
   echo "   🔧 Inserting super admin user into user_tenant_t table..."
   local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
 
-  if kubectl exec -n "$NAMESPACE" deploy/$postgres_pod -- psql -U root -d nexent -c "$sql" >/dev/null 2>&1; then
+  if kubectl exec -n "$NAMESPACE" "deploy/$postgres_pod" -- \
+    psql -U root -d nexent -X -v ON_ERROR_STOP=1 -c "$sql" >/dev/null 2>&1; then
     echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
-  else
-    echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
+    return 0
   fi
+
+  echo "   ❌ Failed to insert super admin user into user_tenant_t table."
+  return 1
 }
 
 # Create default super admin user
@@ -200,16 +212,19 @@ create_supabase_super_admin_user() {
   local display_password="true"
 
   if ! wait_for_supabase_auth_table_ready; then
-    echo "   💡 The super admin user will not be created, but deployment will continue."
-    return 0
+    echo "   ❌ Supabase auth database did not become ready."
+    return 1
   fi
 
   local existing_user_id
-  existing_user_id="$(get_existing_super_admin_user_id "$email")"
+  if ! existing_user_id="$(get_existing_super_admin_user_id "$email")"; then
+    echo "   ❌ Failed to query the existing super admin user_id."
+    return 1
+  fi
   if [ -n "$existing_user_id" ]; then
     echo "   🚧 Default super admin user already exists. Skipping password setup."
     echo "   📧 Email:    ${email}"
-    insert_super_admin_tenant_record "$existing_user_id" "$email"
+    insert_super_admin_tenant_record "$existing_user_id" "$email" || return 1
     echo ""
     echo "--------------------------------"
     echo ""
@@ -299,9 +314,10 @@ create_supabase_super_admin_user() {
     fi
 
     if [ -z "$user_id" ]; then
-      echo "   ⚠️  Warning: Could not retrieve user_id. Skipping database insertion."
+      echo "   ❌ Could not retrieve the created super admin user_id."
+      return 1
     else
-      insert_super_admin_tenant_record "$user_id" "$email"
+      insert_super_admin_tenant_record "$user_id" "$email" || return 1
     fi
   elif echo "$signup_response" | grep -q '"error_code":"user_already_exists"' || \
     echo "$signup_response" | grep -q '"code":422' || \
@@ -313,22 +329,27 @@ create_supabase_super_admin_user() {
     # Get user_id from Supabase auth.users table
     echo "   🔧 Retrieving user_id from Supabase database..."
     local user_id
-    user_id="$(get_existing_super_admin_user_id "$email")"
-
-    if [ -z "$user_id" ]; then
-      echo "   ⚠️  Warning: Could not retrieve user_id. Skipping database insertion."
-      echo "   💡 Note: If user_tenant_t record is missing, you may need to insert it manually."
-      return 0
+    if ! user_id="$(get_existing_super_admin_user_id "$email")"; then
+      echo "   ❌ Failed to query the existing super admin user_id."
+      return 1
     fi
 
-    insert_super_admin_tenant_record "$user_id" "$email"
+    if [ -z "$user_id" ]; then
+      echo "   ❌ Could not retrieve the existing super admin user_id."
+      return 1
+    fi
+
+    insert_super_admin_tenant_record "$user_id" "$email" || return 1
   else
     local user_id
-    user_id="$(get_existing_super_admin_user_id "$email")"
+    if ! user_id="$(get_existing_super_admin_user_id "$email")"; then
+      echo "   ❌ Failed to query the existing super admin user_id."
+      return 1
+    fi
     if [ -n "$user_id" ]; then
       echo "   🚧 Default super admin user already exists. Skipping creation."
       echo "   📧 Email:    ${email}"
-      insert_super_admin_tenant_record "$user_id" "$email"
+      insert_super_admin_tenant_record "$user_id" "$email" || return 1
       return 0
     fi
 
@@ -354,23 +375,20 @@ main() {
 
   # Wait for supabase-kong
   if ! kubectl wait --for=condition=ready pod -l app=nexent-supabase-kong -n $NAMESPACE --timeout=180s 2>/dev/null; then
-    echo "   ⚠️  Warning: Supabase Kong pod is not ready yet."
-    echo "   💡 The super admin user will not be created, but deployment will continue."
-    return 0
+    echo "   ❌ Supabase Kong pod is not ready."
+    return 1
   fi
 
   # Wait for supabase-db
   if ! kubectl wait --for=condition=ready pod -l app=nexent-supabase-db -n $NAMESPACE --timeout=180s 2>/dev/null; then
-    echo "   ⚠️  Warning: Supabase DB pod is not ready yet."
-    echo "   💡 The super admin user will not be created, but deployment will continue."
-    return 0
+    echo "   ❌ Supabase DB pod is not ready."
+    return 1
   fi
 
   # Wait for supabase-auth
   if ! kubectl wait --for=condition=ready pod -l app=nexent-supabase-auth -n $NAMESPACE --timeout=180s 2>/dev/null; then
-    echo "   ⚠️  Warning: Supabase Auth pod is not ready yet."
-    echo "   💡 The super admin user will not be created, but deployment will continue."
-    return 0
+    echo "   ❌ Supabase Auth pod is not ready."
+    return 1
   fi
 
   # Create super admin user
@@ -381,5 +399,5 @@ main() {
   fi
 }
 
-# Run main function
+# Run main function.
 main "$@"
