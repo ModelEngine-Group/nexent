@@ -1,6 +1,7 @@
 import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
+import { withBasePath } from "@/lib/basePath";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -114,6 +115,11 @@ export function convertImageUrlToApiUrl(url: string): string {
 
   if (url.startsWith(`${API_BASE_URL}/share/`)) {
     return url;
+  }
+
+  // Backend share URLs do not include the frontend base path.
+  if (url.startsWith("/api/share/")) {
+    return withBasePath(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues
