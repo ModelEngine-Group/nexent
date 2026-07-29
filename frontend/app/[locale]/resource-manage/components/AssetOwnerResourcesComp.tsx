@@ -110,13 +110,6 @@ export default function AssetOwnerResourcesComp() {
                   />
                 ),
               },
-              {
-                key: "projectConfig",
-                label: t("project.config"),
-                children: (
-                  <ProjectConfigTab/>
-                ),
-              },
             ]}
           />
         </div>

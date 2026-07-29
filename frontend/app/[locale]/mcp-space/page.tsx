@@ -26,10 +26,10 @@ import {
   deleteCommunityMcpTool,
   deleteMcpToolService,
   publishCommunityMcpTool,
-  refreshMcpToolCount,
   rejectCommunityMcpTool,
   updateCommunityMcpTool,
 } from "@/services/mcpToolsService";
+import { checkMcpServerHealth } from "@/services/mcpService";
 import type {
   CommunityMcpCard,
   McpContainerConfigPayload,
@@ -39,6 +39,7 @@ import type {
 import {
   FILTER_ALL,
   McpDeploymentType,
+  McpServiceStatus,
   MCP_TOOLS_QUERY_KEYS,
   McpToolsServicesTab,
   McpTransportType,
@@ -859,16 +860,25 @@ function MineView({
     });
   };
 
-  const handleRefreshToolCount = async (item: MineMcpCardItem) => {
-    if (item.kind !== "local") return;
+  const handleHealthCheck = async (item: MineMcpCardItem) => {
+    const mcpId = item.kind === "local" ? item.service.mcpId : item.service.sourceMcpId;
+    if (!mcpId) return;
     const key = getMineItemKey(item);
     setRefreshingMineKey(key);
     try {
-      await refreshMcpToolCount(item.service.mcpId);
-      message.success(t("mcpTools.mine.refreshToolCountSuccess"));
+      const result = await checkMcpServerHealth(mcpId);
+      if (result.success) {
+        message.success(t("mcpConfig.message.healthCheckSuccess"));
+      } else {
+        message.error(t("mcpConfig.message.healthCheckFailed"));
+        // If MCP is enabled and health check fails, auto-disable it
+        if (item.kind === "local" && item.service.enabled === McpServiceStatus.ENABLED) {
+          await toggle.toggle(item.service);
+        }
+      }
       await refreshMineData();
     } catch {
-      message.error(t("mcpTools.mine.refreshToolCountFailed"));
+      message.error(t("mcpConfig.message.healthCheckFailed"));
     } finally {
       setRefreshingMineKey(null);
     }
@@ -946,7 +956,6 @@ function MineView({
                 }
                 publishing={publishingKey === key}
                 unpublishing={unpublishingKey === key}
-                refreshingToolCount={refreshingMineKey === key}
                 onEditLocal={onEditLocal}
                 onEditCommunity={onEditCommunity}
                 onToggle={handleToggle}
@@ -956,7 +965,8 @@ function MineView({
                 onViewReviewProgress={(item, os) =>
                   setReviewProgressItem({ item, onlineService: os })
                 }
-                onRefreshToolCount={handleRefreshToolCount}
+                onHealthCheck={handleHealthCheck}
+                healthChecking={refreshingMineKey === getMineItemKey(item)}
               />
             );
           })}

@@ -71,6 +71,7 @@ import {
   getStrengthLevel,
   validatePassword as validatePasswordUtil,
 } from "@/lib/utils";
+import ProjectConfigTab from "./resources/projectConfig";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -475,12 +476,12 @@ function TenantList({
       >
         {loading && (
           <div key="loading" className="p-4 text-center text-gray-500">
-            <Spin size="small" /> Loading tenants...
+            <Spin size="small" /> {t("tenantResources.tenants.loading")}
           </div>
         )}
         {!loading && tenants.length === 0 && (
           <div key="empty" className="p-4 text-center text-gray-500">
-            No tenants found
+            {t("tenantResources.tenants.empty")}
           </div>
         )}
         {!loading && tenants.length > 0 && (
@@ -1043,6 +1044,16 @@ export default function UserManageComp() {
   const { isSpeedMode, enableAidpKnowledge } = useDeployment();
   const params = useParams();
   const locale = (params as { locale?: string })?.locale || "en";
+  
+  const [open, setOpen] = useState(false);
+
+  const showModal = () => {
+    setOpen(true);
+  };
+
+  const hideModal = () => {
+    setOpen(false);
+  };
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
@@ -1191,7 +1202,7 @@ export default function UserManageComp() {
   return (
     <div className="flex flex-col w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="flex w-full px-6 pt-12">
+      <div className="flex justify-between w-full px-6 pt-12">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
             <Building2 className="h-6 w-6 text-white" />
@@ -1206,6 +1217,21 @@ export default function UserManageComp() {
             </p>
           </div>
         </div>
+        {isSuperAdmin && (<>
+            <Button type="primary" onClick={showModal}>
+              {t('project.config')}
+            </Button>
+            <Modal
+              title={t('project.config')}
+              open={open}
+              onOk={hideModal}
+              onCancel={hideModal}
+              footer={null}
+              width={800}
+            >
+              <ProjectConfigTab/>
+            </Modal>
+          </>)}
       </div>
       <div className="flex-1 min-h-0 h-full">
         <div className="flex h-full">

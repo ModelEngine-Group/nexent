@@ -26,11 +26,25 @@ from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by
 from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from database.invitation_db import query_invitations_by_tenant, remove_invitation
 from database.tool_db import delete_tools_by_agent_id
-from consts.const import ASSET_OWNER_TENANT_ID, TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID, CONTAINER_SKILLS_PATH
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    CONTAINER_SKILLS_PATH,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    TENANT_ID,
+    TENANT_NAME,
+)
 from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
 from services.skill_service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
+
+
+def _is_manageable_tenant_id(tenant_id: Optional[str]) -> bool:
+    """Return whether a tenant id represents a real tenant in management views."""
+    if not tenant_id:
+        return False
+    return tenant_id not in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
 def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
@@ -45,7 +59,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Tenant information
     """
-    if not tenant_id:
+    if not _is_manageable_tenant_id(tenant_id):
         return {}
 
     # Get tenant name
@@ -139,10 +153,10 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
     """
-    # Exclude virtual ASSET_OWNER tenant from admin tenant listings
+    # Exclude virtual/system tenants from admin tenant listings.
     all_tenant_ids = [
         tid for tid in get_all_tenant_ids()
-        if tid != ASSET_OWNER_TENANT_ID
+        if _is_manageable_tenant_id(tid)
     ]
     total = len(all_tenant_ids)
 
