@@ -1,4 +1,6 @@
+import ast
 import json
+import re
 
 import pytest
 
@@ -23,18 +25,18 @@ from agents.nl2agent_agent import (
         (
             "zh",
             "## 角色",
-            "可执行动作使用",
-            "翻译为英文并重试一次",
-            "结合此前对话",
-            "选择了工具时生成 3 到 5",
+            "每次搜索和 wrapper 步骤都使用一个",
+            "中文搜索成功且候选为空时",
+            "用户明确确认需求后",
+            "选择工具时生成 3 到 5",
         ),
         (
             "en",
             "## Role",
-            "Executable actions use",
-            "once in English",
-            "Use the preceding conversation",
-            "When tools are selected",
+            "Every search and wrapper step is one executable action",
+            "empty Chinese search",
+            "after explicit requirement confirmation",
+            "selected tools produce 3 to 5",
         ),
     ],
 )
@@ -62,13 +64,11 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "few_shot_examples" in prompt
     assert "greeting_message" in prompt
     assert "example_questions" in prompt
-    assert "Think:" in prompt or "思考：" in prompt
-    assert "Code:" in prompt or "代码：" in prompt
+    assert "Thought:" in prompt
     assert format_rule in prompt
     assert retry_rule in prompt
     assert selection_rule in prompt
     assert few_shot_rule in prompt
-    assert "weather_forecast" in prompt
     assert "_assistant" in prompt
     assert "30" in prompt
     assert "3 to 5" in prompt or "3 到 5" in prompt
@@ -82,11 +82,24 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "final_answer(" not in prompt
     assert 'subtype="local_mcp_recommendation"' in prompt
     assert 'subtype="agent_draft"' in prompt
-    assert 'result = runtime_search(keywords=[' in prompt
-    assert "wrapped = runtime_wrapper(" in prompt
-    assert "search_result=result" in prompt
+    assert 'search_result = runtime_search(keywords=[' in prompt
+    assert "recommendations = runtime_wrapper(" in prompt
+    assert "draft = runtime_wrapper(" in prompt
+    assert "search_result=search_result" in prompt
     assert "print(result)" in prompt
     assert "few_shots_prompt" not in prompt
+    code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
+    assert len(code_blocks) == 4
+    for code_block in code_blocks:
+        ast.parse(code_block)
+    assert "```" not in prompt
+    assert prompt.index(selection_rule) < prompt.index("search_result = runtime_search")
+    assert prompt.rstrip().endswith(("Observation.", "继续。"))
+    assert all(
+        phrase not in prompt.lower()
+        for phrase in ("never", "do not", "don't", "without", "only")
+    )
+    assert all(phrase not in prompt for phrase in ("不要", "不得", "不超过"))
 
 
 def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
