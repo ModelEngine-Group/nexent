@@ -33,7 +33,6 @@ import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
@@ -57,10 +56,9 @@ export default function AgentSelectorHeader({
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
   const { token } = theme?.useToken?.() || {};
-  const { user } = useAuthorizationContext();
 
-  // Fetch agent list internally
-  const { agents } = useAgentList(user?.tenantId ?? null);
+  // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
+  const { agents } = useAgentList("");
 
   // Store state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
