@@ -18,11 +18,12 @@ import types
 import warnings
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
+from consts.exceptions import UnauthorizedError
 from consts.model import NL2AgentRunRequest
 
 # Filter out deprecation warnings from third-party libraries
@@ -240,6 +241,53 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert not hasattr(request, "conversation_id")
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        side_effect=UnauthorizedError("Invalid access token"),
+    )
+    create_stream = mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await nl2agent_run_api(
+            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            http_request=MagicMock(),
+            authorization="Bearer invalid-token",
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid access token"
+    create_stream.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("private model configuration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await nl2agent_run_api(
+            nl2agent_request=NL2AgentRunRequest(query="Build an assistant"),
+            http_request=MagicMock(),
+            authorization="Bearer tenant-token",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "NL2Agent run error."
+    assert "private model configuration" not in exc_info.value.detail
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):

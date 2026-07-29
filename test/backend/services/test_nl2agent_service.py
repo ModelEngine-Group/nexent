@@ -1,3 +1,4 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -112,6 +113,61 @@ def test_search_filters_scores_below_threshold(mocker):
     assert search_installed_mcp_tools_by_query(
         "tenant-a",
         "weather forecast search",
+    ) == []
+
+
+def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
+    mocker.patch(
+        "services.nl2agent_service.query_all_tools",
+        return_value=[
+            {
+                "tool_id": 1,
+                "name": "",
+                "description": "",
+                "source": "mcp",
+                "is_available": True,
+            },
+            {
+                "tool_id": 2,
+                "name": "weather_lookup",
+                "description": "  Current\n weather  ",
+                "source": "mcp",
+                "usage": "weather-server",
+                "labels": "weather",
+                "inputs": "not a schema",
+                "is_available": True,
+            },
+            {
+                "tool_id": 3,
+                "name": "weather_alerts",
+                "description": "Weather alerts",
+                "source": "mcp",
+                "usage": "weather-server",
+                "labels": ["weather", None],
+                "inputs": ["not", "an", "object"],
+                "is_available": True,
+            },
+        ],
+    )
+    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=90)
+    mocker.patch("services.nl2agent_service.fuzz.token_set_ratio", return_value=90)
+
+    result = search_installed_mcp_tools_by_query(
+        "tenant-a",
+        "weather",
+        limit=2,
+    )
+
+    assert [item.tool_id for item in result] == [2, 3]
+    assert result[0].description == "Current weather"
+    assert result[0].labels == []
+    assert result[0].inputs == {}
+    assert result[1].labels == ["weather"]
+    assert result[1].inputs == {}
+    assert search_installed_mcp_tools_by_query(
+        "tenant-a",
+        "weather",
+        limit=-1,
     ) == []
 
 
@@ -233,6 +289,60 @@ async def test_build_run_info_is_ephemeral(mocker):
 
 
 @pytest.mark.asyncio
+async def test_build_run_info_falls_back_without_capacity_or_authorization(mocker):
+    mocker.patch(
+        "services.nl2agent_service.join_minio_file_description_to_query",
+        new_callable=AsyncMock,
+        return_value="Build a writing assistant",
+    )
+    model_configs = []
+    mocker.patch(
+        "services.nl2agent_service.create_model_config_list",
+        new_callable=AsyncMock,
+        return_value=model_configs,
+    )
+    mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value={"model_name": "tenant-default"},
+    )
+    capacity_snapshot = {"capacity_fingerprint": "legacy-capacity"}
+    mocker.patch(
+        "services.nl2agent_service._resolve_input_budget",
+        return_value=(8192, capacity_snapshot, None),
+    )
+    mocker.patch(
+        "services.nl2agent_service._resolve_safe_input_budget",
+        return_value=None,
+    )
+    mocker.patch(
+        "services.nl2agent_service.LOCAL_MCP_SERVER",
+        "http://local-mcp:5011/base/",
+    )
+
+    run_info = await build_nl2agent_run_info(
+        NL2AgentRunRequest(query="Build a writing assistant"),
+        tenant_id="tenant-a",
+        language="en",
+        authorization=None,
+    )
+
+    context_config = run_info.agent_config.context_manager_config
+    assert context_config.token_threshold == 8192
+    assert context_config.context_window_tokens == 8192
+    assert context_config.soft_input_budget_tokens == 0
+    assert context_config.hard_input_budget_tokens == 0
+    assert run_info.model_config_list == model_configs
+    assert run_info.history == []
+    assert not run_info.context_input.items
+    assert run_info.mcp_host == [
+        {
+            "url": "http://local-mcp:5011/base/sse",
+            "transport": "sse",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
@@ -286,4 +396,75 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
             '\\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n'
         ),
     ]
+    run_info.stop_event.set.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
+    run_info = MagicMock()
+    run_info.stop_event = MagicMock()
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+
+    async def failing_agent_run(_run_info):
+        if False:
+            yield "unreachable"
+        raise RuntimeError("private provider credentials")
+
+    mocker.patch(
+        "services.nl2agent_service.agent_run",
+        side_effect=failing_agent_run,
+    )
+
+    stream = await create_nl2agent_stream(
+        NL2AgentRunRequest(query="Build an assistant"),
+        "tenant-a",
+        "en",
+        "Bearer tenant-token",
+    )
+    chunks = [chunk async for chunk in stream]
+
+    assert len(chunks) == 1
+    payload = json.loads(chunks[0].removeprefix("data: ").strip())
+    assert payload == {
+        "type": "error",
+        "content": "NL2Agent execution failed.",
+    }
+    assert "credentials" not in chunks[0]
+    assert "tenant-token" not in chunks[0]
+    run_info.stop_event.set.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
+    run_info = MagicMock()
+    run_info.stop_event = MagicMock()
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+
+    async def cancelled_agent_run(_run_info):
+        if False:
+            yield "unreachable"
+        raise asyncio.CancelledError
+
+    mocker.patch(
+        "services.nl2agent_service.agent_run",
+        side_effect=cancelled_agent_run,
+    )
+
+    stream = await create_nl2agent_stream(
+        NL2AgentRunRequest(query="Build an assistant"),
+        "tenant-a",
+        "en",
+        None,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await anext(stream)
+
     run_info.stop_event.set.assert_called_once_with()
