@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 
@@ -35,6 +35,8 @@ import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeSe
  * compatibility.
  */
 type RcFileLike = File & { uid: string; lastModifiedDate: Date };
+import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import { partitionAidpFiles, isAidpFileValid } from "@/services/uploadService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
@@ -85,6 +87,17 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
   const [fileList, setFileList] = useState<File[]>([]);
+
+  // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
+  // The `newFiles` array may-or-may-not be the same reference across the N
+  // calls (behavior differs between <Upload> and <Dragger> and antd versions),
+  // so we cannot rely on reference-equality for a single-call-per-batch guard.
+  // Instead, we collect each file in beforeUpload and schedule a single
+  // requestAnimationFrame flush that runs validate/add once per batch.
+  // This guarantees partitionAidpFiles + toast execute exactly ONCE per
+  // user selection, regardless of antd's internal dispatch count.
+  const pendingFilesRef = useRef<File[]>([]);
+  const rafIdRef = useRef<number | null>(null);
 
   // Load the tenant's groups so the user can pick which groups may access
   // the new KB. When no tenant context is available we fall back to an
@@ -235,6 +248,18 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       }
       setLoading(true);
 
+      // Defense-in-depth: re-validate every file in case beforeUpload was bypassed
+      if (!skipUpload && fileList.length > 0) {
+        const invalidFiles = fileList.filter((f) => !isAidpFileValid(f));
+        if (invalidFiles.length > 0) {
+          setLoading(false);
+          message.error(
+            t("aidpKnowledge.invalidFileType", { count: invalidFiles.length })
+          );
+          return;
+        }
+      }
+
       // Step 1: Create KB
       // Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload
       const created = await aidpKnowledgeService.createKb({
@@ -305,6 +330,11 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     form.resetFields();
     setCurrent(0);
     setFileList([]);
+    pendingFilesRef.current = [];
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     setFormValues({
       name: "",
       chunk_token_num: AIDP_CREATE_DEFAULTS.chunk_token_num,
@@ -519,6 +549,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
   const renderStep1 = () => (
     <div className="mt-4">
       <Dragger
+        accept={AIDP_ACCEPT_STRING}
         multiple
         fileList={fileList.map((f, i) => ({
           uid: `${i}-${f.name}`,
@@ -527,16 +558,27 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           status: "done" as const,
           originFileObj: f as unknown as RcFileLike,
         }))}
-        beforeUpload={(_file, newFiles) => {
-          // Only use beforeUpload as the single state updater for file additions.
-          // Returning false prevents antd's default upload behavior.
-          setFileList((prev) => {
-            const existing = new Set(prev.map((f) => f.name));
-            const unique = (newFiles as File[]).filter(
-              (f) => !existing.has(f.name)
-            );
-            return [...prev, ...unique];
-          });
+        beforeUpload={(_file) => {
+          // Queue the file and defer validation + state update until the
+          // synchronous batch of beforeUpload calls finishes. Each batch
+          // flushes in a single frame so toasts and setFileList run once.
+          pendingFilesRef.current.push(_file);
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              const batch = pendingFilesRef.current;
+              pendingFilesRef.current = [];
+              rafIdRef.current = null;
+
+              const { valid } = partitionAidpFiles(batch, t, message);
+              if (valid.length > 0) {
+                setFileList((prev) => {
+                  const existing = new Set(prev.map((f) => f.name));
+                  const unique = valid.filter((f) => !existing.has(f.name));
+                  return [...prev, ...unique];
+                });
+              }
+            });
+          }
           return false;
         }}
         onRemove={(file) => {
