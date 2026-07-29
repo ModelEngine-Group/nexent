@@ -5,17 +5,30 @@ from unittest.mock import AsyncMock
 import pytest
 from fastmcp import FastMCP
 from mcp.types import Tool
+from pydantic import ValidationError
 
+from agents.nl2agent_agent import (
+    Nl2aAgentDraftInput,
+    Nl2aLocalMcpRecommendationInput,
+)
 import services.nl2agent_service as nl2agent_service
 import services.tool_configuration_service as tool_configuration_service
 import tool_collection.mcp.local_mcp_service as local_mcp_service_module
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
+    NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
     local_mcp_service,
+    nl2a_wrapper,
     search_installed_mcp_tools,
 )
+
+
+def _unwrap_nl2a(result: str) -> dict:
+    wrapper, marker = result.rsplit("</nl2a>", 1)
+    assert marker.strip() == "NL2A payload generated."
+    return json.loads(wrapper.split("<nl2a>", 1)[1])
 
 
 @pytest.mark.asyncio
@@ -203,6 +216,179 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
 
 
 @pytest.mark.asyncio
+async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
+    search_result = json.dumps(
+        {
+            "subtype": "local_mcp_recommendation",
+            "status": "success",
+            "recommendation_count": 2,
+            "recommendations": [
+                {
+                    "tool_id": tool_id,
+                    "name": name,
+                    "origin_name": None,
+                    "description": f"Tool {tool_id}",
+                    "source": "mcp",
+                    "usage": "weather-server",
+                    "labels": ["weather"],
+                    "inputs": {"city": "string"},
+                    "score": score,
+                }
+                for tool_id, name, score in [
+                    (7, "primary_weather", 0.95),
+                    (12, "secondary_weather", 0.75),
+                ]
+            ],
+        }
+    )
+
+    result = await nl2a_wrapper.fn(
+        Nl2aLocalMcpRecommendationInput(
+            subtype="local_mcp_recommendation",
+            search_result=search_result,
+            selected_tool_ids=[12],
+        )
+    )
+
+    assert _unwrap_nl2a(result) == {
+        "subtype": "local_mcp_recommendation",
+        "status": "success",
+        "recommendation_count": 1,
+        "recommendations": [json.loads(search_result)["recommendations"][1]],
+    }
+
+    with pytest.raises(ValueError, match="not present in search_result"):
+        await nl2a_wrapper.fn(
+            Nl2aLocalMcpRecommendationInput(
+                subtype="local_mcp_recommendation",
+                search_result=search_result,
+                selected_tool_ids=[999],
+            )
+        )
+    with pytest.raises(ValidationError, match="selected_tool_ids must be unique"):
+        Nl2aLocalMcpRecommendationInput(
+            subtype="local_mcp_recommendation",
+            search_result=search_result,
+            selected_tool_ids=[7, 7],
+        )
+
+    error_result = await nl2a_wrapper.fn(
+        Nl2aLocalMcpRecommendationInput(
+            subtype="local_mcp_recommendation",
+            search_result=json.dumps(
+                {
+                    "subtype": "local_mcp_recommendation",
+                    "status": "error",
+                    "code": "tool_search_failed",
+                    "retryable": True,
+                }
+            ),
+            selected_tool_ids=[],
+        )
+    )
+    assert _unwrap_nl2a(error_result) == {
+        "subtype": "local_mcp_recommendation",
+        "status": "error",
+        "code": "tool_search_failed",
+        "retryable": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_nl2a_wrapper_renders_structured_agent_few_shots():
+    examples = [
+        {
+            "user_input": question,
+            "reasoning": f"Query weather for {city}.",
+            "tool_calls": [
+                {"name": "weather_forecast", "arguments": {"city": city}}
+            ],
+            "response_guidance": "Answer using the real observation.",
+        }
+        for question, city in [
+            ("上海明天会下雨吗？", "上海"),
+            ("北京今天适合穿什么？", "北京"),
+            ("杭州今天适合徒步吗？", "杭州"),
+        ]
+    ]
+    payload = Nl2aAgentDraftInput(
+        subtype="agent_draft",
+        language="zh",
+        name="weather_assistant",
+        display_name="天气助手",
+        description="查询天气并提供出行建议。",
+        duty_prompt="回答天气问题。",
+        constraint_prompt="使用真实工具结果。",
+        greeting_message="你好，我可以帮助查询天气。",
+        example_questions=[example["user_input"] for example in examples],
+        selected_tool_names=["weather_forecast"],
+        few_shot_examples=examples,
+    )
+
+    result = _unwrap_nl2a(await nl2a_wrapper.fn(payload))
+
+    assert result["subtype"] == "agent_draft"
+    assert result["example_questions"] == [
+        "上海明天会下雨吗？",
+        "北京今天适合穿什么？",
+        "杭州今天适合徒步吗？",
+    ]
+    assert result["few_shots_prompt"].count("<code>") == 3
+    assert "result = weather_forecast(city='上海')" in result["few_shots_prompt"]
+    assert "selected_tool_names" not in result
+    assert "few_shot_examples" not in result
+
+    no_tool_payload = Nl2aAgentDraftInput(
+        subtype="agent_draft",
+        language="en",
+        name="writing_assistant",
+        display_name="Writing Assistant",
+        description="Helps improve writing.",
+        duty_prompt="Improve user-provided text.",
+        constraint_prompt="Preserve the user's meaning.",
+        greeting_message="Hello, I can help improve your writing.",
+        example_questions=[
+            "Can you improve this paragraph?",
+            "Can you make this more concise?",
+            "Can you correct the grammar?",
+        ],
+        selected_tool_names=[],
+        few_shot_examples=None,
+    )
+    no_tool_result = _unwrap_nl2a(await nl2a_wrapper.fn(no_tool_payload))
+    assert no_tool_result["few_shots_prompt"] is None
+
+
+def test_agent_draft_wrapper_rejects_missing_or_unknown_few_shot_tools():
+    common = {
+        "subtype": "agent_draft",
+        "language": "en",
+        "name": "weather_assistant",
+        "display_name": "Weather Assistant",
+        "description": "Weather help.",
+        "duty_prompt": "Answer weather questions.",
+        "constraint_prompt": "Use real observations.",
+        "greeting_message": "Hello, I can help with weather.",
+        "example_questions": ["Question one?", "Question two?", "Question three?"],
+        "selected_tool_names": ["weather_forecast"],
+    }
+    with pytest.raises(ValidationError, match="few_shot_examples are required"):
+        Nl2aAgentDraftInput(**common)
+
+    invalid_examples = [
+        {
+            "user_input": f"Question {index}?",
+            "reasoning": "Use a tool.",
+            "tool_calls": [{"name": "invented_tool", "arguments": {}}],
+            "response_guidance": "Use the observation.",
+        }
+        for index in range(3)
+    ]
+    with pytest.raises(ValidationError, match="must use selected tool names"):
+        Nl2aAgentDraftInput(**common, few_shot_examples=invalid_examples)
+
+
+@pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     parent = FastMCP("test-parent")
     parent.mount(
@@ -212,9 +398,11 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     )
     mounted_tools = await parent.get_tools()
     tool = mounted_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME]
+    wrapper_tool = mounted_tools[NL2A_WRAPPER_NAME]
 
     assert LOCAL_MCP_TOOL_NAME_OVERRIDES == {
-        SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME
+        SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
     }
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
     assert tool.name == SEARCH_INSTALLED_MCP_TOOLS_NAME
@@ -224,6 +412,13 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert tool.parameters["required"] == ["keywords"]
     assert tool.meta["nexent_internal"] is True
     assert "print(result)" in tool.description
+    assert wrapper_tool.name == NL2A_WRAPPER_NAME
+    assert wrapper_tool.parameters["required"] == ["payload"]
+    assert wrapper_tool.parameters["properties"]["payload"]["discriminator"] == {
+        "propertyName": "subtype"
+    }
+    assert len(wrapper_tool.parameters["properties"]["payload"]["oneOf"]) == 2
+    assert wrapper_tool.meta["nexent_internal"] is True
 
 
 @pytest.mark.asyncio
@@ -262,6 +457,12 @@ async def test_public_mcp_scanner_skips_internal_tools(mocker):
         Tool(
             name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
             description="Internal search",
+            inputSchema={"type": "object", "properties": {}},
+            _meta={"nexent_internal": True},
+        ),
+        Tool(
+            name=NL2A_WRAPPER_NAME,
+            description="Internal wrapper",
             inputSchema={"type": "object", "properties": {}},
             _meta={"nexent_internal": True},
         ),

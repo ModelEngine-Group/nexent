@@ -7,9 +7,12 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
 
 from agents.nl2agent_agent import (
+    NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    Nl2aWrapperPayload,
     SearchInstalledMcpToolsErrorObservation,
     SearchInstalledMcpToolsObservation,
+    build_nl2a_wrapper,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 LOCAL_MCP_TOOL_NAME_OVERRIDES = {
     SEARCH_INSTALLED_MCP_TOOLS_NAME: SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    NL2A_WRAPPER_NAME: NL2A_WRAPPER_NAME,
 }
 
 # Create MCP server
@@ -98,6 +102,22 @@ async def search_installed_mcp_tools(keywords: list[str]) -> str:
             recommendations=recommendations,
         )
     )
+
+
+@local_mcp_service.tool(
+    name=NL2A_WRAPPER_NAME,
+    description=(
+        "Validate and wrap one NL2Agent structured payload. Pass `payload` with "
+        "subtype `local_mcp_recommendation` or `agent_draft`. Call the tool as "
+        "`result = nl2a_wrapper(...)`, then use `print(result)` so the runtime "
+        "can emit the structured payload directly."
+    ),
+    meta={"nexent_internal": True},
+)
+async def nl2a_wrapper(payload: Nl2aWrapperPayload) -> str:
+    """Return one validated NL2Agent payload in its canonical wrapper."""
+
+    return build_nl2a_wrapper(payload)
 
 
 @local_mcp_service.tool(name="test_tool_name",

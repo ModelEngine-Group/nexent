@@ -307,7 +307,7 @@ class MessageObserver:
 
     @staticmethod
     def _extract_nl2a_wrapper(content):
-        """Extract one valid NL2Agent JSON wrapper from a final answer."""
+        """Extract one valid NL2Agent JSON wrapper from tool execution logs."""
         if not isinstance(content, str):
             return None, content
 
@@ -335,8 +335,8 @@ class MessageObserver:
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
 
         if (
-            process_type == ProcessType.FINAL_ANSWER
-            and self.enable_nl2a_wrapper
+            self.enable_nl2a_wrapper
+            and process_type == ProcessType.EXECUTION_LOGS
         ):
             nl2a_content, formatted_content = self._extract_nl2a_wrapper(
                 formatted_content
