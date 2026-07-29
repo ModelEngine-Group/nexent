@@ -1099,6 +1099,7 @@ async def get_remote_mcp_server_list(
             "enabled": record.get("enabled"),
             "source": record.get("source"),
             "update_time": record.get("update_time"),
+            "create_time": record.get("create_time"),
             "tags": record.get("tags") or [],
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),

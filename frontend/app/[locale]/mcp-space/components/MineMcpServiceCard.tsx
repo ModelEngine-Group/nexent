@@ -71,7 +71,10 @@ export default function MineMcpServiceCard({
     ? Boolean(onlineService) && (onlineService?.reviewStatus === "approved" || onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
-  const updatedAt = formatRegistryDate(service.updatedAt || "");
+  const timeSource = (item.service as any);
+  const createDate = formatRegistryDate(
+    item.kind === "local" ? (timeSource.createTime || "") : (timeSource.createdAt || "")
+  );
   const toolCount = resolveToolCount(item);
 
   // Owned = user-created MCP can be published/updated; community-installed
@@ -242,7 +245,7 @@ export default function MineMcpServiceCard({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
           <Clock className="h-3.5 w-3.5 text-slate-400" />
-          {updatedAt}
+          {createDate}
         </span>
       </div>
 
