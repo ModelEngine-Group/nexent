@@ -276,19 +276,22 @@ def _screened_tool_forward(engine, tool_name, controller, logger, original_forwa
             kwargs = decision.masked_kwargs
     return original_forward(*args, **kwargs)
 def _coerce_observer_arguments(arguments: Any) -> Any:
-    """Coerce AST/Python-literal arguments into a JSON-serializable payload.
+    """Coerce arguments into a JSON-serializable payload.
 
-    smolagents may pass arguments either as a dict (after Python execution) or
-    as a JSON-encoded string (OpenAI-style). We accept both and emit a JSON-
-    friendly value into the observer so the downstream SSE chunk stays
-    consistent with the shape produced by builtin tools.
+    Recursively walks dicts, lists and tuples, replacing callable objects
+    with their ``name`` attribute so that downstream ``json.dumps`` never
+    encounters a Python function / Tool reference.
     """
     if arguments is None:
         return None
     if isinstance(arguments, (str, int, float, bool)):
         return arguments
-    if isinstance(arguments, (dict, list)):
-        return arguments
+    if callable(arguments):
+        return getattr(arguments, "name", str(arguments))
+    if isinstance(arguments, dict):
+        return {k: _coerce_observer_arguments(v) for k, v in arguments.items()}
+    if isinstance(arguments, (list, tuple)):
+        return type(arguments)(_coerce_observer_arguments(v) for v in arguments)
     return str(arguments)
 
 
