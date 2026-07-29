@@ -14,25 +14,22 @@ from agents.nl2agent_agent import (
         "expected",
         "format_rule",
         "retry_rule",
-        "unclear_example",
-        "clear_example",
+        "selection_rule",
     ),
     [
         (
             "zh",
             "## 角色",
-            "可执行代码必须使用",
-            "英文关键词",
-            "### 需求不明确",
-            "### 需求明确",
+            "可执行动作使用",
+            "翻译为英文并重试一次",
+            "结合此前对话",
         ),
         (
             "en",
             "## Role",
-            "Executable code must use",
-            "English keywords",
-            "### Unclear Request",
-            "### Clear Request",
+            "Executable actions use",
+            "once in English",
+            "Use the preceding conversation",
         ),
     ],
 )
@@ -41,8 +38,7 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     expected,
     format_rule,
     retry_rule,
-    unclear_example,
-    clear_example,
+    selection_rule,
 ):
     prompt = build_nl2agent_system_prompt(
         language,
@@ -56,25 +52,23 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "keywords" in prompt
     assert "nl2agent_tool_selection" in prompt
     assert "few_shots_prompt" in prompt
-    assert "Thought:" in prompt
-    assert "Code:" in prompt
-    assert "Do not search again" in prompt or "不得再次搜索" in prompt
-    assert "valid JSON" in prompt or "合法 JSON" in prompt
+    assert "Think:" in prompt or "思考：" in prompt
+    assert "Code:" in prompt or "代码：" in prompt
     assert "JSON object" in prompt or "JSON 对象" in prompt
     assert format_rule in prompt
     assert retry_rule in prompt
-    assert unclear_example in prompt
-    assert clear_example in prompt
+    assert selection_rule in prompt
     assert "<code>" in prompt
     assert "</code>" in prompt
     assert "<nl2a>" in prompt
     assert "</nl2a>" in prompt
-    assert 'final_answer("""<nl2a>' in prompt
+    assert "final_answer(" not in prompt
     assert "recommendation_count" in prompt
     assert '"subtype":"local_mcp_recommendation"' in prompt
     assert '"subtype":"agent_draft"' in prompt
     assert 'result = runtime_search(keywords=[' in prompt
-    assert prompt.count("print(result)") >= 3
+    assert "print(result)" in prompt
+    assert "<code>\n<nl2a>" not in prompt
 
 
 def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
@@ -120,4 +114,4 @@ def test_create_nl2agent_agent_config_has_only_runtime_tool():
     assert config.tools[0].usage == "outer-apis"
     assert config.tools[0].inputs == '{"keywords": "list[str]"}'
     assert config.tools[0].metadata is None
-    assert "不得创建" in config.instructions
+    assert "持久化由产品流程完成" in config.instructions
