@@ -1044,7 +1044,7 @@ export default function UserManageComp() {
   const { isSpeedMode, enableAidpKnowledge } = useDeployment();
   const params = useParams();
   const locale = (params as { locale?: string })?.locale || "en";
-  
+
   const [open, setOpen] = useState(false);
 
   const showModal = () => {
@@ -1125,7 +1125,7 @@ export default function UserManageComp() {
   // For non-super-admin: use directly fetched tenant data (directTenantData)
   // For super-admin: use paginated tenant list (tenantData)
   let currentTenant: Tenant | undefined;
-  let currentTenantName: string;
+  let currentTenantName = "";
 
   if (!isSuperAdmin && directTenantData) {
     // Non-super-admin: use directly fetched tenant info
@@ -1140,6 +1140,7 @@ export default function UserManageComp() {
     currentTenantName =
       currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
   }
+  const hasSelectedTenant = Boolean(tenantId);
 
   // Tenant name editing states
   const [isEditingTenantName, setIsEditingTenantName] = useState(false);
@@ -1217,21 +1218,23 @@ export default function UserManageComp() {
             </p>
           </div>
         </div>
-        {isSuperAdmin && (<>
+        {isSuperAdmin && (
+          <>
             <Button type="primary" onClick={showModal}>
-              {t('project.config')}
+              {t("project.config")}
             </Button>
             <Modal
-              title={t('project.config')}
+              title={t("project.config")}
               open={open}
               onOk={hideModal}
               onCancel={hideModal}
               footer={null}
               width={800}
             >
-              <ProjectConfigTab/>
+              <ProjectConfigTab />
             </Modal>
-          </>)}
+          </>
+        )}
       </div>
       <div className="flex-1 min-h-0 h-full">
         <div className="flex h-full">
@@ -1279,6 +1282,8 @@ export default function UserManageComp() {
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                     {t("quota.platformOverview", "Platform Quota Overview")}
                   </h2>
+                ) : !hasSelectedTenant ? (
+                  <div />
                 ) : isEditingTenantName ? (
                   <Input
                     ref={tenantNameInputRef}
@@ -1295,7 +1300,10 @@ export default function UserManageComp() {
                     onClick={startEditingTenantName}
                   >
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {currentTenantName}
+                      {currentTenantName ||
+                        (directTenantLoading
+                          ? t("tenantResources.tenants.loading")
+                          : t("tenantResources.tenants.name"))}
                     </h2>
                     <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
