@@ -27,7 +27,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/lib/agentImportUtils";
+import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
@@ -146,44 +146,16 @@ export default function AgentSelectorHeader({
   );
 
   // Handle import agent
-  const handleImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
+  const handleImportAgent = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+      },
+      message: message,
+      t: t,
+      log: log,
+    });
   };
 
   // Handle view call relationship
@@ -209,7 +181,12 @@ export default function AgentSelectorHeader({
   const handleExportAgent = async (agent: Agent) => {
     try {
       const result = await exportAgent(Number(agent.id));
-      if (result.success && result.data) {
+      if (!result.success) {
+        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        return;
+      }
+
+      if (result.data) {
         const blob = new Blob([JSON.stringify(result.data, null, 2)], {
           type: "application/json",
         });
@@ -221,12 +198,9 @@ export default function AgentSelectorHeader({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.message.agentExportSuccess"));
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.agentImportFailed")
-        );
       }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
     } catch (error) {
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
