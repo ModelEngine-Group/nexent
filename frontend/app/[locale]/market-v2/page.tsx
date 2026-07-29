@@ -11,8 +11,10 @@ import {
 } from "@/components/market/SolutionMarketCard";
 import { SolutionConfigDrawer } from "@/components/market/SolutionConfigDrawer";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { instantiateMarketAgent } from "@/services/marketService";
 import type { Agent } from "@/types/agentConfig";
 import { useRouter } from "next/navigation";
+import log from "@/lib/logger";
 
 /**
  * Built-in solution catalog. Currently focused on AI 资讯速递 (ai_news_hot)
@@ -71,12 +73,9 @@ function resolveSolutions(
   solutions: SolutionCardData[],
   agents: Agent[]
 ): SolutionCardData[] {
-  const availableAgents = agents;
-  const firstAgent = availableAgents[0];
-
   return solutions.map((sol) => {
     if (sol.tool_keywords && sol.tool_keywords.length > 0) {
-      const matched = availableAgents.find((agent) =>
+      const matched = agents.find((agent) =>
         agentMatchesKeywords(agent, sol.tool_keywords)
       );
       if (matched) {
@@ -93,19 +92,7 @@ function resolveSolutions(
         };
       }
     }
-    if (firstAgent) {
-      const firstAgentExtra = firstAgent as Agent & {
-        is_available?: boolean;
-        unavailable_reasons?: string[];
-      };
-      return {
-        ...sol,
-        agent_id: Number(firstAgent.id) || undefined,
-        resolved: true,
-        is_available: firstAgentExtra.is_available !== false,
-        unavailable_reasons: firstAgentExtra.unavailable_reasons || [],
-      };
-    }
+    // Not installed yet — show install button
     return { ...sol, resolved: false };
   });
 }
@@ -119,9 +106,13 @@ export default function UnifiedMarketPage() {
   const [configSolution, setConfigSolution] = useState<SolutionCardData | null>(
     null
   );
+  const [installing, setInstalling] = useState(false);
 
-  const { agents: publishedAgents, isLoading: isLoadingSolutions } =
-    usePublishedAgentList();
+  const {
+    agents: publishedAgents,
+    isLoading: isLoadingSolutions,
+    invalidate: invalidatePublishedAgents,
+  } = usePublishedAgentList();
 
   const solutions: SolutionCardData[] = useMemo(
     () => resolveSolutions(BUILTIN_SOLUTIONS, publishedAgents || []),
@@ -149,9 +140,7 @@ export default function UnifiedMarketPage() {
         router.push("/newchat");
       } else {
         message.warning(
-          isZh
-            ? "该方案无法直接启动对话"
-            : "This solution cannot launch chat directly"
+          isZh ? "请先安装方案" : "Please install the solution first"
         );
       }
     },
@@ -164,7 +153,7 @@ export default function UnifiedMarketPage() {
         setConfigSolution(solution);
       } else {
         message.warning(
-          isZh ? "该方案无法配置" : "This solution cannot be configured"
+          isZh ? "请先安装方案" : "Please install the solution first"
         );
       }
     },
@@ -176,6 +165,51 @@ export default function UnifiedMarketPage() {
       setConfigSolution(solution);
     }
   }, []);
+
+  // One-click install: call instantiate API, then auto-open config drawer
+  const handleInstall = useCallback(
+    async (solution: SolutionCardData) => {
+      if (installing) return;
+      setInstalling(true);
+      try {
+        const result = await instantiateMarketAgent(solution.id, {}, true);
+        if (result.agent_id) {
+          // Refresh published agent list so the card switches to "configured" state
+          await invalidatePublishedAgents();
+          message.success(
+            isZh
+              ? "安装成功！请选择 LLM 模型后开始对话"
+              : "Installed! Select an LLM model to start chatting"
+          );
+          // Auto-open config drawer with the new agent_id
+          setConfigSolution({
+            ...solution,
+            agent_id: result.agent_id,
+            resolved: true,
+            is_available: false,
+            unavailable_reasons: ["model_unavailable"],
+          });
+        } else if (result.precheck) {
+          // Precheck blocked — show what's missing
+          message.warning(
+            isZh
+              ? `安装前检查未通过：${result.precheck.message || "缺少依赖"}`
+              : `Precheck failed: ${result.precheck.message || "missing dependencies"}`
+          );
+        }
+      } catch (err: unknown) {
+        log.error("Install solution failed", err);
+        message.error(
+          isZh
+            ? `安装失败：${(err as Error)?.message || "未知错误"}`
+            : `Install failed: ${(err as Error)?.message || "unknown"}`
+        );
+      } finally {
+        setInstalling(false);
+      }
+    },
+    [installing, isZh, message, invalidatePublishedAgents]
+  );
 
   const renderLoading = () => (
     <div className="flex items-center justify-center py-20">
@@ -229,8 +263,10 @@ export default function UnifiedMarketPage() {
               key={solution.id}
               solution={solution}
               onChat={handleStartChat}
+              onInstall={handleInstall}
               onConfig={handleConfig}
               onViewDetails={handleViewDetails}
+              installing={installing}
               index={idx}
             />
           ))}

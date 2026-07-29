@@ -20,6 +20,8 @@ import {
   Mail,
   Image as ImageIcon,
   Package,
+  Download,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -85,6 +87,7 @@ interface SolutionCardProps {
   onInstall?: (solution: SolutionCardData) => void;
   onConfig?: (solution: SolutionCardData) => void;
   onViewDetails?: (solution: SolutionCardData) => void;
+  installing?: boolean;
   index?: number;
 }
 
@@ -94,6 +97,7 @@ export function SolutionMarketCard({
   onInstall,
   onConfig,
   onViewDetails,
+  installing = false,
   index = 0,
 }: SolutionCardProps) {
   const { t, i18n } = useTranslation("common");
@@ -116,7 +120,9 @@ export function SolutionMarketCard({
   };
 
   const handleCardClick = () => {
-    onViewDetails?.(solution);
+    if (isResolved) {
+      onViewDetails?.(solution);
+    }
   };
 
   const categoryLabel = solution.category
@@ -261,17 +267,13 @@ export function SolutionMarketCard({
 
       {/* Footer */}
       <div className="absolute left-0 right-0 bottom-0 px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center gap-2">
-        {isResolved || isTeam ? (
+        {isResolved ? (
           isAvailable ? (
             <button
               onClick={handleInstall}
               className="flex-1 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
             >
-              {isTeam ? (
-                <Users className="h-4 w-4" />
-              ) : (
-                <MessageCircle className="h-4 w-4" />
-              )}
+              <MessageCircle className="h-4 w-4" />
               {isZh ? "开始对话" : "Start chat"}
             </button>
           ) : (
@@ -285,16 +287,28 @@ export function SolutionMarketCard({
                 : "Configure"}
             </button>
           )
+        ) : installing ? (
+          <button
+            disabled
+            className="flex-1 px-4 py-2 rounded-md bg-slate-400 text-white text-sm font-medium flex items-center justify-center gap-2 cursor-wait"
+          >
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {isZh ? "安装中..." : "Installing..."}
+          </button>
         ) : (
-          <div className="flex-1 px-4 py-2 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 text-sm font-medium flex items-center justify-center gap-2 cursor-not-allowed">
-            {isZh ? "即将上线" : "Coming soon"}
-          </div>
+          <button
+            onClick={handleInstall}
+            className="flex-1 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            {isZh ? "一键安装" : "Install"}
+          </button>
         )}
-        {onViewDetails && (
+        {isResolved && onConfig && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onViewDetails(solution);
+              onConfig(solution);
             }}
             title={isZh ? "配置" : "Configure"}
             className="shrink-0 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 text-sm transition-all duration-300 flex items-center gap-1"
