@@ -266,7 +266,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
   return files;
 }
 
-function parseSkillFileAttachments(
+export function parseSkillFileAttachments(
   content: string,
   messageId: string,
 ): CompleteAttachment[] {

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
 from enum import Enum
+from typing import Any, Dict, Optional
 
 
 class ToolSign(Enum):
@@ -21,6 +21,7 @@ class ToolSign(Enum):
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
     PLAN_OPERATION = "p"       # Plan / step-state tool identifier (v1.4)
+    UI_OPERATION = "u"         # Declarative A2UI generation
     DATABASE_OPERATION = "z"  # Database operation tool identifier
 
 
@@ -58,6 +59,7 @@ class ToolCategory(Enum):
     MEMORY = "memory"
     SKILL = "skill"
     PLANNING = "planning"
+    UI = "ui"
 
 
 @dataclass

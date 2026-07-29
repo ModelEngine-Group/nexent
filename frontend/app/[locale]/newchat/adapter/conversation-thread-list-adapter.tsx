@@ -32,7 +32,6 @@ import {
   conversationSourcesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
-  remoteChatModelAdapter,
   parseStepTokenCount,
   parsePlan,
   parsePlanStepUpdate,
@@ -41,6 +40,14 @@ import {
   type SearchSource,
   type StepTokenCount,
 } from "./remote-chat-model-adapter";
+import { agUIChatModelAdapter } from "./ag-ui-chat-model-adapter";
+import {
+  createA2UIDataPart,
+  markA2UIFormSubmitted,
+  normalizeLegacyA2UIActionText,
+  processA2UIEnvelope,
+} from "../a2ui/runtime";
+import { parseA2UIFormSubmissionState } from "../a2ui/form-submission-store";
 
 type RemoteThreadInitializeResponse = Awaited<
   ReturnType<RemoteThreadListAdapter["initialize"]>
@@ -57,7 +64,9 @@ type HistoricalChatMode = "planning" | "execution";
 
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
-let historicalChatModeListener: ((mode: HistoricalChatMode) => void) | undefined;
+let historicalChatModeListener:
+  | ((mode: HistoricalChatMode) => void)
+  | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -70,7 +79,7 @@ export const restoreHistoricalPlan = (conversationId?: string): void => {
 };
 
 export const setHistoricalChatModeListener = (
-  listener: ((mode: HistoricalChatMode) => void) | undefined,
+  listener: ((mode: HistoricalChatMode) => void) | undefined
 ): void => {
   historicalChatModeListener = listener;
 };
@@ -78,13 +87,15 @@ export const setHistoricalChatModeListener = (
 export const restoreHistoricalChatMode = (conversationId?: string): void => {
   activeHistoricalChatModeConversationId = conversationId;
   historicalChatModeListener?.(
-    conversationId ? (historicalChatModeCache.get(conversationId) ?? "execution") : "execution",
+    conversationId
+      ? (historicalChatModeCache.get(conversationId) ?? "execution")
+      : "execution"
   );
 };
 
 const cacheHistoricalChatMode = (
   conversationId: string,
-  chatMode: HistoricalChatMode | undefined,
+  chatMode: HistoricalChatMode | undefined
 ): void => {
   const mode = chatMode ?? "execution";
   historicalChatModeCache.set(conversationId, mode);
@@ -113,7 +124,7 @@ const toAttachmentType = (rawType: string): AttachmentType => {
 };
 
 const toToolSearchItem = (
-  value: unknown,
+  value: unknown
 ): { url: string; title: string } | null => {
   if (typeof value !== "object" || value === null) return null;
 
@@ -143,7 +154,7 @@ const parseSearchImageUrls = (content: string): string[] => {
     return Array.isArray(value.images_url)
       ? value.images_url.filter(
           (imageUrl): imageUrl is string =>
-            typeof imageUrl === "string" && imageUrl.length > 0,
+            typeof imageUrl === "string" && imageUrl.length > 0
         )
       : [];
   } catch {
@@ -160,7 +171,7 @@ type BranchableHistoryMessage = Parameters<
 >[0][number];
 
 const buildBranchableHistory = (
-  messages: HistoryMessage[],
+  messages: HistoryMessage[]
 ): BranchableHistoryMessage[] => {
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
@@ -190,7 +201,10 @@ const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
   left.role === "user" &&
   right.role === "user" &&
   JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) === JSON.stringify(right.minio_files ?? []);
+  JSON.stringify(left.minio_files ?? []) ===
+    JSON.stringify(right.minio_files ?? []) &&
+  JSON.stringify(left.a2ui_submission ?? null) ===
+    JSON.stringify(right.a2ui_submission ?? null);
 
 /**
  * Collapse refresh-generated duplicate user messages while preserving every
@@ -222,7 +236,7 @@ const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
 
 const restoreAttachments = (
   message: ApiMessage,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] => {
   if (!message.minio_files) return [];
 
@@ -277,10 +291,12 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
   constructor(
     private readonly getRemoteId: () => string | undefined,
-    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
+    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>
   ) {}
 
-  async load(): Promise<ExportedMessageRepository & { unstable_resume?: boolean }> {
+  async load(): Promise<
+    ExportedMessageRepository & { unstable_resume?: boolean }
+  > {
     const loadGeneration = ++this.loadGeneration;
     // Historical threads may be cached by assistant-ui, so plan state is
     // cached independently by backend conversation ID. Parsing below updates
@@ -290,7 +306,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     log.log(
       `[history-adapter] load() invoked, remoteId="${remoteId}", prior plan=${
         planRegistry.data ? "set" : "null"
-      }`,
+      }`
     );
     if (!remoteId) {
       if (loadGeneration === this.loadGeneration) {
@@ -314,17 +330,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     }
 
     const messages: HistoryMessage[] = [];
-    let assistantIdx = 0;
-
     const historyMessages = collapseRefreshUserMessages(detail.message);
 
     for (const [messageIndex, msg] of historyMessages.entries()) {
       // Resolve a stable messageId first — every per-message side store
       // (sources registry, metadata bucket) is keyed off this value so it
       // matches the id that assistant-ui later sets on the rendered message.
-      const messageId = String(
-        msg.message_id ?? `${remoteId}-${messageIndex}`,
-      );
+      const messageId = String(msg.message_id ?? `${remoteId}-${messageIndex}`);
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
@@ -352,8 +364,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const item = searchItem as Record<string, unknown>;
             const url = (item.url as string | undefined) ?? "";
             const filename = (item.filename as string | undefined) ?? "";
-            const title =
-              (item.title as string | undefined) || filename || url;
+            const title = (item.title as string | undefined) || filename || url;
             if (url || filename || title) {
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
@@ -375,14 +386,25 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
       }
 
-      const content: any[] = [];
+      const content: Array<Record<string, unknown>> = [];
 
       if (msg.role === "user") {
+        const submissionState = parseA2UIFormSubmissionState(
+          msg.a2ui_submission
+        );
+        if (submissionState) {
+          markA2UIFormSubmitted(remoteId, submissionState);
+        }
         const text = messageParts
           .filter((part) => part.type === "text")
           .map((part) => part.content)
           .join("\n");
-        if (text) content.push({ type: "text", text });
+        if (text) {
+          content.push({
+            type: "text",
+            text: normalizeLegacyA2UIActionText(text),
+          });
+        }
       } else {
         let reasoningText = "";
         // Stack of currently-open sub-agent invocations reconstructed from
@@ -400,13 +422,21 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           depth: number;
         };
         const subAgentStack: ActiveSubAgent[] = [];
+        const renderedA2UISurfaces = new Set<string>();
         let historicalRunCounter = 0;
         const currentSubAgent = (): ActiveSubAgent | null =>
           subAgentStack.length > 0
             ? subAgentStack[subAgentStack.length - 1]
             : null;
         const buildMetadata = ():
-          | { subagentId: number | string; runId: string; agentName: string; depth: number; task?: string; isRunning: boolean }
+          | {
+              subagentId: number | string;
+              runId: string;
+              agentName: string;
+              depth: number;
+              task?: string;
+              isRunning: boolean;
+            }
           | undefined => {
           const top = currentSubAgent();
           if (!top) return undefined;
@@ -422,7 +452,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         const flushReasoning = () => {
           if (!reasoningText) return;
-          const reasoningPart: any = {
+          const reasoningPart: Record<string, unknown> = {
             type: "reasoning",
             text: reasoningText,
             status: { type: "done" },
@@ -465,11 +495,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               for (const searchResult of searchResults) {
                 const item = toToolSearchItem(searchResult);
                 if (item) {
-                  attachSearchContentToTool(
-                    content,
-                    item,
-                    part.tool_call_id,
-                  );
+                  attachSearchContentToTool(content, item, part.tool_call_id);
                 }
               }
             }
@@ -485,17 +511,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               for (const searchResult of searchResults) {
                 const item = toToolSearchItem(searchResult);
                 if (item) {
-                  attachSearchContentToTool(
-                    content,
-                    item,
-                    part.tool_call_id,
-                  );
+                  attachSearchContentToTool(content, item, part.tool_call_id);
                 }
               }
             } catch (error) {
               log.warn(
                 "[history-adapter] Failed to parse search_content:",
-                error,
+                error
               );
             }
             continue;
@@ -503,11 +525,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              attachSearchImageToTool(
-                content,
-                imageUrl,
-                part.tool_call_id,
-              );
+              attachSearchImageToTool(content, imageUrl, part.tool_call_id);
             }
             continue;
           }
@@ -516,16 +534,55 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "a2ui") {
+            flushReasoning();
+            let envelope: unknown = part.content;
+            try {
+              envelope = JSON.parse(part.content);
+            } catch {
+              // The runtime emits a safe fallback for malformed history.
+            }
+            const result = processA2UIEnvelope(remoteId, envelope);
+            const createsSurface = Boolean(
+              envelope &&
+              typeof envelope === "object" &&
+              "message" in envelope &&
+              (envelope as { message?: unknown }).message &&
+              typeof (envelope as { message: unknown }).message === "object" &&
+              "createSurface" in (envelope as { message: object }).message
+            );
+            const surfaceId =
+              result.surfaceId ??
+              (envelope &&
+              typeof envelope === "object" &&
+              "surfaceId" in envelope
+                ? String((envelope as { surfaceId: unknown }).surfaceId)
+                : `invalid-${messageId}-${partIndex}`);
+            if (
+              (createsSurface || result.error) &&
+              !renderedA2UISurfaces.has(surfaceId)
+            ) {
+              content.push(
+                createA2UIDataPart(remoteId, surfaceId, result.error)
+              );
+              renderedA2UISurfaces.add(surfaceId);
+            }
+            continue;
+          }
+
           if (part.type === "plan") {
             const plan = parsePlan(part.content);
             log.log(
               `[history-adapter] plan unit: parsed=${
                 plan ? "ok" : "null"
-              }, steps=${plan?.steps.length ?? 0}`,
+              }, steps=${plan?.steps.length ?? 0}`
             );
             if (plan) restoredPlan = plan;
             const previous = content.at(-1);
-            if (previous?.type === "tool-call" && previous.toolName === "tool") {
+            if (
+              previous?.type === "tool-call" &&
+              previous.toolName === "tool"
+            ) {
               previous.toolName = "create_plan";
               previous.argsText = part.content;
             }
@@ -537,7 +594,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             log.log(
               `[history-adapter] plan_step_update unit: parsed=${
                 update ? "ok" : "null"
-              }`,
+              }`
             );
             if (update && restoredPlan) {
               restoredPlan = {
@@ -545,12 +602,15 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 steps: restoredPlan.steps.map((step) =>
                   step.id === update.stepId
                     ? { ...step, status: update.status }
-                    : step,
+                    : step
                 ),
               };
             }
             const previous = content.at(-1);
-            if (previous?.type === "tool-call" && previous.toolName === "tool") {
+            if (
+              previous?.type === "tool-call" &&
+              previous.toolName === "tool"
+            ) {
               previous.toolName = "update_plan_step";
               previous.argsText = part.content;
             }
@@ -622,10 +682,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          if (
-            part.type === "tool" ||
-            part.type === "tool-call"
-          ) {
+          if (part.type === "tool" || part.type === "tool-call") {
             flushReasoning();
             const toolCallPart = buildToolCallPart({
               type: part.type,
@@ -652,7 +709,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "error") {
             flushReasoning();
             if (part.content) {
-              const errorPart: any = {
+              const errorPart: Record<string, unknown> = {
                 type: "text",
                 text: part.content,
                 isError: true,
@@ -667,7 +724,10 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "final_answer") {
             flushReasoning();
             if (part.content) {
-              const textPart: any = { type: "text", text: part.content };
+              const textPart: Record<string, unknown> = {
+                type: "text",
+                text: part.content,
+              };
               const meta = buildMetadata();
               if (meta) textPart.metadata = meta;
               content.push(textPart);
@@ -691,7 +751,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             (item) =>
               item?.type === "tool-call" &&
               Array.isArray(item.searchImages) &&
-              item.searchImages.length > 0,
+              item.searchImages.length > 0
           );
           if (!toolHasImages) {
             for (const imageUrl of msg.picture) {
@@ -717,22 +777,17 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         // the raw SSE chunks.
         if (Array.isArray(msg.search) && msg.search.length > 0) {
           for (const searchItem of msg.search) {
-            if (
-              typeof searchItem === "object" &&
-              searchItem !== null
-            ) {
+            if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
                 (item.title as string | undefined) || filename || url;
               if (!url && !filename && !title) continue;
-              const citeIndex =
-                (item.cite_index as number | undefined) ?? 0;
+              const citeIndex = (item.cite_index as number | undefined) ?? 0;
               content.push({
                 type: "source",
-                sourceType:
-                  item.source_type === "file" ? "document" : "url",
+                sourceType: item.source_type === "file" ? "document" : "url",
                 url,
                 title,
                 text: item.text as string | undefined,
@@ -776,7 +831,6 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       if (content.length === 0 && attachments.length === 0) {
         // Still track assistant index even if no content (for registry alignment)
-        if (msg.role === "assistant") assistantIdx++;
         continue;
       }
 
@@ -793,20 +847,18 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       messages.push({
         id: messageId,
         role: msg.role,
-        content,
+        content: content as unknown as HistoryMessage["content"],
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
           : {}),
         metadata,
       });
-
-      if (msg.role === "assistant") assistantIdx++;
     }
 
     const branchableMessages = buildBranchableHistory(messages);
     const repository = ExportedMessageRepository.fromBranchableArray(
       branchableMessages,
-      { headId: messages.at(-1)?.id ?? null },
+      { headId: messages.at(-1)?.id ?? null }
     );
     if (loadGeneration === this.loadGeneration) {
       historicalPlanCache.set(remoteId, restoredPlan);
@@ -821,16 +873,18 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   }
 
   async *resume(
-    options: ChatModelRunOptions,
+    options: ChatModelRunOptions
   ): AsyncGenerator<ChatModelRunResult, void> {
     const remoteId = this.getRemoteId();
     if (!remoteId) {
-      log.warn("[history-adapter] Cannot resume without a remote conversation ID");
+      log.warn(
+        "[history-adapter] Cannot resume without a remote conversation ID"
+      );
       return;
     }
 
     const custom = (options.runConfig?.custom ?? {}) as Record<string, unknown>;
-    const resumedRun = remoteChatModelAdapter.run({
+    const resumedRun = agUIChatModelAdapter.run({
       ...options,
       runConfig: {
         ...options.runConfig,
@@ -861,14 +915,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   }
 
   withFormat<TMessage, TStorageFormat extends Record<string, unknown>>(
-    _formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>,
+    _formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>
   ): GenericThreadHistoryAdapter<TMessage> {
     return this as unknown as GenericThreadHistoryAdapter<TMessage>;
   }
 }
 
 const toRemoteThreadMetadata = (
-  item: ConversationListItem,
+  item: ConversationListItem
 ): RemoteThreadMetadata => {
   // Prefer the most recent activity timestamp; fall back to the creation time
   // so the thread list can always group by recency. The timestamp is passed
@@ -882,7 +936,9 @@ const toRemoteThreadMetadata = (
     ...(timestamp || item.agent_id
       ? {
           custom: {
-            ...(timestamp ? { lastMessageAt: new Date(timestamp).toISOString() } : {}),
+            ...(timestamp
+              ? { lastMessageAt: new Date(timestamp).toISOString() }
+              : {}),
             ...(item.agent_id ? { agentId: item.agent_id } : {}),
           },
         }
@@ -898,9 +954,9 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
       () =>
         new RemoteConversationHistoryAdapter(
           () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize(),
+          () => aui.threadListItem().initialize()
         ),
-      [aui],
+      [aui]
     );
 
     const adapters = useMemo(() => ({ history }), [history]);
@@ -938,7 +994,7 @@ const titleRequests = new Map<string, Promise<string>>();
 
 export const generateConversationTitle = (
   conversationId: string,
-  question: string,
+  question: string
 ): Promise<string> => {
   const existingRequest = titleRequests.get(conversationId);
   if (existingRequest) return existingRequest;
@@ -952,7 +1008,7 @@ export const generateConversationTitle = (
       const title = typeof result === "string" ? result.trim() : "";
       if (!title) {
         throw new Error(
-          `Title generation returned an empty title for conversation ${conversationId}.`,
+          `Title generation returned an empty title for conversation ${conversationId}.`
         );
       }
       return title;
@@ -967,7 +1023,7 @@ export const generateConversationTitle = (
 };
 
 export const setServerConversationIdState = (
-  state: ServerConversationIdState | null,
+  state: ServerConversationIdState | null
 ) => {
   serverConversationIdState = state;
 };
@@ -976,7 +1032,7 @@ const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
 const waitForServerConversationId = async (
-  fallbackRemoteId: string,
+  fallbackRemoteId: string
 ): Promise<string | null> => {
   const state = serverConversationIdState;
   if (!state) return fallbackRemoteId || null;
@@ -1004,9 +1060,7 @@ const waitForServerConversationId = async (
   // server id in the ref, or we time out.
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, TITLE_POLL_INTERVAL_MS),
-    );
+    await new Promise((resolve) => setTimeout(resolve, TITLE_POLL_INTERVAL_MS));
     const next = readNow();
     if (next) return next;
     if (Date.now() - startedAt > MAX_TITLE_WAIT_MS) return null;
@@ -1061,8 +1115,14 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   async rename(remoteId: string, newTitle: string): Promise<void> {
     const candidateId = await waitForServerConversationId(remoteId);
     const conversationId = Number(candidateId);
-    if (!candidateId || !Number.isInteger(conversationId) || conversationId <= 0) {
-      throw new Error("Cannot rename a conversation without a backend conversation ID.");
+    if (
+      !candidateId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      throw new Error(
+        "Cannot rename a conversation without a backend conversation ID."
+      );
     }
     await conversationService.rename(conversationId, newTitle);
   },
@@ -1072,13 +1132,13 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   // them safely (e.g. from sidebar actions) without crashing the page.
   async archive(_remoteId: string): Promise<void> {
     log.warn(
-      "[adapter] archive is not supported by the backend yet; ignoring.",
+      "[adapter] archive is not supported by the backend yet; ignoring."
     );
   },
 
   async unarchive(_remoteId: string): Promise<void> {
     log.warn(
-      "[adapter] unarchive is not supported by the backend yet; ignoring.",
+      "[adapter] unarchive is not supported by the backend yet; ignoring."
     );
   },
 
@@ -1092,7 +1152,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       conversationService.getList(),
     ]);
     const conversation = conversations.find(
-      (item) => item.conversation_id === detail.conversation_id,
+      (item) => item.conversation_id === detail.conversation_id
     );
 
     return toRemoteThreadMetadata(
@@ -1102,7 +1162,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
         agent_id: detail.agent_id,
         create_time: detail.create_time,
         update_time: detail.create_time,
-      },
+      }
     );
   },
 

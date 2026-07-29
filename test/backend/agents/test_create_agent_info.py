@@ -500,6 +500,7 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_input_budget,
     _resolve_safe_input_budget,
+    _configure_a2ui_tools,
 )
 
 # Import HistoryItem for testing (from mocked consts.model)
@@ -3753,13 +3754,15 @@ class TestCreateAgentRunInfo:
                 history=[],
                 user_id="user_1",
                 tenant_id="tenant_1",
-                language="zh"
+                language="zh",
+                display_query="[A2UI action] submit_feedback (root)",
             )
 
             # Verify that AgentRunInfo was called correctly with dict format mcp_host
             assert mock_agent_run_info.call_count == 1
             mock_agent_run_info.assert_called_with(
                 query="processed_query",
+                display_query="[A2UI action] submit_feedback (root)",
                 model_config_list=["model_config"],
                 observer=mock_message_observer.return_value,
                 agent_config="agent_config",
@@ -3785,7 +3788,7 @@ class TestCreateAgentRunInfo:
                 tenant_id="tenant_1",
                 user_id="user_1",
                 language="zh",
-                last_user_query="processed_query",
+                last_user_query="[A2UI action] submit_feedback (root)",
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
@@ -6494,3 +6497,64 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert len(result) == 1
             # Order should be preserved from original index_names list
             assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
+
+
+@pytest.mark.parametrize(
+    ("client_enabled", "is_root_agent"),
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_configure_a2ui_tools_requires_client_and_root_agent(
+    client_enabled,
+    is_root_agent,
+):
+    tools = [
+        types.SimpleNamespace(name="regular"),
+        types.SimpleNamespace(name="generate_a2ui"),
+    ]
+    model = types.SimpleNamespace(cite_name="main_model")
+    enabled = _configure_a2ui_tools(
+        tools,
+        client_enabled=client_enabled,
+        is_root_agent=is_root_agent,
+        model_name="main_model",
+        model_config_list=[model],
+        surface_id=None,
+    )
+    assert enabled is False
+    assert [tool.name for tool in tools] == ["regular"]
+
+
+def test_configure_a2ui_tools_injects_only_resolved_root_tool():
+    a2ui_tool = types.SimpleNamespace(name="generate_a2ui", source="local", usage=None, metadata=None)
+    tools = [types.SimpleNamespace(name="regular"), a2ui_tool]
+    model = types.SimpleNamespace(cite_name="main_model")
+    enabled = _configure_a2ui_tools(
+        tools,
+        client_enabled=True,
+        is_root_agent=True,
+        model_name="main_model",
+        model_config_list=[model],
+        surface_id="surface-existing",
+    )
+    assert enabled is True
+    assert a2ui_tool.source == "local"
+    assert a2ui_tool.usage is None
+    assert a2ui_tool.metadata["model_config"] is model
+    assert a2ui_tool.metadata["surface_id"] == "surface-existing"
+
+
+def test_configure_a2ui_tools_disables_when_model_is_unresolved():
+    tools = [types.SimpleNamespace(name="generate_a2ui")]
+    enabled = _configure_a2ui_tools(
+        tools,
+        client_enabled=True,
+        is_root_agent=True,
+        model_name="missing",
+        model_config_list=[],
+        surface_id=None,
+    )
+    assert enabled is False
+    assert tools == []

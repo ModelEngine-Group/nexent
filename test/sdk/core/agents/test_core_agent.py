@@ -332,6 +332,44 @@ def test_get_context_summary_returns_runtime_context_manager_summary():
     context_manager.get_summary.assert_called_once_with()
 
 
+def test_run_uses_display_task_only_for_logs_and_observer(monkeypatch):
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock(steps=[])
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = "system"
+    agent.logger = MagicMock()
+    agent.name = "root"
+    agent.model = MagicMock(model_id="model")
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter(()))
+    task_step = MagicMock()
+    monkeypatch.setattr(core_agent_module, "TaskStep", task_step)
+
+    agent.run(
+        "private form payload",
+        stream=True,
+        display_task="[A2UI action] submit_feedback (root)",
+    )
+
+    logged_content = agent.logger.log_task.call_args.kwargs["content"]
+    observed_content = agent.observer.add_message.call_args.args[2]
+    assert "private form payload" not in logged_content
+    assert "private form payload" not in observed_content
+    assert "[A2UI action] submit_feedback (root)" in logged_content
+    assert "[A2UI action] submit_feedback (root)" in observed_content
+    assert "private form payload" in agent.task
+    assert "private form payload" in task_step.call_args.kwargs["task"]
+
+    agent._log_model_call_parameters(["private form payload"], [], {})
+    model_input_log = agent.logger.log_markdown.call_args.kwargs["content"]
+    assert model_input_log == "Input messages redacted for a sensitive A2UI action run."
+    assert agent._safe_run_log_content("private form payload").startswith("[REDACTED:")
+
+
 def test_get_context_summary_returns_none_when_manager_is_unavailable():
     agent = object.__new__(core_agent_module.CoreAgent)
     agent.context_runtime = SimpleNamespace()
@@ -368,6 +406,101 @@ And some more text."""
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")\nx = 42"
     assert result == expected
+
+
+def test_recovers_enabled_a2ui_call_from_reasoning_channel():
+    reasoning = """Thinking before action.
+<code>
+feedback_ui = generate_a2ui(
+    description="Collect feedback",
+    data={"fields": [{"type": "text", "label": "Name"}]},
+    expectedOutput="Render a feedback form",
+)
+print(feedback_ui)
+</code>
+"""
+
+    recovered = core_agent_module._recover_a2ui_code_from_reasoning(
+        reasoning,
+        {"generate_a2ui"},
+    )
+
+    assert recovered is not None
+    assert recovered.count("generate_a2ui(") == 1
+    assert "print(feedback_ui)" in recovered
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "tool_names"),
+    [
+        ("<code>generate_a2ui(description='x', data={}, expectedOutput='y')</code>", set()),
+        ("<code>other_tool(value='x')</code>", {"generate_a2ui"}),
+        (
+            "<code>generate_a2ui(description='x', data={}, expectedOutput='y')\n"
+            "open('/tmp/output', 'w')</code>",
+            {"generate_a2ui"},
+        ),
+        (
+            "<code>generate_a2ui(description='x', data={}, expectedOutput='y')\n"
+            "generate_a2ui(description='x', data={}, expectedOutput='y')</code>",
+            {"generate_a2ui"},
+        ),
+    ],
+)
+def test_does_not_recover_unavailable_or_unsafe_reasoning_calls(reasoning, tool_names):
+    assert core_agent_module._recover_a2ui_code_from_reasoning(reasoning, tool_names) is None
+
+
+def test_retries_false_a2ui_completion_claim_without_tool_code():
+    assert core_agent_module._should_retry_missing_a2ui_call(
+        "已为您创建用户反馈表单，包含姓名、邮箱和反馈内容。",
+        "需要调用 generate_a2ui 工具创建交互式 UI。",
+        {"generate_a2ui"},
+    )
+
+
+def test_retries_generic_tool_commitment_for_a2ui_request():
+    assert core_agent_module._should_retry_missing_a2ui_call(
+        "好的，我再为您生成一个用户反馈表单。",
+        "这次我们直接调用工具生成表单。",
+        {"generate_a2ui"},
+    )
+
+
+def test_retries_completed_a2ui_claim_with_chinese_modifier():
+    assert core_agent_module._should_retry_missing_a2ui_call(
+        "已成功生成用户反馈表单！以下界面已在上方呈现。",
+        "我应该再次调用 generate_a2ui 工具生成。",
+        {"generate_a2ui"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("model_output", "reasoning", "tool_names"),
+    [
+        (
+            "已为您创建用户反馈表单。",
+            "需要调用 generate_a2ui。",
+            set(),
+        ),
+        (
+            "generate_a2ui 是用于创建 UI 的工具。",
+            "The user asked how the tool works.",
+            {"generate_a2ui"},
+        ),
+        (
+            "已为您整理了文字说明。",
+            "No interactive interface is needed.",
+            {"generate_a2ui"},
+        ),
+    ],
+)
+def test_does_not_retry_a2ui_meta_or_unavailable_tool_answers(model_output, reasoning, tool_names):
+    assert not core_agent_module._should_retry_missing_a2ui_call(
+        model_output,
+        reasoning,
+        tool_names,
+    )
 
 
 # ----------------------------------------------------------------------------

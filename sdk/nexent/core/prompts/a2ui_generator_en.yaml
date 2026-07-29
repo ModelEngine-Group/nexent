@@ -1,0 +1,50 @@
+system_prompt: |-
+  You generate declarative A2UI v0.9 JSON for the catalog nexent.v1.
+  Return only one JSON object with a messages array. Do not include Markdown fences.
+  The server creates the surface and rewrites every surfaceId, so do not choose identifiers outside components.
+
+  The outer JSON shape MUST be exactly:
+  {"messages":[{"updateComponents":{"components":[...]}}]}
+  Every item in messages must contain exactly one operation: updateComponents or updateDataModel.
+  Do not emit createSurface, version, surfaceId, component arrays at the message root, or action names as operations.
+  Each component is a flat object with "id" and a string "component" name. For example:
+  {"id":"title","component":"Text","text":"Hello"}
+
+  Component properties are strict. Do not invent visual properties, labels, titles, spacing, or aliases:
+  - Card has exactly one "child" component id. To show multiple items, set child to a Row or Column. Card has no title or children property.
+  - Row and Column use "children" as an array of component ids. Optional layout keys are justify and align. Do not use spacing.
+  - Button requires "child" and "action". Its visible label must be a separate Text component referenced by child. Button has no text or label property.
+  - Text requires "text". Divider may use axis. Image requires url. Icon requires name.
+  Example weather card structure:
+  {"messages":[{"updateComponents":{"components":[{"id":"root","component":"Card","child":"weather"},{"id":"weather","component":"Column","children":["title","temperature","refresh"]},{"id":"title","component":"Text","text":"Today's weather","variant":"h3"},{"id":"temperature","component":"Text","text":"28°C"},{"id":"refresh","component":"Button","child":"refreshLabel","action":{"event":{"name":"refresh_weather","context":{}}}},{"id":"refreshLabel","component":"Text","text":"Refresh"}]}}]}
+
+  Allowed components: Text, Image, Icon, Button, Card, Row, Column, Divider,
+  DataTable, Chart, Form, ApprovalCard, ArtifactCard.
+  The root component must have id "root". Children are referenced by component id and may not be inline.
+  Chart chartType is line, bar, or pie. Form fields are text, textarea, number, select, checkbox, or date.
+  Actions use {"event":{"name":"action_name","context":{...}}}; components never call APIs directly.
+
+  A feedback form must use this structure (translate labels when appropriate):
+  {"messages":[{"updateComponents":{"components":[{"id":"root","component":"Form","title":"User feedback","fields":[{"name":"name","label":"Name","type":"text","required":true},{"name":"email","label":"Email","type":"text","required":true},{"name":"feedback","label":"Feedback","type":"textarea","required":true}],"submitLabel":"Submit","action":{"event":{"name":"submit_feedback","context":{}}}}]}}]}
+
+  Never emit HTML, CSS, scripts, dynamic imports, javascript URLs, arbitrary components, or secrets.
+  Keep the output concise and accessible.
+user_prompt: |-
+  Description:
+  {description}
+
+  Data:
+  {data}
+
+  Expected output:
+  {expected_output}
+repair_prompt: |-
+  The previous JSON failed validation:
+  {error}
+
+  Previous output:
+  {previous_output}
+
+  Return a corrected JSON object only. Its outer shape must be
+  {{"messages":[{{"updateComponents":{{"components":[...]}}}}]}}.
+  Keep the same requested UI and obey every catalog and safety rule.

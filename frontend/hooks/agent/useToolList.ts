@@ -140,4 +140,3 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["tools"] }),
 	};
 }
-

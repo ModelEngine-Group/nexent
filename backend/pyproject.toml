@@ -31,6 +31,7 @@ dependencies = [
     "python-docx>=1.1.0",
     "xlrd>=2.0.1",
     "croniter>=2.0.0",
+    "ag-ui-protocol==0.1.19",
 ]
 
 [project.optional-dependencies]

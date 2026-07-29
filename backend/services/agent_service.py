@@ -118,6 +118,7 @@ from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
+from utils.a2ui_action_utils import A2UI_FORM_SUBMISSION_PREFIX
 from utils.config_utils import tenant_config_manager
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
@@ -957,7 +958,11 @@ async def _stream_agent_chunks(
         )
         assistant_message_req = MessageRequest(
             conversation_id=agent_request.conversation_id,
-            message_idx=user_role_count * 2 + 1,
+            message_idx=(
+                agent_request.current_user_message_index + 1
+                if agent_request.current_user_message_index is not None
+                else user_role_count * 2 + 1
+            ),
             role=MESSAGE_ROLE["ASSISTANT"],
             message=[],
             minio_files=None,
@@ -2784,7 +2789,29 @@ async def prepare_agent_run(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
 
-    agent_run_info = await create_agent_run_info(
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = agent_request.current_user_message_id
+        if current_message_id is None:
+            current_message_id = get_current_run_user_message_id(
+                agent_request.conversation_id, user_id
+            )
+        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+            current_message_id = None
+            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+
+    history_contains_form_submission = any(
+        isinstance(turn, dict)
+        and isinstance(turn.get("user_message"), str)
+        and turn["user_message"].startswith(A2UI_FORM_SUBMISSION_PREFIX)
+        for turn in (historical_context or {}).get("conversation_turns", ())
+    )
+
+    run_info_kwargs = dict(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
         query=agent_request.query,
@@ -2801,20 +2828,14 @@ async def prepare_agent_run(
         conversation_id=agent_request.conversation_id,
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
+        enable_a2ui=agent_request.a2ui_client_enabled,
+        a2ui_surface_id=agent_request.a2ui_surface_id,
     )
-
-    historical_context = None
-    if not agent_request.is_debug and agent_request.conversation_id is not None:
-        current_message_id = get_current_run_user_message_id(
-            agent_request.conversation_id, user_id
-        )
-        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
-            current_message_id = None
-            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
-        if current_message_id is not None:
-            historical_context = load_historical_context(
-                agent_request.conversation_id, current_message_id, user_id, tenant_id
-            )
+    if agent_request.persisted_query is not None:
+        run_info_kwargs["display_query"] = agent_request.persisted_query
+    elif history_contains_form_submission:
+        run_info_kwargs["display_query"] = agent_request.query
+    agent_run_info = await create_agent_run_info(**run_info_kwargs)
     agent_run_info.context_input = _build_authorized_context_input(
         agent_run_info, historical_context
     )
@@ -2845,7 +2866,21 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
         # Historical checkpoint lookup for this run needs the current message boundary.
-        save_conversation_user(agent_request, user_id, tenant_id)
+        request_to_persist = agent_request
+        if agent_request.persisted_query:
+            request_to_persist = agent_request.model_copy(
+                update={"query": agent_request.persisted_query}
+            )
+        save_conversation_user(request_to_persist, user_id, tenant_id)
+        agent_request.current_user_message_id = (
+            request_to_persist.current_user_message_id
+        )
+        agent_request.current_user_message_index = (
+            request_to_persist.current_user_message_index
+        )
+        agent_request.a2ui_action_persisted = (
+            request_to_persist.a2ui_action_persisted
+        )
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:

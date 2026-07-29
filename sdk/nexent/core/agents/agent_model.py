@@ -347,6 +347,10 @@ class AgentPlan(BaseModel):
 
 class AgentRunInfo(BaseModel):
     query: str = Field(description="User query")
+    display_query: Optional[str] = Field(
+        description="Redacted query used for logs, monitoring, and observer events",
+        default=None,
+    )
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")

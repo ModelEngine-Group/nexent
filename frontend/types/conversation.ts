@@ -27,6 +27,12 @@ export interface ApiMessage {
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;
   message_id?: number;
+  a2ui_submission?: {
+    submissionId: string;
+    surfaceId: string;
+    sourceComponentId: string;
+    status: "accepted";
+  };
   picture?: string[];
   search?: any[];
   searchByUnitId?: Record<string, any[]>;

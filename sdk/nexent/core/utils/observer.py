@@ -34,6 +34,7 @@ class ProcessType(Enum):
     VERIFICATION = "verification"  # layered ReAct self-verification status
     PLAN = "plan"  # structured plan JSON for planning feature
     PLAN_STEP_UPDATE = "plan_step_update"  # single plan step status update
+    A2UI = "a2ui"  # validated A2UI v0.9 message envelope
 
     SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
     SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
@@ -162,7 +163,8 @@ class MessageObserver:
             ProcessType.VERIFICATION: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
             ProcessType.PLAN: default_transformer,
-            ProcessType.PLAN_STEP_UPDATE: default_transformer
+            ProcessType.PLAN_STEP_UPDATE: default_transformer,
+            ProcessType.A2UI: default_transformer,
         }
 
     def add_model_new_token(self, new_token):

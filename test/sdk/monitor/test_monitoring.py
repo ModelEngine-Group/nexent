@@ -51,6 +51,7 @@ from sdk.nexent.monitor.monitoring import (
     OPENINFERENCE_TAG_TAGS,
     OPENINFERENCE_INPUT_VALUE,
     OPENINFERENCE_OUTPUT_VALUE,
+    TRACE_REDACTED_VALUE,
 )
 import pytest
 import asyncio
@@ -797,6 +798,47 @@ class TestAgentObservability:
             assert tool_attrs["tenant.id"] == "tenant-2"
             assert tool_attrs["agent.tool.name"] == "web_search"
             assert "query" in tool_attrs[OPENINFERENCE_INPUT_VALUE]
+
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_sensitive_agent_context_redacts_llm_and_tool_payloads(self, mock_trace):
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            llm_span = MagicMock()
+            tool_span = MagicMock()
+            manager._tracer.start_as_current_span.side_effect = [
+                self._span_context(llm_span),
+                self._span_context(tool_span),
+            ]
+            mock_trace.get_current_span.return_value = tool_span
+            tool_span.is_recording.return_value = True
+            metadata = AgentRunMetadata(
+                tenant_id="tenant-sensitive",
+                extra_metadata={"redact_content": True},
+            )
+
+            with agent_monitoring_context(metadata):
+                with manager.trace_llm_request(
+                    "gpt.generate",
+                    "gpt-4",
+                    **{OPENINFERENCE_INPUT_VALUE: "private form payload"},
+                ):
+                    manager.set_openinference_output("private model output")
+                with manager.trace_tool_call(
+                    "tool",
+                    "agent",
+                    {"value": "private tool input"},
+                ):
+                    manager.set_tool_output("private tool output")
+
+            calls = manager._tracer.start_as_current_span.call_args_list
+            assert calls[0].kwargs["attributes"][OPENINFERENCE_INPUT_VALUE] == (
+                TRACE_REDACTED_VALUE
+            )
+            assert calls[1].kwargs["attributes"][OPENINFERENCE_INPUT_VALUE] == (
+                TRACE_REDACTED_VALUE
+            )
+            tool_output = tool_span.set_attributes.call_args.args[0]
+            assert tool_output[OPENINFERENCE_OUTPUT_VALUE] == TRACE_REDACTED_VALUE
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_retriever_span_inherits_bound_agent_context(self, mock_trace):

@@ -26,6 +26,7 @@ from database.conversation_db import (
     get_latest_user_message_id,
     get_last_unit_for_message,  # noqa: F401 - service boundary re-export
     get_message_id_by_index,
+    get_next_conversation_message_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
@@ -44,6 +45,11 @@ from database.conversation_db import (
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.a2ui_action_utils import (
+    A2UI_ACTION_UNIT_TYPE,
+    normalize_legacy_a2ui_action_text,
+    project_a2ui_submission_state,
+)
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
@@ -224,23 +230,39 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row only).
-
-    Note: conversation_message_unit_t only stores assistant message content.
-    User messages do not need unit records.
-    """
+    """Persist a user message and its optional hidden A2UI action payload."""
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
+    message_index = user_role_count * 2
+    if getattr(request, "server_side_message_index", False):
+        message_index = get_next_conversation_message_index(
+            request.conversation_id
+        )
+        if message_index % 2 != 0:
+            message_index += 1
 
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
-        message_idx=user_role_count * 2,
+        message_idx=message_index,
         role=MESSAGE_ROLE["USER"],
         message=[MessageUnit(type="string", content=request.query)],
-        minio_files=request.minio_files,
+        minio_files=getattr(request, "minio_files", None),
     )
-    save_message(
+    message_id = save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id)
+    a2ui_action_payload = getattr(request, "a2ui_action_payload", None)
+    if a2ui_action_payload is not None:
+        save_message_unit(
+            message_id=message_id,
+            conversation_id=request.conversation_id,
+            unit_index=0,
+            unit_type=A2UI_ACTION_UNIT_TYPE,
+            unit_content=a2ui_action_payload,
+            user_id=user_id,
+        )
+        request.a2ui_action_persisted = True
+    request.current_user_message_id = message_id
+    request.current_user_message_index = message_index
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -600,7 +622,9 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         for msg in history_data['message_records']:
             message_id = msg['message_id']
             role = msg['role']
-            message_content = msg['message_content']
+            message_content = normalize_legacy_a2ui_action_text(
+                msg['message_content']
+            )
             # Initialize for all message types
             message_units = msg['units'] or []
 
@@ -616,6 +640,23 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:
                     message_item['minio_files'] = msg['minio_files']
+
+                for unit in message_units:
+                    if unit.get('unit_type') != A2UI_ACTION_UNIT_TYPE:
+                        continue
+                    content = unit.get('unit_content')
+                    try:
+                        payload = (
+                            json.loads(content)
+                            if isinstance(content, str)
+                            else content
+                        )
+                    except json.JSONDecodeError:
+                        continue
+                    submission_state = project_a2ui_submission_state(payload)
+                    if submission_state is not None:
+                        message_item['a2ui_submission'] = submission_state
+                        break
             else:
                 # Assistant message: message is an array, need to process search_content_placeholder
                 processed_units = []

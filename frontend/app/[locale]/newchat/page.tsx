@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FC, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FC } from "react";
 import {
   AssistantRuntimeProvider,
   useAuiState,
@@ -19,19 +19,18 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
-import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
+import { agUIChatModelAdapter } from "./adapter/ag-ui-chat-model-adapter";
 import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
-import {
-  SidebarProvider,
-} from "@/components/ui/sidebar";
+import { A2UIActionBridge } from "./a2ui/action-bridge";
+import { disposeAllA2UISessions } from "./a2ui/runtime";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Layout } from "antd";
-import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 function useLocalChatRuntime(): AssistantRuntime {
-  return useLocalRuntime(remoteChatModelAdapter, {
+  return useLocalRuntime(agUIChatModelAdapter, {
     adapters: {
       attachments: compositeAttachmentAdapter,
     },
@@ -43,29 +42,40 @@ export default function Home() {
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
+  const a2uiDisposalTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const conversationId = new URLSearchParams(window.location.search).get(
-      "conversation_id",
+      "conversation_id"
     );
     setRequestedThreadId(conversationId || undefined);
   }, []);
 
+  useEffect(() => {
+    if (a2uiDisposalTimerRef.current) {
+      clearTimeout(a2uiDisposalTimerRef.current);
+      a2uiDisposalTimerRef.current = undefined;
+    }
+    return () => {
+      a2uiDisposalTimerRef.current = setTimeout(() => {
+        disposeAllA2UISessions();
+        a2uiDisposalTimerRef.current = undefined;
+      }, 0);
+    };
+  }, []);
+
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
-    runtimeHook: () => useLocalChatRuntime(),
+    runtimeHook: useLocalChatRuntime,
     adapter: conversationThreadListAdapter,
     threadId: requestedThreadId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const handleAgentSelected = useCallback(
-    (agent: Agent) => {
-      setSelectedAgent(agent);
-      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-    },
-    [],
-  );
+  const handleAgentSelected = useCallback((agent: Agent) => {
+    setSelectedAgent(agent);
+    log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+  }, []);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -111,6 +121,9 @@ const HomeContent: FC<{
   onBack,
 }) => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const [localA2UISessionKey, setLocalA2UISessionKey] = useState(() =>
+    crypto.randomUUID()
+  );
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -120,7 +133,7 @@ const HomeContent: FC<{
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    runtimeMainThreadId,
+    runtimeMainThreadId
   );
 
   // Update local state when the runtime's active thread changes
@@ -141,7 +154,7 @@ const HomeContent: FC<{
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
-    new Map(),
+    new Map()
   );
   const [, forceServerIdTick] = useState(0);
 
@@ -168,24 +181,30 @@ const HomeContent: FC<{
             });
           })
           .catch((error) => {
-            log.error(`[HomeContent] Failed to generate title for ${numericId}:`, error);
+            log.error(
+              `[HomeContent] Failed to generate title for ${numericId}:`,
+              error
+            );
           });
       }
     },
-    [],
+    []
   );
 
-  const activeThread = (threadItems as ReadonlyArray<{
-    id: string;
-    remoteId?: string;
-    custom?: { agentId?: number | string };
-  }>).find(
-    (item) => item.id === activeThreadId || item.remoteId === activeThreadId,
+  const activeThread = (
+    threadItems as ReadonlyArray<{
+      id: string;
+      remoteId?: string;
+      custom?: { agentId?: number | string };
+    }>
+  ).find(
+    (item) => item.id === activeThreadId || item.remoteId === activeThreadId
   );
   const activeAgentId = activeThread?.custom?.agentId;
-  const serverConversationIdForActiveThread = activeThreadId
-    ? serverConversationIdsRef.current.get(activeThreadId)
-    : undefined;
+  const serverConversationIdForActiveThread =
+    activeThreadId !== undefined
+      ? serverConversationIdsRef.current.get(activeThreadId)
+      : undefined;
   // Prefer the server-issued id (set after the backend auto-creates the
   // conversation), then fall back to the thread's `remoteId` (used when the
   // user opens an existing conversation from the sidebar), then finally the
@@ -194,6 +213,8 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+  const activeA2UISessionKey =
+    activeConversationId || activeThreadId || localA2UISessionKey;
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
     setChatMode(mode);
@@ -203,7 +224,10 @@ const HomeContent: FC<{
   const previousActiveThreadIdRef = useRef(activeThreadId);
 
   useEffect(() => {
-    if (previousActiveThreadIdRef.current !== activeThreadId && activeThreadId) {
+    if (
+      previousActiveThreadIdRef.current !== activeThreadId &&
+      activeThreadId
+    ) {
       shouldRestoreAgentRef.current = true;
     }
     previousActiveThreadIdRef.current = activeThreadId;
@@ -211,7 +235,12 @@ const HomeContent: FC<{
 
   // Resolve the selected conversation's agent from thread metadata.
   useEffect(() => {
-    if (!shouldRestoreAgentRef.current || !activeThreadId || agents.length === 0) return;
+    if (
+      !shouldRestoreAgentRef.current ||
+      !activeThreadId ||
+      agents.length === 0
+    )
+      return;
 
     const agentId = activeAgentId;
     if (agentId === undefined || agentId === null) return;
@@ -219,11 +248,17 @@ const HomeContent: FC<{
     const matchedAgent = agents.find((agent) => agent.id === String(agentId));
     if (matchedAgent && matchedAgent.id !== selectedAgent?.id) {
       log.log(
-        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`,
+        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`
       );
       setSelectedAgent(matchedAgent);
     }
-  }, [activeThreadId, activeAgentId, agents, selectedAgent?.id, setSelectedAgent]);
+  }, [
+    activeThreadId,
+    activeAgentId,
+    agents,
+    selectedAgent?.id,
+    setSelectedAgent,
+  ]);
 
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
@@ -235,17 +270,18 @@ const HomeContent: FC<{
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
+        a2uiSessionKey: activeA2UISessionKey,
         enablePlan: chatMode === "planning",
-        ...(activeThreadId
+        ...(activeThreadId !== undefined
           ? {
               onServerConversationId: (
                 serverId: string,
-                initialQuestion?: string,
+                initialQuestion?: string
               ) =>
                 handleServerConversationId(
                   activeThreadId,
                   serverId,
-                  initialQuestion,
+                  initialQuestion
                 ),
             }
           : {}),
@@ -256,6 +292,7 @@ const HomeContent: FC<{
     selectedAgent,
     activeConversationId,
     activeThreadId,
+    activeA2UISessionKey,
     chatMode,
     handleServerConversationId,
   ]);
@@ -300,10 +337,11 @@ const HomeContent: FC<{
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
+      setLocalA2UISessionKey(crypto.randomUUID());
       await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
-    [runtime, onAgentSelected],
+    [runtime, onAgentSelected]
   );
 
   // Conditional rendering must happen after all hooks
@@ -317,6 +355,12 @@ const HomeContent: FC<{
 
   return (
     <div className="flex w-full h-full">
+      <A2UIActionBridge
+        sessionKey={activeA2UISessionKey}
+        agentId={selectedAgent?.id}
+        conversationId={activeConversationId}
+        enablePlan={chatMode === "planning"}
+      />
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar generatedTitles={generatedTitles} />
@@ -325,7 +369,9 @@ const HomeContent: FC<{
 
       <div className="flex-1 min-w-0">
         <Chat
-          generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
+          generatedTitle={
+            activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+          }
           isLoadingAgents={isLoadingAgents}
           selectedAgent={selectedAgent}
           onAgentSelected={handleAgentSelectedFromLanding}

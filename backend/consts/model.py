@@ -1,7 +1,9 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from ag_ui.core import RunAgentInput
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -339,6 +341,107 @@ class AgentRequest(BaseModel):
         default=False,
         description="Whether to enable the planning phase before execution"
     )
+    a2ui_client_enabled: bool = Field(default=False, exclude=True)
+    a2ui_surface_id: Optional[str] = Field(default=None, exclude=True)
+    persisted_query: Optional[str] = Field(default=None, exclude=True)
+    a2ui_action_payload: Optional[Dict[str, Any]] = Field(default=None, exclude=True)
+    server_side_message_index: bool = Field(default=False, exclude=True)
+    current_user_message_id: Optional[int] = Field(default=None, exclude=True)
+    current_user_message_index: Optional[int] = Field(default=None, exclude=True)
+    a2ui_action_persisted: bool = Field(default=False, exclude=True)
+
+
+class A2UICapability(BaseModel):
+    """A2UI capability advertised by an AG-UI client."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    versions: List[str] = Field(default_factory=list)
+    catalog_id: Optional[str] = Field(default=None, alias="catalogId")
+
+
+class AGUICapabilities(BaseModel):
+    """Nexent-specific client capabilities carried through AG-UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    a2ui: Optional[A2UICapability] = None
+
+
+class A2UIActionBody(BaseModel):
+    """Validated A2UI v0.9 action body."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+    surface_id: str = Field(
+        alias="surfaceId",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+    )
+    source_component_id: str = Field(
+        alias="sourceComponentId",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+    )
+    timestamp: str = Field(min_length=1, max_length=64)
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class A2UIActionMessage(BaseModel):
+    """A2UI v0.9 client-to-server action message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["v0.9"]
+    action: A2UIActionBody
+
+
+class A2UIFormSubmission(BaseModel):
+    """Client-provided values for a submitted Nexent Form component."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class A2UIActionSubmission(BaseModel):
+    """Nexent idempotency envelope for an A2UI action."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    submission_id: UUID = Field(alias="submissionId")
+    message: A2UIActionMessage
+    form_submission: Optional[A2UIFormSubmission] = Field(default=None, alias="formSubmission")
+
+
+class NexentAGUIProps(BaseModel):
+    """Nexent run settings inside ``forwardedProps.nexent``."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    conversation_id: Optional[int] = Field(default=None, alias="conversationId")
+    agent_id: Optional[int] = Field(default=None, alias="agentId")
+    model_id: Optional[int] = Field(default=None, alias="modelId")
+    version_no: int = Field(default=0, alias="versionNo")
+    requested_output_tokens: Optional[int] = Field(default=None, alias="requestedOutputTokens", gt=0)
+    minio_files: List[Dict[str, Any]] = Field(default_factory=list, alias="minioFiles")
+    is_debug: bool = Field(default=False, alias="isDebug")
+    enable_plan: bool = Field(default=False, alias="enablePlan")
+    tool_params: Optional[ToolParamsRequest] = Field(default=None, alias="toolParams")
+    context_policy: Optional[Dict[str, Any]] = Field(default=None, alias="contextPolicy")
+    resume: bool = False
+    capabilities: AGUICapabilities = Field(default_factory=AGUICapabilities)
+    a2ui_action: Optional[A2UIActionSubmission] = Field(default=None, alias="a2uiAction")
+
+    @field_validator("context_policy")
+    @classmethod
+    def validate_agui_context_policy(cls, value):
+        return _validated_context_policy(value)
+
+
+class NexentRunAgentInput(RunAgentInput):
+    """Standard AG-UI input with a typed Nexent forwarding extension."""
+
+    forwarded_props: Dict[str, Any] = Field(alias="forwardedProps")
 
 
 class MessageUnit(BaseModel):

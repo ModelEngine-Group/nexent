@@ -26,6 +26,7 @@ import {
   useAui,
   useAuiState,
 } from "@assistant-ui/react";
+import { A2UISurface } from "../a2ui/runtime";
 import { Sources } from "../ui/sources";
 import { SourcesPanel, type PanelSourceItem } from "../ui/sources-panel";
 import {
@@ -567,7 +568,30 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 // group's header information. We let the header renderer
                 // paint it instead of returning it inside the body, so
                 // suppress here when it lands as a leaf of the chain.
-                return part.dataRendererUI;
+                if (part.name === "a2ui-surface") {
+                  const data = part.data as {
+                    sessionKey?: unknown;
+                    surfaceId?: unknown;
+                    error?: unknown;
+                  };
+                  if (
+                    typeof data?.sessionKey === "string" &&
+                    typeof data.surfaceId === "string"
+                  ) {
+                    return (
+                      <A2UISurface
+                        sessionKey={data.sessionKey}
+                        surfaceId={data.surfaceId}
+                        error={
+                          typeof data.error === "string"
+                            ? data.error
+                            : undefined
+                        }
+                      />
+                    );
+                  }
+                }
+                return null;
               default:
                 return null;
             }

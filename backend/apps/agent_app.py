@@ -1,4 +1,3 @@
-import json
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -8,7 +7,8 @@ from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
+from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
+from consts.model import NexentRunAgentInput
 from consts.exceptions import ForbiddenError, SkillDuplicateError, AppException
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
@@ -17,7 +17,6 @@ from services.agent_service import (
     get_creating_sub_agent_info_impl,
     update_agent_info_impl,
     delete_agent_impl,
-    export_agent_impl,
     import_agent_impl,
     check_agent_name_conflict_batch_impl,
     regenerate_agent_name_batch_impl,
@@ -31,11 +30,12 @@ from services.agent_service import (
     import_agent_with_skills_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
+from services.ag_ui_service import AGUIRequestValidationError, run_agent_agui_stream
+from services.a2ui_action_service import A2UIActionDuplicateError, A2UIActionValidationError
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
     get_version_impl,
-    get_version_detail_impl,
     _get_version_detail_or_draft,
     rollback_version_impl,
     update_version_status_impl,
@@ -80,6 +80,30 @@ async def agent_run_api(
         error_detail = str(e) if agent_request.is_debug else "Agent run error."
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
+
+
+@agent_runtime_router.post("/run/ag-ui")
+async def agent_run_agui_api(
+    run_input: NexentRunAgentInput,
+    http_request: Request,
+    authorization: str = Header(None),
+):
+    """Run a Nexent agent through the internal AG-UI compatibility endpoint."""
+    try:
+        return await run_agent_agui_stream(run_input, http_request, authorization)
+    except A2UIActionDuplicateError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
+    except A2UIActionValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except AGUIRequestValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("AG-UI agent run failed")
+        debug = bool((run_input.forwarded_props.get("nexent") or {}).get("isDebug"))
+        detail = str(exc) if debug else "Agent run error."
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=detail) from exc
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")
@@ -681,4 +705,3 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
