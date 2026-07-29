@@ -40,11 +40,10 @@ from services.skill_service import install_skills_from_zip_for_tenant
 logger = logging.getLogger(__name__)
 
 
-def _is_manageable_tenant_id(tenant_id: Optional[str]) -> bool:
+def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
     """Return whether a tenant id represents a real tenant in management views."""
-    if not tenant_id:
-        return False
-    return tenant_id not in {DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
+    normalized_tenant_id = (tenant_id or "").strip()
+    return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
 def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
@@ -59,7 +58,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Tenant information
     """
-    if not _is_manageable_tenant_id(tenant_id):
+    if not _is_displayable_tenant_id(tenant_id):
         return {}
 
     # Get tenant name
@@ -156,7 +155,7 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     # Exclude virtual/system tenants from admin tenant listings.
     all_tenant_ids = [
         tid for tid in get_all_tenant_ids()
-        if _is_manageable_tenant_id(tid)
+        if _is_displayable_tenant_id(tid)
     ]
     total = len(all_tenant_ids)
 
