@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from nexent.core.agents.agent_model import (
         ContextComponent,
+        ConversationFileComponent,
         ToolsComponent,
         SkillsComponent,
         MemoryComponent,
@@ -1209,6 +1210,9 @@ def build_context_components(
     memory_search_query: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
+    # Conversation file context
+    conversation_file_component: Optional["ConversationFileComponent"] = None,
+    conversation_file_citation_rules: Optional[str] = None,
     # Legacy param for fallback (removed short-circuit in Goal 3)
     system_prompt: Optional[str] = None,
     # Inclusion flags (kept for backward compatibility)
@@ -1353,6 +1357,18 @@ def build_context_components(
                 language=language,
             )
         )
+
+    # 8.5. Conversation File (if exists)
+    if conversation_file_component is not None:
+        if conversation_file_citation_rules:
+            components.append(
+                build_system_prompt_component(
+                    content=conversation_file_citation_rules,
+                    template_name="file_citation_rules",
+                    priority=9,
+                )
+            )
+        components.append(conversation_file_component)
 
     # 9. Managed Agents (if exists) - manager only
     if is_manager and include_managed_agents and managed_agents:

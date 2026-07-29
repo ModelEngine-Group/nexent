@@ -34,6 +34,56 @@ _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 # Configure logging
 logger = logging.getLogger("data_process.service")
 
+# Max per-part size for in-memory file processing. Splitting large files into
+# smaller parts avoids single-shot parsing failures where pdfminer silently
+# skips text extraction on very large PDFs (the exception is swallowed inside
+# unstructured and an empty element list is returned). Mirrors the data-process
+# pipeline, which splits files into ~5MB parts before partitioning.
+IN_MEMORY_FILE_PART_MAX_SIZE = 5 * 1024 * 1024
+
+
+def _split_file_for_in_memory_processing(
+    file_content: bytes,
+    filename: str,
+    max_part_size: int = IN_MEMORY_FILE_PART_MAX_SIZE,
+) -> List[bytes]:
+    """Split a large file into smaller in-memory byte parts.
+
+    Delegates to ``DataProcessCore.file_split``, which dispatches by extension
+    the same way the data-process pipeline does: .doc/.docx are converted to PDF
+    via LibreOffice then split by page, .pdf is split by page, and other
+    splittable types (txt/csv/json/md/xml/epub/xlsx) use pure-Python splitters.
+    Non-splittable extensions and files already below ``max_part_size`` yield a
+    single part containing the original bytes. On split failure the original
+    whole file is returned so processing can still attempt a best-effort pass.
+
+    Args:
+        file_content: Raw file bytes.
+        filename: Original filename, used for extension-based splitter choice.
+        max_part_size: Maximum size in bytes per part.
+
+    Returns:
+        List of byte strings, one per part.
+    """
+    if len(file_content) <= max_part_size:
+        return [file_content]
+
+    try:
+        parts = DataProcessCore().file_split(
+            file_data=file_content,
+            filename=filename,
+            max_size=max_part_size,
+        )
+        if not parts:
+            return [file_content]
+        return [p.getvalue() for p in parts]
+    except Exception as exc:
+        logger.warning(
+            "File split failed for %s, falling back to whole-file processing: %s",
+            filename, exc,
+        )
+        return [file_content]
+
 
 class DataProcessService:
     def __init__(self):
@@ -587,6 +637,12 @@ class DataProcessService:
     async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str = "basic") -> Dict[str, Any]:
         """Process uploaded file bytes into text/chunks using SDK DataProcessCore.
 
+        Large files are split into smaller in-memory parts before partitioning.
+        This avoids silent text-extraction failures on very large PDFs, where
+        pdfminer raises during parsing, unstructured swallows the exception, and
+        an empty element list is returned without any error to the caller. Each
+        part is processed sequentially and the resulting chunks are aggregated.
+
         Args:
             file_content: Raw bytes of the uploaded file
             filename: Original filename for format detection
@@ -601,13 +657,26 @@ class DataProcessService:
 
         def _sync_process():
             data_processor = DataProcessCore()
-            return data_processor.file_process(
-                file_data=file_content,
-                filename=filename,
-                chunking_strategy=chunking_strategy
-            )
+            parts = _split_file_for_in_memory_processing(file_content, filename)
+            all_chunks: List[Dict[str, Any]] = []
+            for idx, part_bytes in enumerate(parts):
+                try:
+                    part_chunks, _ = data_processor.file_process(
+                        file_data=part_bytes,
+                        filename=filename,
+                        chunking_strategy=chunking_strategy,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to process part %d/%d of %s: %s",
+                        idx + 1, len(parts), filename, exc,
+                    )
+                    continue
+                if part_chunks:
+                    all_chunks.extend(part_chunks)
+            return all_chunks, len(parts)
 
-        chunks, _ = await asyncio.to_thread(_sync_process)
+        chunks, parts_count = await asyncio.to_thread(_sync_process)
 
         full_text = ""
         chunk_texts: List[str] = []
@@ -618,9 +687,16 @@ class DataProcessService:
                 chunk_texts.append(chunk_content)
 
         processing_time = time.time() - start_time
-        logger.info(
-            f"Successfully processed uploaded file: {filename}, extracted {len(full_text)} characters in {processing_time:.2f}s"
-        )
+        if not chunks:
+            logger.warning(
+                "No chunks extracted from %s after processing %d part(s) in %.2fs; "
+                "file may be scanned, image-only, or unsupported",
+                filename, parts_count, processing_time,
+            )
+        else:
+            logger.info(
+                f"Successfully processed uploaded file: {filename}, extracted {len(full_text)} characters in {processing_time:.2f}s"
+            )
 
         return {
             "success": True,

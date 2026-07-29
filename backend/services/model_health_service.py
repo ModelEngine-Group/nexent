@@ -3,7 +3,7 @@ from typing import Optional
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
-from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, OpenAICompatibleMultimodalEmbedding, JinaMultimodalEmbedding, SiliconMultimodalEmbedding, DashScopeMultimodalEmbedding, VolcengineMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
@@ -42,13 +42,6 @@ def _infer_model_factory(model_type: str, base_url: str, current_factory: Option
     changing existing behavior. For other types (VLM), uses extended inference
     so tokenpony URLs can be recognized for catalog healthcheck.
     """
-    # Embedding types: keep legacy behavior (only dashscope)
-    if model_type in EMBEDDING_TYPES:
-        if "dashscope" in base_url.lower():
-            return DASHSCOPE_MODEL_FACTORY
-        return current_factory
-
-    # Non-embedding types (VLM, etc): use extended inference
     try:
         from services.model_capacity_suggestion_service import pick_provider_from_base_url
 
@@ -92,22 +85,23 @@ async def _embedding_dimension_check(
         return 0
     elif model_type == "multi_embedding":
         model_factory_lower = (model_factory or "").lower()
+        model_config = {
+            "api_key": model_api_key,
+            "base_url": model_base_url,
+            "model_name": model_name,
+            "embedding_dim": 0,
+            "ssl_verify": ssl_verify
+        }
         if model_factory_lower == "dashscope":
-            embedding_instance = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
+            embedding_instance = DashScopeMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "silicon":
+            embedding_instance = SiliconMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "volcengine":
+            embedding_instance = VolcengineMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "jina":
+            embedding_instance = JinaMultimodalEmbedding(**model_config)
         else:
-            embedding_instance = JinaEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
+            embedding_instance = OpenAICompatibleMultimodalEmbedding(**model_config)
         embedding = await embedding_instance.dimension_check(timeout=effective_timeout)
         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
             return len(embedding[0])
@@ -190,22 +184,23 @@ async def _perform_connectivity_check(
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "multi_embedding":
         model_factory_lower = (model_factory or "").lower()
+        model_config = {
+            "api_key": model_api_key,
+            "base_url": model_base_url,
+            "model_name": model_name,
+            "embedding_dim": 0,
+            "ssl_verify": ssl_verify
+        }
         if model_factory_lower == "dashscope":
-            embedding = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
+            embedding = DashScopeMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "silicon":
+            embedding = SiliconMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "volcengine":
+            embedding = VolcengineMultimodalEmbedding(**model_config)
+        elif model_factory_lower == "jina":
+            embedding = JinaMultimodalEmbedding(**model_config)
         else:
-            embedding = JinaEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
+            embedding = OpenAICompatibleMultimodalEmbedding(**model_config)
         emb = await embedding.dimension_check(timeout=effective_timeout)
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "llm":

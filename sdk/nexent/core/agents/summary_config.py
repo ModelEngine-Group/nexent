@@ -108,6 +108,7 @@ class ContextManagerConfig:
         "skills": 4000,
         "memory": 2000,
         "knowledge_base": 1500,
+        "conversation_file": 5000,
         "managed_agents": 500,
         "external_a2a_agents": 500,
         "conversation_history": 4000,  # Reserved for conversation compression

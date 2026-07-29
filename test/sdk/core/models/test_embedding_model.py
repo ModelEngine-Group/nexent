@@ -3,7 +3,7 @@ import requests
 import sys
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaMultimodalEmbedding, DashScopeMultimodalEmbedding
 
 class DummyResponse:
     def __init__(self, status_code=200, json_data=None):
@@ -37,9 +37,9 @@ def openai_embedding_instance():
 
 @pytest.fixture()
 def jina_embedding_instance():
-    """Return a JinaEmbedding instance with minimal viable attributes for tests."""
+    """Return a JinaMultimodalEmbedding instance with minimal viable attributes for tests."""
 
-    return JinaEmbedding(api_key="dummy-key", ssl_verify=True)
+    return JinaMultimodalEmbedding(api_key="dummy-key", ssl_verify=True)
 
 
 def test_openai_embedding_default_model_type():
@@ -54,7 +54,7 @@ def test_openai_embedding_default_model_type():
 
 
 def test_jina_embedding_default_model_type():
-    emb = JinaEmbedding(api_key="dummy-key", ssl_verify=True)
+    emb = JinaMultimodalEmbedding(api_key="dummy-key", ssl_verify=True)
     assert emb.model_type == "multimodal"
 
 
@@ -110,7 +110,7 @@ async def test_openai_dimension_check_timeout_returns_empty(openai_embedding_ins
 
 
 # ---------------------------------------------------------------------------
-# Tests for JinaEmbedding.dimension_check
+# Tests for JinaMultimodalEmbedding.dimension_check
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +256,7 @@ def test_openai_get_embeddings_timeout_exhausts_raises(openai_embedding_instance
 
 
 # ---------------------------------------------------------------------------
-# Tests for JinaEmbedding.get_embeddings delegation and retry
+# Tests for JinaMultimodalEmbedding.get_embeddings delegation and retry
 # ---------------------------------------------------------------------------
 
 
@@ -270,7 +270,7 @@ def test_jina_get_embeddings_converts_text_and_delegates(jina_embedding_instance
         return [[0.3, 0.4]]
 
     with patch(
-        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -295,7 +295,7 @@ def test_jina_get_embeddings_timeout_retry_succeeds(jina_embedding_instance):
     side_effect.calls = 0
 
     with patch(
-        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -317,7 +317,7 @@ def test_jina_get_embeddings_timeout_exhausts_raises(jina_embedding_instance):
     """Should raise Timeout after exhausting retries."""
 
     with patch(
-        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_delegate:
         with pytest.raises(requests.exceptions.Timeout):
@@ -563,7 +563,7 @@ def test_api_key_normalization_and_verify_jina(monkeypatch):
     monkeypatch.setattr("requests.Session.post", fake_post)
 
     # api_key containing Bearer prefix should be normalized
-    emb = JinaEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
+    emb = JinaMultimodalEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
     data = emb._prepare_multimodal_input([{"text": "hello"}])
     resp = emb._make_request(data, timeout=1)
     assert captured['headers']["Authorization"].startswith("Bearer ")
@@ -628,7 +628,7 @@ def test_jina_make_request_raises_http_error(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", fake_post)
 
-    emb = JinaEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
+    emb = JinaMultimodalEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
     data = emb._prepare_multimodal_input([{"text": "hi"}])
     with pytest.raises(requests.HTTPError):
         emb._make_request(data, timeout=1)
@@ -666,7 +666,7 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", lambda *a, **k: RespNoData())
 
-    emb = JinaEmbedding(api_key="k")
+    emb = JinaMultimodalEmbedding(api_key="k")
     with pytest.raises(KeyError):
         emb.get_multimodal_embeddings([{"text": "t"}], with_metadata=False, timeout=1)
 
@@ -705,7 +705,7 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
 
 
 def test_jina_get_embeddings_calls_record_model_call(mocker):
-    """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
+    """JinaMultimodalEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
     mock_ctx = MagicMock()
     mock_ctx.__enter__ = MagicMock(return_value=None)
     mock_ctx.__exit__ = MagicMock(return_value=False)
@@ -717,7 +717,7 @@ def test_jina_get_embeddings_calls_record_model_call(mocker):
     mock_resp.raise_for_status = Mock()
     mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
 
-    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    emb = JinaMultimodalEmbedding(api_key="k", ssl_verify=True)
     mocker.patch.object(emb.session, "post", return_value=mock_resp)
     emb.get_multimodal_embeddings([{"text": "hi"}], with_metadata=False, timeout=5)
 
@@ -1019,7 +1019,7 @@ def test_jina_get_multimodal_embeddings_generic_exception_propagates(jina_embedd
 
 @pytest.mark.asyncio
 async def test_jina_dimension_check_generic_exception_returns_empty(jina_embedding_instance):
-    """JinaEmbedding.dimension_check should return [] on generic Exception."""
+    """JinaMultimodalEmbedding.dimension_check should return [] on generic Exception."""
     with patch(
         "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
@@ -1083,7 +1083,7 @@ def test_openai_get_embeddings_http_error_not_caught(openai_embedding_instance):
 
 
 def test_jina_get_embeddings_http_error_not_caught(jina_embedding_instance):
-    """HTTP errors should propagate for JinaEmbedding too."""
+    """HTTP errors should propagate for JinaMultimodalEmbedding too."""
     mock_resp = Mock()
     mock_resp.raise_for_status = Mock(side_effect=requests.HTTPError("Server error"))
     mock_resp.json = Mock(return_value={"data": []})

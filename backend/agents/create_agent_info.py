@@ -28,11 +28,17 @@ from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
+    get_embedding_model,
     get_embedding_model_by_index_name,
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
-from services.conversation_file_service import assemble_fulltext_query, is_document_file
+from services.conversation_file_service import (
+    FILE_CITATION_RULES,
+    build_conversation_file_component,
+    is_document_file,
+    retrieve_conversation_chunks,
+)
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -1409,12 +1415,13 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
-    # File context assembly: read cached fulltext from DB and build prompt.
+    # File context assembly: build ConversationFileComponent from cached data.
     # Actual file preprocessing (extraction + caching) is handled earlier in the
     # streaming generators via preprocess_files_streaming, which yields real-time
     # SSE events so the frontend can show per-file progress.
     remaining_minio_files = minio_files
-    preprocessed_query = query
+    conversation_file_component = None
+    file_prompt_max_tokens = None
     if conversation_id:
         try:
             agent_info_for_preprocess = search_agent_info_by_agent_id(
@@ -1424,6 +1431,7 @@ async def create_agent_run_info(
             if file_preprocess_raw:
                 fp_config = AgentFilePreprocessConfig.model_validate(file_preprocess_raw)
                 if fp_config.enable:
+                    file_prompt_max_tokens = fp_config.config.prompt_max_token_length
                     if minio_files:
                         remaining_minio_files = [
                             f for f in minio_files
@@ -1431,17 +1439,28 @@ async def create_agent_run_info(
                         ]
 
                     if fp_config.config.file_mode == FileMode.FULL_TEXT_REFERENCE:
-                        preprocessed_query = assemble_fulltext_query(
-                            query=query,
+                        conversation_file_component = build_conversation_file_component(
                             conversation_id=str(conversation_id),
                             file_preprocess_config=fp_config.config,
+                        )
+                    elif fp_config.config.file_mode == FileMode.CHUNK_SEARCH:
+                        embedding_model, _ = get_embedding_model(
+                            tenant_id,
+                            model_name=fp_config.config.embedding_model_name,
+                        )
+                        conversation_file_component = retrieve_conversation_chunks(
+                            query=query,
+                            conversation_id=str(conversation_id),
+                            tenant_id=tenant_id,
+                            file_preprocess_config=fp_config.config,
+                            embedding_model=embedding_model,
                         )
         except Exception as e:
             logger.warning("File context assembly failed, falling back to default: %s", e)
 
     final_query = await join_minio_file_description_to_query(
         minio_files=remaining_minio_files,
-        query=preprocessed_query,
+        query=query,
         history=history
     )
     model_list = await create_model_config_list(tenant_id)
@@ -1460,6 +1479,20 @@ async def create_agent_run_info(
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
+
+    if conversation_file_component and agent_config.context_components is not None:
+        from utils.context_utils import build_system_prompt_component
+        citation_component = build_system_prompt_component(
+            content=FILE_CITATION_RULES,
+            template_name="file_citation_rules",
+            priority=9,
+        )
+        agent_config.context_components.append(citation_component)
+        agent_config.context_components.append(conversation_file_component)
+        if file_prompt_max_tokens:
+            agent_config.context_manager_config.component_budgets["conversation_file"] = (
+                file_prompt_max_tokens
+            )
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

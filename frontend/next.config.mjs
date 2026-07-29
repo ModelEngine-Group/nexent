@@ -21,6 +21,16 @@ const nextConfig = {
     webpackBuildWorker: true,
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
+    // Transform barrel imports (antd, icon libs, radix) into per-file imports so
+    // webpack does not pull the entire barrel into the dev module graph on every
+    // route compile. Cuts first-compile time for routes that use these libs.
+    optimizePackageImports: [
+      "antd",
+      "@ant-design/icons",
+      "lucide-react",
+      "@radix-ui/react-scroll-area",
+      "@radix-ui/react-tabs",
+    ],
   },
   compress: true,
   // Fix workspace root detection for multiple lockfiles

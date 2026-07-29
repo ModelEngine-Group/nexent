@@ -13,7 +13,7 @@ PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from ..utils.observer import MessageObserver
 
@@ -228,6 +228,10 @@ class FilePreprocessConfig(BaseModel):
         default=FileMode.FULL_TEXT_REFERENCE,
         description="User-selected processing mode. Defaults to full_text_reference, switchable to chunk_search.",
     )
+    embedding_model_name: Optional[str] = Field(
+        default=None,
+        description="Embedding model for chunk_search mode. Falls back to tenant default when None.",
+    )
 
 
 class AgentFilePreprocessConfig(BaseModel):
@@ -324,8 +328,7 @@ class AgentRunInfo(BaseModel):
         default=None,
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
@@ -429,7 +432,7 @@ class ExternalA2AAgentConfig(BaseModel):
 # Context Component System - Building blocks for system prompt assembly
 # =============================================================================
 
-ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge_base", "managed_agents", "external_a2a_agents"]
+ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge_base", "conversation_file", "managed_agents", "external_a2a_agents"]
 
 
 class ContextComponent(BaseModel, ABC):
@@ -566,6 +569,18 @@ class KnowledgeBaseComponent(ContextComponent):
             # authoritative instruction.  Keeping it dynamic protects the
             # stable cache prefix when retrieval results change between turns.
             return [self._text_message("user", self.summary)]
+        return []
+
+
+class ConversationFileComponent(ContextComponent):
+    """Conversation-scoped file context for file Q&A."""
+    component_type: ComponentType = Field(default="conversation_file")
+    content: str = Field(description="XML-tagged file content or retrieved chunks", default="")
+    filenames: List[str] = Field(description="Source filenames included", default_factory=list)
+
+    def to_messages(self) -> List[Dict[str, Any]]:
+        if self.content:
+            return [self._text_message("user", self.content)]
         return []
 
 

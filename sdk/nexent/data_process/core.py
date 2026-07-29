@@ -118,8 +118,17 @@ class DataProcessCore:
             raise ValueError(f"Unsupported processor: {processor_name}")
         
         if extract_image_processor_instance:
-            img_info = extract_image_processor_instance.process_file(
-                file_data, chunking_strategy, filename, **params)
+            try:
+                img_info = extract_image_processor_instance.process_file(
+                    file_data, chunking_strategy, filename, **params)
+            except Exception as exc:
+                # Image extraction is best-effort: a missing system dependency
+                # (e.g. poppler/tesseract) or an unreadable PDF must not abort
+                # the whole file. Degrade to text-only and keep ingesting.
+                logger.warning(
+                    f"Image extraction failed for {filename}, "
+                    f"continuing with text-only: {exc}")
+                img_info = []
         else:
             img_info = []
 

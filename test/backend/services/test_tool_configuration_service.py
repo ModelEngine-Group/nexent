@@ -254,13 +254,13 @@ class MockOpenAICompatibleEmbedding(MockBaseEmbedding):
     pass
 
 
-class MockJinaEmbedding(MockBaseEmbedding):
+class MockJinaMultimodalEmbedding(MockBaseEmbedding):
     pass
 
 
 embedding_model_module.BaseEmbedding = MockBaseEmbedding
 embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
-embedding_model_module.JinaEmbedding = MockJinaEmbedding
+embedding_model_module.JinaMultimodalEmbedding = MockJinaMultimodalEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
 
 # Mock rerank_model module with proper class exports

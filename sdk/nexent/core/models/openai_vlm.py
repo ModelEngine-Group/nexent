@@ -135,10 +135,16 @@ class OpenAIVLModel(OpenAIModel):
         """
         Prepare an OpenAI-compatible multimodal message for audio or video inputs.
 
+        Audio uses the standard ``input_audio`` content part (raw base64 ``data``
+        plus a ``format`` token such as ``mp3``/``wav``). The ``audio_url`` form
+        is intentionally avoided because DashScope's OpenAI-compatible mode
+        rejects it (only ``text``/``image_url``/``video_url``/``video`` are
+        accepted as content-part types, and audio is carried via ``input_audio``).
+
         Args:
             media_input: Media file path or file stream object.
             media_type: Either "audio" or "video".
-            content_type: MIME type for the data URL.
+            content_type: MIME type for the media (e.g. "audio/mpeg").
             system_prompt: System prompt.
 
         Returns:
@@ -148,24 +154,64 @@ class OpenAIVLModel(OpenAIModel):
             raise ValueError(f"Unsupported media type: {media_type}")
 
         base64_media = self.encode_image(media_input)
-        media_url_key = f"{media_type}_url"
-        media_config: Dict[str, Any] = {"url": f"data:{content_type};base64,{base64_media}"}
-        if media_type == "video":
-            media_config.update({"detail": "high", "max_frames": 16, "fps": 1})
+
+        if media_type == "audio":
+            # DashScope's OpenAI-compatible mode accepts the ``input_audio``
+            # content part, but its ``data`` field must be a valid URL/URI.
+            # Raw base64 is rejected ("The provided URL does not appear to be
+            # valid"), so the audio is carried as a data URI, mirroring how
+            # ``image_url`` carries image bytes.
+            media_part: Dict[str, Any] = {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": f"data:{content_type};base64,{base64_media}",
+                    "format": self._audio_format_from_content_type(content_type),
+                },
+            }
+        else:
+            media_part = {
+                "type": "video_url",
+                "video_url": {
+                    "url": f"data:{content_type};base64,{base64_media}",
+                    "detail": "high",
+                    "max_frames": 16,
+                    "fps": 1,
+                },
+            }
 
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": media_url_key,
-                        media_url_key: media_config
-                    },
+                    media_part,
                     {"type": "text", "text": system_prompt}
                 ]
             }
         ]
+        logger.info(f"Prepared {media_type} message with system prompt: {system_prompt}, message content: {messages}")
         return messages
+
+    @staticmethod
+    def _audio_format_from_content_type(content_type: str) -> str:
+        """Map a MIME content type (e.g. 'audio/mpeg') to the audio format
+        token expected by the OpenAI-compatible ``input_audio`` part (e.g.
+        'mp3'). Falls back to 'mp3' when the subtype is unrecognized.
+        """
+        subtype = (content_type or "").split(";")[0].split("/")[-1].strip().lower()
+        mapping = {
+            "mpeg": "mp3",
+            "mp3": "mp3",
+            "wav": "wav",
+            "x-wav": "wav",
+            "wave": "wav",
+            "x-pn-wav": "wav",
+            "flac": "flac",
+            "ogg": "ogg",
+            "x-m4a": "m4a",
+            "m4a": "m4a",
+            "x-flac": "flac",
+        }
+        return mapping.get(subtype, "mp3")
 
     def analyze_image(self, image_input: Union[str, BinaryIO],
             system_prompt: str = "Please describe this picture concisely and carefully, within 200 words.", stream: bool = True,

@@ -54,7 +54,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         ssl_show_warn: bool = False,
     ):
         """
-        Initialize ElasticSearchCore with Elasticsearch client and JinaEmbedding model.
+        Initialize ElasticSearchCore with Elasticsearch client and JinaMultimodalEmbedding model.
 
         Args:
             host: Elasticsearch host URL (defaults to env variable)
@@ -143,6 +143,19 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "file_size": {"type": "long"},
                     "create_time": {"type": "date"},
                     "embedding": {
+                        "type": "dense_vector",
+                        "dims": actual_embedding_dim,
+                        "index": "true",
+                        "similarity": "cosine",
+                    },
+                    # Image embedding vector for multimodal RAG. Must be declared
+                    # explicitly as dense_vector, otherwise Elasticsearch dynamically
+                    # maps the first value as a scalar float/long and subsequent
+                    # vector writes fail with "mapper [multi_embedding] cannot be
+                    # changed from type [float] to [long]". Shares the same dim as
+                    # the text embedding because both come from the same multimodal
+                    # model via get_multimodal_embeddings.
+                    "multi_embedding": {
                         "type": "dense_vector",
                         "dims": actual_embedding_dim,
                         "index": "true",
@@ -490,7 +503,8 @@ class ElasticSearchCore(VectorDatabaseCore):
             )
             doc[embedding_field] = embedding
             if "embedding_model_name" not in doc:
-                doc["embedding_model_name"] = embedding_model.embedding_model_name
+                doc["embedding_model_name"] = getattr(
+                    embedding_model, "model", "unknown")
             operations.append(doc)
         return operations
 
@@ -612,7 +626,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         == "UniversalImageExtractor" else "embedding"] = embedding
                 if "embedding_model_name" not in doc:
                     doc["embedding_model_name"] = getattr(
-                        embedding_model, "embedding_model_name", "unknown")
+                        embedding_model, "model", "unknown")
                 operations.append(doc)
 
             try:
@@ -1188,7 +1202,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                             update_doc = chunk_doc["document"].copy()
                             update_doc["embedding"] = chunk_embedding[0]
                             if "embedding_model_name" not in update_doc:
-                                update_doc["embedding_model_name"] = embedding_model.embedding_model_name
+                                update_doc["embedding_model_name"] = getattr(
+                                    embedding_model, "model", "unknown")
 
                             try:
                                 # Use create_chunk to store the chunk with embedding

@@ -87,6 +87,42 @@ def _is_dashscope_image_understanding_model(model_id: str, desc: str, req_mods: 
     )
 
 
+def _is_dashscope_stt_model(model_id: str, desc: str, req_mods: set, res_mods: set) -> bool:
+    """Determine if model is a dedicated speech-to-text model.
+
+    Qualifies when audio is accepted as input and text is produced as output,
+    AND the model does not also accept image/video input. The exclusion keeps
+    full-modality (omni) conversational models out of the STT bucket, since
+    those are multimodal understanding models rather than pure STT and would
+    not work through the realtime transcription pipeline.
+    """
+    return (
+        "audio" in req_mods
+        and "text" in res_mods
+        and "image" not in req_mods
+        and "video" not in req_mods
+    )
+
+
+def _is_dashscope_tts_model(model_id: str, desc: str, req_mods: set, res_mods: set) -> bool:
+    """Determine if model is a dedicated text-to-speech model.
+
+    Qualifies when audio is produced as output and the model neither accepts
+    image/video input nor emits image/video output. The input-side exclusion
+    is what keeps full-modality (omni) conversational models out of the TTS
+    bucket: such models accept image/video as input alongside text, so they
+    are multimodal understanding/generation models rather than pure TTS, and
+    would not work through the realtime synthesis pipeline.
+    """
+    return (
+        "audio" in res_mods
+        and "image" not in req_mods
+        and "video" not in req_mods
+        and "image" not in res_mods
+        and "video" not in res_mods
+    )
+
+
 class DashScopeModelProvider(AbstractModelProvider):
     """Concrete implementation for DashScope (Aliyun) provider."""
 
@@ -153,10 +189,8 @@ class DashScopeModelProvider(AbstractModelProvider):
                 m_id = model_obj.get('model', '').lower()
                 desc = model_obj.get('description', '')
                 metadata = model_obj.get('inference_metadata') or {}
-                req_mod = metadata.get('request_modality', [])
-                res_mod = metadata.get('response_modality', [])
-                req_mods = _modality_set(req_mod)
-                res_mods = _modality_set(res_mod)
+                req_mods = _modality_set(metadata.get('request_modality', []))
+                res_mods = _modality_set(metadata.get('response_modality', []))
                 model_obj.setdefault("object", model_obj.get("object", "model"))
                 model_obj.setdefault("owned_by", model_obj.get("owned_by", "dashscope"))
                 cleaned_model = {
@@ -169,26 +203,26 @@ class DashScopeModelProvider(AbstractModelProvider):
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
                 cleaned_model.update(_extract_capacity_hints(model_obj))
-               # 1. Embedding
-                if 'embedding' in m_id.lower() or '向量' in desc:
+                # 1. Embedding
+                if 'embedding' in m_id or '向量' in desc:
                     cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})
                     categorized_models['embedding'].append(cleaned_model)
                     continue
 
                 # 2. Rerank
-                if 'rerank' in m_id.lower() or '重排序' in desc:
+                if 'rerank' in m_id or '重排序' in desc:
                     cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})
                     categorized_models['rerank'].append(cleaned_model)
                     continue
 
-                # 3. STT
-                if 'Audio' in req_mod and 'Text' in res_mod:
+                # 3. STT - dedicated speech-to-text only (excludes omni models).
+                if _is_dashscope_stt_model(m_id, desc, req_mods, res_mods):
                     cleaned_model.update({"model_tag": "stt", "model_type": "stt"})
                     categorized_models['stt'].append(cleaned_model)
                     continue
 
-                # 4. TTS
-                if 'Audio' in res_mod and 'Video' not in res_mod:
+                # 4. TTS - dedicated text-to-speech only (excludes omni models).
+                if _is_dashscope_tts_model(m_id, desc, req_mods, res_mods):
                     cleaned_model.update({"model_tag": "tts", "model_type": "tts"})
                     categorized_models['tts'].append(cleaned_model)
                     continue
@@ -211,7 +245,7 @@ class DashScopeModelProvider(AbstractModelProvider):
                     categorized_models['vlm'].append(vlm_model)
 
                 # Fallback to llm when no specialized modality is present
-                if 'Text' in req_mod or 'Text' in res_mod:
+                if 'text' in req_mods or 'text' in res_mods:
                     llm_model = cleaned_model.copy()
                     llm_model.update({"model_tag": "chat", "model_type": "llm"})
                     categorized_models['chat'].append(llm_model)

@@ -1308,11 +1308,11 @@ class TestDetectModelType:
         class OpenAICompatibleEmbedding:
             pass
 
-        class JinaEmbedding:
+        class JinaMultimodalEmbedding:
             pass
 
         assert _detect_model_type(OpenAICompatibleEmbedding()) == "embedding"
-        assert _detect_model_type(JinaEmbedding()) == "embedding"
+        assert _detect_model_type(JinaMultimodalEmbedding()) == "embedding"
 
     def test_unknown_class_name_defaults_to_llm(self):
         """Unknown class names default to 'llm'."""

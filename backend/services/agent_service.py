@@ -20,6 +20,8 @@ from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
 from services.conversation_file_service import preprocess_files_streaming
+from services.vectordatabase_service import get_embedding_model
+from nexent.core.agents.agent_model import FileMode, AgentFilePreprocessConfig
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
@@ -2693,6 +2695,36 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     raise ValueError(f"Unsupported target for save_messages: {target!r}")
 
 
+def _resolve_file_preprocess_config(agent_id: str, tenant_id: str):
+    """Resolve file preprocess config for streaming preprocessing.
+
+    Returns ``(file_mode, embedding_model)`` only when the agent has file
+    preprocess enabled. Returns ``None`` when the feature is disabled or no
+    config is present, so callers can skip streaming preprocessing entirely
+    instead of falling back to a default mode.
+    """
+    try:
+        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
+        raw = agent_info.get("file_preprocess") if agent_info else None
+        if not raw:
+            return None
+
+        fp_config = AgentFilePreprocessConfig.model_validate(raw)
+        if not fp_config.enable:
+            return None
+
+        file_mode = fp_config.config.file_mode
+        embedding_model = None
+        if file_mode == FileMode.CHUNK_SEARCH:
+            embedding_model, _ = get_embedding_model(
+                tenant_id, model_name=fp_config.config.embedding_model_name,
+            )
+        return file_mode, embedding_model
+    except Exception as e:
+        logger.warning("Failed to resolve file preprocess config: %s", e)
+        return None
+
+
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
 async def generate_stream_with_memory(
     agent_request: AgentRequest,
@@ -2736,14 +2768,21 @@ async def generate_stream_with_memory(
     try:
         # Stream file preprocessing events before memory/agent preparation.
         if agent_request.conversation_id and agent_request.minio_files:
-            async for chunk in preprocess_files_streaming(
-                minio_files=agent_request.minio_files,
-                conversation_id=str(agent_request.conversation_id),
-                tenant_id=tenant_id,
-                user_id=user_id,
-            ):
-                await channel.publish(chunk)
-                yield chunk
+            resolved = _resolve_file_preprocess_config(
+                agent_request.agent_id, tenant_id,
+            )
+            if resolved is not None:
+                file_mode, embedding_model = resolved
+                async for chunk in preprocess_files_streaming(
+                    minio_files=agent_request.minio_files,
+                    conversation_id=str(agent_request.conversation_id),
+                    tenant_id=tenant_id,
+                    file_mode=file_mode,
+                    embedding_model=embedding_model,
+                    user_id=user_id,
+                ):
+                    await channel.publish(chunk)
+                    yield chunk
 
         memory_context_preview = build_memory_context(
             user_id, tenant_id, agent_request.agent_id
@@ -2833,17 +2872,24 @@ async def generate_stream_no_memory(
 
     # Stream file preprocessing events before preparing the agent run.
     # Results are persisted to DB; create_agent_run_info reads them via
-    # assemble_fulltext_query (and skips already-processed files).
+    # build_conversation_file_component (and skips already-processed files).
     if agent_request.conversation_id and agent_request.minio_files:
-        async for chunk in preprocess_files_streaming(
-            minio_files=agent_request.minio_files,
-            conversation_id=str(agent_request.conversation_id),
-            tenant_id=tenant_id,
-            user_id=user_id,
-        ):
-            if channel:
-                await channel.publish(chunk)
-            yield chunk
+        resolved = _resolve_file_preprocess_config(
+            agent_request.agent_id, tenant_id,
+        )
+        if resolved is not None:
+            file_mode, embedding_model = resolved
+            async for chunk in preprocess_files_streaming(
+                minio_files=agent_request.minio_files,
+                conversation_id=str(agent_request.conversation_id),
+                tenant_id=tenant_id,
+                file_mode=file_mode,
+                embedding_model=embedding_model,
+                user_id=user_id,
+            ):
+                if channel:
+                    await channel.publish(chunk)
+                yield chunk
 
     # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
     agent_run_info, memory_context = await prepare_agent_run(

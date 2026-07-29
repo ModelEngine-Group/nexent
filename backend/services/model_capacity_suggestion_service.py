@@ -129,6 +129,7 @@ HOST_PROVIDER_PATTERNS = (
     ("jina", "jina"),
     ("tokenpony", "tokenpony"),
     ("bytedance", "volcengine"),
+    ("volces", "volcengine"),
 )
 
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}

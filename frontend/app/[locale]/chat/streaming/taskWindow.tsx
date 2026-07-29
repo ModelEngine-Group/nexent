@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import dynamic from "next/dynamic";
 import {
   Globe,
   Search,
@@ -17,11 +18,24 @@ import {
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button, message as antdMessage } from "antd";
-import {
-  MarkdownRenderer,
-  CodeBlock,
-} from "@/components/common/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
+// Lazy-load MarkdownRenderer and CodeBlock so the heavy markdown pipeline
+// (react-syntax-highlighter + refractor + prismjs) is split into a separate
+// chunk and excluded from the /zh/chat route's first-compile module graph.
+const MarkdownRenderer = dynamic(
+  () =>
+    import("@/components/common/markdownRenderer").then(
+      (m) => ({ default: m.MarkdownRenderer })
+    ),
+  { ssr: false, loading: () => <div className="h-4 animate-pulse" /> }
+);
+const CodeBlock = dynamic(
+  () =>
+    import("@/components/common/markdownRenderer").then(
+      (m) => ({ default: m.CodeBlock })
+    ),
+  { ssr: false, loading: () => <div className="h-4 animate-pulse" /> }
+);
 import {
   ChatMessageType,
   TaskMessageType,

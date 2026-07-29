@@ -74,7 +74,7 @@ sys.modules["nexent.core.utils.observer"] = observer_mod
 embedding_mod = types.ModuleType("nexent.core.models.embedding_model")
 embedding_mod.BaseEmbedding = object
 embedding_mod.OpenAICompatibleEmbedding = object
-embedding_mod.JinaEmbedding = object
+embedding_mod.JinaMultimodalEmbedding = object
 sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
 # Stub consts.model to avoid pydantic/email-validator heavy imports during tests.

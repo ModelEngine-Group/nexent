@@ -24,6 +24,7 @@ def create_conversation_file(
     content_hash: str,
     embedding_model: Optional[str] = None,
     user_id: Optional[str] = None,
+    file_mode: str = "full_text_reference",
 ) -> dict:
     with get_db_session() as session:
         record = ConversationFile(
@@ -33,6 +34,7 @@ def create_conversation_file(
             filename=filename,
             content_hash=content_hash,
             embedding_model=embedding_model,
+            file_mode=file_mode,
             status=ConversationFileStatus.PENDING,
             created_by=user_id,
             updated_by=user_id,
@@ -82,12 +84,15 @@ def update_conversation_file_status(
     status: str,
     chunk_count: int = 0,
     fulltext_key: Optional[str] = None,
+    embedding_model: Optional[str] = None,
     error_message: Optional[str] = None,
 ) -> None:
     with get_db_session() as session:
         values = {"status": status, "chunk_count": chunk_count}
         if fulltext_key is not None:
             values["fulltext_key"] = fulltext_key
+        if embedding_model is not None:
+            values["embedding_model"] = embedding_model
         if error_message is not None:
             values["error_message"] = error_message
         stmt = update(ConversationFile).where(ConversationFile.id == record_id).values(**values)

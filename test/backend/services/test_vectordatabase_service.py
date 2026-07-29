@@ -130,7 +130,7 @@ class MockDashScopeMultimodalEmbedding:
         pass
 
 
-class MockJinaEmbedding:
+class MockJinaMultimodalEmbedding:
     def __init__(self, *args, **kwargs):
         pass
 
@@ -140,7 +140,7 @@ class MockBaseEmbedding:
 
 
 embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
-embedding_model_module.JinaEmbedding = MockJinaEmbedding
+embedding_model_module.JinaMultimodalEmbedding = MockJinaMultimodalEmbedding
 embedding_model_module.BaseEmbedding = MockBaseEmbedding
 embedding_model_module.DashScopeMultimodalEmbedding = MockDashScopeMultimodalEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
@@ -4206,7 +4206,7 @@ class TestElasticSearchService(unittest.TestCase):
         Test get_embedding_model with multi_embedding model type.
 
         This test verifies that:
-        1. When model_name is provided and model_type is "multi_embedding", JinaEmbedding is returned
+        1. When model_name is provided and model_type is "multi_embedding", JinaMultimodalEmbedding is returned
         2. The correct parameters are passed to the embedding model
         """
         # Setup
@@ -4225,7 +4225,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
+            with patch('backend.services.vectordatabase_service.JinaMultimodalEmbedding') as mock_embedding_class, \
                     patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
                 mock_embedding_instance = MagicMock()
                 mock_embedding_class.return_value = mock_embedding_instance
@@ -4333,7 +4333,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
+            with patch('backend.services.vectordatabase_service.JinaMultimodalEmbedding') as mock_embedding_class, \
                     patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
                 mock_embedding_instance = MagicMock()
                 mock_embedding_class.return_value = mock_embedding_instance
@@ -4401,7 +4401,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
+            with patch('backend.services.vectordatabase_service.JinaMultimodalEmbedding') as mock_embedding_class, \
                     patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
                 mock_embedding_instance = MagicMock()
                 mock_embedding_class.return_value = mock_embedding_instance
@@ -4483,7 +4483,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
+            with patch('backend.services.vectordatabase_service.JinaMultimodalEmbedding') as mock_embedding_class, \
                     patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
                 mock_embedding_instance = MagicMock()
                 mock_embedding_class.return_value = mock_embedding_instance
@@ -5901,14 +5901,14 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.JinaEmbedding')
+    @patch('backend.services.vectordatabase_service.JinaMultimodalEmbedding')
     @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_embedding_model_by_id_multi_embedding_type(self, mock_get_model_name, mock_jina_class, mock_get_model):
         """
         Test get_embedding_model_by_id with multi_embedding model type.
 
         This test verifies that:
-        1. When model_type is 'multi_embedding', JinaEmbedding is created
+        1. When model_type is 'multi_embedding', JinaMultimodalEmbedding is created
         2. Correct parameters are passed to Jina embedding model
         """
         from backend.services.vectordatabase_service import get_embedding_model_by_id

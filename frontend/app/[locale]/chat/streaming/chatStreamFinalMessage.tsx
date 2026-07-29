@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import dynamic from "next/dynamic";
 import {
   Copy,
   Volume2,
@@ -10,7 +11,16 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+// Lazy-load MarkdownRenderer so the heavy markdown pipeline
+// (react-syntax-highlighter + refractor + prismjs) is split into a separate
+// chunk and excluded from the /zh/chat route's first-compile module graph.
+const MarkdownRenderer = dynamic(
+  () =>
+    import("@/components/common/markdownRenderer").then(
+      (m) => ({ default: m.MarkdownRenderer })
+    ),
+  { ssr: false, loading: () => <div className="h-4 animate-pulse" /> }
+);
 
 /**
  * Convert custom code tags to standard markdown code fences

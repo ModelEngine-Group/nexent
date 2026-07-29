@@ -400,7 +400,7 @@ class HybridSearchRequest(BaseModel):
     """Request payload for hybrid knowledge-base searches."""
     query: str = Field(..., min_length=1,
                        description="Search query text")
-    index_names: List[str] = Field(..., min_items=1,
+    index_names: List[str] = Field(..., min_length=1,
                                    description="List of index names to search")
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
@@ -675,8 +675,7 @@ class ExportAndImportAgentInfo(BaseModel):
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class MCPInfo(BaseModel):

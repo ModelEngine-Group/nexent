@@ -21,7 +21,8 @@ export type ModelSource =
   | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine"
-  | "volcengine";
+  | "volcengine"
+  | "jina";
 
 // Model type
 export type ModelType =

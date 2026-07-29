@@ -1560,6 +1560,7 @@ class ConversationFile(TableBase):
     chunk_count = Column(Integer, nullable=False, default=0, doc="Number of chunks produced")
     fulltext_key = Column(String(512), doc="MinIO object key for the cached fulltext extraction")
     embedding_model = Column(String(128), doc="Embedding model used for chunk_search mode")
+    file_mode = Column(String(32), default="full_text_reference", doc="Processing mode: full_text_reference/chunk_search")
     error_message = Column(Text, doc="Error details when status is failed")
 
     __table_args__ = (

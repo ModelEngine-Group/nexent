@@ -159,7 +159,11 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
     apt-get install -y --no-install-recommends --fix-missing \
         libreoffice \
         fontconfig \
-        fonts-noto-cjk && \
+        fonts-noto-cjk \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-chi-sim \
+        tesseract-ocr-eng && \
     fc-cache -fv && \
     apt-get autoremove -y && \
     rm -rf /tmp/* /var/tmp/*

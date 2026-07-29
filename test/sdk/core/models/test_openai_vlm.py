@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -340,9 +341,34 @@ def test_prepare_media_message_audio(vl_model_instance):
         system_prompt="Listen carefully",
     )
 
-    assert messages[0]["content"][0]["type"] == "audio_url"
-    assert messages[0]["content"][0]["audio_url"]["url"].startswith("data:audio/mpeg;base64,")
+    assert messages[0]["content"][0]["type"] == "input_audio"
+    assert messages[0]["content"][0]["input_audio"]["data"].startswith("data:audio/mpeg;base64,")
+    assert messages[0]["content"][0]["input_audio"]["data"].endswith(base64.b64encode(b"audio bytes").decode("utf-8"))
+    assert messages[0]["content"][0]["input_audio"]["format"] == "mp3"
     assert messages[0]["content"][1] == {"type": "text", "text": "Listen carefully"}
+
+
+def test_prepare_media_message_audio_format_mapping(vl_model_instance):
+    audio_stream = MagicMock()
+    audio_stream.read.return_value = b"audio bytes"
+
+    for content_type, expected_format in [
+        ("audio/mpeg", "mp3"),
+        ("audio/mp3", "mp3"),
+        ("audio/wav", "wav"),
+        ("audio/x-wav", "wav"),
+        ("audio/flac", "flac"),
+        ("audio/ogg", "ogg"),
+        ("audio/x-m4a", "m4a"),
+        ("application/octet-stream", "mp3"),  # unknown -> mp3 fallback
+    ]:
+        messages = vl_model_instance.prepare_media_message(
+            audio_stream,
+            media_type="audio",
+            content_type=content_type,
+            system_prompt="Listen carefully",
+        )
+        assert messages[0]["content"][0]["input_audio"]["format"] == expected_format, content_type
 
 
 def test_prepare_media_message_video(vl_model_instance):
