@@ -88,6 +88,7 @@ export interface ThreadProps {
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 /**
@@ -124,6 +125,7 @@ export const Thread: FC<ThreadProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -181,6 +183,7 @@ export const Thread: FC<ThreadProps> = ({
         onModelChange={onModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
+        showModelSelector={showModelSelector}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -199,6 +202,7 @@ interface ThreadViewProps {
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -214,6 +218,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector,
   hasMessages,
   displayName,
   conversationTitle,
@@ -257,6 +262,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             onModelChange={onModelChange}
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>

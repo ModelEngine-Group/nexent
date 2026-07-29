@@ -4,7 +4,7 @@ from copy import deepcopy
 import json
 import keyword
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -15,6 +15,7 @@ NL2AGENT_NAME = "__nl2agent_runtime__"
 SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
 NL2A_WRAPPER_NAME = "nl2a_wrapper"
 MAX_TOOL_RECOMMENDATIONS = 5
+FEW_SHOT_EXAMPLE_COUNT = 2
 NL2A_SUBTYPES = Literal["local_mcp_recommendation", "agent_draft"]
 
 LOCAL_MCP_RECOMMENDATION_JSON_TEMPLATE: dict[str, Any] = {
@@ -126,6 +127,16 @@ class Nl2aFewShotExample(BaseModel):
     final_answer: str = Field(min_length=1)
 
 
+Nl2aFewShotExamples = Annotated[
+    list[Nl2aFewShotExample],
+    Field(
+        min_length=FEW_SHOT_EXAMPLE_COUNT,
+        max_length=FEW_SHOT_EXAMPLE_COUNT,
+        description="Exactly two structured few-shot examples.",
+    ),
+]
+
+
 class Nl2aLocalMcpRecommendationInput(BaseModel):
     """Wrapper input for a real installed-tool search observation."""
 
@@ -157,11 +168,7 @@ class Nl2aAgentDraftInput(BaseModel):
     greeting_message: str = Field(min_length=1)
     example_questions: list[str] = Field(min_length=3, max_length=5)
     selected_tool_names: list[str] = Field(max_length=MAX_TOOL_RECOMMENDATIONS)
-    few_shot_examples: list[Nl2aFewShotExample] | None = Field(
-        default=None,
-        min_length=3,
-        max_length=5,
-    )
+    few_shot_examples: Nl2aFewShotExamples | None = None
 
     @model_validator(mode="after")
     def validate_few_shot_tools(self) -> "Nl2aAgentDraftInput":
@@ -209,13 +216,16 @@ class Nl2aAgentDraftInput(BaseModel):
         return self
 
 
-def _render_few_shots(payload: Nl2aAgentDraftInput) -> str | None:
-    if payload.few_shot_examples is None:
+def _render_few_shots(
+    language: Literal["en", "zh"],
+    few_shot_examples: Nl2aFewShotExamples | None,
+) -> str | None:
+    if few_shot_examples is None:
         return None
 
     rendered_examples: list[str] = []
-    for example_index, example in enumerate(payload.few_shot_examples, start=1):
-        if payload.language == "en":
+    for example_index, example in enumerate(few_shot_examples, start=1):
+        if language == "en":
             lines = [f'Task {example_index}: "{example.user_input}"']
         else:
             lines = [f'任务{example_index}："{example.user_input}"']
@@ -235,11 +245,11 @@ def _render_few_shots(payload: Nl2aAgentDraftInput) -> str | None:
                 code_lines.append(f"{variable_name} = {call.name}({arguments})")
                 code_lines.append(f"print({variable_name})")
 
-            think_label = "Think" if payload.language == "en" else "思考"
-            code_label = "Code" if payload.language == "en" else "代码"
+            think_label = "Think" if language == "en" else "思考"
+            code_label = "Code" if language == "en" else "代码"
             observation_prefix = (
                 "# System returns Observation"
-                if payload.language == "en"
+                if language == "en"
                 else "# 系统返回 Observation"
             )
             lines.extend(
@@ -256,7 +266,7 @@ def _render_few_shots(payload: Nl2aAgentDraftInput) -> str | None:
                 ]
             )
 
-        think_label = "Think" if payload.language == "en" else "思考"
+        think_label = "Think" if language == "en" else "思考"
         lines.extend(
             [
                 "",
@@ -282,7 +292,7 @@ def build_nl2a_wrapper(
     greeting_message: str | None = None,
     example_questions: list[str] | None = None,
     selected_tool_names: list[str] | None = None,
-    few_shot_examples: list[Nl2aFewShotExample] | None = None,
+    few_shot_examples: Nl2aFewShotExamples | None = None,
 ) -> str:
     """Fill the JSON template selected by subtype and return its wrapper."""
 
@@ -376,7 +386,10 @@ def build_nl2a_wrapper(
             description=payload.description,
             duty_prompt=payload.duty_prompt,
             constraint_prompt=payload.constraint_prompt,
-            few_shots_prompt=_render_few_shots(payload),
+            few_shots_prompt=_render_few_shots(
+                payload.language,
+                payload.few_shot_examples,
+            ),
             greeting_message=payload.greeting_message,
             example_questions=payload.example_questions,
         )
@@ -417,10 +430,12 @@ You are NL2Agent, an ephemeral assistant that turns a user's requirements into i
 Think: Briefly explain why the search is needed.
 Code:
 <code>
-result = {tool_name}(keywords=["capability keyword", "another capability"])
+import json
+
+result = json.loads({tool_name}(keywords=["capability keyword", "another capability"]))
 print(result)
 </code>
-Continue only after the system returns the real Observation. For the English retry, use the same action with translated keywords. Executable actions use `<code>...</code>` tags.""",
+The MCP tool returns JSON text, so decode it into a JSON object before using it as `search_result`. Continue only after the system returns the real Observation. For the English retry, use the same action with translated keywords. Executable actions use `<code>...</code>` tags.""",
             """#### Clarification
 When requirements are unclear, return the question directly without a code action and stop the loop:
 What task should the assistant handle, and what result should it produce?""",
@@ -429,7 +444,7 @@ What task should the assistant handle, and what result should it produce?""",
 The selection input uses this protocol:
 {{"type":"nl2agent_tool_selection","tools":[]}}
 
-This is the only confirmation gate for draft generation. Use the preceding conversation and the tools in this current input to define the complete draft, then call `{wrapper_name}` with subtype `agent_draft`. This path does not call the search tool. Use each selected tool's exact `name`; never invent tools or inputs. When tools are selected, provide a numbered `constraint_prompt` and 3 to 5 structured `few_shot_examples`. When no tools are selected, set `constraint_prompt` to an empty string, `selected_tool_names` to an empty list, and `few_shot_examples` to `None`.""",
+This is the only confirmation gate for draft generation. Use the preceding conversation and the tools in this current input to define the complete draft, then call `{wrapper_name}` with subtype `agent_draft`. This path does not call the search tool. Use each selected tool's exact `name`; never invent tools or inputs. When tools are selected, provide a numbered `constraint_prompt` and exactly 2 structured `few_shot_examples`. When no tools are selected, set `constraint_prompt` to an empty string, `selected_tool_names` to an empty list, and `few_shot_examples` to `None`.""",
             """#### Agent Draft Generation Rules
 Generate every draft field according to the ordinary Agent configuration rules.
 
@@ -449,7 +464,7 @@ Generate every draft field according to the ordinary Agent configuration rules.
 3. An empty tool selection uses an empty string.
 
 ##### Few-Shot Prompt
-1. A selected tool set produces 3 to 5 concrete examples. Each `user_input` is a specific hypothetical question a user could actually ask.
+1. A selected tool set produces exactly 2 concrete examples. Each `user_input` is a specific hypothetical question a user could actually ask.
 2. Each example follows the ordinary Agent execution flow: one or more Think-Code-Observation steps, then a final Think and a concrete final answer.
 3. Each step's `reasoning` identifies the information or action needed and explains the decision and expected result.
 4. Each `tool_calls` entry uses an exact selected tool name, declared keyword argument names, and concrete argument values. Calls use result variables and `print()` in the rendered prompt.
@@ -463,7 +478,7 @@ Generate every draft field according to the ordinary Agent configuration rules.
 ##### Greeting and Example Questions
 1. `greeting_message` is a concise, friendly 1-to-2-sentence introduction to the Agent's identity and core capabilities.
 2. `example_questions` contains 3 to 5 specific, practical questions with clear use cases that demonstrate the Agent's core functions.
-3. When few-shot examples exist, derive the example questions from their user scenarios, preserve their meaning, and simplify them into natural conversational questions.""",
+3. When few-shot examples exist, include simplified versions of both user scenarios in `example_questions`, then add distinct questions as needed to reach 3 to 5 items.""",
             """### Python Code Specifications
 1. Each search or wrapper action uses simple, valid Python inside literal `<code>` and `</code>` tags.
 2. Each action calls one business tool with keyword arguments, saves the return value in a variable, and prints that variable.
@@ -475,7 +490,7 @@ Generate every draft field according to the ordinary Agent configuration rules.
 #### Wrapper Actions
 `{wrapper_name}` is the only way to produce structured output. Before the current user message confirms tool selection, use only subtype `local_mcp_recommendation`; subtype `agent_draft` is unavailable. Use subtype `agent_draft` only for the current `nl2agent_tool_selection` confirmation input. Never compose, copy, or return the wrapper JSON yourself.
 
-After a search Observation, call it with the unmodified result variable and the IDs of the filtered candidates:
+After a search Observation, call it with the decoded JSON object and the IDs of the filtered candidates:
 Think: I will validate and wrap the selected recommendations.
 Code:
 <code>
@@ -506,7 +521,6 @@ wrapped = {wrapper_name}(
     few_shot_examples=[
         {{"user_input": "Will it rain in Shanghai tomorrow?", "steps": [{{"reasoning": "Get Shanghai's forecast.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Shanghai"}}}}], "observation": "The forecast reports rain tomorrow."}}], "final_reasoning": "The forecast directly answers the question.", "final_answer": "Yes. Rain is forecast in Shanghai tomorrow, so bring an umbrella."}},
         {{"user_input": "What should I wear in Beijing?", "steps": [{{"reasoning": "Get Beijing's forecast first.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Beijing"}}}}], "observation": "Beijing will be cool and windy today."}}], "final_reasoning": "The conditions support layered clothing.", "final_answer": "Wear layers and a wind-resistant jacket today."}},
-        {{"user_input": "Is Hangzhou suitable for hiking today?", "steps": [{{"reasoning": "Check Hangzhou's current conditions.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Hangzhou"}}}}], "observation": "Conditions are dry with mild temperatures."}}], "final_reasoning": "Dry and mild weather is suitable for hiking.", "final_answer": "Yes. Today's dry, mild conditions are suitable for hiking."}},
     ],
 )
 print(wrapped)
@@ -530,10 +544,12 @@ Continue only after the real wrapper Observation. Its structured payload is emit
 思考：简要说明为什么需要搜索。
 代码：
 <code>
-result = {tool_name}(keywords=["能力关键词", "另一个能力关键词"])
+import json
+
+result = json.loads({tool_name}(keywords=["能力关键词", "另一个能力关键词"]))
 print(result)
 </code>
-等待系统返回真实 Observation 后再继续。英文重试使用相同动作并替换为翻译后的关键词。可执行动作使用 `<code>...</code>` 标签。""",
+MCP 工具返回 JSON 文本，因此必须先解析为 JSON 对象，再用作 `search_result`。等待系统返回真实 Observation 后再继续。英文重试使用相同动作并替换为翻译后的关键词。可执行动作使用 `<code>...</code>` 标签。""",
             """#### 澄清
 需求不清楚时，不生成代码，直接返回问题并停止循环：
 这个智能体需要完成什么任务，并产出什么结果？""",
@@ -542,7 +558,7 @@ print(result)
 工具选择输入使用以下协议：
 {{"type":"nl2agent_tool_selection","tools":[]}}
 
-这是生成草稿的唯一确认门槛。结合此前对话和本轮输入中的已选工具生成完整草稿，然后使用 `agent_draft` 子类型调用 `{wrapper_name}`。此流程不调用搜索工具。只使用已选工具的真实 `name`，不得编造工具或参数。选择了工具时生成从序号 1 开始的 `constraint_prompt` 和 3 到 5 个结构化 `few_shot_examples`；未选择工具时将 `constraint_prompt` 设为空字符串、`selected_tool_names` 设为空列表，并将 `few_shot_examples` 设为 `None`。""",
+这是生成草稿的唯一确认门槛。结合此前对话和本轮输入中的已选工具生成完整草稿，然后使用 `agent_draft` 子类型调用 `{wrapper_name}`。此流程不调用搜索工具。只使用已选工具的真实 `name`，不得编造工具或参数。选择了工具时生成从序号 1 开始的 `constraint_prompt` 和恰好 2 个结构化 `few_shot_examples`；未选择工具时将 `constraint_prompt` 设为空字符串、`selected_tool_names` 设为空列表，并将 `few_shot_examples` 设为 `None`。""",
             """#### 智能体草稿生成规则
 所有草稿字段严格按照普通智能体配置规则生成。
 
@@ -562,7 +578,7 @@ print(result)
 3. 没有已选工具时使用空字符串。
 
 ##### Few-shot 提示词
-1. 选择工具时生成 3 到 5 个具体示例，每个 `user_input` 都是用户真实可能提出的具体假设问题。
+1. 选择工具时生成恰好 2 个具体示例，每个 `user_input` 都是用户真实可能提出的具体假设问题。
 2. 每个示例严格遵循普通 Agent 执行流程：一个或多个“思考-代码-Observation”步骤，随后是最终思考和具体最终回答。
 3. 每一步的 `reasoning` 明确需要通过工具获取的信息或执行的操作，并解释决策逻辑和预期结果。
 4. 每个 `tool_calls` 条目使用已选工具的准确名称、工具声明的关键字参数名和具体参数值；wrapper 渲染后使用变量保存调用结果并通过 `print()` 输出。
@@ -576,7 +592,7 @@ print(result)
 ##### 开场白和示例问题
 1. `greeting_message` 使用简洁友好的 1 到 2 句话介绍智能体身份和核心能力，避免过长或过于正式。
 2. `example_questions` 包含 3 到 5 个具体、实用且使用场景明确的问题，并体现智能体的核心功能。
-3. 存在 few-shot 示例时，优先从其中提炼用户提问场景，保持语义一致，并简化为自然的对话问题。""",
+3. 存在 few-shot 示例时，`example_questions` 必须包含两个用户场景的简化版本，再按需补充不同问题以达到 3 到 5 个。""",
             """### Python 代码规范
 1. 每次搜索或 wrapper 动作都使用简单、有效的 Python，并放在字面量 `<code>` 和 `</code>` 标签中。
 2. 每个动作使用关键字参数调用一个业务工具，将返回值保存到变量，并通过 `print()` 输出该变量。
@@ -588,7 +604,7 @@ print(result)
 #### Wrapper 动作
 `{wrapper_name}` 是生成结构化输出的唯一方式。当前用户消息确认工具选择前，只能使用 `local_mcp_recommendation` 子类型，`agent_draft` 子类型不可用；只有当前输入是 `nl2agent_tool_selection` 确认消息时才可使用 `agent_draft`。不得自行拼装、复制或返回 wrapper JSON。
 
-收到搜索 Observation 后，将未经修改的结果变量和筛选出的工具 ID 传入：
+收到搜索 Observation 后，将解析后的 JSON 对象和筛选出的工具 ID 传入：
 思考：校验并包装选中的工具推荐。
 代码：
 <code>
@@ -619,7 +635,6 @@ wrapped = {wrapper_name}(
     few_shot_examples=[
         {{"user_input": "上海明天会下雨吗？", "steps": [{{"reasoning": "先查询上海天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "上海"}}}}], "observation": "预报显示上海明天有雨。"}}], "final_reasoning": "预报结果可以直接回答问题。", "final_answer": "会。上海明天有雨，出门建议带伞。"}},
         {{"user_input": "北京今天适合穿什么？", "steps": [{{"reasoning": "先查询北京天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "北京"}}}}], "observation": "北京今天气温较低并伴有风。"}}], "final_reasoning": "低温和风适合分层穿着。", "final_answer": "建议分层穿着，并加一件防风外套。"}},
-        {{"user_input": "杭州今天适合徒步吗？", "steps": [{{"reasoning": "查询杭州当前天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "杭州"}}}}], "observation": "杭州今天干燥，气温温和。"}}], "final_reasoning": "干燥温和的天气适合徒步。", "final_answer": "适合。今天杭州天气干燥温和，可以安排徒步。"}},
     ],
 )
 print(wrapped)
@@ -672,7 +687,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
                 "greeting_message": "str | None",
                 "example_questions": "list[str] | None",
                 "selected_tool_names": "list[str] | None",
-                "few_shot_examples": "list[dict] | None",
+                "few_shot_examples": "list[dict] with exactly 2 items | None",
             },
             separators=(",", ":"),
         ),

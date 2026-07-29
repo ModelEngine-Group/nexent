@@ -12,7 +12,6 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
-from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -73,7 +72,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -93,7 +92,7 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
+    generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     get_conversation_service,
     get_current_run_user_message_id,
     get_latest_assistant_message,
@@ -119,7 +118,6 @@ from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
-from utils.memory_utils import build_memory_config
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -941,7 +939,6 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -1046,9 +1043,6 @@ async def _stream_agent_chunks(
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
-
-            if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
                 artifact_content = data.get("content")
@@ -3768,7 +3762,6 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
     Returns:
         A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
     """
-    from nexent.core.agents.sandbox import SandboxConfig
     from consts.const import (
         NEXENT_SANDBOX_DEFAULT_LEVEL,
         NEXENT_SANDBOX_DEFAULT_SCOPE,

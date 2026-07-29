@@ -304,7 +304,6 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         for question, city in [
             ("上海明天会下雨吗？", "上海"),
             ("北京今天适合穿什么？", "北京"),
-            ("杭州今天适合徒步吗？", "杭州"),
         ]
     ]
     payload = {
@@ -316,7 +315,11 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         "duty_prompt": "回答天气问题。",
         "constraint_prompt": "使用真实工具结果。",
         "greeting_message": "你好，我可以帮助查询天气。",
-        "example_questions": [example["user_input"] for example in examples],
+        "example_questions": [
+            "上海明天会下雨吗？",
+            "北京今天适合穿什么？",
+            "杭州今天适合徒步吗？",
+        ],
         "selected_tool_names": ["weather_forecast"],
         "few_shot_examples": examples,
     }
@@ -329,7 +332,7 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         "北京今天适合穿什么？",
         "杭州今天适合徒步吗？",
     ]
-    assert result["few_shots_prompt"].count("<code>") == 3
+    assert result["few_shots_prompt"].count("<code>") == 2
     assert "任务1" in result["few_shots_prompt"]
     assert "result_1 = weather_forecast(city='上海')" in result["few_shots_prompt"]
     assert "# 系统返回 Observation: 上海 has mild and dry weather." in result["few_shots_prompt"]
@@ -390,10 +393,48 @@ def test_agent_draft_wrapper_rejects_missing_or_unknown_few_shot_tools():
             "final_reasoning": "Use the observation.",
             "final_answer": "A concrete answer.",
         }
-        for index in range(3)
+        for index in range(2)
     ]
     with pytest.raises(ValidationError, match="must use selected tool names"):
         Nl2aAgentDraftInput(**common, few_shot_examples=invalid_examples)
+
+
+@pytest.mark.parametrize("example_count", [1, 3])
+def test_agent_draft_wrapper_requires_exactly_two_few_shot_examples(
+    example_count,
+):
+    examples = [
+        {
+            "user_input": f"Question {index}?",
+            "steps": [
+                {
+                    "reasoning": "Use the selected tool.",
+                    "tool_calls": [
+                        {"name": "weather_forecast", "arguments": {}}
+                    ],
+                    "observation": "A tool result.",
+                }
+            ],
+            "final_reasoning": "Use the observation.",
+            "final_answer": "A concrete answer.",
+        }
+        for index in range(example_count)
+    ]
+
+    with pytest.raises(ValidationError):
+        Nl2aAgentDraftInput(
+            subtype="agent_draft",
+            language="en",
+            name="weather_assistant",
+            display_name="WeatherAssistant",
+            description="Weather help.",
+            duty_prompt="Answer weather questions.",
+            constraint_prompt="Use real observations.",
+            greeting_message="Hello, I can help with weather.",
+            example_questions=["Question one?", "Question two?", "Question three?"],
+            selected_tool_names=["weather_forecast"],
+            few_shot_examples=examples,
+        )
 
 
 @pytest.mark.parametrize(
@@ -472,6 +513,16 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "local_mcp_recommendation",
         "agent_draft",
     ]
+    few_shot_schema = next(
+        option
+        for option in wrapper_tool.parameters["properties"]["few_shot_examples"][
+            "anyOf"
+        ]
+        if option.get("type") == "array"
+    )
+    assert few_shot_schema["minItems"] == 2
+    assert few_shot_schema["maxItems"] == 2
+    assert few_shot_schema["description"] == "Exactly two structured few-shot examples."
     assert wrapper_tool.meta["nexent_internal"] is True
 
 

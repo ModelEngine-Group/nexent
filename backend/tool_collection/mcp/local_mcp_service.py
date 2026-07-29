@@ -9,7 +9,7 @@ from fastmcp.server.dependencies import get_http_request
 from agents.nl2agent_agent import (
     NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    Nl2aFewShotExample,
+    Nl2aFewShotExamples,
     SearchInstalledMcpToolsErrorObservation,
     SearchInstalledMcpToolsObservation,
     build_nl2a_wrapper,
@@ -127,7 +127,7 @@ async def nl2a_wrapper(
     greeting_message: str | None = None,
     example_questions: list[str] | None = None,
     selected_tool_names: list[str] | None = None,
-    few_shot_examples: list[Nl2aFewShotExample] | None = None,
+    few_shot_examples: Nl2aFewShotExamples | None = None,
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
