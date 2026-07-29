@@ -109,10 +109,8 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         side_effect=score_by_document,
     )
 
-    result = json.loads(
-        await search_installed_mcp_tools.fn(
-            [" Weather ", "forecast", "WEATHER"]
-        )
+    result = await search_installed_mcp_tools.fn(
+        [" Weather ", "forecast", "WEATHER"]
     )
 
     get_current_user_id.assert_called_once_with("Bearer tenant-token")
@@ -177,9 +175,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
 @pytest.mark.asyncio
 async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     for keywords in ([], ["   "]):
-        invalid_result = json.loads(
-            await search_installed_mcp_tools.fn(keywords)
-        )
+        invalid_result = await search_installed_mcp_tools.fn(keywords)
         assert invalid_result == {
             "subtype": "local_mcp_recommendation",
             "status": "error",
@@ -203,67 +199,62 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
         side_effect=RuntimeError("private database details"),
     )
 
-    result_text = await search_installed_mcp_tools.fn(["private", "weather"])
+    result = await search_installed_mcp_tools.fn(["private", "weather"])
 
-    assert json.loads(result_text) == {
+    assert result == {
         "subtype": "local_mcp_recommendation",
         "status": "error",
         "code": "tool_search_failed",
         "retryable": True,
     }
-    assert "private-token" not in result_text
-    assert "private database details" not in result_text
+    serialized_result = json.dumps(result)
+    assert "private-token" not in serialized_result
+    assert "private database details" not in serialized_result
 
 
 @pytest.mark.asyncio
 async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
-    search_result = json.dumps(
-        {
-            "subtype": "local_mcp_recommendation",
-            "status": "success",
-            "recommendation_count": 2,
-            "recommendations": [
-                {
-                    "tool_id": tool_id,
-                    "name": name,
-                    "origin_name": None,
-                    "description": f"Tool {tool_id}",
-                    "source": "mcp",
-                    "usage": "weather-server",
-                    "labels": ["weather"],
-                    "inputs": {"city": "string"},
-                    "score": score,
-                }
-                for tool_id, name, score in [
-                    (7, "primary_weather", 0.95),
-                    (12, "secondary_weather", 0.75),
-                ]
-            ],
-        }
-    )
+    search_result = {
+        "subtype": "local_mcp_recommendation",
+        "status": "success",
+        "recommendation_count": 2,
+        "recommendations": [
+            {
+                "tool_id": tool_id,
+                "name": name,
+                "origin_name": None,
+                "description": f"Tool {tool_id}",
+                "source": "mcp",
+                "usage": "weather-server",
+                "labels": ["weather"],
+                "inputs": {"city": "string"},
+                "score": score,
+            }
+            for tool_id, name, score in [
+                (7, "primary_weather", 0.95),
+                (12, "secondary_weather", 0.75),
+            ]
+        ],
+    }
 
     result = await nl2a_wrapper.fn(
-        Nl2aLocalMcpRecommendationInput(
-            subtype="local_mcp_recommendation",
-            search_result=search_result,
-            selected_tool_ids=[12],
-        )
+        subtype="local_mcp_recommendation",
+        search_result=search_result,
+        selected_tool_ids=[12],
     )
 
     assert _unwrap_nl2a(result) == {
         "subtype": "local_mcp_recommendation",
         "status": "success",
         "recommendation_count": 1,
-        "recommendations": [json.loads(search_result)["recommendations"][1]],
+        "recommendations": [search_result["recommendations"][1]],
     }
 
     with pytest.raises(ValueError, match="not present in search_result"):
         await nl2a_wrapper.fn(
-            Nl2aLocalMcpRecommendationInput(
-                subtype="local_mcp_recommendation",
-                search_result=search_result,
-                selected_tool_ids=[999],
-            )
+            subtype="local_mcp_recommendation",
+            search_result=search_result,
+            selected_tool_ids=[999],
         )
     with pytest.raises(ValidationError, match="selected_tool_ids must be unique"):
         Nl2aLocalMcpRecommendationInput(
@@ -273,18 +264,14 @@ async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
         )
 
     error_result = await nl2a_wrapper.fn(
-        Nl2aLocalMcpRecommendationInput(
-            subtype="local_mcp_recommendation",
-            search_result=json.dumps(
-                {
-                    "subtype": "local_mcp_recommendation",
-                    "status": "error",
-                    "code": "tool_search_failed",
-                    "retryable": True,
-                }
-            ),
-            selected_tool_ids=[],
-        )
+        subtype="local_mcp_recommendation",
+        search_result={
+            "subtype": "local_mcp_recommendation",
+            "status": "error",
+            "code": "tool_search_failed",
+            "retryable": True,
+        },
+        selected_tool_ids=[],
     )
     assert _unwrap_nl2a(error_result) == {
         "subtype": "local_mcp_recommendation",
@@ -320,21 +307,21 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
             ("杭州今天适合徒步吗？", "杭州"),
         ]
     ]
-    payload = Nl2aAgentDraftInput(
-        subtype="agent_draft",
-        language="zh",
-        name="weather_assistant",
-        display_name="天气助手",
-        description="查询天气并提供出行建议。",
-        duty_prompt="回答天气问题。",
-        constraint_prompt="使用真实工具结果。",
-        greeting_message="你好，我可以帮助查询天气。",
-        example_questions=[example["user_input"] for example in examples],
-        selected_tool_names=["weather_forecast"],
-        few_shot_examples=examples,
-    )
+    payload = {
+        "subtype": "agent_draft",
+        "language": "zh",
+        "name": "weather_assistant",
+        "display_name": "天气助手",
+        "description": "查询天气并提供出行建议。",
+        "duty_prompt": "回答天气问题。",
+        "constraint_prompt": "使用真实工具结果。",
+        "greeting_message": "你好，我可以帮助查询天气。",
+        "example_questions": [example["user_input"] for example in examples],
+        "selected_tool_names": ["weather_forecast"],
+        "few_shot_examples": examples,
+    }
 
-    result = _unwrap_nl2a(await nl2a_wrapper.fn(payload))
+    result = _unwrap_nl2a(await nl2a_wrapper.fn(**payload))
 
     assert result["subtype"] == "agent_draft"
     assert result["example_questions"] == [
@@ -350,24 +337,24 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
     assert "selected_tool_names" not in result
     assert "few_shot_examples" not in result
 
-    no_tool_payload = Nl2aAgentDraftInput(
-        subtype="agent_draft",
-        language="en",
-        name="writing_assistant",
-        display_name="WritingAssistant",
-        description="Helps improve writing.",
-        duty_prompt="Improve user-provided text.",
-        constraint_prompt="",
-        greeting_message="Hello, I can help improve your writing.",
-        example_questions=[
+    no_tool_payload = {
+        "subtype": "agent_draft",
+        "language": "en",
+        "name": "writing_assistant",
+        "display_name": "WritingAssistant",
+        "description": "Helps improve writing.",
+        "duty_prompt": "Improve user-provided text.",
+        "constraint_prompt": "",
+        "greeting_message": "Hello, I can help improve your writing.",
+        "example_questions": [
             "Can you improve this paragraph?",
             "Can you make this more concise?",
             "Can you correct the grammar?",
         ],
-        selected_tool_names=[],
-        few_shot_examples=None,
-    )
-    no_tool_result = _unwrap_nl2a(await nl2a_wrapper.fn(no_tool_payload))
+        "selected_tool_names": [],
+        "few_shot_examples": None,
+    }
+    no_tool_result = _unwrap_nl2a(await nl2a_wrapper.fn(**no_tool_payload))
     assert no_tool_result["constraint_prompt"] == ""
     assert no_tool_result["few_shots_prompt"] is None
 
@@ -465,11 +452,26 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert tool.meta["nexent_internal"] is True
     assert "print(result)" in tool.description
     assert wrapper_tool.name == NL2A_WRAPPER_NAME
-    assert wrapper_tool.parameters["required"] == ["payload"]
-    assert wrapper_tool.parameters["properties"]["payload"]["discriminator"] == {
-        "propertyName": "subtype"
+    assert wrapper_tool.parameters["required"] == ["subtype"]
+    assert set(wrapper_tool.parameters["properties"]) == {
+        "subtype",
+        "search_result",
+        "selected_tool_ids",
+        "language",
+        "name",
+        "display_name",
+        "description",
+        "duty_prompt",
+        "constraint_prompt",
+        "greeting_message",
+        "example_questions",
+        "selected_tool_names",
+        "few_shot_examples",
     }
-    assert len(wrapper_tool.parameters["properties"]["payload"]["oneOf"]) == 2
+    assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
+        "local_mcp_recommendation",
+        "agent_draft",
+    ]
     assert wrapper_tool.meta["nexent_internal"] is True
 
 
@@ -491,7 +493,7 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
         return_value=[],
     )
 
-    result = json.loads(await search_installed_mcp_tools.fn(["weather"]))
+    result = await search_installed_mcp_tools.fn(["weather"])
 
     assert result == {
         "subtype": "local_mcp_recommendation",

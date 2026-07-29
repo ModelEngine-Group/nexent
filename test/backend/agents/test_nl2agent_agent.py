@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agents.nl2agent_agent import (
@@ -78,10 +80,11 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "<nl2a>" not in prompt
     assert "</nl2a>" not in prompt
     assert "final_answer(" not in prompt
-    assert '"subtype": "local_mcp_recommendation"' in prompt
-    assert '"subtype": "agent_draft"' in prompt
+    assert 'subtype="local_mcp_recommendation"' in prompt
+    assert 'subtype="agent_draft"' in prompt
     assert 'result = runtime_search(keywords=[' in prompt
-    assert "wrapped = runtime_wrapper(payload={" in prompt
+    assert "wrapped = runtime_wrapper(" in prompt
+    assert "search_result=result" in prompt
     assert "print(result)" in prompt
     assert "few_shots_prompt" not in prompt
 
@@ -143,6 +146,10 @@ def test_create_nl2agent_agent_config_has_only_runtime_tools():
     assert all(tool.source == "mcp" for tool in config.tools)
     assert all(tool.usage == "outer-apis" for tool in config.tools)
     assert config.tools[0].inputs == '{"keywords": "list[str]"}'
-    assert config.tools[1].inputs == '{"payload": "Nl2aWrapperPayload"}'
+    wrapper_inputs = json.loads(config.tools[1].inputs)
+    assert wrapper_inputs["subtype"] == "str"
+    assert wrapper_inputs["search_result"] == "dict | None"
+    assert wrapper_inputs["language"] == "str | None"
+    assert wrapper_inputs["few_shot_examples"] == "list[dict] | None"
     assert all(tool.metadata is None for tool in config.tools)
     assert "持久化由产品流程完成" in config.instructions

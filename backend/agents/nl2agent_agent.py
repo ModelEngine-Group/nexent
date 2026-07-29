@@ -1,9 +1,10 @@
 """Build the ephemeral NL2Agent and its MCP tool configuration."""
 
+from copy import deepcopy
 import json
 import keyword
 import re
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +15,26 @@ NL2AGENT_NAME = "__nl2agent_runtime__"
 SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
 NL2A_WRAPPER_NAME = "nl2a_wrapper"
 MAX_TOOL_RECOMMENDATIONS = 5
+NL2A_SUBTYPES = Literal["local_mcp_recommendation", "agent_draft"]
+
+LOCAL_MCP_RECOMMENDATION_JSON_TEMPLATE: dict[str, Any] = {
+    "subtype": "local_mcp_recommendation",
+    "status": "success",
+    "recommendation_count": 0,
+    "recommendations": [],
+}
+
+AGENT_DRAFT_JSON_TEMPLATE: dict[str, Any] = {
+    "subtype": "agent_draft",
+    "name": "",
+    "display_name": "",
+    "description": "",
+    "duty_prompt": "",
+    "constraint_prompt": "",
+    "few_shots_prompt": None,
+    "greeting_message": "",
+    "example_questions": [],
+}
 
 
 class InstalledMcpToolRecommendation(BaseModel):
@@ -111,7 +132,7 @@ class Nl2aLocalMcpRecommendationInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     subtype: Literal["local_mcp_recommendation"]
-    search_result: str = Field(min_length=1)
+    search_result: dict[str, Any]
     selected_tool_ids: list[int] = Field(max_length=MAX_TOOL_RECOMMENDATIONS)
 
     @model_validator(mode="after")
@@ -188,12 +209,6 @@ class Nl2aAgentDraftInput(BaseModel):
         return self
 
 
-Nl2aWrapperPayload = Annotated[
-    Nl2aLocalMcpRecommendationInput | Nl2aAgentDraftInput,
-    Field(discriminator="subtype"),
-]
-
-
 def _render_few_shots(payload: Nl2aAgentDraftInput) -> str | None:
     if payload.few_shot_examples is None:
         return None
@@ -254,26 +269,46 @@ def _render_few_shots(payload: Nl2aAgentDraftInput) -> str | None:
     return "\n\n---\n\n".join(rendered_examples)
 
 
-def build_nl2a_wrapper(payload: Nl2aWrapperPayload) -> str:
-    """Validate one NL2Agent payload and return its canonical wrapper."""
+def build_nl2a_wrapper(
+    subtype: NL2A_SUBTYPES,
+    search_result: dict[str, Any] | None = None,
+    selected_tool_ids: list[int] | None = None,
+    language: Literal["en", "zh"] | None = None,
+    name: str | None = None,
+    display_name: str | None = None,
+    description: str | None = None,
+    duty_prompt: str | None = None,
+    constraint_prompt: str | None = None,
+    greeting_message: str | None = None,
+    example_questions: list[str] | None = None,
+    selected_tool_names: list[str] | None = None,
+    few_shot_examples: list[Nl2aFewShotExample] | None = None,
+) -> str:
+    """Fill the JSON template selected by subtype and return its wrapper."""
 
-    if isinstance(payload, Nl2aLocalMcpRecommendationInput):
-        try:
-            search_payload = json.loads(payload.search_result)
-        except json.JSONDecodeError as exc:
-            raise ValueError("search_result must be valid JSON") from exc
-        if not isinstance(search_payload, dict):
-            raise ValueError("search_result must contain a JSON object")
-
-        if search_payload.get("status") == "error":
+    if subtype == "local_mcp_recommendation":
+        if search_result is None or selected_tool_ids is None:
+            raise ValueError(
+                "local_mcp_recommendation requires search_result and selected_tool_ids"
+            )
+        payload = Nl2aLocalMcpRecommendationInput(
+            subtype=subtype,
+            search_result=search_result,
+            selected_tool_ids=selected_tool_ids,
+        )
+        if payload.search_result.get("status") == "error":
             if payload.selected_tool_ids:
                 raise ValueError("selected_tool_ids must be empty for a search error")
-            output: BaseModel = SearchInstalledMcpToolsErrorObservation.model_validate(
-                search_payload
+            observation = SearchInstalledMcpToolsErrorObservation.model_validate(
+                payload.search_result
             )
-        elif search_payload.get("status") == "success":
+            output = deepcopy(LOCAL_MCP_RECOMMENDATION_JSON_TEMPLATE)
+            output.pop("recommendation_count")
+            output.pop("recommendations")
+            output.update(observation.model_dump(mode="json", exclude={"subtype"}))
+        elif payload.search_result.get("status") == "success":
             observation = SearchInstalledMcpToolsObservation.model_validate(
-                search_payload
+                payload.search_result
             )
             selected_ids = set(payload.selected_tool_ids)
             available_ids = {
@@ -291,14 +326,51 @@ def build_nl2a_wrapper(payload: Nl2aWrapperPayload) -> str:
                 for recommendation in observation.recommendations
                 if recommendation.tool_id in selected_ids
             ]
-            output = SearchInstalledMcpToolsObservation(
+            output = deepcopy(LOCAL_MCP_RECOMMENDATION_JSON_TEMPLATE)
+            output.update(
                 recommendation_count=len(recommendations),
-                recommendations=recommendations,
+                recommendations=[
+                    recommendation.model_dump(mode="json")
+                    for recommendation in recommendations
+                ],
             )
         else:
             raise ValueError("search_result has an unsupported status")
-    else:
-        output = GeneratedAgentDraft(
+    elif subtype == "agent_draft":
+        required_parameters = {
+            "language": language,
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+            "duty_prompt": duty_prompt,
+            "constraint_prompt": constraint_prompt,
+            "greeting_message": greeting_message,
+            "example_questions": example_questions,
+            "selected_tool_names": selected_tool_names,
+        }
+        missing_parameters = [
+            parameter
+            for parameter, value in required_parameters.items()
+            if value is None
+        ]
+        if missing_parameters:
+            raise ValueError(
+                "agent_draft requires parameters: " + ", ".join(missing_parameters)
+            )
+        payload = Nl2aAgentDraftInput(
+            subtype=subtype,
+            language=language,
+            name=name,
+            display_name=display_name,
+            description=description,
+            duty_prompt=duty_prompt,
+            constraint_prompt=constraint_prompt,
+            greeting_message=greeting_message,
+            example_questions=example_questions,
+            selected_tool_names=selected_tool_names,
+            few_shot_examples=few_shot_examples,
+        )
+        draft = GeneratedAgentDraft(
             name=payload.name,
             display_name=payload.display_name,
             description=payload.description,
@@ -308,9 +380,13 @@ def build_nl2a_wrapper(payload: Nl2aWrapperPayload) -> str:
             greeting_message=payload.greeting_message,
             example_questions=payload.example_questions,
         )
+        output = deepcopy(AGENT_DRAFT_JSON_TEMPLATE)
+        output.update(draft.model_dump(mode="json", exclude={"subtype"}))
+    else:
+        raise ValueError(f"unsupported nl2a subtype: {subtype}")
 
     serialized = json.dumps(
-        output.model_dump(mode="json"),
+        output,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -368,11 +444,11 @@ After a search Observation, call it with the unmodified result variable and the 
 Think: I will validate and wrap the selected recommendations.
 Code:
 <code>
-wrapped = {wrapper_name}(payload={{
-    "subtype": "local_mcp_recommendation",
-    "search_result": result,
-    "selected_tool_ids": [7, 12],
-}})
+wrapped = {wrapper_name}(
+    subtype="local_mcp_recommendation",
+    search_result=result,
+    selected_tool_ids=[7, 12],
+)
 print(wrapped)
 </code>
 For an error Observation, use the same call with an empty ID list.
@@ -381,23 +457,23 @@ For a tool selection input, call it with every required draft field. Do not put 
 Think: I will validate and wrap the complete agent draft.
 Code:
 <code>
-wrapped = {wrapper_name}(payload={{
-    "subtype": "agent_draft",
-    "language": "en",
-    "name": "weather_assistant",
-    "display_name": "WeatherAssistant",
-    "description": "You are a weather assistant that checks forecasts and provides practical travel advice.",
-    "duty_prompt": "You are a weather assistant that answers weather questions and provides practical travel advice.",
-    "constraint_prompt": "1. Use the selected weather tool when current conditions or forecasts are needed.\\n2. Base weather claims on the returned Observation.",
-    "greeting_message": "Hello! I can check forecasts and help you plan for the weather.",
-    "example_questions": ["Will it rain in Shanghai tomorrow?", "What should I wear in Beijing?", "Is Hangzhou suitable for hiking today?"],
-    "selected_tool_names": ["weather_forecast"],
-    "few_shot_examples": [
+wrapped = {wrapper_name}(
+    subtype="agent_draft",
+    language="en",
+    name="weather_assistant",
+    display_name="WeatherAssistant",
+    description="You are a weather assistant that checks forecasts and provides practical travel advice.",
+    duty_prompt="You are a weather assistant that answers weather questions and provides practical travel advice.",
+    constraint_prompt="1. Use the selected weather tool when current conditions or forecasts are needed.\\n2. Base weather claims on the returned Observation.",
+    greeting_message="Hello! I can check forecasts and help you plan for the weather.",
+    example_questions=["Will it rain in Shanghai tomorrow?", "What should I wear in Beijing?", "Is Hangzhou suitable for hiking today?"],
+    selected_tool_names=["weather_forecast"],
+    few_shot_examples=[
         {{"user_input": "Will it rain in Shanghai tomorrow?", "steps": [{{"reasoning": "Get Shanghai's forecast.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Shanghai"}}}}], "observation": "The forecast reports rain tomorrow."}}], "final_reasoning": "The forecast directly answers the question.", "final_answer": "Yes. Rain is forecast in Shanghai tomorrow, so bring an umbrella."}},
         {{"user_input": "What should I wear in Beijing?", "steps": [{{"reasoning": "Get Beijing's forecast first.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Beijing"}}}}], "observation": "Beijing will be cool and windy today."}}], "final_reasoning": "The conditions support layered clothing.", "final_answer": "Wear layers and a wind-resistant jacket today."}},
         {{"user_input": "Is Hangzhou suitable for hiking today?", "steps": [{{"reasoning": "Check Hangzhou's current conditions.", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "Hangzhou"}}}}], "observation": "Conditions are dry with mild temperatures."}}], "final_reasoning": "Dry and mild weather is suitable for hiking.", "final_answer": "Yes. Today's dry, mild conditions are suitable for hiking."}},
     ],
-}})
+)
 print(wrapped)
 </code>
 
@@ -446,11 +522,11 @@ print(result)
 思考：校验并包装选中的工具推荐。
 代码：
 <code>
-wrapped = {wrapper_name}(payload={{
-    "subtype": "local_mcp_recommendation",
-    "search_result": result,
-    "selected_tool_ids": [7, 12],
-}})
+wrapped = {wrapper_name}(
+    subtype="local_mcp_recommendation",
+    search_result=result,
+    selected_tool_ids=[7, 12],
+)
 print(wrapped)
 </code>
 如果 Observation 是错误结果，使用相同调用并传入空 ID 列表。
@@ -459,23 +535,23 @@ print(wrapped)
 思考：校验并包装完整的智能体草稿。
 代码：
 <code>
-wrapped = {wrapper_name}(payload={{
-    "subtype": "agent_draft",
-    "language": "zh",
-    "name": "weather_assistant",
-    "display_name": "天气助手",
-    "description": "你是一个天气助手，可以查询天气并提供实用的出行建议。",
-    "duty_prompt": "你是一个天气助手，负责回答天气问题并提供实用的出行建议。",
-    "constraint_prompt": "1. 需要当前天气或预报时使用已选天气工具。\\n2. 天气结论必须基于工具返回的 Observation。",
-    "greeting_message": "你好！我可以查询天气预报并帮助你规划出行。",
-    "example_questions": ["上海明天会下雨吗？", "北京今天适合穿什么？", "杭州今天适合徒步吗？"],
-    "selected_tool_names": ["weather_forecast"],
-    "few_shot_examples": [
+wrapped = {wrapper_name}(
+    subtype="agent_draft",
+    language="zh",
+    name="weather_assistant",
+    display_name="天气助手",
+    description="你是一个天气助手，可以查询天气并提供实用的出行建议。",
+    duty_prompt="你是一个天气助手，负责回答天气问题并提供实用的出行建议。",
+    constraint_prompt="1. 需要当前天气或预报时使用已选天气工具。\\n2. 天气结论必须基于工具返回的 Observation。",
+    greeting_message="你好！我可以查询天气预报并帮助你规划出行。",
+    example_questions=["上海明天会下雨吗？", "北京今天适合穿什么？", "杭州今天适合徒步吗？"],
+    selected_tool_names=["weather_forecast"],
+    few_shot_examples=[
         {{"user_input": "上海明天会下雨吗？", "steps": [{{"reasoning": "先查询上海天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "上海"}}}}], "observation": "预报显示上海明天有雨。"}}], "final_reasoning": "预报结果可以直接回答问题。", "final_answer": "会。上海明天有雨，出门建议带伞。"}},
         {{"user_input": "北京今天适合穿什么？", "steps": [{{"reasoning": "先查询北京天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "北京"}}}}], "observation": "北京今天气温较低并伴有风。"}}], "final_reasoning": "低温和风适合分层穿着。", "final_answer": "建议分层穿着，并加一件防风外套。"}},
         {{"user_input": "杭州今天适合徒步吗？", "steps": [{{"reasoning": "查询杭州当前天气。", "tool_calls": [{{"name": "weather_forecast", "arguments": {{"city": "杭州"}}}}], "observation": "杭州今天干燥，气温温和。"}}], "final_reasoning": "干燥温和的天气适合徒步。", "final_answer": "适合。今天杭州天气干燥温和，可以安排徒步。"}},
     ],
-}})
+)
 print(wrapped)
 </code>
 
@@ -499,7 +575,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
         description=description,
         inputs='{"keywords": "list[str]"}',
-        output_type="string",
+        output_type="object",
         params={},
         source="mcp",
         usage="outer-apis",
@@ -512,7 +588,24 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
             if language == LANGUAGE["EN"]
             else "校验并序列化 NL2Agent 工具推荐或智能体草稿。"
         ),
-        inputs='{"payload": "Nl2aWrapperPayload"}',
+        inputs=json.dumps(
+            {
+                "subtype": "str",
+                "search_result": "dict | None",
+                "selected_tool_ids": "list[int] | None",
+                "language": "str | None",
+                "name": "str | None",
+                "display_name": "str | None",
+                "description": "str | None",
+                "duty_prompt": "str | None",
+                "constraint_prompt": "str | None",
+                "greeting_message": "str | None",
+                "example_questions": "list[str] | None",
+                "selected_tool_names": "list[str] | None",
+                "few_shot_examples": "list[dict] | None",
+            },
+            separators=(",", ":"),
+        ),
         output_type="string",
         params={},
         source="mcp",
