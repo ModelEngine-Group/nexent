@@ -168,6 +168,7 @@ export interface McpServiceItem {
   source: McpSource;
   enabled: McpServiceStatus;
   updatedAt: string;
+  createTime: string;
   tags: string[];
   transportType: McpTransportType;
   serverUrl: string;

@@ -684,7 +684,13 @@ function MineView({
   };
 
   const refreshMineData = async () => {
-    await Promise.all([localList.refetch(), myPublished.refetch()]);
+    await queryClient.invalidateQueries({
+      queryKey: MCP_TOOLS_QUERY_KEYS.communityReview,
+    });
+    await Promise.all([
+      localList.refetch(),
+      myPublished.refetch(),
+    ]);
   };
 
   const handleSubmitVersionUpdate = (
@@ -759,15 +765,20 @@ function MineView({
         });
       }
       message.success("上架申请成功");
-      // Optimistically update local cache to show pending status
       updateLocalReviewStatus(item, "pending");
-      await refreshMineData();
     } catch {
       message.error("上架申请失败");
-      throw new Error("Apply listing failed");
-    } finally {
       setPublishingKey(null);
+      return;
     }
+    // Refresh caches after successful submission; never fail the submission
+    // when a cache refresh has a transient error.
+    try {
+      await refreshMineData();
+    } catch {
+      // cache refresh errors are non-fatal
+    }
+    setPublishingKey(null);
   };
 
   const updateLocalReviewStatus = (
