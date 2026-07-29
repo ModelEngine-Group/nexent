@@ -542,7 +542,6 @@ export default function McpServiceDetailModal({
               <p className="text-xs text-slate-400 -mt-3">此添加方式不支持分组和权限设置</p>
             ) : null}
 
-            <div className="flex flex-col gap-4">
               <TagEditor
                 title={t("mcpTools.detail.tags")}
                 titleClassName="mb-1 block text-sm font-medium text-slate-700"
@@ -552,10 +551,9 @@ export default function McpServiceDetailModal({
                 removeAriaKey="mcpTools.detail.removeTagAria"
                 placeholderKey="mcpTools.detail.tagInputPlaceholder"
               />
-            </div>
           </Form>
 
-          <div className="flex flex-col gap-y-3 border-t border-slate-100 bg-white px-6 py-4">
+          <div className="flex flex-col gap-y-3 bg-white px-6 py-4">
             <div className="flex flex-wrap gap-2">
               {draft.containerId ? (
                 <Button onClick={() => setLogsOpen(true)}>

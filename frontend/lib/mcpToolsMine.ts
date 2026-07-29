@@ -56,11 +56,15 @@ export function getMineCardMenuActions(
 
   const reviewStatus = onlineService?.reviewStatus || item.service.reviewStatus;
 
-  if (reviewStatus === "pending") {
+  // Always show "view review progress" for any submitted status (pending/approved/rejected)
+  if (reviewStatus === "pending" || reviewStatus === "approved" || reviewStatus === "rejected") {
     actions.push("view-review-progress");
-  } else if (reviewStatus === "approved") {
+  }
+
+  // Primary action depends on status
+  if (reviewStatus === "approved") {
     actions.push("submit-version-update");
-  } else {
+  } else if (reviewStatus !== "pending") {
     // never submitted, rejected, or offline → apply for listing
     actions.push("apply-for-listing");
   }
