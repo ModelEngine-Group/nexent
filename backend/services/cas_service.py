@@ -47,6 +47,7 @@ from services.oauth_service import (
 )
 from services.skill_service import init_skill_list_for_tenant
 from services.tool_configuration_service import init_tool_list_for_tenant
+from services.preset_agent_service import init_preset_agents_for_tenant
 from utils.auth_utils import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
@@ -238,6 +239,12 @@ async def _create_project_session(principal: CasPrincipal, redirect: str = "/", 
     if not existing_tenant:
         await init_tool_list_for_tenant(principal.tenant_id, user_id)
         await init_skill_list_for_tenant(principal.tenant_id, user_id)
+        # Seed built-in preset agents for new tenant
+        try:
+            init_preset_agents_for_tenant(principal.tenant_id, user_id)
+        except Exception as e:
+            logger.error(
+                f"Failed to seed preset agents for tenant {principal.tenant_id}: {str(e)}")
 
     now = datetime.now()
     max_local_expiry = now + timedelta(seconds=LOCAL_SESSION_MAX_AGE_SECONDS)

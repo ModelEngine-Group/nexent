@@ -170,24 +170,6 @@ def get_market_agent_detail(agent_repository_id: int) -> Optional[Dict[str, Any]
         return as_dict(record)
 
 
-def get_market_agent_id_by_name(name: str) -> Optional[int]:
-    """Resolve an official/shared template's repository ID by name."""
-    with get_db_session() as session:
-        record = (
-            session.query(AgentRepository)
-            .filter(
-                AgentRepository.name == name,
-                AgentRepository.delete_flag != "Y",
-                or_(
-                    AgentRepository.status == "shared",
-                    AgentRepository.is_official_template.is_(True),
-                ),
-            )
-            .first()
-        )
-        return int(record.agent_repository_id) if record else None
-
-
 def list_categories(
     entity_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:

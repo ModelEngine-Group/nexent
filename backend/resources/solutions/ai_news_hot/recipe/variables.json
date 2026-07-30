@@ -1,0 +1,18 @@
+{
+  "variables": [
+    {
+      "key": "model_name",
+      "label": "使用模型",
+      "description": "资讯简报生成使用的 LLM 模型（从当前租户已配置的可用 LLM 中选择）",
+      "type": "model",
+      "group": "llm",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "layers": [
+    { "layer_type": "agent", "entity_type": "agent", "entity_name": "ai_news_hot", "source": "official" },
+    { "layer_type": "skill", "entity_type": "skill", "entity_name": "aihot", "source": "official" }
+  ],
+  "post_actions": []
+}

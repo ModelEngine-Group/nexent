@@ -1,0 +1,11 @@
+{
+  "name": "ai_news_hot",
+  "display_name": "AI 资讯速递",
+  "description": "实时查询每天精选的 AI 模型/产品/行业/论文动态，自动整理成中文简报，免配置免登录。",
+  "type": "single",
+  "icon": "🔥",
+  "config_status": "ready",
+  "lead": "ai_news_hot",
+  "members": ["ai_news_hot"],
+  "start_agent_id": 1
+}

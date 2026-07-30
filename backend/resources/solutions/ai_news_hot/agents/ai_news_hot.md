@@ -11,12 +11,11 @@ enabled: true
 model_names:
   - "<<TO_CONFIG:model_name>>"
 tools:
-  - run_skill_script
+  - terminal
   - create_file
   - read_skill_md
 skill_names:
   - aihot
-  - file_share
 managed_agents: []
 ---
 
@@ -34,11 +33,11 @@ managed_agents: []
 
 **收到用户关于 AI 资讯的任何问题时，必须调用 `aihot` 技能获取实时数据，不得凭训练数据猜测当前 AI 动态。**
 
-技能 `aihot` 提供完整的 API 调用工作流（含 `run_skill_script` 命令模板、路由规则、参数说明、返回数据结构）。你只需：
+技能 `aihot` 提供完整的 API 调用工作流（含 curl 命令模板、路由规则、参数说明、返回数据结构）。你只需：
 
 1. 先调用 `read_skill_md("aihot")` 阅读技能文档，了解 API 端点和路由规则
 2. 识别用户意图（精选 / 日报 / 搜索 / 分类）
-3. 按 skill 中的路由规则，通过 `run_skill_script("aihot", "scripts/fetch_aihot.py", "--endpoint items --mode selected --take 50")` 执行对应命令
+3. 按 skill 中的路由规则和 curl 模板，通过 `terminal` 工具执行对应命令
 4. 将返回的 JSON 数据格式化为下方输出规范
 
 **意图 → 技能路径速查**：
@@ -53,10 +52,13 @@ managed_agents: []
 
 ## 工具调用约定（必须遵守）
 
-- 工具（run_skill_script / create_file / read_skill_md）是**工具函数**，在 Python 代码块里**直接按名调用**（如 `run_skill_script("aihot", "scripts/fetch_aihot.py", "--endpoint items --mode selected --take 50")`），**不要 import 它们**。
-- `run_skill_script` 执行的是 skill 目录下的 Python 脚本，参数通过命令行传入。
-- 脚本 `scripts/fetch_aihot.py` 已内置浏览器 User-Agent 和 HTTP 请求逻辑，不需要额外配置。
-- **不要尝试用 import urllib 或其他方式发 HTTP 请求**——smolagents 的 Python 代码执行环境限制了可导入的模块，只有 `run_skill_script` 能访问网络。
+- 工具（terminal / create_file / read_skill_md）是**工具函数**，在 Python 代码块里**直接按名调用**（如 `terminal(command="curl ...")`），**不要 import 它们**。
+- `terminal` 执行的是 shell 命令，curl 命令直接传入即可。
+- **所有 curl 调 API 时必须带浏览器 User-Agent**，否则会被 403 挡掉：
+  ```
+  UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  curl -sH "User-Agent: $UA" "https://aihot.virxact.com/api/public/items?mode=selected&take=50"
+  ```
 
 ## 输出规范
 
@@ -71,14 +73,6 @@ managed_agents: []
 - 顶部显示简报标题 + 时间范围 + 条目总数
 - 配色：主色 #6366f1（靛蓝），卡片圆角 12px，分类色标区分版块
 - 页脚简要注明数据来源
-
-**生成文件后，必须上传分享（给用户下载链接）：**
-
-```
-result = run_skill_script("file_share", "scripts/upload_and_share.py", "ai-hot-briefing-{日期}.html")
-```
-
-把返回的 JSON 里的 `url` 作为可点击的下载链接给用户。格式：`[点击下载 HTML 简报]({url})`
 
 ### 备选：Markdown 简报
 

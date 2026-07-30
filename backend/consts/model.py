@@ -1664,3 +1664,46 @@ class CommunityStatusUpdateRequest(BaseModel):
 class DeleteMcpServiceRequest(BaseModel):
     """Request model for deleting an MCP service"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")
+
+
+# ---------------------------------------------------------------------------
+# Recipe models for market template instantiation (v2.4.0 market)
+# ---------------------------------------------------------------------------
+
+class RecipeVariableOption(BaseModel):
+    """A single option for a select-type recipe variable."""
+    label: str
+    value: str
+
+
+class RecipeVariable(BaseModel):
+    """A single variable definition extracted from a template/recipe snapshot."""
+    key: str
+    label: str
+    description: Optional[str] = None
+    type: str = "string"
+    required: bool = True
+    default: Optional[Any] = None
+    options: Optional[List[RecipeVariableOption]] = None
+
+
+class RecipeLayer(BaseModel):
+    """A single layer in a recipe definition (agent / skill / mcp)."""
+    layer_type: str
+    entity_type: str
+    entity_name: str
+    source: str = "official"
+
+
+class RecipePostAction(BaseModel):
+    """A post-instantiation action defined in a recipe."""
+    action_type: str
+    description: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+
+
+class RecipeDefinition(BaseModel):
+    """Full recipe definition extracted from a template snapshot."""
+    variables: List[RecipeVariable] = Field(default_factory=list)
+    layers: List[RecipeLayer] = Field(default_factory=list)
+    post_actions: List[RecipePostAction] = Field(default_factory=list)

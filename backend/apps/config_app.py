@@ -39,6 +39,7 @@ from apps.haotian_app import router as haotian_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.cas_app import router as cas_router
+from apps.market_app import market_router
 from apps.memory_config_app import router as memory_config_router
 from apps.memory_record_app import router as memory_record_router
 from apps.quota_app import tenant_quota_router, platform_quota_router
@@ -70,6 +71,21 @@ async def sync_default_prompt_template_on_startup():
         logger.info("System default prompt template synced successfully.")
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
+
+
+@app.on_event("startup")
+async def seed_official_market_templates_on_startup():
+    """Idempotently seed official solution templates into the market on startup."""
+    try:
+        from services.preset_market_seeder import seed_official_templates
+        result = seed_official_templates()
+        logger.info(
+            "Official market template seed: %s seeded, %s skipped",
+            result.get("seeded", 0),
+            result.get("skipped", 0),
+        )
+    except Exception as exc:
+        logger.error(f"Failed to seed official market templates: {str(exc)}")
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
@@ -123,3 +139,4 @@ app.include_router(memory_config_router)
 app.include_router(memory_record_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
+app.include_router(market_router)

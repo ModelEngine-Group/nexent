@@ -846,6 +846,16 @@ async def list_published_agents_impl(
         # Get all draft agents (version_no=0)
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Lazy seed: if the tenant has zero enabled agents, auto-create
+        # preset agents so the market-v2 Solutions tab has clickable cards.
+        if not any(a.get("enabled") for a in agent_list):
+            try:
+                from services.preset_agent_service import init_preset_agents_for_tenant
+                init_preset_agents_for_tenant(tenant_id, user_id)
+                agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+            except Exception as e:
+                logger.warning(f"Lazy preset agent seed failed for tenant {tenant_id}: {str(e)}")
+
         model_cache: Dict[int, Optional[dict]] = {}
         enriched_agents: list[dict] = []
 

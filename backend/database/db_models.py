@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, SmallInteger, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, PrimaryKeyConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
@@ -1252,6 +1252,25 @@ class AgentRepository(TableBase):
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
     content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
+    # Unified market columns (v2.4.0 market phase 0)
+    source = Column(String(30), default="community",
+                   doc="Listing source: community / official")
+    is_official_template = Column(Boolean, default=False,
+                                  doc="Whether this listing is an official template")
+    expert_type = Column(String(10), default="agent",
+                         doc="Expert type: agent / expert")
+    category_id = Column(String(30),
+                        doc="Market category ID (FK to market_category_t)")
+    default_init_prompt = Column(Text,
+                                 doc="Default initial prompt shown on template detail page")
+    quick_prompts = Column(JSONB,
+                           doc="Quick prompt suggestions JSON array for template detail")
+    members_info = Column(JSONB,
+                         doc="Members info JSON for expert/recipe composition display")
+    is_featured = Column(Boolean, default=False,
+                         doc="Whether this listing is featured on the market")
+    featured_weight = Column(Integer, default=0,
+                            doc="Featured sort weight, higher = earlier")
 
 
 class SkillRepository(TableBase):
@@ -2027,3 +2046,132 @@ class NotificationReceiver(TableBase):
         Index("ix_notification_receiver_notification_id", "notification_id"),
         {"schema": SCHEMA},
     )
+
+
+# ---------------------------------------------------------------------------
+# Unified market tables (v2.4.0 market phase 0/1)
+# ---------------------------------------------------------------------------
+
+class MarketCategory(TableBase):
+    """Unified market category definitions."""
+    __tablename__ = "market_category_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "name",
+            name="uq_market_category_entity_name",
+        ),
+        Index(
+            "ix_market_category_entity_type",
+            "entity_type", "sort_order",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    category_id = Column(
+        Integer,
+        Sequence("market_category_t_category_id_seq", schema=SCHEMA),
+        primary_key=True, nullable=False,
+        doc="Category ID, unique primary key")
+    entity_type = Column(
+        String(20), nullable=False, default="agent",
+        doc="Entity type: agent / skill / mcp / recipe / expert")
+    name = Column(
+        String(100), nullable=False,
+        doc="Category programmatic name (unique per entity_type)")
+    display_name = Column(
+        String(100),
+        doc="Category display name (English)")
+    display_name_zh = Column(
+        String(100),
+        doc="Category display name (Chinese)")
+    description = Column(Text, doc="Category description (English)")
+    description_zh = Column(Text, doc="Category description (Chinese)")
+    icon = Column(String(50), doc="Category icon (emoji or URL)")
+    sort_order = Column(Integer, default=0, doc="Sort order, lower = earlier")
+    is_active = Column(Boolean, default=True, doc="Whether this category is active")
+
+
+class MarketTag(TableBase):
+    """Unified market tag definitions."""
+    __tablename__ = "market_tag_t"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_market_tag_name"),
+        {"schema": SCHEMA},
+    )
+
+    tag_id = Column(
+        Integer,
+        Sequence("market_tag_t_tag_id_seq", schema=SCHEMA),
+        primary_key=True, nullable=False,
+        doc="Tag ID, unique primary key")
+    name = Column(
+        String(100), nullable=False,
+        doc="Tag programmatic name")
+    display_name = Column(
+        String(100), doc="Tag display name")
+    description = Column(Text, doc="Tag description")
+
+
+class MarketReview(TableBase):
+    """User reviews/ratings for market entities."""
+    __tablename__ = "market_review_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "user_id",
+            name="uq_market_review_entity_user",
+        ),
+        Index(
+            "ix_market_review_entity",
+            "entity_type", "entity_id",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    review_id = Column(
+        BigInteger,
+        Sequence("market_review_t_review_id_seq", schema=SCHEMA),
+        primary_key=True, nullable=False,
+        doc="Review ID, unique primary key")
+    entity_type = Column(
+        String(20), nullable=False,
+        doc="Entity type: agent / skill / mcp / recipe / expert")
+    entity_id = Column(
+        BigInteger, nullable=False,
+        doc="Entity ID (e.g. agent_repository_id)")
+    tenant_id = Column(String(36), doc="Tenant ID")
+    user_id = Column(
+        String(64), nullable=False,
+        doc="Reviewer user ID")
+    rating = Column(
+        SmallInteger, nullable=False,
+        doc="Rating 1-5 stars")
+    comment = Column(Text, doc="Review comment text")
+    parent_review_id = Column(
+        BigInteger, doc="Parent review ID for threaded replies")
+    status = Column(
+        String(20), default="visible",
+        doc="Review status: visible / hidden / pending")
+
+
+class MarketRatingSummary(SimpleTableBase):
+    """Aggregated rating summary per market entity (no audit fields)."""
+    __tablename__ = "market_rating_summary_t"
+    __table_args__ = (
+        PrimaryKeyConstraint("entity_type", "entity_id", name="pk_market_rating_summary"),
+        {"schema": SCHEMA},
+    )
+
+    entity_type = Column(
+        String(20), nullable=False,
+        doc="Entity type: agent / skill / mcp / recipe / expert")
+    entity_id = Column(
+        BigInteger, nullable=False,
+        doc="Entity ID (e.g. agent_repository_id)")
+    avg_rating = Column(
+        Numeric(3, 2), default=0.00,
+        doc="Average rating (0.00-5.00)")
+    rating_count = Column(Integer, default=0, doc="Total number of ratings")
+    review_count = Column(Integer, default=0, doc="Total number of visible reviews with comments")
+    updated_at = Column(
+        TIMESTAMP(timezone=False), server_default=func.now(),
+        onupdate=func.now(), doc="Last summary update time")

@@ -17,7 +17,6 @@ from starlette.responses import JSONResponse
 
 from consts.exceptions import UnauthorizedError
 from consts.market import InstantiateRequest
-from database.market_db import get_market_agent_id_by_name
 from services.market_service import (
     get_agent_mcp_servers_impl,
     get_market_agent_detail_impl,
@@ -30,22 +29,6 @@ from utils.auth_utils import get_current_user_id, get_user_language
 
 logger = logging.getLogger(__name__)
 market_router = APIRouter(prefix="/market")
-
-
-def _resolve_template_id(agent_repository_id: str) -> int:
-    """Resolve a path param to a numeric template ID.
-
-    Accepts either a numeric ID (e.g. ``"16"``) or a solution name
-    (e.g. ``"ai_news_hot"``).  When a name is given, looks up the
-    official/shared template row by name and returns its repository ID.
-    """
-    try:
-        return int(agent_repository_id)
-    except (ValueError, TypeError):
-        tid = get_market_agent_id_by_name(agent_repository_id)
-        if tid is None:
-            raise ValueError(f"Template not found by name: {agent_repository_id}")
-        return tid
 
 
 @market_router.get("/agents")
@@ -86,7 +69,7 @@ async def list_market_agents_api(
 
 @market_router.get("/agents/{agent_repository_id}")
 async def get_market_agent_detail_api(
-    agent_repository_id: str,
+    agent_repository_id: int,
     lang: Optional[str] = Query(None, description="Language preference: zh / en"),
     authorization: str = Header(None, alias="Authorization"),
     request: Request = None,
@@ -95,9 +78,8 @@ async def get_market_agent_detail_api(
     try:
         _user_id, tenant_id = get_current_user_id(authorization)
         language = lang or get_user_language(request)
-        tid = _resolve_template_id(agent_repository_id)
         result = get_market_agent_detail_impl(
-            agent_repository_id=tid,
+            agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             lang=language,
         )
@@ -111,7 +93,7 @@ async def get_market_agent_detail_api(
 
 @market_router.post("/agents/{agent_repository_id}/instantiate")
 async def instantiate_market_agent_api(
-    agent_repository_id: str,
+    agent_repository_id: int,
     body: InstantiateRequest,
     authorization: str = Header(None, alias="Authorization"),
 ):
@@ -128,9 +110,8 @@ async def instantiate_market_agent_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
 
     try:
-        tid = _resolve_template_id(agent_repository_id)
         result = await instantiate_from_template_impl(
-            template_id=tid,
+            template_id=agent_repository_id,
             variable_values=body.variable_values or {},
             user_id=user_id,
             tenant_id=tenant_id,
@@ -155,7 +136,7 @@ async def instantiate_market_agent_api(
 
 @market_router.post("/agents/{agent_repository_id}/launch")
 async def launch_market_agent_api(
-    agent_repository_id: str,
+    agent_repository_id: int,
     authorization: str = Header(None, alias="Authorization"),
 ):
     """Launch a solution straight into a conversation (WorkBuddy-style).
@@ -172,9 +153,8 @@ async def launch_market_agent_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
 
     try:
-        tid = _resolve_template_id(agent_repository_id)
         result = await launch_solution_impl(
-            template_id=tid,
+            template_id=agent_repository_id,
             user_id=user_id,
             tenant_id=tenant_id,
             authorization=authorization,
@@ -225,7 +205,7 @@ async def list_tags_api(
 
 @market_router.get("/agents/{agent_repository_id}/mcp_servers")
 async def get_agent_mcp_servers_api(
-    agent_repository_id: str,
+    agent_repository_id: int,
     authorization: str = Header(None, alias="Authorization"),
 ):
     """Get the MCP servers configured for a market agent listing."""

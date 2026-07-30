@@ -55,6 +55,7 @@ from services.invitation_service import use_invitation_code, check_invitation_av
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
 from services.skill_service import init_skill_list_for_tenant
+from services.preset_agent_service import init_preset_agents_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -282,6 +283,12 @@ async def signup_user_with_invitation(email: EmailStr,
         if not is_asset_owner_registration:
             await init_tool_list_for_tenant(tenant_id, user_id)
             await init_skill_list_for_tenant(tenant_id, user_id)
+            # Seed built-in preset agents (knowledge base QA, web research, etc.)
+            try:
+                init_preset_agents_for_tenant(tenant_id, user_id)
+            except Exception as e:
+                logging.error(
+                    f"Failed to seed preset agents for tenant {tenant_id}: {str(e)}")
 
         return await parse_supabase_response(False, response, user_role, auto_login)
     else:
