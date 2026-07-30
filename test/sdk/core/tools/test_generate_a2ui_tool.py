@@ -23,7 +23,7 @@ class FakeModel:
         return SimpleNamespace(content=next(self.responses))
 
 
-def _tool(responses, *, surface_id=None, lang="zh"):
+def _tool(responses, *, lang="zh"):
     model = FakeModel(responses)
     observer = MessageObserver(lang=lang)
     config = ModelConfig(
@@ -32,7 +32,6 @@ def _tool(responses, *, surface_id=None, lang="zh"):
     tool = GenerateA2UITool(
         model_config=config,
         observer=observer,
-        surface_id=surface_id,
         model_factory=lambda _config: model,
     )
     return tool, model, observer
@@ -83,13 +82,14 @@ def test_generator_prompt_defines_operation_envelope_and_form_shape(language):
     )
 
     assert set(prompt) == {"system_prompt", "user_prompt", "repair_prompt"}
-    assert '{"messages":[{"updateComponents"' in prompt["system_prompt"]
-    assert '"component":"Form"' in prompt["system_prompt"]
-    assert '"action":{"event"' in prompt["system_prompt"]
-    assert "Card" in prompt["system_prompt"] and '"child"' in prompt["system_prompt"]
-    assert "Button" in prompt["system_prompt"] and '"action"' in prompt["system_prompt"]
-    assert "text" in prompt["system_prompt"] and "label" in prompt["system_prompt"]
-    assert '{"messages":[{"updateComponents"' in repair_prompt
+    system_prompt = prompt["system_prompt"]
+    assert "basic catalog" in system_prompt
+    assert "updateDataModel" in system_prompt
+    assert "TextField" in system_prompt
+    assert "ChoicePicker" in system_prompt
+    assert "DateTimeInput" in system_prompt
+    assert "Form" in system_prompt and ("There is no" in system_prompt or "没有" in system_prompt)
+    assert "updateComponents" in repair_prompt
 
 
 @pytest.mark.parametrize(
@@ -150,7 +150,7 @@ def test_generates_server_surface_and_emits_isolated_a2ui_message():
     assert len(emitted) == 2
     assert all(item["type"] == "a2ui" for item in emitted)
     envelope = json.loads(emitted[0]["content"])
-    assert envelope["catalogId"] == "nexent.v1"
+    assert envelope["catalogId"] == "https://a2ui.org/specification/v0_9/basic_catalog.json"
     assert envelope["message"]["createSurface"]["surfaceId"] == result["surfaceId"]
 
 
@@ -161,20 +161,25 @@ def test_generates_server_surface_and_emits_isolated_a2ui_message():
         ("en", "The previous JSON failed validation"),
     ],
 )
-def test_repairs_once_and_updates_existing_surface(language, repair_marker):
-    tool, model, observer = _tool(
-        ["not json", _valid_output("Fixed")],
-        surface_id="surface-existing",
-        lang=language,
-    )
-    result = json.loads(tool.forward("Update", {}, "Updated surface"))
+def test_repairs_once_and_creates_surface(language, repair_marker):
+    tool, model, observer = _tool(["not json", _valid_output("Fixed")], lang=language)
+    result = json.loads(tool.forward("Create", {}, "New surface"))
 
-    assert result["surfaceId"] == "surface-existing"
-    assert result["messageCount"] == 1
+    assert result["surfaceId"].startswith("surface-")
+    assert result["messageCount"] == 2
     assert len(model.calls) == 2
     assert repair_marker in model.calls[1][0][-1]["content"]
     envelope = json.loads(json.loads(observer.message_query[0])["content"])
-    assert "createSurface" not in envelope["message"]
+    assert envelope["message"]["createSurface"]["surfaceId"] == result["surfaceId"]
+
+
+def test_each_invocation_creates_an_independent_surface():
+    tool, _model, _observer = _tool([_valid_output("One"), _valid_output("Two")])
+
+    first = json.loads(tool.forward("First", {}, "First surface"))
+    second = json.loads(tool.forward("Second", {}, "Second surface"))
+
+    assert first["surfaceId"] != second["surfaceId"]
 
 
 def test_repairs_component_contract_error_before_emitting_surface():

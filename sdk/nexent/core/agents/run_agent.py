@@ -194,10 +194,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
-                run_kwargs = {"query": agent_run_info.query, "reset": False}
-                if agent_run_info.display_query is not None:
-                    run_kwargs["display_query"] = agent_run_info.display_query
-                nexent.agent_run_with_observer(**run_kwargs)
+                nexent.agent_run_with_observer(
+                    query=agent_run_info.query, reset=False)
             finally:
                 _log_memory_value_assessment(agent)
         else:
@@ -225,10 +223,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
-                    run_kwargs = {"query": agent_run_info.query, "reset": False}
-                    if agent_run_info.display_query is not None:
-                        run_kwargs["display_query"] = agent_run_info.display_query
-                    nexent.agent_run_with_observer(**run_kwargs)
+                    nexent.agent_run_with_observer(
+                        query=agent_run_info.query, reset=False)
                 finally:
                     _log_memory_value_assessment(agent)
 

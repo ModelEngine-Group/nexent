@@ -43,7 +43,6 @@ _category_multimodal = {
 _category_email = {"get_email": ["email"], "send_email": ["email"]}
 _category_memory = {"store_memory": ["memory"]}
 _category_terminal = {"terminal": ["terminal"]}
-_category_ui = {"generate_a2ui": ["ui"]}
 
 BUILTIN_LABEL_MAP: dict[str, list[str]] = {}
 BUILTIN_LABEL_MAP.update(_category_database)
@@ -54,7 +53,6 @@ BUILTIN_LABEL_MAP.update(_category_multimodal)
 BUILTIN_LABEL_MAP.update(_category_email)
 BUILTIN_LABEL_MAP.update(_category_memory)
 BUILTIN_LABEL_MAP.update(_category_terminal)
-BUILTIN_LABEL_MAP.update(_category_ui)
 
 PARALLEL_EXECUTOR_TOOL_NAME = "parallel_executor"
 SYSTEM_MANAGED_TOOL_NAMES = frozenset({"store_memory", "search_memory", PARALLEL_EXECUTOR_TOOL_NAME})

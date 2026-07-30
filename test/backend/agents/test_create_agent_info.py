@@ -3754,15 +3754,13 @@ class TestCreateAgentRunInfo:
                 history=[],
                 user_id="user_1",
                 tenant_id="tenant_1",
-                language="zh",
-                display_query="[A2UI action] submit_feedback (root)",
+                language="zh"
             )
 
             # Verify that AgentRunInfo was called correctly with dict format mcp_host
             assert mock_agent_run_info.call_count == 1
             mock_agent_run_info.assert_called_with(
                 query="processed_query",
-                display_query="[A2UI action] submit_feedback (root)",
                 model_config_list=["model_config"],
                 observer=mock_message_observer.return_value,
                 agent_config="agent_config",
@@ -3788,7 +3786,7 @@ class TestCreateAgentRunInfo:
                 tenant_id="tenant_1",
                 user_id="user_1",
                 language="zh",
-                last_user_query="[A2UI action] submit_feedback (root)",
+                last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
@@ -6521,7 +6519,6 @@ def test_configure_a2ui_tools_requires_client_and_root_agent(
         is_root_agent=is_root_agent,
         model_name="main_model",
         model_config_list=[model],
-        surface_id=None,
     )
     assert enabled is False
     assert [tool.name for tool in tools] == ["regular"]
@@ -6537,13 +6534,12 @@ def test_configure_a2ui_tools_injects_only_resolved_root_tool():
         is_root_agent=True,
         model_name="main_model",
         model_config_list=[model],
-        surface_id="surface-existing",
     )
     assert enabled is True
     assert a2ui_tool.source == "local"
     assert a2ui_tool.usage is None
     assert a2ui_tool.metadata["model_config"] is model
-    assert a2ui_tool.metadata["surface_id"] == "surface-existing"
+    assert set(a2ui_tool.metadata) == {"model_config"}
 
 
 def test_configure_a2ui_tools_disables_when_model_is_unresolved():
@@ -6554,7 +6550,6 @@ def test_configure_a2ui_tools_disables_when_model_is_unresolved():
         is_root_agent=True,
         model_name="missing",
         model_config_list=[],
-        surface_id=None,
     )
     assert enabled is False
     assert tools == []

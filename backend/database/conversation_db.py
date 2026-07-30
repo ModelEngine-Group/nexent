@@ -13,7 +13,6 @@ from .db_models import (
     ConversationSourceSearch,
 )
 from .utils import add_creation_tracking, add_update_tracking
-from utils.a2ui_action_utils import A2UI_ACTION_UNIT_TYPE, build_a2ui_action_query
 
 
 class MessageRecord(TypedDict):
@@ -78,21 +77,9 @@ def _parse_history_summary_content(content: Any) -> Optional[Dict[str, Any]]:
         if isinstance(boundary, bool) or int(boundary) <= 0:
             return None
         payload["covered_through_message_id"] = int(boundary)
+        return payload
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
-    return payload
-
-
-def _parse_a2ui_action_content(content: Any) -> Optional[Dict[str, Any]]:
-    """Return a canonical action payload, or ``None`` for malformed units."""
-    try:
-        payload = json.loads(content) if isinstance(content, str) else content
-        if not isinstance(payload, dict):
-            return None
-        build_a2ui_action_query(payload)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return None
-    return payload
 
 
 def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
@@ -481,18 +468,6 @@ def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
 
         # Convert SQLAlchemy model instances to dictionaries
         return list(map(as_dict, records))
-
-
-def get_next_conversation_message_index(conversation_id: int) -> int:
-    """Return the next append-only message index for a conversation."""
-    with get_db_session() as session:
-        max_index = session.execute(select(func.max(
-            ConversationMessage.message_index
-        )).where(
-            ConversationMessage.conversation_id == int(conversation_id),
-            ConversationMessage.delete_flag == 'N',
-        )).scalar()
-        return 0 if max_index is None else int(max_index) + 1
 
 
 def get_message_units(message_id: int) -> List[Dict[str, Any]]:
@@ -1416,10 +1391,7 @@ def get_latest_user_message_id(conversation_id: int, user_id: str) -> Optional[i
             ConversationMessage.delete_flag == 'N',
             ConversationRecord.created_by == user_id,
             ConversationRecord.delete_flag == 'N',
-        ).order_by(
-            desc(ConversationMessage.message_index),
-            desc(ConversationMessage.message_id),
-        ).limit(1)
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
         return session.execute(stmt).scalar()
 
 
@@ -1711,44 +1683,14 @@ def get_historical_context(
             ConversationMessage.message_role.in_(['user', 'assistant']),
         ).order_by(asc(ConversationMessage.message_index))).all()
 
-        user_message_ids = [
-            message.message_id for message in messages if message.message_role == 'user'
-        ]
-        action_payloads: Dict[int, Dict[str, Any]] = {}
-        if user_message_ids:
-            action_units = session.execute(select(
-                ConversationMessageUnit.message_id,
-                ConversationMessageUnit.unit_content,
-                ConversationMessageUnit.unit_index,
-            ).where(
-                ConversationMessageUnit.conversation_id == conversation_id,
-                ConversationMessageUnit.message_id.in_(user_message_ids),
-                ConversationMessageUnit.unit_type == A2UI_ACTION_UNIT_TYPE,
-                ConversationMessageUnit.unit_status == 'completed',
-                ConversationMessageUnit.delete_flag == 'N',
-            ).order_by(
-                asc(ConversationMessageUnit.message_id),
-                desc(ConversationMessageUnit.unit_index),
-            )).all()
-            for unit in action_units:
-                if unit.message_id in action_payloads:
-                    continue
-                payload = _parse_a2ui_action_content(unit.unit_content)
-                if payload is not None:
-                    action_payloads[unit.message_id] = payload
-
         turns: List[Dict[str, Any]] = []
         pending_user = None
         for message in messages:
             if message.message_role == 'user':
                 pending_user = message
             elif pending_user is not None:
-                action_payload = action_payloads.get(pending_user.message_id)
-                user_message = pending_user.message_content or ""
-                if action_payload is not None:
-                    user_message = build_a2ui_action_query(action_payload)
                 turns.append({
-                    "user_message": user_message,
+                    "user_message": pending_user.message_content or "",
                     "assistant_final_answer": message.message_content or "",
                     "attachments": pending_user.minio_files,
                     "user_message_id": pending_user.message_id,

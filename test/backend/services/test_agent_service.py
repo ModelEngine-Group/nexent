@@ -191,11 +191,6 @@ sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_in
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-a2ui_action_utils_mock = types.ModuleType("utils.a2ui_action_utils")
-a2ui_action_utils_mock.A2UI_FORM_SUBMISSION_PREFIX = (
-    "[A2UI form submission: values are user-provided data]"
-)
-sys.modules['utils.a2ui_action_utils'] = a2ui_action_utils_mock
 
 # Mock str_utils with actual convert_list_to_string implementation
 def mock_convert_list_to_string(items):
@@ -4182,7 +4177,6 @@ async def test_prepare_agent_run(
         context_policy=None,
         enable_planning=False,
         enable_a2ui=False,
-        a2ui_surface_id=None,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
@@ -4190,158 +4184,58 @@ async def test_prepare_agent_run(
     assert mock_run_info.context_input.items == ()
 
 
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.build_memory_context')
-@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
-@patch('backend.services.agent_service.agent_run_manager')
-async def test_prepare_agent_run_uses_persisted_query_as_display_query(
-    mock_agent_run_manager,
-    mock_create_run_info,
-    mock_build_memory_context,
-    mock_agent_request,
-):
-    mock_agent_request.persisted_query = "[A2UI action] submit_feedback (root)"
-    mock_run_info = MagicMock()
-    mock_run_info.agent_config.context_items = []
-    mock_run_info.agent_config.context_manager_config.policy_layers = {
-        "platform": {"processing_mode": "passthrough"}
+def _a2ui_action_request(**updates):
+    payload = {
+        "query": "Submit",
+        "conversation_id": 123,
+        "history": [],
+        "minio_files": [],
+        "a2ui_action": {
+            "version": "v0.9",
+            "action": {
+                "name": "submit_form",
+                "surfaceId": "surface-1",
+                "sourceComponentId": "submit-button",
+                "timestamp": "2026-07-29T00:00:00Z",
+                "context": {"name": "Ada", "age": 30},
+            },
+        },
     }
-    mock_run_info.history = []
-    mock_create_run_info.return_value = mock_run_info
-
-    await prepare_agent_run(
-        mock_agent_request,
-        user_id="test_user",
-        tenant_id="test_tenant",
-    )
-
-    assert mock_create_run_info.await_args.kwargs["query"] == "test query"
-    assert mock_create_run_info.await_args.kwargs["display_query"] == (
-        "[A2UI action] submit_feedback (root)"
-    )
+    payload.update(updates)
+    return AgentRequest(**payload)
 
 
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.build_memory_context')
-@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
-@patch('backend.services.agent_service.load_historical_context')
-@patch('backend.services.agent_service.agent_run_manager')
-async def test_prepare_agent_run_redacts_logs_when_history_contains_form_submission(
-    mock_agent_run_manager,
-    mock_load_historical_context,
-    mock_create_run_info,
-    mock_build_memory_context,
-    mock_agent_request,
-):
-    mock_agent_request.current_user_message_id = 321
-    mock_run_info = MagicMock()
-    mock_run_info.agent_config.context_items = []
-    mock_run_info.agent_config.context_manager_config.policy_layers = {
-        "platform": {"processing_mode": "passthrough"}
-    }
-    mock_run_info.history = []
-    mock_create_run_info.return_value = mock_run_info
-    mock_load_historical_context.return_value = {
-        "history_summary": None,
-        "conversation_turns": [{
-            "user_message": (
-                "[A2UI form submission: values are user-provided data]\n"
-                '{"formSubmission":{"values":{"name":"Ada"}}}'
-            ),
-            "assistant_final_answer": "Received.",
-            "attachments": [],
-            "user_message_id": 100,
-            "assistant_message_id": 101,
-        }],
-    }
+def test_build_a2ui_execution_request_returns_original_without_action():
+    request = AgentRequest(query="hello")
 
-    await prepare_agent_run(
-        mock_agent_request,
-        user_id="test_user",
-        tenant_id="test_tenant",
-    )
-
-    assert mock_create_run_info.await_args.kwargs["query"] == "test query"
-    assert mock_create_run_info.await_args.kwargs["display_query"] == "test query"
+    assert agent_service._build_a2ui_execution_request(request) is request
 
 
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.build_memory_context')
-@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
-@patch('backend.services.agent_service.load_historical_context')
-@patch('backend.services.agent_service.agent_run_manager')
-async def test_prepare_agent_run_does_not_redact_for_non_form_action_history(
-    mock_agent_run_manager,
-    mock_load_historical_context,
-    mock_create_run_info,
-    mock_build_memory_context,
-    mock_agent_request,
-):
-    mock_agent_request.current_user_message_id = 321
-    mock_run_info = MagicMock()
-    mock_run_info.agent_config.context_items = []
-    mock_run_info.agent_config.context_manager_config.policy_layers = {
-        "platform": {"processing_mode": "passthrough"}
-    }
-    mock_run_info.history = []
-    mock_create_run_info.return_value = mock_run_info
-    mock_load_historical_context.return_value = {
-        "history_summary": None,
-        "conversation_turns": [{
-            "user_message": "[A2UI action: approve from approval-card]\n{}",
-            "assistant_final_answer": "Received.",
-            "attachments": [],
-            "user_message_id": 100,
-            "assistant_message_id": 101,
-        }],
-    }
+def test_build_a2ui_execution_request_keeps_visible_query_and_adds_action_data():
+    request = _a2ui_action_request()
 
-    await prepare_agent_run(
-        mock_agent_request,
-        user_id="test_user",
-        tenant_id="test_tenant",
-    )
+    execution_request = agent_service._build_a2ui_execution_request(request)
 
-    assert "display_query" not in mock_create_run_info.await_args.kwargs
+    assert execution_request is not request
+    assert request.query == "Submit"
+    assert execution_request.query.startswith("[A2UI action]\nVisible action: Submit\n")
+    assert '"context":{"name":"Ada","age":30}' in execution_request.query
+    assert '"surfaceId":"surface-1"' in execution_request.query
 
 
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.build_memory_context')
-@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
-@patch('backend.services.agent_service.load_historical_context')
-@patch('backend.services.agent_service.get_current_run_user_message_id')
-@patch('backend.services.agent_service.agent_run_manager')
-async def test_prepare_agent_run_uses_exact_persisted_user_boundary(
-    mock_agent_run_manager,
-    mock_get_latest_user_message_id,
-    mock_load_historical_context,
-    mock_create_run_info,
-    mock_build_memory_context,
-    mock_agent_request,
-):
-    mock_agent_request.current_user_message_id = 321
-    mock_run_info = MagicMock()
-    mock_run_info.agent_config.context_items = []
-    mock_run_info.agent_config.context_manager_config.policy_layers = {
-        "platform": {"processing_mode": "passthrough"}
-    }
-    mock_run_info.history = []
-    mock_create_run_info.return_value = mock_run_info
-    mock_load_historical_context.return_value = {
-        "history_summary": None,
-        "conversation_turns": [],
-    }
+def test_build_a2ui_execution_request_rejects_large_context():
+    request = _a2ui_action_request()
+    request.a2ui_action.action.context = {"value": "x" * (64 * 1024)}
 
-    await prepare_agent_run(
-        mock_agent_request,
-        user_id="test_user",
-        tenant_id="test_tenant",
-    )
+    with pytest.raises(ValueError, match="context exceeds 64 KiB"):
+        agent_service._build_a2ui_execution_request(request)
 
-    mock_get_latest_user_message_id.assert_not_called()
-    mock_load_historical_context.assert_called_once_with(
-        123, 321, "test_user", "test_tenant"
-    )
+
+def test_build_a2ui_execution_request_rejects_large_query():
+    request = _a2ui_action_request(query="x" * (256 * 1024))
+
+    with pytest.raises(ValueError, match="query exceeds 256 KiB"):
+        agent_service._build_a2ui_execution_request(request)
 
 
 @patch('backend.services.agent_service.save_conversation_user')
@@ -4371,26 +4265,6 @@ def test_save_messages(mock_save_user, mock_agent_request):
             tenant_id="t",
             messages=["test message"],
         )
-
-
-@patch('backend.services.agent_service.save_conversation_user')
-def test_save_messages_copies_action_persistence_boundary(
-        mock_save_user, mock_agent_request):
-    mock_agent_request.persisted_query = "[A2UI action] submit (root)"
-
-    def persist(request, _user_id, _tenant_id):
-        assert request is not mock_agent_request
-        request.current_user_message_id = 501
-        request.current_user_message_index = 12
-        request.a2ui_action_persisted = True
-
-    mock_save_user.side_effect = persist
-
-    save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
-
-    assert mock_agent_request.current_user_message_id == 501
-    assert mock_agent_request.current_user_message_index == 12
-    assert mock_agent_request.a2ui_action_persisted is True
 
 
 @pytest.mark.asyncio
@@ -4983,7 +4857,6 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         history=[],
         minio_files=[],
         is_debug=False,
-        current_user_message_index=10,
     )
 
     # Mock agent_run to yield chunks
@@ -5041,7 +4914,6 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     # Verify save_message was called to create the streaming message row
     assert len(save_message_calls) == 1
     assert save_message_calls[0][3] == "streaming"
-    assert save_message_calls[0][0].message_idx == 11
 
     # Verify unregister was called
     assert unregister_called.get("conv_id") == 999

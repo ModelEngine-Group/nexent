@@ -11,6 +11,11 @@ import type { ThreadMessage } from "@assistant-ui/core";
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
+import {
+  createA2UIDataPart,
+  parseA2UIEnvelope,
+  type A2UISurfaceData,
+} from "../a2ui/runtime";
 
 // Backend SSE chunk format
 interface SseChunk {
@@ -63,7 +68,8 @@ function parseSubAgentStart(content: string): SubAgentStartPayload {
   if (!content) return {};
   try {
     const parsed = JSON.parse(content);
-    if (parsed && typeof parsed === "object") return parsed as SubAgentStartPayload;
+    if (parsed && typeof parsed === "object")
+      return parsed as SubAgentStartPayload;
   } catch {
     // Backwards-compat: legacy SUBAGENT_START chunks carried plain task text.
   }
@@ -74,7 +80,8 @@ function parseSubAgentEnd(content: string): SubAgentEndPayload {
   if (!content) return {};
   try {
     const parsed = JSON.parse(content);
-    if (parsed && typeof parsed === "object") return parsed as SubAgentEndPayload;
+    if (parsed && typeof parsed === "object")
+      return parsed as SubAgentEndPayload;
   } catch {
     // Fall through to empty payload.
   }
@@ -147,7 +154,7 @@ interface ReasoningPart {
 function makeReasoningPart(
   text: string,
   isRunning: boolean,
-  metadata?: SubAgentPartMetadata,
+  metadata?: SubAgentPartMetadata
 ): ReasoningPart {
   const part: ReasoningPart = {
     type: "reasoning",
@@ -219,13 +226,65 @@ function extractTextContent(messages: readonly ThreadMessage[]): string {
     .join("\n");
 }
 
+function extractA2UIAction(message: ThreadMessage | undefined): unknown {
+  if (!message) return undefined;
+  const actionPart = message.content.find(
+    (part) => part.type === "data" && part.name === "a2ui-action"
+  );
+  return actionPart?.type === "data" ? actionPart.data : undefined;
+}
+
+function appendA2UIChunk(
+  contentParts: Array<Record<string, unknown>>,
+  content: string
+): void {
+  let rawEnvelope: unknown;
+  try {
+    rawEnvelope = JSON.parse(content);
+    const envelope = parseA2UIEnvelope(rawEnvelope);
+    const partIndex = contentParts.findIndex((part) => {
+      const data = part.data as { surfaceId?: unknown } | undefined;
+      return (
+        part.type === "data" &&
+        part.name === "a2ui-surface" &&
+        data?.surfaceId === envelope.surfaceId
+      );
+    });
+    const previous =
+      partIndex >= 0
+        ? (contentParts[partIndex].data as A2UISurfaceData)
+        : undefined;
+    const part = createA2UIDataPart({
+      surfaceId: envelope.surfaceId,
+      messages: [...(previous?.messages ?? []), envelope],
+    });
+    if (partIndex >= 0) contentParts[partIndex] = part;
+    else contentParts.push(part);
+  } catch {
+    const raw = rawEnvelope as { surfaceId?: unknown } | undefined;
+    const surfaceId =
+      typeof raw?.surfaceId === "string"
+        ? raw.surfaceId
+        : `invalid-${Date.now()}-${contentParts.length}`;
+    contentParts.push(
+      createA2UIDataPart({
+        surfaceId,
+        messages: [],
+        error: "Interactive content cannot be displayed",
+      })
+    );
+  }
+}
+
 /**
  * Extracts `minio_files` payload from a user message's attachments. The
  * attachment adapter stashes upload metadata on each attachment after a
  * successful MinIO upload, so we can read it back here without an extra
  * upload round-trip.
  */
-function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload[] {
+function extractMinioFiles(
+  message: ThreadMessage | undefined
+): MinioFilePayload[] {
   if (!message) return [];
   // Attachments are attached by the AttachmentAdapter via the message content
   // pipeline; the public ThreadMessage type does not declare them but they are
@@ -250,7 +309,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
     if (!objectName || !url) {
       log.warn(
         "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-        att.name,
+        att.name
       );
       continue;
     }
@@ -266,9 +325,9 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
   return files;
 }
 
-export function parseSkillFileAttachments(
+function parseSkillFileAttachments(
   content: string,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] {
   try {
     const payload = JSON.parse(content) as {
@@ -281,8 +340,7 @@ export function parseSkillFileAttachments(
         const name = file.file_name || file.name || "Generated file";
         const contentType =
           file.mime_type || file.type || "application/octet-stream";
-        const url =
-          file.preview_url || file.presigned_url || file.url;
+        const url = file.preview_url || file.presigned_url || file.url;
 
         return {
           id: `${messageId}-skill-file-${index}`,
@@ -307,7 +365,7 @@ export function parseSkillFileAttachments(
           presigned_url: file.presigned_url,
           size: file.file_size ?? file.size,
         } as unknown as CompleteAttachment;
-      },
+      }
     );
 
     return attachments;
@@ -486,10 +544,7 @@ function formatToolArguments(raw: unknown): string {
  * shared `ToolGroupRoot` / `ToolGroupTrigger` / `ToolGroupContent`
  * rendering defined in `thread.tsx`.
  */
-function appendToolCallPart(
-  contentParts: any[],
-  toolCallPart: any
-): any {
+function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
   contentParts.push(toolCallPart);
   return toolCallPart;
 }
@@ -539,7 +594,7 @@ export function attachSearchContentToTool(
   if (
     item.url &&
     !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url,
+      (source: { url: string }) => source.url === item.url
     )
   ) {
     targetToolCall.searchContent.push(item);
@@ -647,7 +702,7 @@ export const planRegistry = {
     const stepIndex = this.data.steps.findIndex((item) => item.id === stepId);
     if (stepIndex < 0) return;
     const steps = this.data.steps.map((step, index) =>
-      index === stepIndex ? { ...step, status } : step,
+      index === stepIndex ? { ...step, status } : step
     );
     this.data = { ...this.data, steps };
     planListeners.forEach((listener) => listener());
@@ -688,9 +743,14 @@ export function parsePlan(content: string): PlanData | null {
   }
 }
 
-export function parsePlanStepUpdate(content: string): { stepId: string; status: string } | null {
+export function parsePlanStepUpdate(
+  content: string
+): { stepId: string; status: string } | null {
   try {
-    const payload = JSON.parse(content) as { step_id?: string | number; status?: string };
+    const payload = JSON.parse(content) as {
+      step_id?: string | number;
+      status?: string;
+    };
     if (payload.step_id === undefined || !payload.status) return null;
     return { stepId: String(payload.step_id), status: payload.status };
   } catch {
@@ -770,7 +830,9 @@ export function clearStepTokenCounts(): void {
  * Parse and build timing metadata from backend token_count chunk.
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
-function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimingResult> | null {
+function buildTimingFromTokenCount(
+  content: string
+): ReturnType<typeof buildTimingResult> | null {
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -790,10 +852,10 @@ function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimi
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
-    undefined,  // firstTokenTime - not available
-    0,         // toolCallCount - tracked separately
+    undefined, // firstTokenTime - not available
+    0, // toolCallCount - tracked separately
     parsed.totalOutputTokens,
-    totalDuration,
+    totalDuration
   );
 }
 
@@ -831,7 +893,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           threadId?: string;
           onServerConversationId?: (
             serverId: string,
-            initialQuestion?: string,
+            initialQuestion?: string
           ) => void;
           resume?: boolean;
         }
@@ -850,9 +912,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
 
     const query =
-      lastUserIndex >= 0
-        ? extractTextContent([messages[lastUserIndex]])
-        : "";
+      lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -888,7 +948,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: false,
+      a2ui_client_enabled: true,
     };
+    const a2uiAction = isResume
+      ? undefined
+      : extractA2UIAction(messages[lastUserIndex]);
+    if (a2uiAction) requestBody.a2ui_action = a2uiAction;
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
@@ -961,23 +1026,20 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const headerConversationId = response.headers.get("conversation_id");
     if (headerConversationId && onServerConversationId) {
       const numericHeaderId = Number(headerConversationId);
-      if (
-        !Number.isNaN(numericHeaderId) &&
-        numericHeaderId > 0
-      ) {
+      if (!Number.isNaN(numericHeaderId) && numericHeaderId > 0) {
         try {
           onServerConversationId(
             String(numericHeaderId),
-            !isResume && !hasServerConversationId ? query : undefined,
+            !isResume && !hasServerConversationId ? query : undefined
           );
           log.log(
-            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`,
+            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`
           );
         } catch (cbError) {
           // Callback failures must never break the stream — log and continue.
           log.error(
             "[ChatModelAdapter] onServerConversationId callback threw:",
-            cbError,
+            cbError
           );
         }
       }
@@ -1017,7 +1079,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null = null;
+    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null =
+      null;
 
     const contentParts: any[] = [];
 
@@ -1044,9 +1107,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const subAgentStack: ActiveSubAgent[] = [];
     let subAgentRunCounter = 0;
     const currentSubAgent = (): ActiveSubAgent | null =>
-      subAgentStack.length > 0
-        ? subAgentStack[subAgentStack.length - 1]
-        : null;
+      subAgentStack.length > 0 ? subAgentStack[subAgentStack.length - 1] : null;
     const buildMetadata = (): SubAgentPartMetadata | null => {
       const top = currentSubAgent();
       if (!top) return null;
@@ -1124,6 +1185,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "a2ui") {
+            flushOpenReasoning();
+            appendA2UIChunk(contentParts, chunk.content);
+            yield buildStreamResult(contentParts);
+            continue;
+          }
+
           // Handle agent_new_run - capture the agent start time before stripping the prefix
           if (chunk.type === "agent_new_run") {
             const captured = extractAgentRunTime(chunk.content);
@@ -1146,12 +1214,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             currentReasoningPart = makeReasoningPart(
               (currentReasoningPart?.text ?? "") + chunk.content,
               true,
-              buildMetadata() ?? undefined,
+              buildMetadata() ?? undefined
             );
             yield buildStreamResult(
               currentReasoningPart
                 ? [...contentParts, currentReasoningPart]
-                : [...contentParts],
+                : [...contentParts]
             );
             continue;
           }
@@ -1225,7 +1293,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning();
             const payload = parseSubAgentStart(chunk.content);
             const agentId =
-              payload.agent_id ?? chunk.agent_id ?? `unknown-${subAgentRunCounter}`;
+              payload.agent_id ??
+              chunk.agent_id ??
+              `unknown-${subAgentRunCounter}`;
             subAgentRunCounter += 1;
             const runId = `run-${subAgentRunCounter}`;
             const descriptor = {
@@ -1272,12 +1342,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             currentReasoningPart = makeReasoningPart(
               (currentReasoningPart?.text ?? "") + chunk.content,
               true,
-              buildMetadata() ?? undefined,
+              buildMetadata() ?? undefined
             );
             yield buildStreamResult(
               currentReasoningPart
                 ? [...contentParts, currentReasoningPart]
-                : [...contentParts],
+                : [...contentParts]
             );
           } else if (partType === "tool-call") {
             // Finalize any ongoing reasoning
@@ -1313,7 +1383,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // the most recent tool call so the ToolFallback UI can render them.
             try {
               const searchResults = JSON.parse(chunk.content);
-              const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+              const results = Array.isArray(searchResults)
+                ? searchResults
+                : [searchResults];
               for (const result of results) {
                 const url = result.url || "";
                 const filename = result.filename || "";
@@ -1325,7 +1397,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   !searchSourcesAccumulator.some(
                     (source) =>
                       `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                      sourceKey,
+                      sourceKey
                   )
                 ) {
                   searchSourcesAccumulator.push({
@@ -1366,6 +1438,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "plan_step_update") {
             const update = parsePlanStepUpdate(chunk.content);
             if (update) planRegistry.updateStep(update.stepId, update.status);
+          } else if (chunk.type === "a2ui") {
+            flushOpenReasoning();
+            appendA2UIChunk(contentParts, chunk.content);
+            yield buildStreamResult(contentParts);
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
@@ -1407,9 +1483,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (partType === "reasoning") {
               currentReasoningPart = makeReasoningPart(
                 (currentReasoningPart?.text ?? "") + chunk.content,
-                true,
+                true
               );
-              yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+              yield buildStreamResult([
+                ...contentParts,
+                currentReasoningPart,
+              ] as any);
             } else if (partType === "tool-call") {
               if (currentReasoningPart) {
                 currentReasoningPart.status = { type: "done" };
@@ -1446,7 +1525,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               try {
                 const searchResults = JSON.parse(chunk.content);
-                const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+                const results = Array.isArray(searchResults)
+                  ? searchResults
+                  : [searchResults];
                 for (const result of results) {
                   const url = result.url || "";
                   const filename = result.filename || "";
@@ -1458,7 +1539,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     !searchSourcesAccumulator.some(
                       (source) =>
                         `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                        sourceKey,
+                        sourceKey
                     )
                   ) {
                     searchSourcesAccumulator.push({
@@ -1475,13 +1556,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     });
                   }
                   attachSearchContentToTool(
-                  contentParts,
-                  { url, title },
-                  chunk.tool_call_id
-                );
+                    contentParts,
+                    { url, title },
+                    chunk.tool_call_id
+                  );
                 }
               } catch (e) {
-                log.warn("[ChatModelAdapter] Failed to parse search_content:", e);
+                log.warn(
+                  "[ChatModelAdapter] Failed to parse search_content:",
+                  e
+                );
               }
             }
           }
@@ -1563,7 +1647,8 @@ function buildTimingResult(
   tokenCount: number = 0,
   duration: number = 0
 ) {
-  const totalStreamTime = duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
+  const totalStreamTime =
+    duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
 
   return {
     metadata: {
@@ -1572,7 +1657,8 @@ function buildTimingResult(
         firstTokenTime,
         totalStreamTime,
         tokenCount,
-        tokensPerSecond: duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
+        tokensPerSecond:
+          duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
         totalChunks: 1,
         toolCallCount,
       },

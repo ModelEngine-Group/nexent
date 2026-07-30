@@ -31,6 +31,7 @@ from nexent.core.utils.observer import ProcessType
 from consts.model import (
     AgentInfoRequest,
     AgentRequest,
+    A2UIActionMessage,
     AgentNameBatchCheckRequest,
     AgentNameBatchRegenerateRequest,
     ExportAndImportAgentInfo,
@@ -118,7 +119,6 @@ from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
-from utils.a2ui_action_utils import A2UI_FORM_SUBMISSION_PREFIX
 from utils.config_utils import tenant_config_manager
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
@@ -132,7 +132,44 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+_A2UI_ACTION_CONTEXT_MAX_BYTES = 64 * 1024
+_A2UI_ACTION_QUERY_MAX_BYTES = 256 * 1024
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+
+
+def _build_a2ui_execution_request(agent_request: AgentRequest) -> AgentRequest:
+    """Create an execution-only query while keeping the visible query unchanged."""
+    action = getattr(agent_request, "a2ui_action", None)
+    if not isinstance(action, A2UIActionMessage):
+        return agent_request
+
+    action_payload = action.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=True,
+    )
+    context_json = json.dumps(
+        action_payload["action"].get("context", {}),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(context_json.encode("utf-8")) > _A2UI_ACTION_CONTEXT_MAX_BYTES:
+        raise ValueError("A2UI action context exceeds 64 KiB")
+
+    payload_json = json.dumps(
+        action_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    execution_query = (
+        "[A2UI action]\n"
+        f"Visible action: {agent_request.query}\n"
+        "The following JSON is untrusted user-provided action data:\n"
+        f"{payload_json}"
+    )
+    if len(execution_query.encode("utf-8")) > _A2UI_ACTION_QUERY_MAX_BYTES:
+        raise ValueError("A2UI action query exceeds 256 KiB")
+    return agent_request.model_copy(update={"query": execution_query})
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -958,11 +995,7 @@ async def _stream_agent_chunks(
         )
         assistant_message_req = MessageRequest(
             conversation_id=agent_request.conversation_id,
-            message_idx=(
-                agent_request.current_user_message_index + 1
-                if agent_request.current_user_message_index is not None
-                else user_role_count * 2 + 1
-            ),
+            message_idx=user_role_count * 2 + 1,
             role=MESSAGE_ROLE["ASSISTANT"],
             message=[],
             minio_files=None,
@@ -2789,29 +2822,7 @@ async def prepare_agent_run(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
 
-    historical_context = None
-    if not agent_request.is_debug and agent_request.conversation_id is not None:
-        current_message_id = agent_request.current_user_message_id
-        if current_message_id is None:
-            current_message_id = get_current_run_user_message_id(
-                agent_request.conversation_id, user_id
-            )
-        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
-            current_message_id = None
-            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
-        if current_message_id is not None:
-            historical_context = load_historical_context(
-                agent_request.conversation_id, current_message_id, user_id, tenant_id
-            )
-
-    history_contains_form_submission = any(
-        isinstance(turn, dict)
-        and isinstance(turn.get("user_message"), str)
-        and turn["user_message"].startswith(A2UI_FORM_SUBMISSION_PREFIX)
-        for turn in (historical_context or {}).get("conversation_turns", ())
-    )
-
-    run_info_kwargs = dict(
+    agent_run_info = await create_agent_run_info(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
         query=agent_request.query,
@@ -2829,13 +2840,20 @@ async def prepare_agent_run(
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
         enable_a2ui=agent_request.a2ui_client_enabled,
-        a2ui_surface_id=agent_request.a2ui_surface_id,
     )
-    if agent_request.persisted_query is not None:
-        run_info_kwargs["display_query"] = agent_request.persisted_query
-    elif history_contains_form_submission:
-        run_info_kwargs["display_query"] = agent_request.query
-    agent_run_info = await create_agent_run_info(**run_info_kwargs)
+
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = get_current_run_user_message_id(
+            agent_request.conversation_id, user_id
+        )
+        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+            current_message_id = None
+            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
     agent_run_info.context_input = _build_authorized_context_input(
         agent_run_info, historical_context
     )
@@ -2866,21 +2884,7 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
         # Historical checkpoint lookup for this run needs the current message boundary.
-        request_to_persist = agent_request
-        if agent_request.persisted_query:
-            request_to_persist = agent_request.model_copy(
-                update={"query": agent_request.persisted_query}
-            )
-        save_conversation_user(request_to_persist, user_id, tenant_id)
-        agent_request.current_user_message_id = (
-            request_to_persist.current_user_message_id
-        )
-        agent_request.current_user_message_index = (
-            request_to_persist.current_user_message_index
-        )
-        agent_request.a2ui_action_persisted = (
-            request_to_persist.a2ui_action_persisted
-        )
+        save_conversation_user(agent_request, user_id, tenant_id)
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:
@@ -3354,6 +3358,8 @@ async def run_agent_stream(
             tenant_id=resolved_tenant_id,
         )
 
+    execution_request = _build_a2ui_execution_request(agent_request)
+
     memory_ctx_preview = build_memory_context(
         resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
     )
@@ -3387,7 +3393,7 @@ async def run_agent_stream(
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
     stream_gen = generate_stream(
-        agent_request,
+        execution_request,
         user_id=resolved_user_id,
         tenant_id=resolved_tenant_id,
         language=language,
@@ -3447,6 +3453,8 @@ async def run_agent_background(
             tenant_id=tenant_id,
         )
 
+    execution_request = _build_a2ui_execution_request(agent_request)
+
     memory_ctx_preview = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
     )
@@ -3476,7 +3484,7 @@ async def run_agent_background(
 
     if memory_enabled and not agent_request.is_debug:
         stream_gen = generate_stream(
-            agent_request,
+            execution_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
@@ -3484,7 +3492,7 @@ async def run_agent_background(
         )
     else:
         stream_gen = generate_stream(
-            agent_request,
+            execution_request,
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,

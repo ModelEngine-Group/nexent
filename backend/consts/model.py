@@ -1,6 +1,5 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
-from uuid import UUID
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from ag_ui.core import RunAgentInput
@@ -341,14 +340,8 @@ class AgentRequest(BaseModel):
         default=False,
         description="Whether to enable the planning phase before execution"
     )
-    a2ui_client_enabled: bool = Field(default=False, exclude=True)
-    a2ui_surface_id: Optional[str] = Field(default=None, exclude=True)
-    persisted_query: Optional[str] = Field(default=None, exclude=True)
-    a2ui_action_payload: Optional[Dict[str, Any]] = Field(default=None, exclude=True)
-    server_side_message_index: bool = Field(default=False, exclude=True)
-    current_user_message_id: Optional[int] = Field(default=None, exclude=True)
-    current_user_message_index: Optional[int] = Field(default=None, exclude=True)
-    a2ui_action_persisted: bool = Field(default=False, exclude=True)
+    a2ui_client_enabled: bool = False
+    a2ui_action: Optional["A2UIActionMessage"] = None
 
 
 class A2UICapability(BaseModel):
@@ -395,22 +388,7 @@ class A2UIActionMessage(BaseModel):
     action: A2UIActionBody
 
 
-class A2UIFormSubmission(BaseModel):
-    """Client-provided values for a submitted Nexent Form component."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    values: Dict[str, Any] = Field(default_factory=dict)
-
-
-class A2UIActionSubmission(BaseModel):
-    """Nexent idempotency envelope for an A2UI action."""
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    submission_id: UUID = Field(alias="submissionId")
-    message: A2UIActionMessage
-    form_submission: Optional[A2UIFormSubmission] = Field(default=None, alias="formSubmission")
+AgentRequest.model_rebuild()
 
 
 class NexentAGUIProps(BaseModel):
@@ -430,7 +408,7 @@ class NexentAGUIProps(BaseModel):
     context_policy: Optional[Dict[str, Any]] = Field(default=None, alias="contextPolicy")
     resume: bool = False
     capabilities: AGUICapabilities = Field(default_factory=AGUICapabilities)
-    a2ui_action: Optional[A2UIActionSubmission] = Field(default=None, alias="a2uiAction")
+    a2ui_action: Optional[A2UIActionMessage] = Field(default=None, alias="a2uiAction")
 
     @field_validator("context_policy")
     @classmethod

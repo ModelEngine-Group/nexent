@@ -1,491 +1,287 @@
 import pytest
 
-from nexent.core.a2ui.validator import A2UIValidationError, validate_a2ui_messages
+from nexent.core.a2ui.validator import (
+    A2UI_CATALOG_ID,
+    A2UIValidationError,
+    validate_a2ui_messages,
+)
 
 
-def _components(*extra):
-    return [
-        {
-            "id": "root",
-            "component": "Column",
-            "children": ["title", *[item["id"] for item in extra]],
-        },
-        {"id": "title", "component": "Text", "text": "Safe title"},
-        *extra,
-    ]
-
-
-def _messages(components=None):
-    return [
+def _messages(components=None, data=None):
+    messages = []
+    if data is not None:
+        messages.append({"updateDataModel": {"path": "/", "value": data}})
+    messages.append(
         {
             "updateComponents": {
-                "surfaceId": "model-value-is-rewritten",
-                "components": components or _components(),
+                "components": components
+                or [{"id": "root", "component": "Text", "text": "Hello"}]
             }
         }
-    ]
+    )
+    return messages
 
 
-def test_normalizes_surface_and_catalog():
-    result = validate_a2ui_messages(_messages(), surface_id="surface-1")
-    assert result[0] == {
-        "version": "v0.9",
-        "createSurface": {"surfaceId": "surface-1", "catalogId": "nexent.v1"},
-    }
-    assert result[1]["updateComponents"]["surfaceId"] == "surface-1"
-
-
-def test_accepts_business_components_and_trusted_urls():
-    components = _components(
+def _form_messages():
+    components = [
         {
-            "id": "artifact",
-            "component": "ArtifactCard",
-            "title": "Report",
-            "url": "https://objects.example.com/report.pdf",
+            "id": "root",
+            "component": "Card",
+            "child": "form-column",
         },
         {
-            "id": "form",
-            "component": "Form",
-            "fields": [{"name": "date", "label": "Date", "type": "date"}],
+            "id": "form-column",
+            "component": "Column",
+            "children": [
+                "title",
+                "name",
+                "notes",
+                "age",
+                "role",
+                "confirmed",
+                "date",
+                "divider",
+                "submit",
+            ],
+        },
+        {"id": "title", "component": "Text", "text": "Feedback", "variant": "h2"},
+        {
+            "id": "name",
+            "component": "TextField",
+            "label": "Name",
+            "value": {"path": "/form/name"},
+            "variant": "shortText",
+        },
+        {
+            "id": "notes",
+            "component": "TextField",
+            "label": "Notes",
+            "value": {"path": "/form/notes"},
+            "variant": "longText",
+        },
+        {
+            "id": "age",
+            "component": "TextField",
+            "label": "Age",
+            "value": {"path": "/form/age"},
+            "variant": "number",
+        },
+        {
+            "id": "role",
+            "component": "ChoicePicker",
+            "label": "Role",
+            "options": [
+                {"label": "Engineer", "value": "engineer"},
+                {"label": "Designer", "value": "designer"},
+            ],
+            "value": {"path": "/form/role"},
+            "variant": "mutuallyExclusive",
+        },
+        {
+            "id": "confirmed",
+            "component": "CheckBox",
+            "label": "Confirmed",
+            "value": {"path": "/form/confirmed"},
+        },
+        {
+            "id": "date",
+            "component": "DateTimeInput",
+            "label": "Date",
+            "value": {"path": "/form/date"},
+            "enableDate": True,
+            "enableTime": False,
+        },
+        {"id": "divider", "component": "Divider"},
+        {
+            "id": "submit",
+            "component": "Button",
+            "child": "submit-label",
+            "variant": "primary",
             "action": {
-                "event": {"name": "submit", "context": {"date": {"path": "/form/date"}}}
+                "event": {
+                    "name": "submit_form",
+                    "context": {
+                        "name": {"path": "/form/name"},
+                        "notes": {"path": "/form/notes"},
+                        "age": {"path": "/form/age"},
+                        "role": {"path": "/form/role"},
+                        "confirmed": {"path": "/form/confirmed"},
+                        "date": {"path": "/form/date"},
+                    },
+                }
             },
         },
-    )
-    result = validate_a2ui_messages(
-        {"messages": _messages(components)},
-        surface_id="surface-1",
-        allowed_url_hosts=["objects.example.com"],
-    )
-    assert len(result) == 2
+        {"id": "submit-label", "component": "Text", "text": "Submit"},
+    ]
+    data = {
+        "form": {
+            "name": "",
+            "notes": "",
+            "age": "",
+            "role": [],
+            "confirmed": False,
+            "date": "",
+        }
+    }
+    return _messages(components, data)
+
+
+def test_normalizes_official_catalog_surface_and_all_basic_form_fields():
+    result = validate_a2ui_messages({"messages": _form_messages()}, surface_id="surface-1")
+
+    assert result[0] == {
+        "version": "v0.9",
+        "createSurface": {"surfaceId": "surface-1", "catalogId": A2UI_CATALOG_ID},
+    }
+    assert A2UI_CATALOG_ID == "https://a2ui.org/specification/v0_9/basic_catalog.json"
+    assert result[1]["updateDataModel"] == {
+        "surfaceId": "surface-1",
+        "path": "/",
+        "value": _form_messages()[0]["updateDataModel"]["value"],
+    }
+    assert result[2]["updateComponents"]["surfaceId"] == "surface-1"
+    component_types = {
+        component["component"]
+        for component in result[2]["updateComponents"]["components"]
+    }
+    assert {
+        "Text",
+        "Button",
+        "Card",
+        "Column",
+        "Divider",
+        "TextField",
+        "CheckBox",
+        "ChoicePicker",
+        "DateTimeInput",
+    } <= component_types
+
+
+def test_accepts_row_layout_bindings_and_literal_action_context():
+    components = [
+        {"id": "root", "component": "Row", "children": ["text", "button"]},
+        {"id": "text", "component": "Text", "text": {"path": "/message"}},
+        {
+            "id": "button",
+            "component": "Button",
+            "child": "button-label",
+            "action": {
+                "event": {
+                    "name": "continue",
+                    "context": {"count": 1, "enabled": True, "items": ["a"]},
+                }
+            },
+        },
+        {"id": "button-label", "component": "Text", "text": "Continue"},
+    ]
+
+    result = validate_a2ui_messages(_messages(components, {"message": "Ready"}), surface_id="surface-1")
+
+    assert result[-1]["updateComponents"]["components"] == components
+
+
+@pytest.mark.parametrize("component_type", ["Form", "DataTable", "Chart", "ApprovalCard", "ArtifactCard"])
+def test_rejects_custom_catalog_components(component_type):
+    with pytest.raises(A2UIValidationError, match="outside the supported basic catalog"):
+        validate_a2ui_messages(
+            _messages([{"id": "root", "component": component_type}]),
+            surface_id="surface-1",
+        )
 
 
 @pytest.mark.parametrize(
-    ("components", "error"),
+    ("component", "error"),
     [
-        (_components({"id": "bad", "component": "Arbitrary"}), "outside nexent.v1"),
+        ({"id": "root", "component": "Text", "text": "x", "style": {}}, "unsupported properties"),
+        ({"id": "root", "component": "Text", "text": "<script>x</script>"}, "HTML"),
+        ({"id": "root", "component": "Text", "text": "javascript:alert(1)"}, "HTML"),
+        ({"id": "root", "component": "Text", "text": 1}, "string or data binding"),
+        ({"id": "root", "component": "Text", "text": "x", "variant": "hero"}, "variant"),
+        ({"id": "root", "component": "Divider", "axis": "diagonal"}, "axis"),
+        ({"id": "root", "component": "Column", "children": [], "align": "left"}, "align"),
+        ({"id": "root", "component": "Row", "children": [], "justify": "left"}, "justify"),
         (
-            _components(
-                {"id": "bad", "component": "Text", "html": "<script>x</script>"}
-            ),
-            "Forbidden",
+            {"id": "root", "component": "TextField", "label": "Name", "variant": "email"},
+            "variant",
         ),
         (
-            _components(
-                {"id": "bad", "component": "Image", "url": "javascript:alert(1)"}
-            ),
-            "javascript",
+            {"id": "root", "component": "CheckBox", "label": "Yes", "value": "yes"},
+            "boolean or data binding",
         ),
         (
-            _components(
-                {"id": "bad", "component": "Image", "url": "http://example.com/a"}
-            ),
-            "HTTPS",
+            {"id": "root", "component": "ChoicePicker", "options": [], "value": []},
+            "non-empty",
         ),
         (
-            _components({"id": "bad", "component": "Image", "url": "//evil.example/a"}),
-            "HTTPS",
-        ),
-        (
-            _components(
-                {"id": "bad", "component": "Image", "url": "https://evil.example/a"}
-            ),
-            "not trusted",
-        ),
-        (
-            _components(
-                {"id": "bad", "component": "Chart", "chartType": "scatter", "data": []}
-            ),
-            "chartType",
-        ),
-        (
-            _components(
-                {"id": "bad", "component": "Form", "fields": [{"type": "email"}]}
-            ),
-            "unsupported",
-        ),
-        (_components({"id": "bad", "component": "Text", "style": {}}), "Forbidden"),
-        (
-            _components({"id": "title", "component": "Text", "text": "duplicate"}),
-            "unique",
+            {
+                "id": "root",
+                "component": "DateTimeInput",
+                "value": "",
+                "enableDate": "yes",
+            },
+            "must be a boolean",
         ),
     ],
 )
-def test_rejects_catalog_and_security_violations(components, error):
+def test_rejects_invalid_basic_component_contracts(component, error):
+    with pytest.raises(A2UIValidationError, match=error):
+        validate_a2ui_messages(_messages([component]), surface_id="surface-1")
+
+
+@pytest.mark.parametrize(
+    ("action", "error"),
+    [
+        ({}, "exactly one event"),
+        ({"event": "run"}, "unsupported properties"),
+        ({"event": {"name": ""}}, "name is invalid"),
+        ({"event": {"name": "run", "target": "api"}}, "unsupported properties"),
+        ({"event": {"name": "run", "context": []}}, "must be an object"),
+        ({"event": {"name": "run", "context": {"nested": {"value": 1}}}}, "literals or data bindings"),
+    ],
+)
+def test_rejects_invalid_button_actions(action, error):
+    components = [
+        {
+            "id": "root",
+            "component": "Button",
+            "child": "label",
+            "action": action,
+        },
+        {"id": "label", "component": "Text", "text": "Run"},
+    ]
     with pytest.raises(A2UIValidationError, match=error):
         validate_a2ui_messages(_messages(components), surface_id="surface-1")
 
 
-def test_rejects_reference_cycle_missing_reference_and_missing_root():
-    with pytest.raises(A2UIValidationError, match="cycle"):
-        validate_a2ui_messages(
-            _messages([{"id": "root", "component": "Column", "children": ["root"]}]),
-            surface_id="surface-1",
-        )
-    with pytest.raises(A2UIValidationError, match="Unknown"):
+def test_rejects_missing_references_root_cycles_and_duplicate_ids():
+    with pytest.raises(A2UIValidationError, match="Unknown component references"):
         validate_a2ui_messages(
             _messages([{"id": "root", "component": "Column", "children": ["missing"]}]),
             surface_id="surface-1",
         )
     with pytest.raises(A2UIValidationError, match="root"):
         validate_a2ui_messages(
-            _messages([{"id": "title", "component": "Text", "text": "x"}]),
+            _messages([{"id": "other", "component": "Text", "text": "x"}]),
             surface_id="surface-1",
         )
-
-
-def test_rejects_size_and_collection_limits():
-    with pytest.raises(A2UIValidationError, match="500"):
+    with pytest.raises(A2UIValidationError, match="cycle"):
         validate_a2ui_messages(
-            _messages(
-                _components(
-                    {"id": "table", "component": "DataTable", "rows": [{}] * 501}
-                )
-            ),
+            _messages([{"id": "root", "component": "Column", "children": ["root"]}]),
             surface_id="surface-1",
         )
-    with pytest.raises(A2UIValidationError, match="1000"):
-        validate_a2ui_messages(
-            _messages(
-                _components(
-                    {
-                        "id": "chart",
-                        "component": "Chart",
-                        "chartType": "line",
-                        "data": [{}] * 1001,
-                    }
-                )
-            ),
-            surface_id="surface-1",
-        )
-    with pytest.raises(A2UIValidationError, match="200"):
+    with pytest.raises(A2UIValidationError, match="unique"):
         validate_a2ui_messages(
             _messages(
                 [
-                    {"id": "root", "component": "Column", "children": []},
-                    *[
-                        {"id": f"item-{index}", "component": "Text", "text": "x"}
-                        for index in range(200)
-                    ],
+                    {"id": "root", "component": "Text", "text": "one"},
+                    {"id": "root", "component": "Text", "text": "two"},
                 ]
             ),
             surface_id="surface-1",
         )
 
 
-def test_update_existing_surface_and_data_model():
-    result = validate_a2ui_messages(
-        [
-            _messages()[0],
-            {"updateDataModel": {"path": "/value", "value": {"safe": True}}},
-        ],
-        surface_id="surface-1",
-        create_surface=False,
-    )
-    assert "createSurface" not in result[0]
-    assert result[1]["updateDataModel"]["surfaceId"] == "surface-1"
-
-
-def test_accepts_relative_url_string_reference_and_ignores_model_create_surface():
-    result = validate_a2ui_messages(
-        [
-            {"createSurface": {"surfaceId": "model"}},
-            {
-                "updateComponents": {
-                    "components": [
-                        {"id": "root", "component": "Card", "child": "image"},
-                        {
-                            "id": "image",
-                            "component": "Image",
-                            "url": "/api/assets/image.png",
-                        },
-                    ]
-                }
-            },
-        ],
-        surface_id="surface-1",
-    )
-    assert len(result) == 2
-
-
-def test_accepts_renderable_weather_card_component_contract():
-    components = [
-        {"id": "root", "component": "Card", "child": "weather"},
-        {
-            "id": "weather",
-            "component": "Column",
-            "children": ["title", "temperature", "refresh"],
-        },
-        {"id": "title", "component": "Text", "text": "Today's weather"},
-        {"id": "temperature", "component": "Text", "text": "28°C"},
-        {
-            "id": "refresh",
-            "component": "Button",
-            "child": "refresh-label",
-            "action": {"event": {"name": "refresh_weather", "context": {}}},
-        },
-        {"id": "refresh-label", "component": "Text", "text": "Refresh"},
-    ]
-
-    result = validate_a2ui_messages(_messages(components), surface_id="surface-1")
-
-    assert result[1]["updateComponents"]["components"] == components
-
-
-@pytest.mark.parametrize(
-    ("component", "error"),
-    [
-        (
-            {
-                "id": "root",
-                "component": "Card",
-                "children": ["content"],
-                "title": "Weather",
-            },
-            "missing required properties: child",
-        ),
-        (
-            {
-                "id": "root",
-                "component": "Button",
-                "text": "Refresh",
-                "action": {"event": {"name": "refresh", "context": {}}},
-            },
-            "missing required properties: child",
-        ),
-        (
-            {"id": "root", "component": "Column", "children": [], "spacing": "8px"},
-            "unsupported properties: spacing",
-        ),
-        (
-            {"id": "root", "component": "Text", "text": "Weather", "title": "Invalid"},
-            "unsupported properties: title",
-        ),
-    ],
-)
-def test_rejects_component_properties_outside_renderable_contract(component, error):
-    with pytest.raises(A2UIValidationError, match=error):
-        validate_a2ui_messages(_messages([component]), surface_id="surface-1")
-
-
-@pytest.mark.parametrize(
-    ("components", "error"),
-    [
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Button",
-                    "child": "label",
-                    "action": {},
-                },
-                {"id": "label", "component": "Text", "text": "Run"},
-            ],
-            "exactly one event",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Button",
-                    "child": "label",
-                    "action": {"event": "invalid"},
-                },
-                {"id": "label", "component": "Text", "text": "Run"},
-            ],
-            "event must be an object",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Button",
-                    "child": "label",
-                    "action": {"event": {"name": "run", "target": "api"}},
-                },
-                {"id": "label", "component": "Text", "text": "Run"},
-            ],
-            "unsupported properties: target",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Button",
-                    "child": "label",
-                    "action": {"event": {"name": ""}},
-                },
-                {"id": "label", "component": "Text", "text": "Run"},
-            ],
-            "event.name must be a string",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Button",
-                    "child": "label",
-                    "action": {"event": {"name": "run", "context": []}},
-                },
-                {"id": "label", "component": "Text", "text": "Run"},
-            ],
-            "event.context must be an object",
-        ),
-        (
-            [{"id": "root", "component": "Row", "children": [1]}],
-            "contain component ids",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Column",
-                    "children": {"componentId": "item"},
-                }
-            ],
-            "contain component ids",
-        ),
-        (
-            [{"id": "root", "component": "ArtifactCard", "title": 1, "url": "/report"}],
-            "ArtifactCard.title must be a string",
-        ),
-        (
-            [{"id": "root", "component": "DataTable", "columns": "bad", "rows": []}],
-            "DataTable.columns",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "DataTable",
-                    "columns": [{"key": "name", "label": "Name"}],
-                    "rows": "bad",
-                }
-            ],
-            "DataTable.rows",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Chart",
-                    "chartType": "line",
-                    "data": {},
-                    "valueKey": "value",
-                }
-            ],
-            "Chart.data",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Form",
-                    "fields": [
-                        {
-                            "name": "name",
-                            "label": "Name",
-                            "type": "text",
-                            "placeholder": "Name",
-                        }
-                    ],
-                    "action": {"event": {"name": "submit"}},
-                }
-            ],
-            "Form field has unsupported properties: placeholder",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Form",
-                    "fields": [{"label": "Name", "type": "text"}],
-                    "action": {"event": {"name": "submit"}},
-                }
-            ],
-            "require string name and label",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Form",
-                    "fields": [
-                        {
-                            "name": "name",
-                            "label": "Name",
-                            "type": "text",
-                            "required": "yes",
-                        }
-                    ],
-                    "action": {"event": {"name": "submit"}},
-                }
-            ],
-            "required must be boolean",
-        ),
-        (
-            [
-                {
-                    "id": "root",
-                    "component": "Form",
-                    "fields": [
-                        {
-                            "name": "room",
-                            "label": "Room",
-                            "type": "select",
-                            "options": ["suite"],
-                        }
-                    ],
-                    "action": {"event": {"name": "submit"}},
-                }
-            ],
-            "options must contain label/value objects",
-        ),
-    ],
-)
-def test_rejects_invalid_component_contract_details(components, error):
-    with pytest.raises(A2UIValidationError, match=error):
-        validate_a2ui_messages(_messages(components), surface_id="surface-1")
-
-
-@pytest.mark.parametrize(
-    ("raw", "surface_id", "error"),
-    [
-        ({"invalid": True}, "surface-1", "messages array"),
-        ([], "unsafe surface", "Invalid server"),
-        (["invalid"], "surface-1", "must be an object"),
-        (
-            [{"updateComponents": {"components": "invalid"}}],
-            "surface-1",
-            "must be an array",
-        ),
-        (
-            [{"updateComponents": {"components": ["invalid"]}}],
-            "surface-1",
-            "must be objects",
-        ),
-        (
-            [
-                {
-                    "updateComponents": {
-                        "components": [{"id": "unsafe id", "component": "Text"}]
-                    }
-                }
-            ],
-            "surface-1",
-            "safe id",
-        ),
-        ([{"updateDataModel": "invalid"}], "surface-1", "must be an object"),
-        ([{"version": "v1.0", "updateDataModel": {}}], "surface-1", "version"),
-        ([{"unsupported": {}}], "surface-1", "wrap components"),
-    ],
-)
-def test_rejects_malformed_message_shapes(raw, surface_id, error):
-    with pytest.raises(A2UIValidationError, match=error):
-        validate_a2ui_messages(raw, surface_id=surface_id)
-
-
-def test_rejects_deep_graph_large_action_context_and_large_message():
+def test_rejects_depth_component_action_and_message_size_limits():
     chain = [
         {
             "id": "root" if index == 0 else f"node-{index}",
@@ -497,47 +293,54 @@ def test_rejects_deep_graph_large_action_context_and_large_message():
     with pytest.raises(A2UIValidationError, match="depth 16"):
         validate_a2ui_messages(_messages(chain), surface_id="surface-1")
 
+    components = [{"id": "root", "component": "Column", "children": []}]
+    components.extend(
+        {"id": f"item-{index}", "component": "Text", "text": "x"}
+        for index in range(200)
+    )
+    with pytest.raises(A2UIValidationError, match="200 components"):
+        validate_a2ui_messages(_messages(components), surface_id="surface-1")
+
+    action_components = [
+        {
+            "id": "root",
+            "component": "Button",
+            "child": "label",
+            "action": {"event": {"name": "run", "context": {"value": "x" * (64 * 1024)}}},
+        },
+        {"id": "label", "component": "Text", "text": "Run"},
+    ]
     with pytest.raises(A2UIValidationError, match="Action context"):
-        validate_a2ui_messages(
-            _messages(
-                _components(
-                    {
-                        "id": "button",
-                        "component": "Button",
-                        "action": {
-                            "event": {
-                                "name": "submit",
-                                "context": {"value": "x" * (64 * 1024)},
-                            }
-                        },
-                    }
-                )
-            ),
-            surface_id="surface-1",
-        )
+        validate_a2ui_messages(_messages(action_components), surface_id="surface-1")
 
     with pytest.raises(A2UIValidationError, match="256 KiB"):
         validate_a2ui_messages(
-            _messages(
-                [{"id": "root", "component": "Text", "text": "x" * (256 * 1024)}]
-            ),
+            _messages([{"id": "root", "component": "Text", "text": "x" * (256 * 1024)}]),
             surface_id="surface-1",
         )
 
 
-def test_rejects_form_fields_that_are_not_an_array():
-    with pytest.raises(A2UIValidationError, match="must be an array"):
-        validate_a2ui_messages(
-            _messages(
-                _components({"id": "form", "component": "Form", "fields": "invalid"})
-            ),
-            surface_id="surface-1",
-        )
-
-
-def test_rejects_components_without_update_components_envelope():
-    with pytest.raises(A2UIValidationError, match="wrap components"):
-        validate_a2ui_messages(
-            {"messages": [{"components": [{"id": "root", "component": "Text"}]}]},
-            surface_id="surface-1",
-        )
+@pytest.mark.parametrize(
+    ("raw", "surface_id", "error"),
+    [
+        ({"invalid": True}, "surface-1", "messages array"),
+        ([], "surface-1", "non-empty"),
+        (_messages(), "unsafe surface", "Invalid server-generated surface id"),
+        (["bad"], "surface-1", "must be an object"),
+        ([{"version": "v1.0", "updateDataModel": {"value": {}}}], "surface-1", "version"),
+        ([{"createSurface": {}}], "surface-1", "unsupported operation"),
+        ([{"updateComponents": "bad"}], "surface-1", "contain only components"),
+        ([{"updateComponents": {"components": []}}], "surface-1", "non-empty array"),
+        ([{"updateComponents": {"components": ["bad"]}}], "surface-1", "must be objects"),
+        ([{"updateDataModel": {"path": "bad", "value": {}}}], "surface-1", "JSON Pointer"),
+        ([{"updateDataModel": {"path": "/"}}], "surface-1", "value is required"),
+        (
+            [{"updateComponents": {"components": [{"id": "unsafe id", "component": "Text"}]}}],
+            "surface-1",
+            "safe id",
+        ),
+    ],
+)
+def test_rejects_malformed_messages(raw, surface_id, error):
+    with pytest.raises(A2UIValidationError, match=error):
+        validate_a2ui_messages(raw, surface_id=surface_id)

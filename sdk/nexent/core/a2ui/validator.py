@@ -1,62 +1,55 @@
-"""Strict validation boundary for server-generated A2UI v0.9 messages."""
+"""Validation boundary for server-generated A2UI v0.9 basic catalog messages."""
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
 from typing import Any
-from urllib.parse import urlparse
 
 
 A2UI_PROTOCOL_VERSION = "v0.9"
-A2UI_CATALOG_ID = "nexent.v1"
+A2UI_CATALOG_ID = "https://a2ui.org/specification/v0_9/basic_catalog.json"
 A2UI_MAX_MESSAGE_BYTES = 256 * 1024
 A2UI_MAX_COMPONENTS = 200
 A2UI_MAX_DEPTH = 16
 A2UI_MAX_ACTION_CONTEXT_BYTES = 64 * 1024
-A2UI_MAX_TABLE_ROWS = 500
-A2UI_MAX_CHART_POINTS = 1000
 
 A2UI_COMPONENTS = frozenset(
     {
         "Text",
-        "Image",
-        "Icon",
         "Button",
         "Card",
         "Row",
         "Column",
         "Divider",
-        "DataTable",
-        "Chart",
-        "Form",
-        "ApprovalCard",
-        "ArtifactCard",
+        "TextField",
+        "CheckBox",
+        "ChoicePicker",
+        "DateTimeInput",
     }
 )
-_COMMON_COMPONENT_KEYS = frozenset({"id", "component", "accessibility", "weight"})
+_COMMON_COMPONENT_KEYS = frozenset({"id", "component", "weight"})
 _COMPONENT_CONTRACTS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "Text": (frozenset({"text"}), frozenset({"variant"})),
-    "Image": (frozenset({"url"}), frozenset({"description", "fit", "variant"})),
-    "Icon": (frozenset({"name"}), frozenset()),
-    "Button": (frozenset({"child", "action"}), frozenset({"variant", "checks"})),
+    "Button": (frozenset({"child", "action"}), frozenset({"variant"})),
     "Card": (frozenset({"child"}), frozenset()),
     "Row": (frozenset({"children"}), frozenset({"justify", "align"})),
     "Column": (frozenset({"children"}), frozenset({"justify", "align"})),
     "Divider": (frozenset(), frozenset({"axis"})),
-    "DataTable": (frozenset({"columns", "rows"}), frozenset({"caption"})),
-    "Chart": (frozenset({"chartType", "data", "valueKey"}), frozenset({"xKey", "title"})),
-    "Form": (frozenset({"fields", "action"}), frozenset({"title", "submitLabel"})),
-    "ApprovalCard": (
-        frozenset({"title", "approveAction", "rejectAction"}),
-        frozenset({"description", "approveLabel", "rejectLabel"}),
+    "TextField": (frozenset({"label"}), frozenset({"value", "variant", "validationRegexp"})),
+    "CheckBox": (frozenset({"label", "value"}), frozenset()),
+    "ChoicePicker": (
+        frozenset({"options", "value"}),
+        frozenset({"label", "variant", "displayStyle", "filterable"}),
     ),
-    "ArtifactCard": (frozenset({"title", "url"}), frozenset({"description"})),
+    "DateTimeInput": (
+        frozenset({"value"}),
+        frozenset({"label", "enableDate", "enableTime", "min", "max"}),
+    ),
 }
 _COMPONENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-_HTML_RE = re.compile(r"<\s*/?\s*(?:script|style|iframe|object|embed|html|body|svg|[a-z][a-z0-9-]*)\b", re.I)
-_REFERENCE_KEYS = frozenset({"child", "children", "trigger", "content", "entryPointChild"})
+_ACTION_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_HTML_RE = re.compile(r"<\s*/?\s*[a-z][a-z0-9-]*\b", re.I)
 
 
 class A2UIValidationError(ValueError):
@@ -67,188 +60,166 @@ def _json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
-def _walk(value: Any) -> Iterable[tuple[str | None, Any]]:
+def _validate_safe_value(value: Any, *, depth: int = 0) -> None:
+    if depth > 32:
+        raise A2UIValidationError("A2UI value nesting is too deep")
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if "javascript:" in lowered or _HTML_RE.search(value):
+            raise A2UIValidationError("HTML and script-like content are forbidden")
+        return
     if isinstance(value, dict):
-        for key, child in value.items():
-            yield key, child
-            yield from _walk(child)
-    elif isinstance(value, list):
+        forbidden = {"style", "className", "css", "html", "dangerouslySetInnerHTML", "api", "endpoint"}
+        if forbidden.intersection(value):
+            raise A2UIValidationError("A2UI contains a forbidden property")
+        for child in value.values():
+            _validate_safe_value(child, depth=depth + 1)
+        return
+    if isinstance(value, list):
         for child in value:
-            yield None, child
-            yield from _walk(child)
+            _validate_safe_value(child, depth=depth + 1)
 
 
-def _validate_strings_and_urls(value: Any, allowed_url_hosts: set[str]) -> None:
-    for key, child in _walk(value):
-        if not isinstance(child, str):
-            continue
-        lowered = child.strip().lower()
-        if "javascript:" in lowered or _HTML_RE.search(child):
-            raise A2UIValidationError("HTML, script markup, and javascript URLs are forbidden")
-        if key not in {"url", "href", "downloadUrl", "previewUrl"}:
-            continue
-        if child.startswith("/") and not child.startswith("//") and "\\" not in child:
-            continue
-        parsed = urlparse(child)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise A2UIValidationError("URLs must be same-origin paths or HTTPS URLs")
-        if parsed.hostname not in allowed_url_hosts:
-            raise A2UIValidationError(f"URL host is not trusted: {parsed.hostname}")
+def _is_binding(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"path"}
+        and isinstance(value["path"], str)
+        and value["path"].startswith("/")
+        and len(value["path"]) <= 512
+    )
 
 
-def _collect_references(component: dict[str, Any]) -> set[str]:
-    references: set[str] = set()
-    for key, value in component.items():
-        if key in _REFERENCE_KEYS:
-            if isinstance(value, str):
-                references.add(value)
-            elif isinstance(value, list):
-                references.update(item for item in value if isinstance(item, str))
-            elif isinstance(value, dict):
-                for candidate_key in ("id", "componentId", "child"):
-                    candidate = value.get(candidate_key)
-                    if isinstance(candidate, str):
-                        references.add(candidate)
-        if key == "tabs" and isinstance(value, list):
-            for tab in value:
-                if isinstance(tab, dict) and isinstance(tab.get("child"), str):
-                    references.add(tab["child"])
-    return references
+def _validate_dynamic_string(value: Any, property_name: str) -> None:
+    if not isinstance(value, str) and not _is_binding(value):
+        raise A2UIValidationError(f"{property_name} must be a string or data binding")
 
 
-def _validate_action(value: Any, component_type: str, property_name: str) -> None:
+def _validate_dynamic_boolean(value: Any, property_name: str) -> None:
+    if not isinstance(value, bool) and not _is_binding(value):
+        raise A2UIValidationError(f"{property_name} must be a boolean or data binding")
+
+
+def _validate_dynamic_string_list(value: Any, property_name: str) -> None:
+    if _is_binding(value):
+        return
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise A2UIValidationError(f"{property_name} must be a string array or data binding")
+
+
+def _validate_action(value: Any) -> None:
     if not isinstance(value, dict) or set(value) != {"event"}:
-        raise A2UIValidationError(f"{component_type}.{property_name} must contain exactly one event")
-    event = value.get("event")
-    if not isinstance(event, dict):
-        raise A2UIValidationError(f"{component_type}.{property_name}.event must be an object")
-    unknown = set(event) - {"name", "context"}
-    if unknown:
-        raise A2UIValidationError(
-            f"{component_type}.{property_name}.event has unsupported properties: {', '.join(sorted(unknown))}"
-        )
-    if not isinstance(event.get("name"), str) or not event["name"].strip():
-        raise A2UIValidationError(f"{component_type}.{property_name}.event.name must be a string")
-    if "context" in event and not isinstance(event["context"], dict):
-        raise A2UIValidationError(f"{component_type}.{property_name}.event.context must be an object")
+        raise A2UIValidationError("Button.action must contain exactly one event")
+    event = value["event"]
+    if not isinstance(event, dict) or set(event) - {"name", "context"}:
+        raise A2UIValidationError("Button.action.event has unsupported properties")
+    name = event.get("name")
+    if not isinstance(name, str) or not _ACTION_NAME_RE.fullmatch(name):
+        raise A2UIValidationError("Button.action.event.name is invalid")
+    context = event.get("context", {})
+    if not isinstance(context, dict):
+        raise A2UIValidationError("Button.action.event.context must be an object")
+    if _json_size(context) > A2UI_MAX_ACTION_CONTEXT_BYTES:
+        raise A2UIValidationError("Action context exceeds 64 KiB")
+    for item in context.values():
+        if isinstance(item, (str, int, float, bool, list)) or item is None or _is_binding(item):
+            continue
+        raise A2UIValidationError("Action context values must be literals or data bindings")
 
 
-def _validate_child_list(value: Any, component_type: str) -> None:
-    if not isinstance(value, list) or not all(isinstance(child, str) and child for child in value):
-        raise A2UIValidationError(f"{component_type}.children must contain component ids")
-
-
-def _validate_component_contract(component: dict[str, Any]) -> None:
-    component_type = str(component["component"])
+def _validate_component(component: dict[str, Any]) -> set[str]:
+    component_type = component["component"]
     required, optional = _COMPONENT_CONTRACTS[component_type]
     missing = required - set(component)
     if missing:
-        raise A2UIValidationError(f"{component_type} is missing required properties: {', '.join(sorted(missing))}")
+        raise A2UIValidationError(
+            f"{component_type} is missing required properties: {', '.join(sorted(missing))}"
+        )
     unknown = set(component) - (_COMMON_COMPONENT_KEYS | required | optional)
     if unknown:
-        raise A2UIValidationError(f"{component_type} has unsupported properties: {', '.join(sorted(unknown))}")
+        raise A2UIValidationError(
+            f"{component_type} has unsupported properties: {', '.join(sorted(unknown))}"
+        )
+    if "weight" in component and not isinstance(component["weight"], (int, float)):
+        raise A2UIValidationError(f"{component_type}.weight must be a number")
 
-    if component_type in {"Card", "Button"}:
+    references: set[str] = set()
+    if component_type in {"Button", "Card"}:
         child = component.get("child")
         if not isinstance(child, str) or not child:
             raise A2UIValidationError(f"{component_type}.child must be a component id")
+        references.add(child)
     if component_type in {"Row", "Column"}:
-        _validate_child_list(component.get("children"), component_type)
-    if component_type == "Button":
-        _validate_action(component.get("action"), component_type, "action")
-    elif component_type == "Form":
-        _validate_action(component.get("action"), component_type, "action")
-    elif component_type == "ApprovalCard":
-        _validate_action(component.get("approveAction"), component_type, "approveAction")
-        _validate_action(component.get("rejectAction"), component_type, "rejectAction")
+        children = component.get("children")
+        if not isinstance(children, list) or not all(isinstance(child, str) and child for child in children):
+            raise A2UIValidationError(f"{component_type}.children must contain component ids")
+        references.update(children)
 
-    string_properties = {
-        "DataTable": ("caption",),
-        "Chart": ("valueKey", "xKey", "title"),
-        "Form": ("title", "submitLabel"),
-        "ApprovalCard": ("title", "description", "approveLabel", "rejectLabel"),
-        "ArtifactCard": ("title", "description", "url"),
-    }.get(component_type, ())
-    for property_name in string_properties:
-        if property_name in component and not isinstance(component[property_name], str):
-            raise A2UIValidationError(f"{component_type}.{property_name} must be a string")
+    if component_type == "Text":
+        _validate_dynamic_string(component["text"], "Text.text")
+        if component.get("variant", "body") not in {"h1", "h2", "h3", "h4", "h5", "caption", "body"}:
+            raise A2UIValidationError("Text.variant is invalid")
+    elif component_type == "Button":
+        _validate_action(component["action"])
+        if component.get("variant", "default") not in {"default", "primary", "borderless"}:
+            raise A2UIValidationError("Button.variant is invalid")
+    elif component_type in {"Row", "Column"}:
+        if component.get("align", "stretch") not in {"start", "center", "end", "stretch"}:
+            raise A2UIValidationError(f"{component_type}.align is invalid")
+        if component.get("justify", "start") not in {
+            "start", "center", "end", "stretch", "spaceAround", "spaceBetween", "spaceEvenly"
+        }:
+            raise A2UIValidationError(f"{component_type}.justify is invalid")
+    elif component_type == "Divider":
+        if component.get("axis", "horizontal") not in {"horizontal", "vertical"}:
+            raise A2UIValidationError("Divider.axis is invalid")
+    elif component_type == "TextField":
+        _validate_dynamic_string(component["label"], "TextField.label")
+        if "value" in component:
+            _validate_dynamic_string(component["value"], "TextField.value")
+        if component.get("variant", "shortText") not in {"shortText", "longText", "number"}:
+            raise A2UIValidationError("TextField.variant is invalid")
+        if "validationRegexp" in component and not isinstance(component["validationRegexp"], str):
+            raise A2UIValidationError("TextField.validationRegexp must be a string")
+    elif component_type == "CheckBox":
+        _validate_dynamic_string(component["label"], "CheckBox.label")
+        _validate_dynamic_boolean(component["value"], "CheckBox.value")
+    elif component_type == "ChoicePicker":
+        if "label" in component:
+            _validate_dynamic_string(component["label"], "ChoicePicker.label")
+        options = component["options"]
+        if not isinstance(options, list) or not options:
+            raise A2UIValidationError("ChoicePicker.options must be a non-empty array")
+        for option in options:
+            if not isinstance(option, dict) or set(option) != {"label", "value"}:
+                raise A2UIValidationError("ChoicePicker options require label and value")
+            _validate_dynamic_string(option["label"], "ChoicePicker.options.label")
+            if not isinstance(option["value"], str):
+                raise A2UIValidationError("ChoicePicker.options.value must be a string")
+        _validate_dynamic_string_list(component["value"], "ChoicePicker.value")
+        if component.get("variant", "mutuallyExclusive") not in {"multipleSelection", "mutuallyExclusive"}:
+            raise A2UIValidationError("ChoicePicker.variant is invalid")
+        if component.get("displayStyle", "checkbox") not in {"checkbox", "chips"}:
+            raise A2UIValidationError("ChoicePicker.displayStyle is invalid")
+        if "filterable" in component and not isinstance(component["filterable"], bool):
+            raise A2UIValidationError("ChoicePicker.filterable must be a boolean")
+    elif component_type == "DateTimeInput":
+        _validate_dynamic_string(component["value"], "DateTimeInput.value")
+        if "label" in component:
+            _validate_dynamic_string(component["label"], "DateTimeInput.label")
+        for key in ("min", "max"):
+            if key in component:
+                _validate_dynamic_string(component[key], f"DateTimeInput.{key}")
+        for key in ("enableDate", "enableTime"):
+            if key in component and not isinstance(component[key], bool):
+                raise A2UIValidationError(f"DateTimeInput.{key} must be a boolean")
 
-    if component_type == "DataTable":
-        columns = component.get("columns")
-        rows = component.get("rows")
-        if not isinstance(columns, list) or not all(
-            isinstance(column, dict)
-            and set(column) == {"key", "label"}
-            and isinstance(column.get("key"), str)
-            and isinstance(column.get("label"), str)
-            for column in columns
-        ):
-            raise A2UIValidationError("DataTable.columns must contain key/label objects")
-        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-            raise A2UIValidationError("DataTable.rows must contain objects")
-    elif component_type == "Chart" and not isinstance(component.get("data"), list):
-        raise A2UIValidationError("Chart.data must be an array")
-    elif component_type == "Form":
-        fields = component.get("fields")
-        if not isinstance(fields, list):
-            raise A2UIValidationError("Form fields must be an array")
-        allowed_field_keys = {"name", "label", "type", "required", "options"}
-        for field in fields:
-            if not isinstance(field, dict):
-                raise A2UIValidationError("Form fields must be objects")
-            unknown_field_keys = set(field) - allowed_field_keys
-            if unknown_field_keys:
-                raise A2UIValidationError(
-                    f"Form field has unsupported properties: {', '.join(sorted(unknown_field_keys))}"
-                )
-            if not isinstance(field.get("name"), str) or not isinstance(field.get("label"), str):
-                raise A2UIValidationError("Form fields require string name and label")
-            if "required" in field and not isinstance(field["required"], bool):
-                raise A2UIValidationError("Form field required must be boolean")
-            if "options" in field:
-                options = field["options"]
-                if not isinstance(options, list) or not all(
-                    isinstance(option, dict)
-                    and set(option) == {"label", "value"}
-                    and isinstance(option.get("label"), str)
-                    and isinstance(option.get("value"), str)
-                    for option in options
-                ):
-                    raise A2UIValidationError("Form field options must contain label/value objects")
-
-
-def _validate_component_limits(component: dict[str, Any]) -> None:
-    component_type = component["component"]
-    if component_type == "DataTable":
-        rows = component.get("rows", component.get("data", []))
-        if isinstance(rows, list) and len(rows) > A2UI_MAX_TABLE_ROWS:
-            raise A2UIValidationError("DataTable exceeds the 500 row limit")
-    if component_type == "Chart":
-        data = component.get("data", [])
-        point_count = len(data) if isinstance(data, list) else 0
-        if point_count > A2UI_MAX_CHART_POINTS:
-            raise A2UIValidationError("Chart exceeds the 1000 point limit")
-        if component.get("chartType") not in {"line", "bar", "pie"}:
-            raise A2UIValidationError("Chart chartType must be line, bar, or pie")
-    if component_type == "Form":
-        fields = component.get("fields", [])
-        allowed = {"text", "textarea", "number", "select", "checkbox", "date"}
-        if not isinstance(fields, list):
-            raise A2UIValidationError("Form fields must be an array")
-        for field in fields:
-            if not isinstance(field, dict) or field.get("type") not in allowed:
-                raise A2UIValidationError("Form contains an unsupported field type")
-
-    for key, value in _walk(component):
-        if key == "context" and isinstance(value, dict):
-            if _json_size(value) > A2UI_MAX_ACTION_CONTEXT_BYTES:
-                raise A2UIValidationError("Action context exceeds 64 KiB")
-        if key in {"style", "className", "css", "html", "dangerouslySetInnerHTML", "api", "endpoint"}:
-            raise A2UIValidationError(f"Forbidden component property: {key}")
+    _validate_safe_value(component)
+    return references
 
 
 def _validate_graph(component_ids: set[str], graph: dict[str, set[str]]) -> None:
-    missing = {ref for refs in graph.values() for ref in refs if ref not in component_ids}
+    missing = {reference for references in graph.values() for reference in references if reference not in component_ids}
     if missing:
         raise A2UIValidationError(f"Unknown component references: {', '.join(sorted(missing))}")
     if "root" not in component_ids:
@@ -265,46 +236,43 @@ def _validate_graph(component_ids: set[str], graph: dict[str, set[str]]) -> None
     visit("root", set(), 1)
 
 
-def validate_a2ui_messages(
-    raw_messages: Any,
-    *,
-    surface_id: str,
-    create_surface: bool = True,
-    allowed_url_hosts: Iterable[str] = (),
-) -> list[dict[str, Any]]:
-    """Normalize model output and validate the v0.9 schema, catalog, references, and limits."""
+def validate_a2ui_messages(raw_messages: Any, *, surface_id: str) -> list[dict[str, Any]]:
+    """Normalize model output and validate the supported v0.9 basic catalog subset."""
     if isinstance(raw_messages, dict) and "messages" in raw_messages:
         raw_messages = raw_messages["messages"]
-    if not isinstance(raw_messages, list):
-        raise A2UIValidationError("Generator output must be a messages array")
+    if not isinstance(raw_messages, list) or not raw_messages:
+        raise A2UIValidationError("Generator output must be a non-empty messages array")
     if not _COMPONENT_ID_RE.fullmatch(surface_id):
         raise A2UIValidationError("Invalid server-generated surface id")
 
-    normalized: list[dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = [
+        {
+            "version": A2UI_PROTOCOL_VERSION,
+            "createSurface": {"surfaceId": surface_id, "catalogId": A2UI_CATALOG_ID},
+        }
+    ]
     components: dict[str, dict[str, Any]] = {}
     graph: dict[str, set[str]] = {}
-    trusted_hosts = {host.lower() for host in allowed_url_hosts if host}
-
-    if create_surface:
-        normalized.append(
-            {
-                "version": A2UI_PROTOCOL_VERSION,
-                "createSurface": {"surfaceId": surface_id, "catalogId": A2UI_CATALOG_ID},
-            }
-        )
 
     for raw in raw_messages:
         if not isinstance(raw, dict):
             raise A2UIValidationError("Each A2UI message must be an object")
+        allowed_keys = {"version", "updateComponents", "updateDataModel"}
+        if set(raw) - allowed_keys:
+            raise A2UIValidationError("A2UI message contains an unsupported operation")
         if "version" in raw and raw["version"] != A2UI_PROTOCOL_VERSION:
             raise A2UIValidationError("A2UI message version must be v0.9")
-        update_components = raw.get("updateComponents")
-        update_data = raw.get("updateDataModel")
-        if update_components is not None:
-            if not isinstance(update_components, dict) or not isinstance(update_components.get("components"), list):
-                raise A2UIValidationError("updateComponents.components must be an array")
-            message_components = update_components["components"]
-            message_component_ids: set[str] = set()
+        operations = [key for key in ("updateComponents", "updateDataModel") if key in raw]
+        if len(operations) != 1:
+            raise A2UIValidationError("Each message must contain exactly one update operation")
+
+        if operations[0] == "updateComponents":
+            update = raw["updateComponents"]
+            if not isinstance(update, dict) or set(update) != {"components"}:
+                raise A2UIValidationError("updateComponents must contain only components")
+            message_components = update["components"]
+            if not isinstance(message_components, list) or not message_components:
+                raise A2UIValidationError("updateComponents.components must be a non-empty array")
             for component in message_components:
                 if not isinstance(component, dict):
                     raise A2UIValidationError("Components must be objects")
@@ -312,40 +280,37 @@ def validate_a2ui_messages(
                 component_type = component.get("component")
                 if not isinstance(component_id, str) or not _COMPONENT_ID_RE.fullmatch(component_id):
                     raise A2UIValidationError("Every component requires a safe id")
-                if component_id in message_component_ids:
+                if component_id in components:
                     raise A2UIValidationError("Component ids must be unique")
-                message_component_ids.add(component_id)
                 if component_type not in A2UI_COMPONENTS:
-                    raise A2UIValidationError(f"Component is outside nexent.v1: {component_type}")
+                    raise A2UIValidationError(f"Component is outside the supported basic catalog: {component_type}")
                 components[component_id] = component
-                graph[component_id] = _collect_references(component)
-                _validate_component_limits(component)
-                _validate_component_contract(component)
-                _validate_strings_and_urls(component, trusted_hosts)
+                graph[component_id] = _validate_component(component)
             normalized.append(
                 {
                     "version": A2UI_PROTOCOL_VERSION,
                     "updateComponents": {"surfaceId": surface_id, "components": message_components},
                 }
             )
-        elif update_data is not None:
-            if not isinstance(update_data, dict):
-                raise A2UIValidationError("updateDataModel must be an object")
-            message = {
-                "version": A2UI_PROTOCOL_VERSION,
-                "updateDataModel": {
-                    "surfaceId": surface_id,
-                    "path": update_data.get("path", "/"),
-                    "value": update_data.get("value"),
-                },
-            }
-            _validate_strings_and_urls(message, trusted_hosts)
-            normalized.append(message)
-        elif "createSurface" in raw:
-            continue
         else:
-            raise A2UIValidationError(
-                "Each messages item must wrap components in updateComponents or provide updateDataModel"
+            update = raw["updateDataModel"]
+            if not isinstance(update, dict) or set(update) - {"path", "value"}:
+                raise A2UIValidationError("updateDataModel has unsupported properties")
+            path = update.get("path", "/")
+            if not isinstance(path, str) or not path.startswith("/") or len(path) > 512:
+                raise A2UIValidationError("updateDataModel.path must be a JSON Pointer path")
+            if "value" not in update:
+                raise A2UIValidationError("updateDataModel.value is required for generated forms")
+            _validate_safe_value(update["value"])
+            normalized.append(
+                {
+                    "version": A2UI_PROTOCOL_VERSION,
+                    "updateDataModel": {
+                        "surfaceId": surface_id,
+                        "path": path,
+                        "value": update["value"],
+                    },
+                }
             )
 
     if len(components) > A2UI_MAX_COMPONENTS:

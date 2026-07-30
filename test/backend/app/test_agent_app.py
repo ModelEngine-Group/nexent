@@ -192,6 +192,38 @@ async def test_agent_run_api(mocker, mock_auth_header):
     assert "data: chunk2" in content
 
 
+def test_agent_run_api_accepts_agui_on_same_route(mocker, mock_auth_header):
+    mock_run_agent_agui_stream = mocker.patch(
+        "apps.agent_app.run_agent_agui_stream", new_callable=AsyncMock
+    )
+
+    async def mock_stream():
+        yield b'data: {"type":"RUN_STARTED"}\n\n'
+
+    mock_run_agent_agui_stream.return_value = StreamingResponse(
+        mock_stream(), media_type="text/event-stream"
+    )
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={
+            "threadId": "thread-1",
+            "runId": "run-1",
+            "messages": [{"id": "user-1", "role": "user", "content": "hello"}],
+            "tools": [],
+            "context": [],
+            "state": {},
+            "forwardedProps": {"nexent": {"agentId": 1}},
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_run_agent_agui_stream.assert_awaited_once()
+    assert "RUN_STARTED" in response.text
+    assert runtime_client.post("/agent/run/ag-ui", json={}).status_code == 404
+
+
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
     """Test agent_run_api error case in debug mode - should expose actual error."""
     mock_run_agent_stream = mocker.patch(

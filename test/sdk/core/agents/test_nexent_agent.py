@@ -125,7 +125,6 @@ class _MockProcessType:
 class _MockAgentRunMetadata:
     agent_name: str | None = None
     query: str | None = None
-    extra_metadata: dict | None = None
 
 
 MessageObserver = _MockMessageObserver
@@ -1602,36 +1601,6 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "", ProcessType.TOKEN_COUNT, ANY)
     mock_core_agent.observer.add_message.assert_any_call(
         "test_agent", ProcessType.FINAL_ANSWER, " content")
-
-
-def test_agent_run_with_observer_uses_redacted_display_query(
-    nexent_agent_instance,
-    mock_core_agent,
-):
-    nexent_agent_instance.agent = mock_core_agent
-    mock_core_agent.stop_event.is_set.return_value = False
-    action_step = MagicMock(spec=ActionStep)
-    action_step.timing = MagicMock(duration=0.1)
-    action_step.step_number = 1
-    action_step.error = None
-    action_step.output = "done"
-    mock_core_agent.run.return_value = [action_step]
-
-    nexent_agent_instance.agent_run_with_observer(
-        "private form payload",
-        display_query="[A2UI action] submit_feedback (root)",
-    )
-
-    mock_core_agent.run.assert_called_once_with(
-        "private form payload",
-        stream=True,
-        reset=True,
-        display_task="[A2UI action] submit_feedback (root)",
-    )
-    monitoring_manager = mock_sdk_nexent_monitor_module.get_monitoring_manager.return_value
-    metadata = monitoring_manager.start_agent_run.call_args.args[0]
-    assert metadata.query == "[A2UI action] submit_feedback (root)"
-    assert metadata.extra_metadata["redact_content"] is True
 
 
 def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instance, mock_core_agent):
@@ -4893,11 +4862,7 @@ def test_create_local_generate_a2ui_tool(nexent_agent_instance):
         name="generate_a2ui",
         params={},
         source="local",
-        metadata={
-            "model_config": model_config,
-            "surface_id": "surface-1",
-            "allowed_url_hosts": ["objects.example.com"],
-        },
+        metadata={"model_config": model_config},
     )
 
     result = nexent_agent_instance.create_local_tool(tool_config)
@@ -4905,8 +4870,6 @@ def test_create_local_generate_a2ui_tool(nexent_agent_instance):
     assert result.name == "generate_a2ui"
     assert result.model_config is model_config
     assert result.observer is nexent_agent_instance.observer
-    assert result.surface_id == "surface-1"
-    assert result.allowed_url_hosts == ("objects.example.com",)
 
 
 def test_create_local_generate_a2ui_tool_requires_model(nexent_agent_instance):

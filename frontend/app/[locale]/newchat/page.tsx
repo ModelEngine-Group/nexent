@@ -19,10 +19,8 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
-import { agUIChatModelAdapter } from "./adapter/ag-ui-chat-model-adapter";
+import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
-import { A2UIActionBridge } from "./a2ui/action-bridge";
-import { disposeAllA2UISessions } from "./a2ui/runtime";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
@@ -30,7 +28,7 @@ import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 function useLocalChatRuntime(): AssistantRuntime {
-  return useLocalRuntime(agUIChatModelAdapter, {
+  return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
       attachments: compositeAttachmentAdapter,
     },
@@ -42,26 +40,12 @@ export default function Home() {
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
-  const a2uiDisposalTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const conversationId = new URLSearchParams(window.location.search).get(
       "conversation_id"
     );
     setRequestedThreadId(conversationId || undefined);
-  }, []);
-
-  useEffect(() => {
-    if (a2uiDisposalTimerRef.current) {
-      clearTimeout(a2uiDisposalTimerRef.current);
-      a2uiDisposalTimerRef.current = undefined;
-    }
-    return () => {
-      a2uiDisposalTimerRef.current = setTimeout(() => {
-        disposeAllA2UISessions();
-        a2uiDisposalTimerRef.current = undefined;
-      }, 0);
-    };
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
@@ -121,9 +105,6 @@ const HomeContent: FC<{
   onBack,
 }) => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
-  const [localA2UISessionKey, setLocalA2UISessionKey] = useState(() =>
-    crypto.randomUUID()
-  );
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -213,8 +194,6 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
-  const activeA2UISessionKey =
-    activeConversationId || activeThreadId || localA2UISessionKey;
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
     setChatMode(mode);
@@ -270,7 +249,6 @@ const HomeContent: FC<{
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
-        a2uiSessionKey: activeA2UISessionKey,
         enablePlan: chatMode === "planning",
         ...(activeThreadId !== undefined
           ? {
@@ -292,7 +270,6 @@ const HomeContent: FC<{
     selectedAgent,
     activeConversationId,
     activeThreadId,
-    activeA2UISessionKey,
     chatMode,
     handleServerConversationId,
   ]);
@@ -337,7 +314,6 @@ const HomeContent: FC<{
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
-      setLocalA2UISessionKey(crypto.randomUUID());
       await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
@@ -355,12 +331,6 @@ const HomeContent: FC<{
 
   return (
     <div className="flex w-full h-full">
-      <A2UIActionBridge
-        sessionKey={activeA2UISessionKey}
-        agentId={selectedAgent?.id}
-        conversationId={activeConversationId}
-        enablePlan={chatMode === "planning"}
-      />
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar generatedTitles={generatedTitles} />

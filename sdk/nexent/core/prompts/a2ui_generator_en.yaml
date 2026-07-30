@@ -1,34 +1,55 @@
 system_prompt: |-
-  You generate declarative A2UI v0.9 JSON for the catalog nexent.v1.
-  Return only one JSON object with a messages array. Do not include Markdown fences.
-  The server creates the surface and rewrites every surfaceId, so do not choose identifiers outside components.
+  ### Role
+  Generate concise declarative A2UI v0.9 JSON using the official basic catalog:
+  https://a2ui.org/specification/v0_9/basic_catalog.json
 
-  The outer JSON shape MUST be exactly:
-  {"messages":[{"updateComponents":{"components":[...]}}]}
-  Every item in messages must contain exactly one operation: updateComponents or updateDataModel.
-  Do not emit createSurface, version, surfaceId, component arrays at the message root, or action names as operations.
-  Each component is a flat object with "id" and a string "component" name. For example:
-  {"id":"title","component":"Text","text":"Hello"}
+  ### Output Contract
+  Return only one JSON object with a non-empty `messages` array. Do not use Markdown fences.
+  The server creates the Surface and supplies `version` and `surfaceId`, so omit `createSurface`,
+  `version`, and `surfaceId`. Every message must contain exactly one operation:
 
-  Component properties are strict. Do not invent visual properties, labels, titles, spacing, or aliases:
-  - Card has exactly one "child" component id. To show multiple items, set child to a Row or Column. Card has no title or children property.
-  - Row and Column use "children" as an array of component ids. Optional layout keys are justify and align. Do not use spacing.
-  - Button requires "child" and "action". Its visible label must be a separate Text component referenced by child. Button has no text or label property.
-  - Text requires "text". Divider may use axis. Image requires url. Icon requires name.
-  Example weather card structure:
-  {"messages":[{"updateComponents":{"components":[{"id":"root","component":"Card","child":"weather"},{"id":"weather","component":"Column","children":["title","temperature","refresh"]},{"id":"title","component":"Text","text":"Today's weather","variant":"h3"},{"id":"temperature","component":"Text","text":"28°C"},{"id":"refresh","component":"Button","child":"refreshLabel","action":{"event":{"name":"refresh_weather","context":{}}}},{"id":"refreshLabel","component":"Text","text":"Refresh"}]}}]}
+  - `{"updateDataModel":{"path":"/form","value":{...}}}`
+  - `{"updateComponents":{"components":[...]}}`
 
-  Allowed components: Text, Image, Icon, Button, Card, Row, Column, Divider,
-  DataTable, Chart, Form, ApprovalCard, ArtifactCard.
-  The root component must have id "root". Children are referenced by component id and may not be inline.
-  Chart chartType is line, bar, or pie. Form fields are text, textarea, number, select, checkbox, or date.
-  Actions use {"event":{"name":"action_name","context":{...}}}; components never call APIs directly.
+  Use flat component objects with unique `id` values. The root component must have id `root`.
+  Children are referenced by component ID and are never defined inline.
 
-  A feedback form must use this structure (translate labels when appropriate):
-  {"messages":[{"updateComponents":{"components":[{"id":"root","component":"Form","title":"User feedback","fields":[{"name":"name","label":"Name","type":"text","required":true},{"name":"email","label":"Email","type":"text","required":true},{"name":"feedback","label":"Feedback","type":"textarea","required":true}],"submitLabel":"Submit","action":{"event":{"name":"submit_feedback","context":{}}}}]}}]}
+  ### Allowed Components
+  Use only Text, Button, Card, Row, Column, Divider, TextField, CheckBox,
+  ChoicePicker, and DateTimeInput.
 
-  Never emit HTML, CSS, scripts, dynamic imports, javascript URLs, arbitrary components, or secrets.
-  Keep the output concise and accessible.
+  - Text requires `text`; optional variant is h1, h2, h3, h4, h5, caption, or body.
+  - Card requires one `child` ID.
+  - Row and Column require a `children` array of component IDs.
+  - Button requires `child` and an event `action`. Its visible label is a referenced Text component.
+  - TextField requires `label`; use variant shortText, longText, or number.
+  - CheckBox requires `label` and a boolean value binding.
+  - ChoicePicker requires `options` and a string-array value binding. Use mutuallyExclusive for select.
+  - DateTimeInput requires a string value binding; use enableDate=true and enableTime=false for dates.
+
+  ### Form Composition
+  There is no Form component. Compose forms from basic input components inside a Column.
+  Initialize form values with `updateDataModel` before `updateComponents`, then bind every input
+  with `{"path":"/form/fieldName"}`.
+
+  Map requested field types as follows:
+
+  - text: TextField with variant shortText
+  - textarea: TextField with variant longText
+  - number: TextField with variant number
+  - select: ChoicePicker with variant mutuallyExclusive; initialize its value as an array
+  - checkbox: CheckBox; initialize its value as false
+  - date: DateTimeInput with enableDate true and enableTime false
+
+  Put every submitted value in the Button event context as a data binding. The processor resolves
+  those paths to the user's current values before sending the action.
+
+  Example:
+  {"messages":[{"updateDataModel":{"path":"/form","value":{"name":"","age":"","topic":[],"confirmed":false,"date":""}}},{"updateComponents":{"components":[{"id":"root","component":"Card","child":"form-column"},{"id":"form-column","component":"Column","children":["title","name","age","topic","confirmed","date","submit"]},{"id":"title","component":"Text","text":"Registration","variant":"h3"},{"id":"name","component":"TextField","label":"Name","value":{"path":"/form/name"},"variant":"shortText"},{"id":"age","component":"TextField","label":"Age","value":{"path":"/form/age"},"variant":"number"},{"id":"topic","component":"ChoicePicker","label":"Topic","options":[{"label":"Product","value":"product"},{"label":"Support","value":"support"}],"value":{"path":"/form/topic"},"variant":"mutuallyExclusive"},{"id":"confirmed","component":"CheckBox","label":"I confirm","value":{"path":"/form/confirmed"}},{"id":"date","component":"DateTimeInput","label":"Date","value":{"path":"/form/date"},"enableDate":true,"enableTime":false},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submit_form","context":{"name":{"path":"/form/name"},"age":{"path":"/form/age"},"topic":{"path":"/form/topic"},"confirmed":{"path":"/form/confirmed"},"date":{"path":"/form/date"}}}}},{"id":"submit-label","component":"Text","text":"Submit"}]}}]}
+
+  ### Safety
+  Never emit HTML, CSS, scripts, dynamic imports, functionCall actions, URLs, arbitrary components,
+  API endpoints, or secrets. Keep the component tree small and accessible.
 user_prompt: |-
   Description:
   {description}
@@ -45,6 +66,5 @@ repair_prompt: |-
   Previous output:
   {previous_output}
 
-  Return a corrected JSON object only. Its outer shape must be
-  {{"messages":[{{"updateComponents":{{"components":[...]}}}}]}}.
-  Keep the same requested UI and obey every catalog and safety rule.
+  Return only a corrected JSON object. It must use the official basic catalog subset and the outer
+  shape {{"messages":[{{"updateDataModel":{{...}}}},{{"updateComponents":{{"components":[...]}}}}]}}.

@@ -8,7 +8,7 @@ import re
 import time
 import uuid
 from importlib import resources
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 import yaml
 from pydantic import Field
@@ -83,21 +83,13 @@ class GenerateA2UITool(Tool):
         self,
         model_config: ModelConfig = Field(description="Resolved root model configuration", exclude=True),
         observer: MessageObserver = Field(description="Main run observer", exclude=True),
-        surface_id: str | None = Field(default=None, description="Existing server surface id", exclude=True),
-        allowed_url_hosts: Iterable[str] = Field(default=(), description="Trusted asset hosts", exclude=True),
         model_factory: Callable[[ModelConfig], Any] | None = Field(default=None, exclude=True),
     ) -> None:
         super().__init__()
-        if isinstance(surface_id, FieldInfo):
-            surface_id = surface_id.default
-        if isinstance(allowed_url_hosts, FieldInfo):
-            allowed_url_hosts = allowed_url_hosts.default
         if isinstance(model_factory, FieldInfo):
             model_factory = model_factory.default
         self.model_config = model_config
         self.observer = observer
-        self.surface_id = surface_id
-        self.allowed_url_hosts = tuple(allowed_url_hosts)
         self._model_factory = model_factory
 
     def _create_model(self) -> Any:
@@ -158,15 +150,12 @@ class GenerateA2UITool(Tool):
         ]
         response_text = invoke_generator(messages)
 
-        surface_id = self.surface_id or f"surface-{uuid.uuid4()}"
-        create_surface = self.surface_id is None
+        surface_id = f"surface-{uuid.uuid4()}"
         attempts = 1
         try:
             normalized = validate_a2ui_messages(
                 _extract_json(response_text),
                 surface_id=surface_id,
-                create_surface=create_surface,
-                allowed_url_hosts=self.allowed_url_hosts,
             )
         except (A2UIValidationError, json.JSONDecodeError) as first_error:
             logger.warning("event=a2ui_schema_failure attempt=1 error=%s", first_error)
@@ -183,8 +172,6 @@ class GenerateA2UITool(Tool):
                 normalized = validate_a2ui_messages(
                     _extract_json(repaired_text),
                     surface_id=surface_id,
-                    create_surface=create_surface,
-                    allowed_url_hosts=self.allowed_url_hosts,
                 )
             except (A2UIValidationError, json.JSONDecodeError) as final_error:
                 logger.warning(

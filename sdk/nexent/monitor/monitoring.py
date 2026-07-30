@@ -156,7 +156,6 @@ OPENINFERENCE_METADATA = "metadata"
 OPENINFERENCE_SESSION_ID = "session.id"
 OPENINFERENCE_USER_ID = "user.id"
 OPENINFERENCE_TAG_TAGS = "tag.tags"
-TRACE_REDACTED_VALUE = "[REDACTED: sensitive run content]"
 
 AGENT_OPERATION_NAMES = {
     "agent.run",
@@ -253,14 +252,6 @@ def set_agent_monitoring_context(
 def get_agent_monitoring_context() -> Optional[AgentRunMetadata]:
     """Return the current Agent run metadata, if any."""
     return _monitoring_agent_run_metadata.get()
-
-
-def _should_redact_trace_content() -> bool:
-    metadata = get_agent_monitoring_context()
-    return bool(
-        metadata is not None
-        and (metadata.extra_metadata or {}).get("redact_content") is True
-    )
 
 
 @contextmanager
@@ -787,11 +778,6 @@ class MonitoringManager:
         attrs: Dict[str, Any] = {
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
-        if _should_redact_trace_content():
-            if input_value is not None:
-                input_value = TRACE_REDACTED_VALUE
-            if output_value is not None:
-                output_value = TRACE_REDACTED_VALUE
         if input_value is not None:
             input_preview = self._trace_payload_preview(input_value)
             if input_preview != "":
@@ -954,11 +940,6 @@ class MonitoringManager:
         # Process input.value and output.value through payload preview (same as trace_llm_request)
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
-        if _should_redact_trace_content():
-            if input_value is not None:
-                input_value = TRACE_REDACTED_VALUE
-            if output_value is not None:
-                output_value = TRACE_REDACTED_VALUE
         if input_value is not None:
             input_preview = self._trace_payload_preview(input_value)
             if input_preview != "":
@@ -1148,11 +1129,6 @@ class MonitoringManager:
             ))
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
-        if _should_redact_trace_content():
-            if input_value is not None:
-                input_value = TRACE_REDACTED_VALUE
-            if output_value is not None:
-                output_value = TRACE_REDACTED_VALUE
         if input_value is not None:
             input_preview = self._trace_payload_preview(input_value)
             if input_preview != "":
@@ -1451,8 +1427,6 @@ class MonitoringManager:
 
         # Add tool input as JSON string
         if tool_input is not None:
-            if _should_redact_trace_content():
-                tool_input = TRACE_REDACTED_VALUE
             tool_input_preview = self._trace_payload_preview(tool_input)
             openinference_attrs["agent.tool.input"] = tool_input_preview
             openinference_attrs["tool.parameters"] = tool_input_preview
@@ -1534,8 +1508,6 @@ class MonitoringManager:
                 openinference_attrs["agent.name"] = agent_name
 
         if retrieval_input is not None:
-            if _should_redact_trace_content():
-                retrieval_input = TRACE_REDACTED_VALUE
             retrieval_input_json = self._trace_payload_preview(retrieval_input)
             openinference_attrs["retriever.input"] = retrieval_input_json
             openinference_attrs[OPENINFERENCE_INPUT_VALUE] = retrieval_input_json
@@ -1602,8 +1574,6 @@ class MonitoringManager:
 
         span = trace.get_current_span()
         if span and span.is_recording():
-            if _should_redact_trace_content():
-                output = TRACE_REDACTED_VALUE
             output_value = self._trace_payload_preview(output)
             attrs = {
                 "agent.tool.output": output_value,
@@ -1620,8 +1590,6 @@ class MonitoringManager:
 
         span = trace.get_current_span()
         if span and span.is_recording():
-            if _should_redact_trace_content():
-                output = TRACE_REDACTED_VALUE
             output_value = self._trace_payload_preview(output)
             attrs = {
                 "retriever.output": output_value,

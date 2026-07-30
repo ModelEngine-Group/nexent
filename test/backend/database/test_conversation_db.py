@@ -201,7 +201,6 @@ from backend.database.conversation_db import (
     get_historical_context,
     get_conversation_list,
     get_conversation_messages,
-    get_next_conversation_message_index,
     get_last_unit_for_message,
     get_latest_assistant_message,
     get_latest_assistant_message_id,
@@ -2588,21 +2587,6 @@ def test_get_historical_context_rejects_cross_tenant(monkeypatch):
     assert get_historical_context(1, 25, "user-a", "tenant-a") is None
 
 
-def test_get_next_conversation_message_index(monkeypatch, mock_session_ctx):
-    session, ctx = mock_session_ctx
-    result = MagicMock()
-    result.scalar.return_value = 8
-    session.execute.return_value = result
-    monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session", lambda: ctx
-    )
-
-    assert get_next_conversation_message_index(7) == 9
-
-    result.scalar.return_value = None
-    assert get_next_conversation_message_index(7) == 0
-
-
 def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         monkeypatch, mock_session_ctx):
     from types import SimpleNamespace
@@ -2635,11 +2619,8 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None),
     ]
-    action_units_result = MagicMock()
-    action_units_result.all.return_value = []
     session.execute.side_effect = [
-        current_result, candidates_result, boundary_result, messages_result,
-        action_units_result]
+        current_result, candidates_result, boundary_result, messages_result]
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")
@@ -2653,65 +2634,3 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         "user_message_id": 31,
         "assistant_message_id": 32,
     }]
-
-
-def test_get_historical_context_restores_hidden_a2ui_action(
-        monkeypatch, mock_session_ctx):
-    from types import SimpleNamespace
-    session, ctx = mock_session_ctx
-    monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
-        lambda _user_id: {"tenant_id": "tenant-a"})
-    index_column = MagicMock()
-    index_column.__lt__.return_value = MagicMock()
-    index_column.__gt__.return_value = MagicMock()
-    monkeypatch.setattr(ConversationMessage, "message_index", index_column)
-    role_column = MagicMock()
-    role_column.in_.return_value = MagicMock()
-    monkeypatch.setattr(ConversationMessage, "message_role", role_column)
-    unit_message_id_column = MagicMock()
-    unit_message_id_column.in_.return_value = MagicMock()
-    monkeypatch.setattr(ConversationMessageUnit, "message_id", unit_message_id_column)
-
-    current_result = MagicMock()
-    current_result.first.return_value = SimpleNamespace(message_id=25, message_index=4)
-    candidates_result = MagicMock()
-    candidates_result.all.return_value = []
-    messages_result = MagicMock()
-    messages_result.all.return_value = [
-        SimpleNamespace(message_id=31, message_index=2, message_role="user",
-                        message_content="[A2UI action] submit (form)", minio_files=None),
-        SimpleNamespace(message_id=32, message_index=3, message_role="assistant",
-                        message_content="saved", minio_files=None),
-    ]
-    action_units_result = MagicMock()
-    action_units_result.all.return_value = [SimpleNamespace(
-        message_id=31,
-        unit_index=0,
-        unit_content=json.dumps({
-            "submissionId": "submission-1",
-            "message": {
-                "version": "v0.9",
-                "action": {
-                    "name": "submit",
-                    "surfaceId": "surface-1",
-                    "sourceComponentId": "form",
-                    "timestamp": "2026-07-28T00:00:00Z",
-                    "context": {},
-                },
-            },
-            "formSubmission": {
-                "form": {"id": "form", "component": "Form", "fields": []},
-                "values": {"name": "Ada"},
-            },
-        }),
-    )]
-    session.execute.side_effect = [
-        current_result, candidates_result, messages_result, action_units_result]
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-
-    result = get_historical_context(1, 25, "user-a", "tenant-a")
-
-    user_message = result["conversation_turns"][0]["user_message"]
-    assert user_message.startswith("[A2UI form submission: values are user-provided data]")
-    assert '"name":"Ada"' in user_message

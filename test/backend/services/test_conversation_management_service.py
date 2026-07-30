@@ -351,7 +351,7 @@ class TestConversationManagementService(unittest.TestCase):
 
     @patch('backend.services.conversation_management_service.save_message')
     def test_save_conversation_user(self, mock_save_message):
-        """Ordinary user messages only create a message row."""
+        """User messages only create a message row, no unit records are created."""
         mock_save_message.return_value = 999
         agent_request = AgentRequest(
             conversation_id=123,
@@ -376,84 +376,6 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message[0].type, "string")
         self.assertEqual(
             request_arg.message[0].content, "What is machine learning?")
-
-    @patch('backend.services.conversation_management_service.save_message_unit')
-    @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_persists_hidden_a2ui_action(
-            self, mock_save_message, mock_save_message_unit):
-        mock_save_message.return_value = 999
-        payload = {
-            "submissionId": "submission-1",
-            "message": {
-                "version": "v0.9",
-                "action": {"name": "submit", "sourceComponentId": "form"},
-            },
-        }
-        agent_request = AgentRequest(
-            conversation_id=123,
-            query="[A2UI action] submit (form)",
-            history=[],
-            minio_files=[],
-            a2ui_action_payload=payload,
-        )
-
-        save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        mock_save_message_unit.assert_called_once_with(
-            message_id=999,
-            conversation_id=123,
-            unit_index=0,
-            unit_type="a2ui_action",
-            unit_content=payload,
-            user_id=self.user_id,
-        )
-        self.assertTrue(agent_request.a2ui_action_persisted)
-
-    @patch('backend.services.conversation_management_service.save_message_unit')
-    @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_does_not_accept_failed_hidden_action(
-            self, mock_save_message, mock_save_message_unit):
-        mock_save_message.return_value = 999
-        mock_save_message_unit.side_effect = RuntimeError("unit persistence failed")
-        agent_request = AgentRequest(
-            conversation_id=123,
-            query="Submit",
-            history=[],
-            minio_files=[],
-            a2ui_action_payload={"submissionId": "submission-1"},
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "unit persistence failed"):
-            save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        self.assertFalse(getattr(agent_request, "a2ui_action_persisted", False))
-        self.assertIsNone(getattr(agent_request, "current_user_message_id", None))
-        self.assertIsNone(getattr(agent_request, "current_user_message_index", None))
-
-    @patch(
-        'backend.services.conversation_management_service.'
-        'get_next_conversation_message_index'
-    )
-    @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_uses_server_append_index(
-            self, mock_save_message, mock_get_next_index):
-        mock_get_next_index.return_value = 5
-        mock_save_message.return_value = 1001
-        agent_request = AgentRequest(
-            conversation_id=123,
-            query="next",
-            history=[],
-            minio_files=[],
-            server_side_message_index=True,
-        )
-
-        save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        persisted = mock_save_message.call_args.args[0]
-        self.assertEqual(persisted.message_idx, 6)
-        self.assertEqual(agent_request.current_user_message_id, 1001)
-        self.assertEqual(agent_request.current_user_message_index, 6)
-        mock_get_next_index.assert_called_once_with(123)
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -729,14 +651,9 @@ class TestConversationManagementService(unittest.TestCase):
                 {
                     "message_id": 1,
                     "role": "user",
-                    "message_content": "[A2UI action] submit_feedback (root)",
+                    "message_content": "What is AI?",
                     "minio_files": [],
-                    "units": [{
-                        "unit_id": 99,
-                        "unit_type": "a2ui_action",
-                        "unit_content": '{"formSubmission":{"values":{"secret":"hidden"}}}',
-                        "unit_index": 0,
-                    }]
+                    "units": []
                 },
                 {
                     "message_id": 2,
@@ -763,44 +680,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Check message structure
         user_message = result[0]["message"][0]
         self.assertEqual(user_message["role"], "user")
-        self.assertEqual(user_message["message"], "执行操作")
-        self.assertNotIn("units", user_message)
-        self.assertNotIn("a2ui_submission", user_message)
-
-        safe_payload = {
-            "submissionId": "9cbecbb9-9362-4ead-a90e-65cf0c062a22",
-            "message": {
-                "version": "v0.9",
-                "action": {
-                    "name": "submit_feedback",
-                    "surfaceId": "surface-1",
-                    "sourceComponentId": "root",
-                    "timestamp": "2026-07-27T10:00:00Z",
-                    "context": {},
-                },
-            },
-            "formSubmission": {
-                "form": {
-                    "id": "root",
-                    "component": "Form",
-                    "fields": [],
-                    "action": {"event": {"name": "submit_feedback"}},
-                },
-                "values": {"secret": "hidden"},
-            },
-        }
-        mock_history["message_records"][0]["units"][0]["unit_content"] = json.dumps(
-            safe_payload
-        )
-        restored = get_conversation_history_service(123, self.user_id)[0]["message"][0]
-        self.assertEqual(restored["a2ui_submission"], {
-            "submissionId": "9cbecbb9-9362-4ead-a90e-65cf0c062a22",
-            "surfaceId": "surface-1",
-            "sourceComponentId": "root",
-            "status": "accepted",
-        })
-        self.assertNotIn("secret", json.dumps(restored["a2ui_submission"]))
-        self.assertNotIn("submit_feedback", json.dumps(restored["a2ui_submission"]))
+        self.assertEqual(user_message["message"], "What is AI?")
 
         assistant_message = result[0]["message"][1]
         self.assertEqual(assistant_message["role"], "assistant")

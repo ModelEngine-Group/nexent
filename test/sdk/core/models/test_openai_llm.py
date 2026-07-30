@@ -502,7 +502,6 @@ def test_call_normal_operation(openai_model_instance):
 
         # Verify the result
         assert result == mock_result_message
-        assert result.reasoning_content == ""
         mock_prepare.assert_called_once()
 
         # Verify observer calls
@@ -744,7 +743,6 @@ def test_call_with_reasoning_content(openai_model_instance):
 
         # Verify the result
         assert result == mock_result_message
-        assert result.reasoning_content == "This is a reasoning step"
 
         # Verify that reasoning_content was added to observer
         openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with(
@@ -805,7 +803,6 @@ def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
             "First reasoning step")
         openai_model_instance.observer.add_model_reasoning_content.assert_any_call(
             "Second reasoning step")
-        assert result.reasoning_content == "First reasoning stepSecond reasoning step"
 
         # Verify that normal tokens were also added
         openai_model_instance.observer.add_model_new_token.assert_any_call(
@@ -856,7 +853,6 @@ def test_call_with_reasoning_content_only(openai_model_instance):
         # Verify that reasoning_content was added to observer
         openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with(
             "Pure reasoning content")
-        assert result.reasoning_content == "Pure reasoning content"
 
         # Verify that only the non-null content token was added
         openai_model_instance.observer.add_model_new_token.assert_called_once_with(

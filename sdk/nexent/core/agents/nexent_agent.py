@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import replace
 from threading import Event
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -231,8 +231,6 @@ class NexentAgent:
             return GenerateA2UITool(
                 model_config=model_config,
                 observer=self.observer,
-                surface_id=metadata.get("surface_id"),
-                allowed_url_hosts=metadata.get("allowed_url_hosts", ()),
             )
 
         tool_class = globals().get(class_name)
@@ -715,29 +713,16 @@ class NexentAgent:
                                                           action_output=msg.content, model_output=msg.content))
 
         self.agent._history_step_count = len(self.agent.memory.steps)
-    def agent_run_with_observer(
-        self,
-        query: str,
-        reset: bool = True,
-        display_query: Optional[str] = None,
-    ):
+    def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
         monitoring_manager = get_monitoring_manager()
         current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
-        extra_metadata = dict(getattr(current_metadata, "extra_metadata", {}) or {})
-        if display_query is not None:
-            extra_metadata["redact_content"] = True
         metadata = replace(
             current_metadata,
             agent_name=current_metadata.agent_name or self.agent.agent_name,
-            query=(
-                current_metadata.query
-                if current_metadata.query is not None
-                else display_query if display_query is not None else query
-            ),
-            extra_metadata=extra_metadata,
+            query=current_metadata.query if current_metadata.query is not None else query,
         )
         observer = self.agent.observer
         total_output_tokens = 0
@@ -750,10 +735,7 @@ class NexentAgent:
             ):
                 try:
                     step_log = None
-                    run_kwargs = {"stream": True, "reset": reset}
-                    if display_query is not None:
-                        run_kwargs["display_task"] = display_query
-                    for step_log in self.agent.run(query, **run_kwargs):
+                    for step_log in self.agent.run(query, stream=True, reset=reset):
                         # Add content to observer
                         if not isinstance(step_log, ActionStep):
                             continue

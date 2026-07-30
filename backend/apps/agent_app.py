@@ -31,7 +31,6 @@ from services.agent_service import (
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.ag_ui_service import AGUIRequestValidationError, run_agent_agui_stream
-from services.a2ui_action_service import A2UIActionDuplicateError, A2UIActionValidationError
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -55,55 +54,47 @@ logger = logging.getLogger("agent_app")
 # Define API route
 @agent_runtime_router.post("/run")
 async def agent_run_api(
-    agent_request: AgentRequest,
+    agent_request: AgentRequest | NexentRunAgentInput,
     http_request: Request,
     authorization: str = Header(None),
     resume: bool = Query(False, description="Resume an existing streaming conversation"),
 ):
     """
-    Agent execution API endpoint.
-    If resume=true, attempts to continue streaming from where it left off after a tab switch.
+    Run either the legacy Nexent request or a standard AG-UI request.
+
+    Legacy requests contain ``query`` and keep the existing SSE contract. AG-UI
+    requests contain ``threadId``, ``runId`` and ``messages`` and receive AG-UI
+    encoded SSE from the same underlying runtime.
     """
     try:
+        if isinstance(agent_request, NexentRunAgentInput):
+            return await run_agent_agui_stream(
+                agent_request,
+                http_request,
+                authorization,
+            )
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
             authorization=authorization,
             resume=resume,
         )
+    except AGUIRequestValidationError as e:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(e)) from e
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
         # Keep generic message in normal mode for user experience
-        error_detail = str(e) if agent_request.is_debug else "Agent run error."
+        if isinstance(agent_request, AgentRequest):
+            is_debug = bool(agent_request.is_debug)
+        else:
+            nexent = agent_request.forwarded_props.get("nexent") or {}
+            is_debug = bool(nexent.get("isDebug")) if isinstance(nexent, dict) else False
+        error_detail = str(e) if is_debug else "Agent run error."
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
-
-
-@agent_runtime_router.post("/run/ag-ui")
-async def agent_run_agui_api(
-    run_input: NexentRunAgentInput,
-    http_request: Request,
-    authorization: str = Header(None),
-):
-    """Run a Nexent agent through the internal AG-UI compatibility endpoint."""
-    try:
-        return await run_agent_agui_stream(run_input, http_request, authorization)
-    except A2UIActionDuplicateError as exc:
-        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
-    except A2UIActionValidationError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except AGUIRequestValidationError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except ForbiddenError as exc:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("AG-UI agent run failed")
-        debug = bool((run_input.forwarded_props.get("nexent") or {}).get("isDebug"))
-        detail = str(exc) if debug else "Agent run error."
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=detail) from exc
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")

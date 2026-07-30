@@ -313,7 +313,6 @@ class OpenAIModel(OpenAIServerModel):
 
         chunk_list = []
         token_join = []
-        reasoning_join = []
         role = None
         finish_reason = None
         self.last_finish_reason = None
@@ -351,8 +350,6 @@ class OpenAIModel(OpenAIServerModel):
 
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
-                    if isinstance(reasoning_content, str):
-                        reasoning_join.append(reasoning_content)
                     self.observer.add_model_reasoning_content(
                         reasoning_content)
                     if token_tracker and not first_token_received:
@@ -469,11 +466,6 @@ class OpenAIModel(OpenAIServerModel):
                 )
             message.raw = current_request
             message.role = MessageRole.ASSISTANT
-            # Some reasoning models place an intended tool call in
-            # reasoning_content while returning only a user-facing summary in
-            # content. Keep the complete reasoning channel on the response so
-            # the agent can apply a narrowly scoped, safety-checked recovery.
-            message.reasoning_content = "".join(reasoning_join)
             return message
 
         except Exception as e:

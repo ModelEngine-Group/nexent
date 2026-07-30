@@ -78,7 +78,6 @@ export const API_ENDPOINTS = {
   },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
-    runAgUi: `${API_BASE_URL}/agent/run/ag-ui`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     publishedList: `${API_BASE_URL}/agent/published_list`,

@@ -87,12 +87,19 @@ export interface ThreadProps {
  * Derives ModelOption[] from agent.model_ids and agent.model_names.
  * Falls back to model_name for single model scenarios.
  */
-const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] => {
+const useAgentModels = (
+  agent: Agent | PublishedAgent
+): readonly ModelOption[] => {
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
-    if (model_ids && model_ids.length > 0 && model_names && model_names.length > 0) {
+    if (
+      model_ids &&
+      model_ids.length > 0 &&
+      model_names &&
+      model_names.length > 0
+    ) {
       return model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
@@ -100,7 +107,8 @@ const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] =
     }
 
     // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string }).model_name;
+    const modelName = (typedAgent as unknown as { model_name?: string })
+      .model_name;
     if (modelName) {
       return [{ id: modelName, name: modelName }];
     }
@@ -123,19 +131,22 @@ export const Thread: FC<ThreadProps> = ({
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
-      (item) => item.id === s.threads.mainThreadId,
+      (item) => item.id === s.threads.mainThreadId
     );
     return currentThread?.title;
   });
   const hasMessages = messages.length > 0;
   const displayName = agent.display_name || agent.name;
-  const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
+  const conversationTitle =
+    generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
 
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
 
   const open = useCallback((payload: SourcesPanelSelection) => {
     setSelection(payload);
@@ -160,7 +171,7 @@ export const Thread: FC<ThreadProps> = ({
 
   const panelContextValue = useMemo(
     () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close],
+    [selection, open, toggle, close]
   );
 
   return (
@@ -224,7 +235,9 @@ const ThreadView: FC<ThreadViewProps> = ({
               {hasMessages ? conversationTitle : displayName}
             </span>
             {hasMessages && (
-              <span className="text-xs text-muted-foreground">Conversation</span>
+              <span className="text-xs text-muted-foreground">
+                Conversation
+              </span>
             )}
           </div>
         </header>
@@ -274,7 +287,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
     (question: string) => {
       aui.composer().setText(question);
     },
-    [aui],
+    [aui]
   );
 
   return (
@@ -379,9 +392,7 @@ const AssistantWorkingIndicator: FC = () => {
 };
 
 const AssistantCompletionIndicator: FC = () => {
-  const isComplete = useAuiState(
-    (s) => s.message.status?.type === "complete",
-  );
+  const isComplete = useAuiState((s) => s.message.status?.type === "complete");
 
   if (!isComplete) return null;
 
@@ -468,11 +479,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             // parallel invocations as separate cards inside the summary.
             // Each card retains the same reasoning/tool grouping as the main
             // message.
-            const meta = (part as { metadata?: { subagentId?: number | string; runId?: string } })
-              .metadata;
+            const meta = (
+              part as {
+                metadata?: { subagentId?: number | string; runId?: string };
+              }
+            ).metadata;
             const subagentId = meta?.subagentId;
             const runId = meta?.runId;
-            const chainPath: (`group-${string}`)[] =
+            const chainPath: `group-${string}`[] =
               part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : part.type === "tool-call"
@@ -483,9 +497,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
-              return ["group-subagent-calls", groupKey, ...chainPath] as (
-                `group-${string}`
-              )[];
+              return [
+                "group-subagent-calls",
+                groupKey,
+                ...chainPath,
+              ] as `group-${string}`[];
             }
             return chainPath;
           }}
@@ -528,7 +544,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "group-reasoning": {
                 const running = part.status.type === "running";
                 return (
-                  <Reasoning.Root defaultOpen={running} >
+                  <Reasoning.Root defaultOpen={running}>
                     <GroupReasoningTrigger active={running} />
                     <Reasoning.Content aria-busy={running}>
                       <Reasoning.Text>{children}</Reasoning.Text>
@@ -553,7 +569,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return <MarkdownText />;
               }
               case "reasoning":
-                return <Reasoning {...part} /> ;
+                return <Reasoning {...part} />;
               case "tool-call":
                 return part.toolUI ?? <ToolFallback {...part} />;
               case "indicator":
@@ -570,18 +586,18 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 // suppress here when it lands as a leaf of the chain.
                 if (part.name === "a2ui-surface") {
                   const data = part.data as {
-                    sessionKey?: unknown;
                     surfaceId?: unknown;
+                    messages?: unknown;
                     error?: unknown;
                   };
                   if (
-                    typeof data?.sessionKey === "string" &&
-                    typeof data.surfaceId === "string"
+                    typeof data?.surfaceId === "string" &&
+                    Array.isArray(data.messages)
                   ) {
                     return (
                       <A2UISurface
-                        sessionKey={data.sessionKey}
                         surfaceId={data.surfaceId}
+                        messages={data.messages}
                         error={
                           typeof data.error === "string"
                             ? data.error
@@ -665,7 +681,6 @@ const AssistantActionBar: FC = () => {
         <MessageTiming />
         <SingleTurnTokenUsage />
       </div>
-
     </ActionBarPrimitive.Root>
   );
 };
@@ -780,7 +795,7 @@ const renderSubAgentCallsGroup = (
     indices: readonly number[];
     status: { type: string };
   },
-  children: ReactNode,
+  children: ReactNode
 ): ReactElement => (
   <SubAgentCallsGroupRenderer indices={part.indices}>
     {children}
@@ -830,12 +845,16 @@ const renderSubAgentGroup = (
     indices: readonly number[];
     status: { type: string };
   },
-  children: ReactNode,
+  children: ReactNode
 ): ReactElement | null => {
   // We can't read s.message.content from inside the children callback
   // because the callback is not a component. Defer to a small inline
   // component so the selector re-runs on each streaming yield.
-  return <SubAgentGroupRenderer indices={part.indices}>{children}</SubAgentGroupRenderer>;
+  return (
+    <SubAgentGroupRenderer indices={part.indices}>
+      {children}
+    </SubAgentGroupRenderer>
+  );
 };
 
 const SubAgentGroupRenderer: FC<{
@@ -852,7 +871,12 @@ const SubAgentGroupRenderer: FC<{
       task?: string;
       isRunning?: boolean;
     };
-    data?: { agentName?: string; task?: string; depth?: number; isRunning?: boolean };
+    data?: {
+      agentName?: string;
+      task?: string;
+      depth?: number;
+      isRunning?: boolean;
+    };
     name?: string;
   }>;
   const descriptor = useMemo(() => {
@@ -870,21 +894,30 @@ const SubAgentGroupRenderer: FC<{
         subagentId = meta.subagentId;
       }
       // The first member is the boundary stamp; prefer its `data` field.
-      if (member?.type === "data" && member.name === "subagent-boundary" && member.data) {
+      if (
+        member?.type === "data" &&
+        member.name === "subagent-boundary" &&
+        member.data
+      ) {
         if (member.data.agentName) agentName = member.data.agentName;
         if (member.data.task) task = member.data.task;
         if (typeof member.data.depth === "number") depth = member.data.depth;
-        if (typeof member.data.isRunning === "boolean") isRunning = member.data.isRunning;
+        if (typeof member.data.isRunning === "boolean")
+          isRunning = member.data.isRunning;
         break;
       }
       if (meta?.agentName) agentName = meta.agentName;
       if (meta?.task) task = meta.task;
       if (typeof meta?.depth === "number") depth = meta.depth;
-      if (typeof meta?.isRunning === "boolean") isRunning = isRunning || meta.isRunning;
+      if (typeof meta?.isRunning === "boolean")
+        isRunning = isRunning || meta.isRunning;
     }
     if (indices.length > 0) {
       const lastMember = content[indices[indices.length - 1]];
-      if (lastMember?.metadata && typeof lastMember.metadata.isRunning === "boolean") {
+      if (
+        lastMember?.metadata &&
+        typeof lastMember.metadata.isRunning === "boolean"
+      ) {
         isRunning = lastMember.metadata.isRunning;
       }
     }
@@ -970,7 +1003,10 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
         aria-pressed={isActive}
         className="aui-source-group-button inline-flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
       >
-        <span aria-hidden className="inline-flex items-center gap-1 text-muted-foreground">
+        <span
+          aria-hidden
+          className="inline-flex items-center gap-1 text-muted-foreground"
+        >
           <FileTextIcon className="size-3.5" />
           检索结果
         </span>

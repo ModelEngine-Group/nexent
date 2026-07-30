@@ -3,7 +3,7 @@ import asyncio
 import threading
 import logging
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
@@ -57,7 +57,7 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET, MINIO_ENDPOINT
+from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
@@ -742,7 +742,6 @@ def _configure_a2ui_tools(
     is_root_agent: bool,
     model_name: str,
     model_config_list: Optional[List[ModelConfig]],
-    surface_id: Optional[str],
 ) -> bool:
     """Apply agent-tool, client-capability, and root-agent A2UI gating."""
     a2ui_tools = [tool for tool in tools if tool.name == "generate_a2ui"]
@@ -759,15 +758,10 @@ def _configure_a2ui_tools(
         logger.warning("A2UI tool disabled because the selected model configuration was not resolved")
         return False
 
-    minio_host = urlparse(MINIO_ENDPOINT or "").hostname
     for tool in a2ui_tools:
         tool.source = "local"
         tool.usage = None
-        tool.metadata = {
-            "model_config": resolved_model_config,
-            "surface_id": surface_id,
-            "allowed_url_hosts": [minio_host] if minio_host else [],
-        }
+        tool.metadata = {"model_config": resolved_model_config}
     return True
 
 
@@ -786,7 +780,6 @@ async def create_agent_config(
     request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     enable_a2ui: bool = False,
-    a2ui_surface_id: Optional[str] = None,
     model_config_list: Optional[List[ModelConfig]] = None,
     is_root_agent: bool = True,
 ):
@@ -1193,7 +1186,6 @@ async def create_agent_config(
         is_root_agent=is_root_agent,
         model_name=model_name,
         model_config_list=model_config_list,
-        surface_id=a2ui_surface_id,
     )
 
     # A2UI gating happens after the base prompt inputs are assembled because
@@ -1752,8 +1744,6 @@ async def create_agent_run_info(
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     enable_a2ui: bool = False,
-    a2ui_surface_id: Optional[str] = None,
-    display_query: Optional[str] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1779,7 +1769,7 @@ async def create_agent_run_info(
         "tenant_id": tenant_id,
         "user_id": user_id,
         "language": language,
-        "last_user_query": display_query if display_query is not None else final_query,
+        "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
         "conversation_id": conversation_id,
@@ -1788,7 +1778,6 @@ async def create_agent_run_info(
     if enable_a2ui:
         create_config_kwargs.update({
             "enable_a2ui": True,
-            "a2ui_surface_id": a2ui_surface_id,
             "model_config_list": model_list,
         })
     if override_model_id is not None:
@@ -1855,25 +1844,22 @@ async def create_agent_run_info(
     sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
     minio_client = get_sandbox_minio_client() if sandbox_config and sandbox_config.auto_sync_outputs else None
 
-    run_info_kwargs = {
-        "query": final_query,
-        "model_config_list": model_list,
-        "observer": MessageObserver(lang=language),
-        "agent_config": agent_config,
-        "mcp_host": mcp_host,
-        "history": converted_history,
-        "stop_event": threading.Event(),
-        "capacity_snapshot": getattr(agent_config, "capacity_snapshot", None),
-        "safe_input_budget_snapshot": getattr(
+    agent_run_info = AgentRunInfo(
+        query=final_query,
+        model_config_list=model_list,
+        observer=MessageObserver(lang=language),
+        agent_config=agent_config,
+        mcp_host=mcp_host,
+        history=converted_history,
+        stop_event=threading.Event(),
+        capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
+        safe_input_budget_snapshot=getattr(
             agent_config,
             "safe_input_budget_snapshot",
             None,
         ),
-        "sandbox_config": sandbox_config,
-        "minio_client": minio_client,
-        "redis_client": get_redis_client(),
-    }
-    if display_query is not None:
-        run_info_kwargs["display_query"] = display_query
-    agent_run_info = AgentRunInfo(**run_info_kwargs)
+        sandbox_config=sandbox_config,
+        minio_client=minio_client,
+        redis_client=get_redis_client(),
+    )
     return agent_run_info

@@ -31,6 +31,7 @@ import {
   buildToolCallPart,
   conversationSourcesRegistry,
   isReasoningChunkType,
+  remoteChatModelAdapter,
   skillFileUploadsRegistry,
   parseStepTokenCount,
   parsePlan,
@@ -40,14 +41,11 @@ import {
   type SearchSource,
   type StepTokenCount,
 } from "./remote-chat-model-adapter";
-import { agUIChatModelAdapter } from "./ag-ui-chat-model-adapter";
 import {
   createA2UIDataPart,
-  markA2UIFormSubmitted,
-  normalizeLegacyA2UIActionText,
-  processA2UIEnvelope,
+  parseA2UIEnvelope,
+  type A2UISurfaceData,
 } from "../a2ui/runtime";
-import { parseA2UIFormSubmissionState } from "../a2ui/form-submission-store";
 
 type RemoteThreadInitializeResponse = Awaited<
   ReturnType<RemoteThreadListAdapter["initialize"]>
@@ -202,9 +200,7 @@ const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
   right.role === "user" &&
   JSON.stringify(left.message) === JSON.stringify(right.message) &&
   JSON.stringify(left.minio_files ?? []) ===
-    JSON.stringify(right.minio_files ?? []) &&
-  JSON.stringify(left.a2ui_submission ?? null) ===
-    JSON.stringify(right.a2ui_submission ?? null);
+    JSON.stringify(right.minio_files ?? []);
 
 /**
  * Collapse refresh-generated duplicate user messages while preserving every
@@ -389,21 +385,12 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       const content: Array<Record<string, unknown>> = [];
 
       if (msg.role === "user") {
-        const submissionState = parseA2UIFormSubmissionState(
-          msg.a2ui_submission
-        );
-        if (submissionState) {
-          markA2UIFormSubmitted(remoteId, submissionState);
-        }
         const text = messageParts
           .filter((part) => part.type === "text")
           .map((part) => part.content)
           .join("\n");
         if (text) {
-          content.push({
-            type: "text",
-            text: normalizeLegacyA2UIActionText(text),
-          });
+          content.push({ type: "text", text });
         }
       } else {
         let reasoningText = "";
@@ -422,7 +409,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           depth: number;
         };
         const subAgentStack: ActiveSubAgent[] = [];
-        const renderedA2UISurfaces = new Set<string>();
+        const a2uiPartIndexes = new Map<string, number>();
         let historicalRunCounter = 0;
         const currentSubAgent = (): ActiveSubAgent | null =>
           subAgentStack.length > 0
@@ -536,36 +523,41 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "a2ui") {
             flushReasoning();
-            let envelope: unknown = part.content;
+            let rawEnvelope: unknown;
             try {
-              envelope = JSON.parse(part.content);
+              rawEnvelope = JSON.parse(part.content);
+              const envelope = parseA2UIEnvelope(rawEnvelope);
+              const existingIndex = a2uiPartIndexes.get(envelope.surfaceId);
+              const previous =
+                existingIndex === undefined
+                  ? undefined
+                  : (content[existingIndex].data as A2UISurfaceData);
+              const dataPart = createA2UIDataPart({
+                surfaceId: envelope.surfaceId,
+                messages: [...(previous?.messages ?? []), envelope],
+              });
+              if (existingIndex === undefined) {
+                a2uiPartIndexes.set(envelope.surfaceId, content.length);
+                content.push(dataPart);
+              } else {
+                content[existingIndex] = dataPart;
+              }
             } catch {
-              // The runtime emits a safe fallback for malformed history.
-            }
-            const result = processA2UIEnvelope(remoteId, envelope);
-            const createsSurface = Boolean(
-              envelope &&
-              typeof envelope === "object" &&
-              "message" in envelope &&
-              (envelope as { message?: unknown }).message &&
-              typeof (envelope as { message: unknown }).message === "object" &&
-              "createSurface" in (envelope as { message: object }).message
-            );
-            const surfaceId =
-              result.surfaceId ??
-              (envelope &&
-              typeof envelope === "object" &&
-              "surfaceId" in envelope
-                ? String((envelope as { surfaceId: unknown }).surfaceId)
-                : `invalid-${messageId}-${partIndex}`);
-            if (
-              (createsSurface || result.error) &&
-              !renderedA2UISurfaces.has(surfaceId)
-            ) {
-              content.push(
-                createA2UIDataPart(remoteId, surfaceId, result.error)
-              );
-              renderedA2UISurfaces.add(surfaceId);
+              const raw = rawEnvelope as { surfaceId?: unknown } | undefined;
+              const surfaceId =
+                typeof raw?.surfaceId === "string"
+                  ? raw.surfaceId
+                  : `invalid-${messageId}-${partIndex}`;
+              if (!a2uiPartIndexes.has(surfaceId)) {
+                a2uiPartIndexes.set(surfaceId, content.length);
+                content.push(
+                  createA2UIDataPart({
+                    surfaceId,
+                    messages: [],
+                    error: "Interactive content cannot be displayed",
+                  })
+                );
+              }
             }
             continue;
           }
@@ -884,7 +876,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     }
 
     const custom = (options.runConfig?.custom ?? {}) as Record<string, unknown>;
-    const resumedRun = agUIChatModelAdapter.run({
+    const resumedRun = remoteChatModelAdapter.run({
       ...options,
       runConfig: {
         ...options.runConfig,

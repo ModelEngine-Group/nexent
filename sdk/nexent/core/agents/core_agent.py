@@ -1,5 +1,5 @@
-import ast
 import json
+import ast
 import logging
 import time
 import uuid
@@ -116,162 +116,6 @@ def parse_code_blobs(text: str) -> str:
             """
         ).strip()
     )
-
-
-def _recover_a2ui_code_from_reasoning(
-    reasoning_content: Any,
-    available_tool_names: set[str],
-) -> Optional[str]:
-    """Recover one safe A2UI call emitted in a model reasoning channel.
-
-    Reasoning-capable providers may place the executable ``<code>`` block in
-    ``reasoning_content`` and return only a prose summary in ``content``. The
-    normal parser must continue to ignore hidden reasoning in every other
-    case. This recovery therefore applies only when ``generate_a2ui`` is an
-    enabled root-agent tool and the recovered block contains a single A2UI
-    call plus an optional ``print``.
-    """
-
-    if (
-        "generate_a2ui" not in available_tool_names
-        or not isinstance(reasoning_content, str)
-        or not reasoning_content.strip()
-    ):
-        return None
-
-    try:
-        code_action = parse_code_blobs(reasoning_content)
-    except ValueError:
-        return None
-
-    if len(code_action) > 32 * 1024:
-        return None
-
-    try:
-        parsed = ast.parse(code_action, mode="exec")
-    except SyntaxError:
-        return None
-
-    if not parsed.body or not all(isinstance(node, (ast.Assign, ast.Expr)) for node in parsed.body):
-        return None
-
-    for node in parsed.body:
-        if isinstance(node, ast.Assign) and not all(isinstance(target, ast.Name) for target in node.targets):
-            return None
-
-    forbidden_nodes = (
-        ast.Attribute,
-        ast.Await,
-        ast.ClassDef,
-        ast.Delete,
-        ast.For,
-        ast.FunctionDef,
-        ast.Global,
-        ast.Import,
-        ast.ImportFrom,
-        ast.Lambda,
-        ast.Nonlocal,
-        ast.Raise,
-        ast.Try,
-        ast.While,
-        ast.With,
-        ast.Yield,
-        ast.YieldFrom,
-    )
-    if any(isinstance(node, forbidden_nodes) for node in ast.walk(parsed)):
-        return None
-
-    call_names: List[str] = []
-    for node in ast.walk(parsed):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Name):
-            return None
-        call_names.append(node.func.id)
-
-    if call_names.count("generate_a2ui") != 1:
-        return None
-    if not set(call_names).issubset({"generate_a2ui", "print"}):
-        return None
-
-    return code_action
-
-
-def _should_retry_missing_a2ui_call(
-    model_output: Any,
-    reasoning_content: Any,
-    available_tool_names: set[str],
-) -> bool:
-    """Detect a false A2UI completion claim that should receive one repair turn.
-
-    Some models state that an interface was created after discussing
-    ``generate_a2ui`` without emitting any executable code. This predicate is
-    intentionally narrow: the tool must be enabled, the reasoning must mention
-    it or explicitly commit to calling a tool, and the visible answer must
-    claim or promise that a UI artifact was generated. The repair turn asks
-    the model to emit the real tool call; it never fabricates or executes
-    arguments from prose.
-    """
-
-    if "generate_a2ui" not in available_tool_names or not isinstance(model_output, str):
-        return False
-
-    reasoning_text = reasoning_content if isinstance(reasoning_content, str) else ""
-    combined = f"{reasoning_text}\n{model_output}".lower()
-    tool_commitments = (
-        "调用工具",
-        "使用工具",
-        "call the tool",
-        "use the tool",
-    )
-    if "generate_a2ui" not in combined and not any(
-        commitment in combined for commitment in tool_commitments
-    ):
-        return False
-
-    output_lower = model_output.lower()
-    completion_claims = (
-        "已创建",
-        "已生成",
-        "已为您创建",
-        "已为你创建",
-        "已为您生成",
-        "已为你生成",
-        "为您生成",
-        "为你生成",
-        "创建完成",
-        "生成完成",
-        "created",
-        "generated",
-        "rendered",
-        "built",
-    )
-    ui_terms = (
-        "a2ui",
-        "ui",
-        "界面",
-        "表单",
-        "卡片",
-        "图表",
-        "interface",
-        "form",
-        "card",
-        "chart",
-        "surface",
-    )
-    has_completion_claim = any(claim in output_lower for claim in completion_claims)
-    if not has_completion_claim:
-        for completion_verb in ("创建", "生成"):
-            verb_index = output_lower.find(completion_verb)
-            while verb_index != -1:
-                if "已" in output_lower[max(0, verb_index - 8):verb_index]:
-                    has_completion_claim = True
-                    break
-                verb_index = output_lower.find(completion_verb, verb_index + len(completion_verb))
-            if has_completion_claim:
-                break
-
-    return has_completion_claim and any(term in output_lower for term in ui_terms)
 
 
 def convert_code_format(text):
@@ -784,13 +628,6 @@ class CoreAgent(CodeAgent):
             additional_args: Additional arguments passed to the model
         """
         try:
-            if getattr(self, "_redact_run_logs", False):
-                self.logger.log_markdown(
-                    content="Input messages redacted for a sensitive A2UI action run.",
-                    title="MODEL INPUT PARAMETERS",
-                    level=LogLevel.INFO,
-                )
-                return
             # Convert messages to serializable format and truncate
             messages_data = []
             for msg in input_messages:
@@ -834,12 +671,6 @@ Additional Args:
         except Exception as e:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
-
-    def _safe_run_log_content(self, content: Any) -> Any:
-        """Redact payload-bearing console logs while preserving execution data."""
-        if getattr(self, "_redact_run_logs", False):
-            return "[REDACTED: sensitive A2UI action run content]"
-        return content
 
     @staticmethod
     def _ensure_context_within_hard_budget(final_context: Any) -> None:
@@ -928,19 +759,13 @@ Additional Args:
             memory_step.model_output = model_output
 
             self.logger.log_markdown(
-                content=self._safe_run_log_content(model_output),
-                title="MODEL OUTPUT",
-                level=LogLevel.INFO,
-            )
+                content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
         except Exception as e:
             raise AgentGenerationError(
                 f"Error in generating model output:\n{e}", self.logger) from e
 
         self.logger.log_markdown(
-            content=self._safe_run_log_content(model_output),
-            title="Output message of the LLM:",
-            level=LogLevel.DEBUG,
-        )
+            content=model_output, title="Output message of the LLM:", level=LogLevel.DEBUG)
 
         # Parse
         try:
@@ -949,47 +774,6 @@ Additional Args:
                 code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
             else:
                 code_action = parse_code_blobs(model_output)
-        except Exception:
-            reasoning_content = getattr(chat_message, "reasoning_content", None)
-            available_tool_names = self._known_tool_names()
-            code_action = _recover_a2ui_code_from_reasoning(
-                reasoning_content,
-                available_tool_names,
-            )
-            if code_action is None:
-                if (
-                    not getattr(self, "_a2ui_missing_call_retry_used", False)
-                    and not getattr(self, "_a2ui_call_executed_in_run", False)
-                    and _should_retry_missing_a2ui_call(
-                        model_output,
-                        reasoning_content,
-                        available_tool_names,
-                    )
-                ):
-                    self._a2ui_missing_call_retry_used = True
-                    self.logger.log(
-                        "Retrying a false A2UI completion claim without a generate_a2ui call",
-                        level=LogLevel.INFO,
-                    )
-                    raise AgentExecutionError(
-                        "You claimed that an A2UI interface was created, but generate_a2ui was not executed. "
-                        "If the user requested an interactive UI, call generate_a2ui exactly once inside a "
-                        "<code>...</code> block and wait for its observation before giving the final answer. "
-                        "Otherwise, correct the claim and do not say that an interface was created.",
-                        self.logger,
-                    )
-                self.logger.log_markdown(
-                    content=self._safe_run_log_content(model_output),
-                    title="AGENT FINAL ANSWER",
-                    level=LogLevel.INFO,
-                )
-                raise FinalAnswerError()
-            self.logger.log(
-                "Recovered an enabled generate_a2ui call from model reasoning_content",
-                level=LogLevel.INFO,
-            )
-
-        try:
             code_action = fix_final_answer_code(code_action)
             memory_step.code_action = code_action
             # Record parsing results
@@ -1013,10 +797,7 @@ Additional Args:
             raise
         except Exception:
             self.logger.log_markdown(
-                content=self._safe_run_log_content(model_output),
-                title="AGENT FINAL ANSWER",
-                level=LogLevel.INFO,
-            )
+                content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
 
         tool_call = ToolCall(
@@ -1028,7 +809,7 @@ Additional Args:
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
-                             content=self._safe_run_log_content(code_action), level=LogLevel.INFO)
+                             content=code_action, level=LogLevel.INFO)
         exec_start = time.time()
         try:
             monitoring_manager = get_monitoring_manager()
@@ -1083,24 +864,13 @@ Additional Args:
                         Text("Execution logs:", style="bold"), Text(execution_logs), ]
                     memory_step.observations = "Execution logs:\n" + execution_logs
                     self.logger.log(
-                        self._safe_run_log_content(Group(*execution_outputs_console)),
-                        level=LogLevel.INFO,
-                    )
+                        Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
             self.logger.log(
-                self._safe_run_log_content(
-                    f"[Code Execution] step={memory_step.step_number} failed after "
-                    f"{exec_duration_ms:.1f}ms: {error_msg}"
-                ),
+                f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,
             )
             raise AgentExecutionError(error_msg, self.logger)
-
-        if any(
-            tool_call["name"] == "generate_a2ui"
-            for tool_call in _scan_code_for_tool_calls(code_action, self._known_tool_names())
-        ):
-            self._a2ui_call_executed_in_run = True
 
         exec_duration_ms = (time.time() - exec_start) * 1000
         self.logger.log(
@@ -1152,10 +922,7 @@ Additional Args:
                     f"Out: {truncated_output}",
                 ),
             ]
-        self.logger.log(
-            self._safe_run_log_content(Group(*execution_outputs_console)),
-            level=LogLevel.INFO,
-        )
+        self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
         memory_step.action_output = code_output.output
 
         # v1.4: Plan step state advances entirely via the update_plan_step
@@ -1169,8 +936,7 @@ Additional Args:
         yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
-            additional_args: Optional[Dict] = None, max_steps: Optional[int] = None,
-            return_full_result: bool | None = None, display_task: Optional[str] = None):
+            additional_args: Optional[Dict] = None, max_steps: Optional[int] = None, return_full_result: bool | None = None):
         """
         Run the agent for the given task.
 
@@ -1183,7 +949,6 @@ Additional Args:
             max_steps (`int`, *optional*): Maximum number of steps the agent can take to solve the task. if not provided, will use the agent's default value.
             return_full_result (`bool`, *optional*): Whether to return the full [`RunResult`] object or just the final answer output.
                 If `None` (default), the agent's `self.return_full_result` setting is used.
-            display_task (`str`, *optional*): Redacted task used only for logs and observer events.
 
         Example:
         ```py
@@ -1204,11 +969,6 @@ Additional Args:
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
 
-        display_content = self.task.strip()
-        if display_task is not None:
-            display_content = f"[Current time: {time_str}]\n\n{display_task}".strip()
-        self._redact_run_logs = display_task is not None
-
         if reset:
             self.memory.reset()
             self.monitor.reset()
@@ -1217,13 +977,13 @@ You have been provided with these additional arguments, that you can access usin
             fallback_system_prompt=self.system_prompt,
         )
 
-        self.logger.log_task(content=display_content,
+        self.logger.log_task(content=self.task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )
 
         # Record current agent task
         self.observer.add_message(
-            self.name, ProcessType.AGENT_NEW_RUN, display_content)
+            self.name, ProcessType.AGENT_NEW_RUN, self.task.strip())
 
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
@@ -1339,8 +1099,6 @@ You have been provided with these additional arguments, that you can access usin
         final_answer = None
         action_step = None
         self.step_number = 1
-        self._a2ui_missing_call_retry_used = False
-        self._a2ui_call_executed_in_run = False
         returned_final_answer = False
         final_verification_round = 0
         verification_config = getattr(
@@ -1373,9 +1131,7 @@ You have been provided with these additional arguments, that you can access usin
                 if isinstance(output, ActionOutput) and output.is_final_answer:
                     candidate_answer = output.output
                     self.logger.log(
-                        self._safe_run_log_content(
-                            Text(f"Final answer: {candidate_answer}", style=f"bold {YELLOW_HEX}")
-                        ),
+                        Text(f"Final answer: {candidate_answer}", style=f"bold {YELLOW_HEX}"),
                         level=LogLevel.INFO,
                     )
 
@@ -1621,10 +1377,7 @@ You have been provided with these additional arguments, that you can access usin
         except Exception as e:
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"
-            self.logger.log(
-                self._safe_run_log_content(f"Error in final answer generation: {e}"),
-                level=LogLevel.ERROR,
-            )
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()
