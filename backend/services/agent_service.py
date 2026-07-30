@@ -1644,34 +1644,40 @@ def _validate_requested_output_tokens_for_agent(
     if requested_output_tokens is None:
         return
 
-    model_id = request.model_id
-    if model_id is None and request.agent_id is not None:
+    # Validate against every configured model — the user can switch models at
+    # chat time, so requested_output_tokens must not exceed any model's limit.
+    model_ids = list(request.model_ids or [])
+    if not model_ids and request.agent_id is not None:
         try:
             existing_agent = search_agent_info_by_agent_id(
                 agent_id=request.agent_id,
                 tenant_id=tenant_id,
                 version_no=request.version_no,
             )
-            model_id = existing_agent.get("model_id")
+            model_ids = list(existing_agent.get("model_ids") or [])
         except Exception as exc:
             logger.warning(
-                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                "Could not resolve existing agent models for requested_output_tokens validation: %s",
                 exc,
             )
 
-    if model_id is None:
+    if not model_ids:
         return
 
-    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            (
-                "requested_output_tokens cannot exceed the selected model "
-                f"max_output_tokens ({max_output_tokens})"
-            ),
-        )
+    for model_id in model_ids:
+        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+        if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+            model_display = (
+                model_info.get("display_name") if model_info else f"model_id={model_id}"
+            )
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                (
+                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
+                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
+                ),
+            )
 
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
