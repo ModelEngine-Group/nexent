@@ -163,6 +163,16 @@ export default function SkillBuildModal({
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
+  const groupNamesById = useMemo(
+    () =>
+      new Map(
+        (groupData?.groups ?? []).map((group) => [
+          group.group_id,
+          group.group_name,
+        ])
+      ),
+    [groupData?.groups]
+  );
   const accessibleGroupIds = useMemo(
     () => getAccessibleGroupIds(),
     [getAccessibleGroupIds]
@@ -1205,6 +1215,7 @@ export default function SkillBuildModal({
       shouldAutoScrollRef={shouldAutoScrollRef}
       onTextareaScroll={handleTextareaScroll}
       groupSelectOptions={groupSelectOptions}
+      groupNamesById={groupNamesById}
     />
   );
 

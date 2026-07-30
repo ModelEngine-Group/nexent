@@ -674,6 +674,7 @@ class NexentAgent:
                 conversation_id=self.conversation_id,
                 user_id=self.user_id,
                 executor=python_executor,
+                verification_config=getattr(agent_config, "verification_config", None),
             )
             agent.stop_event = self.stop_event
 

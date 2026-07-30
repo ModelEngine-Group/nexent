@@ -30,6 +30,7 @@ import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { type AttachmentType } from "../utils/attachment-type";
+import { useTranslation } from "react-i18next";
 
 const useFileSrc = (file: File | undefined) => {
   const [src, setSrc] = useState<string | undefined>(undefined);
@@ -131,6 +132,7 @@ const AttachmentPreview: FC<{
   attachment: AttachmentViewModel;
   mode: "composer" | "message";
 }> = ({ attachment, mode }) => {
+  const { t } = useTranslation();
   const [isLocalPreviewOpen, setIsLocalPreviewOpen] = useState(false);
   const [isRemotePreviewOpen, setIsRemotePreviewOpen] = useState(false);
 
@@ -201,7 +203,7 @@ const AttachmentPreview: FC<{
           }}
           role={isComposer && !isImage ? undefined : "button"}
           tabIndex={isComposer && !isImage ? undefined : 0}
-          aria-label={isComposer && !isImage ? undefined : `Preview ${name}`}
+          aria-label={isComposer && !isImage ? undefined : t("chat.attachments.preview", { name })}
         >
           <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300">
             {isImage && thumbnailUrl ? (
@@ -224,7 +226,7 @@ const AttachmentPreview: FC<{
           </div>
           {!isComposer && (
             <TooltipIconButton
-              tooltip="Download"
+              tooltip={t("chat.attachments.download")}
               type="button"
               className="size-7 shrink-0 text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-800"
               onClick={(event) => {
@@ -240,8 +242,8 @@ const AttachmentPreview: FC<{
 
         {isComposer && (
           <AttachmentPrimitive.Remove
-            aria-label={`Remove ${name}`}
-            className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-blue-100 text-blue-700 opacity-0 transition-opacity hover:bg-blue-200 group-hover/attachment:opacity-100 focus:opacity-100 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800"
+            aria-label={t("chat.attachments.remove", { name })}
+            className="absolute -right-1 -top-1 flex size-5 cursor-pointer items-center justify-center rounded-full bg-blue-100 text-blue-700 opacity-0 transition-opacity hover:bg-blue-200 group-hover/attachment:opacity-100 focus:opacity-100 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
@@ -287,9 +289,11 @@ const AttachmentPreview: FC<{
 };
 
 export const ComposerAddAttachment: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ComposerPrimitive.AddAttachment asChild multiple>
-      <TooltipIconButton tooltip="Add attachment">
+      <TooltipIconButton tooltip={t("chat.composer.addAttachment")}>
         <PlusIcon className="size-4" />
       </TooltipIconButton>
     </ComposerPrimitive.AddAttachment>
