@@ -108,7 +108,7 @@ SUPABASE_JWT_SECRET = os.getenv(
 
 
 # OAuth Configuration
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "").rstrip("/")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # OAuth login mode:
