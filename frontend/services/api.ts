@@ -621,6 +621,10 @@ export const API_ENDPOINTS = {
     },
     agentDetail: (agentId: number) =>
       `${API_BASE_URL}/market/agents/${agentId}`,
+    instantiate: (agentId: string | number) =>
+      `${API_BASE_URL}/market/agents/${agentId}/instantiate`,
+    launch: (agentId: string | number) =>
+      `${API_BASE_URL}/market/agents/${agentId}/launch`,
     categories: `${API_BASE_URL}/market/categories`,
     tags: `${API_BASE_URL}/market/tags`,
     mcpServers: (agentId: number) =>

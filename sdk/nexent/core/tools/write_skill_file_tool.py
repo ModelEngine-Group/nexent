@@ -1,15 +1,24 @@
 """Skill file writing tool."""
 import logging
 import os
-from contextvars import ContextVar
 from typing import Optional
-from smolagents import tool
+
+from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
-class WriteSkillFileTool:
+class WriteSkillFileTool(Tool):
     """Tool for writing skill files to local storage."""
+
+    name = "write_skill_file"
+    description = "Write content to a file within a tenant-scoped skill directory."
+    inputs = {
+        "skill_name": {"type": "string", "description": "Name of the target skill."},
+        "file_path": {"type": "string", "description": "Path relative to the skill root."},
+        "content": {"type": "string", "description": "Content to write."},
+    }
+    output_type = "string"
 
     def __init__(
         self,
@@ -26,6 +35,7 @@ class WriteSkillFileTool:
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
         """
+        super().__init__()
         self.skill_manager = None
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
@@ -36,12 +46,7 @@ class WriteSkillFileTool:
         """Lazy load skill manager."""
         if self.skill_manager is None:
             from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(
-                self.local_skills_dir,
-                agent_id=self.agent_id,
-                tenant_id=self.tenant_id,
-                version_no=self.version_no,
-            )
+            self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     def execute(
@@ -88,6 +93,10 @@ class WriteSkillFileTool:
             logger.error(f"Failed to write skill file: {e}")
             return f"[Error] Failed to write file: {type(e).__name__}: {str(e)}"
 
+    def forward(self, skill_name: str, file_path: str, content: str) -> str:
+        """Write a tenant-scoped skill file."""
+        return self.execute(skill_name, file_path, content)
+
     def _write_direct_file(self, relative_path: str, content: str) -> str:
         """Write a file directly to local_skills_dir.
 
@@ -98,10 +107,11 @@ class WriteSkillFileTool:
         Returns:
             Success or error message
         """
-        if not self.local_skills_dir:
-            return "[Error] local_skills_dir is not configured"
-
-        file_path = os.path.join(self.local_skills_dir, *relative_path.split("/"))
+        manager = self._get_skill_manager()
+        file_path = os.path.join(
+            manager.resolve_tenant_dir(tenant_id=self.tenant_id),
+            *relative_path.split("/"),
+        )
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         try:
@@ -127,7 +137,7 @@ class WriteSkillFileTool:
             skill_data = SkillLoader.parse(content)
             skill_data["name"] = skill_name
             skill_data["content"] = content
-            manager.save_skill(skill_data)
+            manager.save_skill(skill_data, tenant_id=self.tenant_id)
             return f"Successfully wrote SKILL.md for skill '{skill_name}'"
         except ValueError as e:
             return f"[Error] Invalid SKILL.md format: {e}"
@@ -152,10 +162,7 @@ class WriteSkillFileTool:
         Returns:
             Success or error message
         """
-        if manager.local_skills_dir is None:
-            return "[Error] local_skills_dir is not configured"
-
-        skill_dir = os.path.join(manager.local_skills_dir, skill_name)
+        skill_dir = manager.resolve_skill_dir(skill_name, tenant_id=self.tenant_id)
         os.makedirs(skill_dir, exist_ok=True)
 
         file_path = os.path.join(skill_dir, *relative_path.split("/"))
@@ -169,63 +176,27 @@ class WriteSkillFileTool:
             return f"[Error] Failed to write '{relative_path}': {e}"
 
 
-# Global fallback instance supports direct calls outside an agent execution
-# context. During agent execution, get_write_skill_file_tool() stores a
-# per-context instance in _write_tool_context so each agent gets its own tool
-# with the correct local_skills_dir / tenant_id.
-_global_tool_instance: Optional["WriteSkillFileTool"] = None
-_write_tool_context: ContextVar[Optional["WriteSkillFileTool"]] = ContextVar(
-    "write_skill_file_tool_context",
-    default=None,
-)
-
-
-def get_write_skill_file_tool(
+def _uncached_write_skill_file_tool(
     local_skills_dir: Optional[str] = None,
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
-) -> "WriteSkillFileTool":
+) -> WriteSkillFileTool:
     """Get or create the write skill file tool instance.
-
-    When called with context parameters, a new instance is created and stored
-    in a ContextVar so the @tool-decorated ``write_skill_file`` function picks
-    it up within the same execution context. When called without parameters,
-    the ContextVar value is used, falling back to a global default instance.
 
     Args:
         local_skills_dir: Path to local skills storage.
         agent_id: Agent ID for filtering available skills in error messages.
         tenant_id: Tenant ID for filtering available skills in error messages.
         version_no: Version number for filtering available skills.
+
+    Returns:
+        Tool instance cached by tenant_id for tenant isolation.
     """
-    global _global_tool_instance
-    has_context = any(
-        value is not None
-        for value in (local_skills_dir, agent_id, tenant_id)
-    )
-
-    if has_context:
-        context_tool = WriteSkillFileTool(
-            local_skills_dir,
-            agent_id,
-            tenant_id,
-            version_no,
-        )
-        _write_tool_context.set(context_tool)
-        return context_tool
-
-    context_tool = _write_tool_context.get()
-    if context_tool is not None:
-        return context_tool
-
-    if _global_tool_instance is None:
-        _global_tool_instance = WriteSkillFileTool()
-    return _global_tool_instance
+    return WriteSkillFileTool(local_skills_dir, agent_id, tenant_id, version_no)
 
 
-@tool
-def write_skill_file(skill_name: str, file_path: str, content: str) -> str:
+def _write_skill_file_without_context(skill_name: str, file_path: str, content: str) -> str:
     """Write a file to a skill directory in local storage.
 
     Use this tool when you need to create or update skill files (SKILL.md,
@@ -258,5 +229,5 @@ def write_skill_file(skill_name: str, file_path: str, content: str) -> str:
         # Write directly to local_skills_dir (when skill_name is empty)
         write_skill_file("", "my-file.txt", "file content")
     """
-    tool_instance = get_write_skill_file_tool()
+    tool_instance = _uncached_write_skill_file_tool()
     return tool_instance.execute(skill_name, file_path, content)
