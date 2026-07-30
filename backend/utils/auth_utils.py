@@ -549,7 +549,9 @@ def get_user_language(request: Request = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def generate_test_jwt(user_id: str, expires_in: int = 7200) -> str:
+def generate_test_jwt(user_id: str, expires_in: Optional[int] = None) -> str:
+    if expires_in is None:
+        expires_in = JWT_EXPIRY_SECONDS
     """
     Generate a simple unsigned JWT for testing purposes (HS256 with dummy secret)
     """

@@ -882,7 +882,7 @@ class TestCompleteOAuth(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertEqual(data["data"]["user"]["id"], "new-user")
-        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 7200)
+        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
         complete_mock.assert_awaited_once_with(
             pending_token="pending.jwt",
             email="new@example.com",

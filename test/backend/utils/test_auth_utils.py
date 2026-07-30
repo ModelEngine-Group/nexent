@@ -305,6 +305,7 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
 def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
     monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
     monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
 
     token = au.generate_session_jwt("user-1")
     claims = au.jwt.decode(
