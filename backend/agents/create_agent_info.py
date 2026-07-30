@@ -1003,7 +1003,7 @@ async def create_agent_config(
             if fixed_search_result.startswith("Found "):
                 memory_list.append({
                     "memory": fixed_search_result,
-                    "memory_level": "retrieved",
+                    "memory_level": "agent",
                 })
 
             loaded_memory_tools = [store_tool_config.name]
