@@ -733,6 +733,12 @@ def refresh_external_agent_cache(
             agent.streaming = new_streaming
         if new_supported_interfaces is not None:
             agent.supported_interfaces = new_supported_interfaces
+            interface = _find_interface_by_protocol_type(
+                new_supported_interfaces,
+                agent.protocol_type,
+            )
+            if interface:
+                agent.agent_url = interface.get("url", agent.agent_url)
         if new_security_schemes is not None:
             agent.security_schemes = new_security_schemes
         if new_security_requirements is not None:

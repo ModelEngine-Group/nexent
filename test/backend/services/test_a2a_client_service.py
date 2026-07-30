@@ -1162,6 +1162,43 @@ class TestRefreshAgentCard:
                 assert headers["A2A-Version"] == "1.0"
 
     @pytest.mark.asyncio
+    async def test_preserves_selected_protocol_when_card_default_changes(self):
+        """Test refreshing does not overwrite the user's protocol selection."""
+        from backend.services.a2a_client_service import A2AClientService
+
+        service = A2AClientService()
+        agent = {
+            "id": 1,
+            "agent_url": "https://example.com/rest",
+            "source_url": "https://example.com/agent-card.json",
+            "protocol_type": "HTTP+JSON",
+        }
+        card = {
+            "name": "Test Agent",
+            "description": "Updated endpoint",
+            "url": "https://example.com/rpc",
+            "supportedInterfaces": [
+                {"protocolBinding": "http-json-rpc", "url": "https://example.com/rpc"},
+                {"protocolBinding": "httprest", "url": "https://example.com/rest"},
+            ],
+        }
+        refreshed_agent = {"id": 1, "agent_url": "https://example.com/rest"}
+
+        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            mock_db.get_external_agent_by_id.return_value = agent
+            mock_db.refresh_external_agent_cache.return_value = refreshed_agent
+            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+                mock_client = MockClient.return_value.__aenter__.return_value
+                mock_client.get_json = AsyncMock(return_value=card)
+
+                result = await service.refresh_agent_card(1, "tenant-1", "user-1")
+
+        assert result == refreshed_agent
+        refresh_kwargs = mock_db.refresh_external_agent_cache.call_args.kwargs
+        assert refresh_kwargs["new_supported_interfaces"] == card["supportedInterfaces"]
+        assert "new_protocol_type" not in refresh_kwargs
+
+    @pytest.mark.asyncio
     async def test_refreshes_cache_with_changed_agent_url(self):
         """Test refreshing persists a changed URL without changing the protocol."""
         from backend.services.a2a_client_service import A2AClientService

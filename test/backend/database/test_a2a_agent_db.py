@@ -988,6 +988,29 @@ class TestRefreshExternalAgentCache:
             result = a2a_db.refresh_external_agent_cache(1, 'tenant-1', 'user-1', new_protocol_type='HTTP+JSON')
             assert result is not None
 
+    def test_preserves_selected_protocol_when_refreshing_interfaces(self):
+        agent = factory_external_agent(
+            id=1,
+            protocol_type='HTTP+JSON',
+            agent_url='http://old-rest.example.com',
+        )
+        refreshed_interfaces = [
+            {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com:8000", "protocolVersion": "1.0"},
+            {"protocolBinding": "httprest", "url": "http://rest.example.com:8000", "protocolVersion": "1.0"},
+        ]
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({db_models_mock.A2AExternalAgent: [agent]})
+            result = a2a_db.refresh_external_agent_cache(
+                1,
+                'tenant-1',
+                'user-1',
+                new_supported_interfaces=refreshed_interfaces,
+            )
+
+        assert result is not None
+        assert agent.protocol_type == 'HTTP+JSON'
+        assert agent.agent_url == 'http://rest.example.com:8000'
+
     def test_refreshes_all_fields_at_once(self):
         agent = factory_external_agent(id=1)
         with patch.object(a2a_db, '_get_db_session') as mk:
