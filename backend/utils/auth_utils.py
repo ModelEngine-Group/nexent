@@ -566,9 +566,12 @@ def generate_test_jwt(user_id: str, expires_in: int = 7200) -> str:
 
 
 def generate_session_jwt(
-    user_id: str, expires_in: int = JWT_EXPIRY_SECONDS, session_id: str = None
+    user_id: str, expires_in: Optional[int] = None, session_id: str = None
 ) -> str:
     """Generate a signed JWT compatible with the existing auth verification flow."""
+    if expires_in is None:
+        expires_in = JWT_EXPIRY_SECONDS
+
     now = int(time.time())
     payload = {
         "sub": user_id,

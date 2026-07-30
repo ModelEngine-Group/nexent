@@ -302,6 +302,21 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     assert seconds == 1234
 
 
+def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    token = au.generate_session_jwt("user-1")
+    claims = au.jwt.decode(
+        token,
+        au.MOCK_JWT_SECRET_KEY,
+        algorithms=["HS256"],
+        audience="authenticated",
+    )
+
+    assert claims["exp"] - claims["iat"] == 5432
+
+
 def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
     """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
     now = int(time.time())
