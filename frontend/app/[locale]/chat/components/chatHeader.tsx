@@ -6,13 +6,6 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
 import { CalendarClock, Share2, X } from "lucide-react";
-import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
-import { useConfig } from "@/hooks/useConfig";
-import log from "@/lib/logger";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-import { USER_ROLES } from "@/const/auth";
-import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 interface ChatHeaderProps {
   title: string;
@@ -33,30 +26,7 @@ export function ChatHeader({
   const [editTitle, setEditTitle] = useState(title);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const { t, i18n } = useTranslation("common");
-  const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
-  const { confirm } = useConfirmModal();
-  const { modelConfig } = useConfig();
-  const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
-
-  const showAutoOffConfirm = () => {
-    confirm({
-      title: t("embedding.chatMemoryAutoDeselectModal.title"),
-      content: (
-        <div className="py-2">
-          <div className="text-sm leading-6">
-            {t("embedding.chatMemoryAutoDeselectModal.content")}
-          </div>
-          {!isAdmin && (
-            <div className="mt-2 text-xs opacity-70">
-              {t("embedding.chatMemoryAutoDeselectModal.tip")}
-            </div>
-          )}
-        </div>
-      ),
-    });
-  };
+  const { t } = useTranslation("common");
 
   // Update editTitle when the title attribute changes
   useEffect(() => {
@@ -74,37 +44,6 @@ export function ChatHeader({
       }
     }, 10);
   };
-
-  // Check embedding configuration and memory switch once when entering the page
-  useEffect(() => {
-    try {
-      const configured = Boolean(
-        modelConfig?.embedding?.modelName ||
-        modelConfig?.multiEmbedding?.modelName
-      );
-
-      if (!configured) {
-        // If memory switch is on, turn it off automatically and notify the user
-        loadMemoryConfig()
-          .then(async (cfg) => {
-            if (cfg.memoryEnabled) {
-              const ok = await setMemorySwitch(false);
-              if (!ok) {
-                log.warn(
-                  "Failed to auto turn off memory switch when embedding is not configured"
-                );
-              }
-              showAutoOffConfirm();
-            }
-          })
-          .catch((e) => {
-            log.error("Failed to check memory config on page enter", e);
-          });
-      }
-    } catch (e) {
-      log.error("Failed to read model config for embedding check", e);
-    }
-  }, []);
 
   // Handle submit editing
   const handleSubmit = () => {

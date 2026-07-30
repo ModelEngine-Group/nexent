@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import type {
   MyEditableSkillListParams,
   MyEditableSkillListResponse,
+  MyEditableSkillCountsResponse,
   SkillRepositoryListingCreatePayload,
   SkillRepositoryListingDetail,
   SkillRepositoryListingItem,
@@ -91,6 +92,29 @@ export async function fetchMyEditableSkills(
   }
 }
 
+export async function fetchMyEditableSkillCounts(): Promise<MyEditableSkillCountsResponse> {
+  try {
+    const response = await fetchWithErrorHandling(
+      API_ENDPOINTS.skillRepository.mineSkillCounts,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch my editable skill counts: ${response.statusText}`
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    log.error("Error fetching my editable skill counts:", error);
+    throw error;
+  }
+}
+
 export async function createSkillRepositoryListing(
   skillId: number,
   payload: SkillRepositoryListingCreatePayload
@@ -123,7 +147,8 @@ export async function createSkillRepositoryListing(
 
 export async function updateSkillRepositoryStatus(
   skillRepositoryId: number,
-  status: SkillRepositoryListingStatus
+  status: SkillRepositoryListingStatus,
+  content?: string
 ): Promise<SkillRepositoryListingItem> {
   try {
     const response = await fetchWithErrorHandling(
@@ -134,7 +159,10 @@ export async function updateSkillRepositoryStatus(
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(content != null && content !== "" ? { content } : {}),
+        }),
       }
     );
 
@@ -196,6 +224,7 @@ const skillRepositoryService = {
   fetchSkillRepositoryListings,
   fetchSkillRepositoryListingDetail,
   fetchMyEditableSkills,
+  fetchMyEditableSkillCounts,
   createSkillRepositoryListing,
   updateSkillRepositoryStatus,
   installSkillFromRepository,

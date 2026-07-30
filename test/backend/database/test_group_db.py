@@ -136,6 +136,8 @@ from backend.database.group_db import (
     count_group_users,
     check_group_name_exists,
     query_groups_by_users,
+    query_group_ids_by_user_in_tenant,
+    filter_tenant_group_ids,
 )
 
 
@@ -1346,3 +1348,222 @@ def test_query_groups_by_users_no_memberships(monkeypatch, mock_session):
     result = query_groups_by_users(["user1", "user2"])
 
     assert result == {"user1": [], "user2": []}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests for query_group_ids_by_user_in_tenant
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_query_group_ids_by_user_in_tenant_success(monkeypatch, mock_session):
+    """Test successfully retrieving group IDs for a user within a tenant"""
+    session, query = mock_session
+
+    # Build the join chain: session.query().join().filter().all()
+    mock_join_result = MagicMock()
+    mock_filter_result = MagicMock()
+    mock_filter_result.all.return_value = [(10,), (20,), (30,)]
+    mock_join_result.filter.return_value = mock_filter_result
+    mock_query_obj = MagicMock()
+    mock_query_obj.join.return_value = mock_join_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_group_ids_by_user_in_tenant("user_123", "tenant_abc")
+
+    assert result == [10, 20, 30]
+    mock_query_obj.join.assert_called_once()
+    mock_join_result.filter.assert_called_once()
+
+
+def test_query_group_ids_by_user_in_tenant_empty_user_id(monkeypatch, mock_session):
+    """Test returns empty list when user_id is empty"""
+    result = query_group_ids_by_user_in_tenant("", "tenant_abc")
+    assert result == []
+
+
+def test_query_group_ids_by_user_in_tenant_none_user_id(monkeypatch, mock_session):
+    """Test returns empty list when user_id is None"""
+    result = query_group_ids_by_user_in_tenant(None, "tenant_abc")
+    assert result == []
+
+
+def test_query_group_ids_by_user_in_tenant_empty_tenant_id(monkeypatch, mock_session):
+    """Test returns empty list when tenant_id is empty"""
+    result = query_group_ids_by_user_in_tenant("user_123", "")
+    assert result == []
+
+
+def test_query_group_ids_by_user_in_tenant_none_tenant_id(monkeypatch, mock_session):
+    """Test returns empty list when tenant_id is None"""
+    result = query_group_ids_by_user_in_tenant("user_123", None)
+    assert result == []
+
+
+def test_query_group_ids_by_user_in_tenant_no_results(monkeypatch, mock_session):
+    """Test returns empty list when user has no groups in the tenant"""
+    session, query = mock_session
+
+    mock_join_result = MagicMock()
+    mock_filter_result = MagicMock()
+    mock_filter_result.all.return_value = []
+    mock_join_result.filter.return_value = mock_filter_result
+    mock_query_obj = MagicMock()
+    mock_query_obj.join.return_value = mock_join_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_group_ids_by_user_in_tenant("user_no_groups", "tenant_abc")
+
+    assert result == []
+
+
+def test_query_group_ids_by_user_in_tenant_delete_flag_filters_soft_deleted(monkeypatch, mock_session):
+    """Test that delete_flag='N' filters are applied to both tables in the join"""
+    session, query = mock_session
+
+    mock_join_result = MagicMock()
+    mock_filter_result = MagicMock()
+    # Only rows where both tables have delete_flag='N' are returned
+    mock_filter_result.all.return_value = [(42,)]
+    mock_join_result.filter.return_value = mock_filter_result
+    mock_query_obj = MagicMock()
+    mock_query_obj.join.return_value = mock_join_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_group_ids_by_user_in_tenant("user_1", "tenant_1")
+
+    assert result == [42]
+    # Verify filter was called (covers the 4 filter criteria including delete_flag checks)
+    mock_join_result.filter.assert_called_once()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests for filter_tenant_group_ids
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_filter_tenant_group_ids_success(monkeypatch, mock_session):
+    """Test filtering group IDs returns only those belonging to the tenant"""
+    session, query = mock_session
+
+    mock_filter_result = MagicMock()
+    mock_filter_result.all.return_value = [(1,), (3,)]
+    mock_query_obj = MagicMock()
+    mock_query_obj.filter.return_value = mock_filter_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = filter_tenant_group_ids([1, 2, 3], "tenant_abc")
+
+    assert result == [1, 3]
+    mock_query_obj.filter.assert_called_once()
+
+
+def test_filter_tenant_group_ids_empty_group_ids_list(monkeypatch, mock_session):
+    """Test returns empty list when group_ids is an empty list"""
+    result = filter_tenant_group_ids([], "tenant_abc")
+    assert result == []
+
+
+def test_filter_tenant_group_ids_none_group_ids(monkeypatch, mock_session):
+    """Test returns empty list when group_ids is None"""
+    result = filter_tenant_group_ids(None, "tenant_abc")
+    assert result == []
+
+
+def test_filter_tenant_group_ids_empty_tenant_id(monkeypatch, mock_session):
+    """Test returns empty list when tenant_id is empty"""
+    result = filter_tenant_group_ids([1, 2, 3], "")
+    assert result == []
+
+
+def test_filter_tenant_group_ids_none_tenant_id(monkeypatch, mock_session):
+    """Test returns empty list when tenant_id is None"""
+    result = filter_tenant_group_ids([1, 2, 3], None)
+    assert result == []
+
+
+def test_filter_tenant_group_ids_no_matching_groups(monkeypatch, mock_session):
+    """Test returns empty list when none of the group IDs belong to the tenant"""
+    session, query = mock_session
+
+    mock_filter_result = MagicMock()
+    mock_filter_result.all.return_value = []
+    mock_query_obj = MagicMock()
+    mock_query_obj.filter.return_value = mock_filter_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = filter_tenant_group_ids([998, 999], "nonexistent_tenant")
+
+    assert result == []
+
+
+def test_filter_tenant_group_ids_all_match(monkeypatch, mock_session):
+    """Test returns all IDs when every group_id belongs to the tenant"""
+    session, query = mock_session
+
+    mock_filter_result = MagicMock()
+    mock_filter_result.all.return_value = [(5,), (6,), (7,)]
+    mock_query_obj = MagicMock()
+    mock_query_obj.filter.return_value = mock_filter_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = filter_tenant_group_ids([5, 6, 7], "tenant_xyz")
+
+    assert result == [5, 6, 7]
+
+
+def test_filter_tenant_group_ids_excludes_soft_deleted(monkeypatch, mock_session):
+    """Test that delete_flag='N' filter excludes soft-deleted groups"""
+    session, query = mock_session
+
+    mock_filter_result = MagicMock()
+    # Only active groups (delete_flag='N') are returned by the query
+    mock_filter_result.all.return_value = [(1,)]
+    mock_query_obj = MagicMock()
+    mock_query_obj.filter.return_value = mock_filter_result
+
+    session.query = MagicMock(return_value=mock_query_obj)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    # Group 2 is soft-deleted, so only group 1 is returned
+    result = filter_tenant_group_ids([1, 2], "tenant_1")
+
+    assert result == [1]
+    mock_query_obj.filter.assert_called_once()

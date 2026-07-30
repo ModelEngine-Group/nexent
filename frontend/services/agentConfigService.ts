@@ -91,13 +91,13 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-              try {
-                const p = JSON.parse(tool.labels);
-                return Array.isArray(p) ? p : [];
-              } catch {
-                return [];
-              }
-            })()
+            try {
+              const p = JSON.parse(tool.labels);
+              return Array.isArray(p) ? p : [];
+            } catch {
+              return [];
+            }
+          })()
           : [],
       updated_by: tool.updated_by || "",
       inputs: tool.inputs,
@@ -526,9 +526,9 @@ export const exportAgent = async (agentId: number) => {
 
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
-      const filename =
-        response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
-      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename);
       return {
         success: true,
         data: null,
@@ -559,6 +559,22 @@ export const exportAgent = async (agentId: number) => {
       message: "Export failed, please try again later",
     };
   }
+};
+
+/**
+ * Extract filename from Content-Disposition header
+ * Handles both quoted and unquoted filename values
+ * @param contentDisposition The Content-Disposition header value
+ * @returns Extracted filename or null if not found
+ */
+const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+  const match = regex.exec(contentDisposition);
+  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
 };
 
 /**
@@ -1097,6 +1113,11 @@ export const fetchSkills = async (tenantId?: string | null) => {
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      group_ids: Array.isArray(skill.group_ids)
+        ? skill.group_ids.map(Number)
+        : [],
+      ingroup_permission: skill.ingroup_permission ?? null,
+      permission: skill.permission ?? "READ_ONLY",
       created_by: skill.created_by ?? null,
       updated_by: skill.updated_by ?? null,
       update_time: skill.update_time,
@@ -1248,6 +1269,8 @@ export const createSkill = async (skillData: {
   source?: string;
   tags?: string[];
   content?: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   files?: Array<{ path: string; content: string }>;
 }) => {
   try {
@@ -1260,6 +1283,12 @@ export const createSkill = async (skillData: {
     };
     if (skillData.files && skillData.files.length > 0) {
       requestBody.files = skillData.files;
+    }
+    if (skillData.group_ids !== undefined) {
+      requestBody.group_ids = skillData.group_ids;
+    }
+    if (skillData.ingroup_permission !== undefined) {
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
     const response = await fetch(API_ENDPOINTS.skills.create, {
@@ -1308,6 +1337,8 @@ export const updateSkill = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1323,6 +1354,10 @@ export const updateSkill = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId
@@ -1369,6 +1404,8 @@ export const updateSkillById = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1385,6 +1422,10 @@ export const updateSkillById = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId
@@ -1506,8 +1547,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
+              .map((e: any) => e.msg || JSON.stringify(e))
+              .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

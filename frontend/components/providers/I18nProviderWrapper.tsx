@@ -4,7 +4,8 @@ import { ReactNode, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { I18nextProvider } from "react-i18next";
 
-import i18n from "@/app/i18n";
+import i18n, { loadLocaleMessages } from "@/app/i18n";
+import { useGlobalConfigStore, useGlobalConfigStoreAllLanguage } from "@/stores/global";
 
 interface I18nProviderWrapperProps {
   children: ReactNode;
@@ -16,8 +17,10 @@ export default function I18nProviderWrapper({
   locale: initialLocale,
 }: I18nProviderWrapperProps) {
   const [mounted, setMounted] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const pathname = usePathname();
-
+  const { setConfig } = useGlobalConfigStore();
+  const { setAllConfig } = useGlobalConfigStoreAllLanguage();
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -26,28 +29,22 @@ export default function I18nProviderWrapper({
   useEffect(() => {
     if (!mounted) return;
 
-    // If locale is provided via props, use it
-    if (initialLocale && (initialLocale === "zh" || initialLocale === "en")) {
-      if (i18n.language !== initialLocale) {
-        i18n.changeLanguage(initialLocale);
-      }
-      document.cookie = `NEXT_LOCALE=${initialLocale}; path=/; max-age=31536000`;
-      return;
+    const targetLocale = initialLocale || pathname.split('/').filter(Boolean)[0] || 'zh';
+
+    const initI18n = async () => {
+      const { resourcesCustom } = await loadLocaleMessages(targetLocale)
+      setConfig(resourcesCustom[targetLocale as 'zh'].custom);
+      setAllConfig(resourcesCustom);
+      i18n.changeLanguage(targetLocale);
+      document.cookie = `NEXT_LOCALE=${targetLocale}; path=/; max-age=31536000`;
+      setLoaded(true)
     }
+    initI18n();
 
     // Fallback: synchronize i18n language according to the URL
-    const segments = pathname.split("/").filter(Boolean);
-    const urlLocale = segments[0];
-
-    if (urlLocale === "zh" || urlLocale === "en") {
-      if (i18n.language !== urlLocale) {
-        i18n.changeLanguage(urlLocale);
-      }
-      document.cookie = `NEXT_LOCALE=${urlLocale}; path=/; max-age=31536000`;
-    }
   }, [initialLocale, pathname, mounted]);
 
-  if (!mounted) {
+  if (!mounted || !loaded) {
     return null;
   }
 

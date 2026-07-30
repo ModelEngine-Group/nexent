@@ -24,7 +24,10 @@ from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
-from apps.permission_utils import require_knowledge_base_edit_permission
+from apps.permission_utils import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -836,7 +839,7 @@ async def hybrid_search(
 ):
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         resolved_index_names: List[str] = []
         for requested_name in payload.index_names:
             try:
@@ -845,6 +848,11 @@ async def hybrid_search(
                 )
             except Exception:
                 resolved_name = requested_name
+            # Enforce per-KB read permission before searching. The permission layer
+            # maps ValueError (KB not found) -> 404 and PermissionError (no access) -> 403.
+            require_knowledge_base_read_permission(
+                index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
+            )
             resolved_index_names.append(resolved_name)
         result = ElasticSearchService.search_hybrid(
             index_names=resolved_index_names,
@@ -869,6 +877,9 @@ async def hybrid_search(
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
+        raise
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

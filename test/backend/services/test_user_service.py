@@ -10,7 +10,7 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 # Mock external dependencies before any imports
 boto3_module = types.ModuleType("boto3")
@@ -594,13 +594,9 @@ class TestDeleteUserAndCleanup:
             "backend.services.user_service.soft_delete_all_conversations_by_user",
             return_value=5
         )
-        mock_build_config = mocker.patch(
-            "backend.services.user_service.build_memory_config",
-            return_value={"key": "value"}
-        )
-        mock_clear_memory = mocker.patch(
-            "backend.services.user_service.clear_memory",
-            new_callable=AsyncMock
+        mock_soft_delete_oauth = mocker.patch(
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
+            return_value=0
         )
         mock_get_admin = mocker.patch(
             "backend.services.user_service.get_supabase_admin_client"
@@ -621,9 +617,7 @@ class TestDeleteUserAndCleanup:
         mock_remove_groups.assert_called_once_with(user_id, user_id)
         mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
         mock_soft_delete_convs.assert_called_once_with(user_id)
-        mock_build_config.assert_called_once_with(tenant_id)
-        # clear_memory called for user and user_agent
-        assert mock_clear_memory.call_count == 2
+        mock_soft_delete_oauth.assert_called_once_with(user_id, user_id)
         mock_get_admin.assert_called_once()
         mock_admin.auth.admin.delete_user.assert_called_once_with(user_id)
 
@@ -648,13 +642,8 @@ class TestDeleteUserAndCleanup:
             side_effect=Exception("convs failed")
         )
         mocker.patch(
-            "backend.services.user_service.build_memory_config",
-            side_effect=Exception("config failed")
-        )
-        mocker.patch(
-            "backend.services.user_service.clear_memory",
-            new_callable=AsyncMock,
-            side_effect=Exception("memory failed")
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
+            side_effect=Exception("oauth failed")
         )
         mocker.patch(
             "backend.services.user_service.get_supabase_admin_client",

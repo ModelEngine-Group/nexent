@@ -246,9 +246,9 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) =>
-      accessibleRoutes.includes(route.path)
-    );
+    const filtered = ROUTE_CONFIG.filter((route) => {
+      return accessibleRoutes.includes(route.path);
+    });
 
     // Separate root items and children
     const rootItems = filtered

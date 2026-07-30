@@ -12,6 +12,7 @@ import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 // @ts-ignore
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
 import { resolveS3UrlToDataUrl } from "@/services/storageService";
@@ -172,7 +173,6 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
   try {
     const createId = createHeadingIdGenerator();
     const headings: ParsedMarkdownHeading[] = [];
-    const { unified } = require("unified") as { unified: () => any };
     const tree = unified()
       .use(remarkParse)
       .use(remarkGfm)

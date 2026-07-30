@@ -32,6 +32,7 @@ import type {
   RegistryQuickAddOption,
 } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 
 interface UseMcpRegistryQuickAddParams {
   onSuccess: () => void;
@@ -249,6 +250,7 @@ export function useMcpRegistryQuickAdd({
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
+      queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
       await refreshToolListWithToast({
         message,
         t,

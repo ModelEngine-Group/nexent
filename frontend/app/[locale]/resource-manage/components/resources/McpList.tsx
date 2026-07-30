@@ -42,8 +42,11 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import McpEditServerModal from "@/components/mcp/McpEditServerModal";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import {
+  getOpenApiServices,
+  importOpenApiService,
+  deleteOpenApiService,
+} from "@/services/mcpService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -396,12 +399,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const loadOpenapiServices = async () => {
     setLoadingOpenapiServices(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
-      if (result.data) {
-        setOpenapiServices(result.data);
+      const services = await getOpenApiServices();
+      if (services) {
+        setOpenapiServices(services);
       } else {
         message.error(t("mcpConfig.openApiToMcp.message.loadToolsFailed"));
       }
@@ -436,33 +436,19 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
     setImportingOpenApi(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiService, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          service_name: openApiServiceName.trim(),
-          server_url: openApiServerUrl.trim(),
-          openapi_json: parsedJson,
-          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
-        }),
+      await importOpenApiService({
+        service_name: openApiServiceName.trim(),
+        server_url: openApiServerUrl.trim(),
+        openapi_json: parsedJson,
+        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
       });
 
-      if (response.ok) {
-        message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
-        setOpenApiJson("");
-        setOpenApiServiceName("");
-        setOpenApiServerUrl("");
-        setOpenApiHeadersTemplate("");
-        await loadOpenapiServices();
-      } else {
-        const errorData = await response.json();
-        message.error(
-          errorData.detail || t("mcpConfig.openApiToMcp.message.importFailed")
-        );
-      }
+      message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
+      setOpenApiJson("");
+      setOpenApiServiceName("");
+      setOpenApiServerUrl("");
+      setOpenApiHeadersTemplate("");
+      await loadOpenapiServices();
     } catch (error) {
       log.error("Failed to import OpenAPI service:", error);
       message.error(t("mcpConfig.openApiToMcp.message.importFailed"));
@@ -480,24 +466,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       cancelText: t("common.cancel"),
       onOk: async () => {
         try {
-          const response = await fetch(
-            API_ENDPOINTS.tool.deleteOpenapiService(service.mcp_service_name),
-            {
-              method: "DELETE",
-              headers: getAuthHeaders(),
-            }
-          );
-
-          if (response.ok) {
-            message.success(
-              t("mcpConfig.openApiToMcp.message.deleteSuccess")
-            );
-            await loadOpenapiServices();
-          } else {
-            message.error(
-              t("mcpConfig.openApiToMcp.message.deleteFailed")
-            );
-          }
+          await deleteOpenApiService(service.mcp_service_name);
+          message.success(t("mcpConfig.openApiToMcp.message.deleteSuccess"));
+          await loadOpenapiServices();
         } catch (error) {
           log.error("Failed to delete OpenAPI service:", error);
           message.error(t("mcpConfig.openApiToMcp.message.deleteFailed"));

@@ -17,6 +17,7 @@ export interface ApiMessageItem {
   content: string;
   unit_index?: number;
   unit_status?: "streaming" | "completed";
+  tool_call_id?: string;
   role?: string;
   tool_name?: string;
   tool_arguments?: string | Record<string, unknown>;
@@ -57,6 +58,7 @@ export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
   agent_id?: number | null;
+  chat_mode?: "planning" | "execution";
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

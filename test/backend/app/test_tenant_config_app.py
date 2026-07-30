@@ -38,6 +38,7 @@ auth_mock.get_current_user_id = mock_get_current_user_id
 const_mock = MagicMock()
 const_mock.DEPLOYMENT_VERSION = 'test_version'
 const_mock.APP_VERSION = 'v1.2.3'
+const_mock.ENABLE_AIDP_KNOWLEDGE = False
 
 sys.modules['services.tenant_config_service'] = services_mock
 sys.modules['utils.auth_utils'] = auth_mock
@@ -123,7 +124,8 @@ class TestTenantConfigApp(unittest.TestCase):
         self.assertEqual(data["status"], "success")
         self.assertIn("deployment_version", data)
         self.assertIn("app_version", data)
-        self.assertEqual(len(data.keys()), 3)
+        self.assertIn("enable_aidp_knowledge", data)
+        self.assertEqual(len(data.keys()), 4)
 
 
 if __name__ == '__main__':

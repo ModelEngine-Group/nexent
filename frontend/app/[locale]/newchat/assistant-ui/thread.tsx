@@ -6,19 +6,21 @@ import {
   useMemo,
   useState,
   type FC,
+  type ReactElement,
+  type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
+import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
-import { Composer } from "./composer";
+import { Composer, type ChatMode } from "./composer";
 import { Button } from "@/components/ui/button";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
-  groupPartByType,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -48,6 +50,8 @@ import {
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { ModelOption } from "../ui/model-selector";
+import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
   AssistantMessageAttachments,
   UserMessageAttachments,
@@ -76,6 +80,8 @@ export interface ThreadProps {
   onBack: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
 }
 
 /**
@@ -110,6 +116,8 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
+  chatMode,
+  onChatModeChange,
 }) => {
   const models = useAgentModels(agent);
 
@@ -164,6 +172,8 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={selectedModelId}
         onModelChange={onModelChange}
+        chatMode={chatMode}
+        onChatModeChange={onChatModeChange}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -180,6 +190,8 @@ interface ThreadViewProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -193,6 +205,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   models,
   selectedModelId,
   onModelChange,
+  chatMode,
+  onChatModeChange,
   hasMessages,
   displayName,
   conversationTitle,
@@ -226,7 +240,13 @@ const ThreadView: FC<ThreadViewProps> = ({
 
         <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col gap-4 pb-8 px-8">
           <ThreadScrollToBottom />
-          <Composer models={models} selectedModelId={selectedModelId} onModelChange={onModelChange} />
+          <Composer
+            models={models}
+            selectedModelId={selectedModelId}
+            onModelChange={onModelChange}
+            chatMode={chatMode}
+            onChatModeChange={onChatModeChange}
+          />
         </ThreadPrimitive.ViewportFooter>
       </div>
 
@@ -443,14 +463,56 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
           )}
         </header>
         <MessagePrimitive.GroupedParts
-          groupBy={groupPartByType({
-            reasoning: ["group-chainOfThought", "group-reasoning"],
-            "tool-call": ["group-chainOfThought", "group-tool"],
-            "standalone-tool-call": [],
-            source: ["group-source"],
-          })}
+          groupBy={(part) => {
+            // Sub-agent parts first enter a shared calls summary, then a
+            // run-specific group. Distinct `runId` suffixes keep repeated or
+            // parallel invocations as separate cards inside the summary.
+            // Each card retains the same reasoning/tool grouping as the main
+            // message.
+            const meta = (part as { metadata?: { subagentId?: number | string; runId?: string } })
+              .metadata;
+            const subagentId = meta?.subagentId;
+            const runId = meta?.runId;
+            const chainPath: (`group-${string}`)[] =
+              part.type === "reasoning"
+                ? ["group-chainOfThought", "group-reasoning"]
+                : part.type === "tool-call"
+                  ? ["group-chainOfThought", "group-tool"]
+                  : part.type === "source"
+                    ? ["group-source"]
+                    : ["group-default"];
+            if (subagentId !== undefined) {
+              const groupKey =
+                `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
+              return ["group-subagent-calls", groupKey, ...chainPath] as (
+                `group-${string}`
+              )[];
+            }
+            return chainPath;
+          }}
         >
           {({ part, children }) => {
+            const partType = (part as { type?: string }).type;
+            if (partType === "group-subagent-calls") {
+              const groupPart = part as unknown as {
+                indices: readonly number[];
+                status: { type: string };
+              };
+              return renderSubAgentCallsGroup(groupPart, children);
+            }
+            if (
+              typeof partType === "string" &&
+              partType.startsWith("group-subagent-")
+            ) {
+              // `GroupPart` always carries `indices`; the runtime check
+              // above narrows the union so this cast is safe.
+              const groupPart = part as unknown as {
+                type: string;
+                indices: readonly number[];
+                status: { type: string };
+              };
+              return renderSubAgentGroup(groupPart, children);
+            }
             switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
@@ -477,6 +539,8 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               }
               case "group-source":
                 return <SourceGroupButton indices={part.indices} />;
+              case "group-default":
+                return <>{children}</>;
               case "text": {
                 const textPart = part as typeof part & { isError?: boolean };
                 if (textPart.isError) {
@@ -501,6 +565,17 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
+                if (part.name === "automation-proposal") {
+                  return (
+                    <AutomationProposalMessage
+                      proposal={part.data as AgentAutomationProposalData}
+                    />
+                  );
+                }
+                // The `subagent-boundary` stamp part is the seat of the
+                // group's header information. We let the header renderer
+                // paint it instead of returning it inside the body, so
+                // suppress here when it lands as a leaf of the chain.
                 return part.dataRendererUI;
               default:
                 return null;
@@ -679,6 +754,141 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
 interface SourceGroupButtonProps {
   indices: readonly number[];
 }
+
+/**
+ * Renders the tool-style summary for all sub-agent invocations in a message.
+ * Each invocation is counted once by runId while its existing nested card
+ * remains responsible for the task details and streamed execution content.
+ */
+const renderSubAgentCallsGroup = (
+  part: {
+    indices: readonly number[];
+    status: { type: string };
+  },
+  children: ReactNode,
+): ReactElement => (
+  <SubAgentCallsGroupRenderer indices={part.indices}>
+    {children}
+  </SubAgentCallsGroupRenderer>
+);
+
+const SubAgentCallsGroupRenderer: FC<{
+  indices: readonly number[];
+  children: ReactNode;
+}> = ({ indices, children }) => {
+  const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
+    metadata?: { runId?: string; isRunning?: boolean };
+  }>;
+  const { count, active } = useMemo(() => {
+    const runIds = new Set<string>();
+    let hasRunningCall = false;
+    for (const index of indices) {
+      const metadata = content[index]?.metadata;
+      if (metadata?.runId) runIds.add(metadata.runId);
+      if (metadata?.isRunning) hasRunningCall = true;
+    }
+    return { count: runIds.size, active: hasRunningCall };
+  }, [content, indices]);
+  const label = `${count} subagent ${count === 1 ? "call" : "calls"}`;
+
+  return (
+    <ToolGroupRoot variant="ghost" defaultOpen={active}>
+      <ToolGroupTrigger count={count} active={active} label={label} />
+      <ToolGroupContent>{children}</ToolGroupContent>
+    </ToolGroupRoot>
+  );
+};
+
+/**
+ * Renders the collapsible card for a `group-subagent-<id>-<runId>` cluster.
+ * Reads agent name / task / running state from the group's member parts:
+ * the streaming adapter stamps a `data` boundary part on `subagent_start`
+ * with the canonical descriptor, and every member part carries matching
+ * `metadata` (incl. `isRunning`).
+ *
+ * `part.indices` indexes into the assistant-ui content array; the first
+ * member is the boundary stamp because the adapter pushes it first.
+ */
+const renderSubAgentGroup = (
+  part: {
+    type: string;
+    indices: readonly number[];
+    status: { type: string };
+  },
+  children: ReactNode,
+): ReactElement | null => {
+  // We can't read s.message.content from inside the children callback
+  // because the callback is not a component. Defer to a small inline
+  // component so the selector re-runs on each streaming yield.
+  return <SubAgentGroupRenderer indices={part.indices}>{children}</SubAgentGroupRenderer>;
+};
+
+const SubAgentGroupRenderer: FC<{
+  indices: readonly number[];
+  children: ReactNode;
+}> = ({ indices, children }) => {
+  const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
+    type?: string;
+    metadata?: {
+      subagentId?: number | string;
+      runId?: string;
+      agentName?: string;
+      depth?: number;
+      task?: string;
+      isRunning?: boolean;
+    };
+    data?: { agentName?: string; task?: string; depth?: number; isRunning?: boolean };
+    name?: string;
+  }>;
+  const descriptor = useMemo(() => {
+    let agentName = "subagent";
+    let task: string | undefined;
+    let depth = 1;
+    let isRunning = false;
+    let runId: string | undefined;
+    let subagentId: number | string | undefined;
+    for (const index of indices) {
+      const member = content[index];
+      const meta = member?.metadata;
+      if (runId === undefined && meta?.runId) runId = meta.runId;
+      if (subagentId === undefined && meta?.subagentId !== undefined) {
+        subagentId = meta.subagentId;
+      }
+      // The first member is the boundary stamp; prefer its `data` field.
+      if (member?.type === "data" && member.name === "subagent-boundary" && member.data) {
+        if (member.data.agentName) agentName = member.data.agentName;
+        if (member.data.task) task = member.data.task;
+        if (typeof member.data.depth === "number") depth = member.data.depth;
+        if (typeof member.data.isRunning === "boolean") isRunning = member.data.isRunning;
+        break;
+      }
+      if (meta?.agentName) agentName = meta.agentName;
+      if (meta?.task) task = meta.task;
+      if (typeof meta?.depth === "number") depth = meta.depth;
+      if (typeof meta?.isRunning === "boolean") isRunning = isRunning || meta.isRunning;
+    }
+    if (indices.length > 0) {
+      const lastMember = content[indices[indices.length - 1]];
+      if (lastMember?.metadata && typeof lastMember.metadata.isRunning === "boolean") {
+        isRunning = lastMember.metadata.isRunning;
+      }
+    }
+    return { agentName, task, depth, isRunning, runId, subagentId };
+  }, [content, indices]);
+
+  return (
+    <SubAgentContainer
+      agentName={descriptor.agentName}
+      depth={descriptor.depth}
+      isRunning={descriptor.isRunning}
+      task={descriptor.task}
+      runId={descriptor.runId}
+      subagentId={descriptor.subagentId}
+    >
+      {children}
+    </SubAgentContainer>
+  );
+};
 
 const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   // Subscribe to the current message so we can split the indices into image

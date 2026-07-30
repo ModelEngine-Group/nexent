@@ -86,6 +86,16 @@ class TestGetTenantInfo:
         service_mocks['get_single_config_info'].assert_any_call(
             tenant_id, "DEFAULT_GROUP_ID")
 
+    def test_get_tenant_info_ignores_virtual_default_tenant(self, service_mocks):
+        """Virtual default tenant should not be materialized as a managed tenant."""
+        from consts.const import DEFAULT_TENANT_ID
+
+        result = get_tenant_info(DEFAULT_TENANT_ID)
+
+        assert result == {}
+        service_mocks['get_single_config_info'].assert_not_called()
+        service_mocks['insert_config'].assert_not_called()
+
     def test_get_tenant_info_name_not_found(self, service_mocks):
         """Test get_tenant_info when tenant name is not found - should auto-create config"""
         # Setup
@@ -202,11 +212,11 @@ class TestGetTenantsPaginated:
             assert len(result["data"]) == 3
             assert result["data"] == tenant_infos
 
-    def test_get_tenants_paginated_excludes_asset_owner_virtual_tenant(self, service_mocks):
-        """Virtual ASSET_OWNER tenant must not appear in admin tenant listings."""
-        from consts.const import ASSET_OWNER_TENANT_ID
+    def test_get_tenants_paginated_excludes_virtual_tenants(self, service_mocks):
+        """Virtual/system tenants must not appear in admin tenant listings."""
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
-        tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, "tenant2"]
+        tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, "", "tenant2"]
         tenant_infos = [
             {"tenant_id": "tenant1", "tenant_name": "Tenant 1", "default_group_id": "g1"},
             {"tenant_id": "tenant2", "tenant_name": "Tenant 2", "default_group_id": "g2"},
@@ -219,6 +229,8 @@ class TestGetTenantsPaginated:
         assert result["total"] == 2
         returned_ids = [t["tenant_id"] for t in result["data"]]
         assert ASSET_OWNER_TENANT_ID not in returned_ids
+        assert DEFAULT_TENANT_ID not in returned_ids
+        assert "" not in returned_ids
         assert returned_ids == ["tenant1", "tenant2"]
 
     def test_get_tenants_paginated_with_missing_configs(self, service_mocks):
@@ -1228,4 +1240,3 @@ class TestCheckTenantNameExists:
 
             # Assert
             assert result is False
-

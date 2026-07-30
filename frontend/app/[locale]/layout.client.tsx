@@ -18,6 +18,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
+import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
 
 const { Header, Sider, Content, Footer } = Layout;
 
@@ -124,6 +125,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   return (
     <Layout style={layoutStyle}>
       <QuotaWarningMonitor enabled={!isSetupPage} />
+      <MemoryEmbeddingMonitor />
       <Header style={headerStyle}>
         <TopNavbar isChatPage={isChatPage} />
       </Header>

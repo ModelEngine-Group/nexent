@@ -36,6 +36,37 @@ def _get_authorized_history(agent_run_info: AgentRunInfo):
     return agent_run_info.history
 
 
+def _log_memory_value_assessment(agent: Any) -> None:
+    """Emit one content-free memory assessment summary for each agent run."""
+    tools = getattr(agent, "tools", {}) or {}
+    store_tool = tools.get("store_memory") if hasattr(tools, "get") else None
+    if store_tool is None:
+        logger.info(
+            "event=memory_value_assessment decision=unavailable "
+            "invocation_count=0 successful_store_count=0 last_outcome=tool_unavailable"
+        )
+        return
+
+    invocation_count = int(getattr(store_tool, "invocation_count", 0) or 0)
+    successful_store_count = int(
+        getattr(store_tool, "successful_store_count", 0) or 0
+    )
+    decision = "store_attempted" if invocation_count else "skip"
+    logger.info(
+        "event=memory_value_assessment tenant_id=%s user_id=%s agent_id=%s "
+        "conversation_id=%s decision=%s invocation_count=%d "
+        "successful_store_count=%d last_outcome=%s",
+        getattr(store_tool, "tenant_id", ""),
+        getattr(store_tool, "user_id", ""),
+        getattr(store_tool, "agent_id", ""),
+        getattr(store_tool, "conversation_id", ""),
+        decision,
+        invocation_count,
+        successful_store_count,
+        getattr(store_tool, "last_outcome", "not_invoked"),
+    )
+
+
 def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
     snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
     if not isinstance(snapshot, dict):
@@ -150,6 +181,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
                 redis_client=agent_run_info.redis_client,
+                sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                minio_client=getattr(agent_run_info, "minio_client", None),
+                conversation_id=agent_run_info.conversation_id,
+                user_id=agent_run_info.user_id,
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -158,8 +193,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent.set_agent(agent)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
-            nexent.agent_run_with_observer(
-                query=agent_run_info.query, reset=False)
+            try:
+                nexent.agent_run_with_observer(
+                    query=agent_run_info.query, reset=False)
+            finally:
+                _log_memory_value_assessment(agent)
         else:
             agent_run_info.observer.add_message(
                 "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
@@ -172,6 +210,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     stop_event=agent_run_info.stop_event,
                     mcp_tool_collection=tool_collection,
                     redis_client=agent_run_info.redis_client,
+                    sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                    minio_client=getattr(agent_run_info, "minio_client", None),
+                    conversation_id=agent_run_info.conversation_id,
+                    user_id=agent_run_info.user_id,
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,
@@ -180,8 +222,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 nexent.set_agent(agent)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
-                nexent.agent_run_with_observer(
-                    query=agent_run_info.query, reset=False)
+                try:
+                    nexent.agent_run_with_observer(
+                        query=agent_run_info.query, reset=False)
+                finally:
+                    _log_memory_value_assessment(agent)
 
     except Exception as e:
         if "Couldn't connect to the MCP server" in str(e):

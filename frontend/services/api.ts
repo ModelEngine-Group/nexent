@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
+import { withBasePath } from "@/lib/basePath";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
@@ -13,7 +14,7 @@ import type {
 import type { MarketAgentListParams } from "@/types/market";
 import type { NotificationListParams } from "@/types/notification";
 
-const API_BASE_URL = "/api";
+export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   user: {
@@ -153,10 +154,12 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   promptTemplates: {
     list: `${API_BASE_URL}/prompt_templates`,
@@ -186,10 +189,10 @@ export const API_ENDPOINTS = {
     delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
-    ws: `/api/voice/stt/ws`,
+    ws: `${API_BASE_URL}/voice/stt/ws`,
   },
   tts: {
-    ws: `/api/voice/tts/ws`,
+    ws: `${API_BASE_URL}/voice/tts/ws`,
   },
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
@@ -275,6 +278,7 @@ export const API_ENDPOINTS = {
   knowledgeBase: {
     // Elasticsearch service
     health: `${API_BASE_URL}/indices/health`,
+    summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
     listFiles: (indexName: string) =>
@@ -335,10 +339,23 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  aidpMgmt: {
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
+    /** PATCH endpoint for the per-KB in-group permission. */
+    kbPermission: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+  },
   config: {
+    frontend: `${API_BASE_URL}/frontend-config`,
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
+    projectConfig: `${API_BASE_URL}/config/project-config`,
   },
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
@@ -379,6 +396,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
     agentProtocol: (agentId: string) =>
       `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentSecurityCredentials: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/security-credentials`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>
@@ -448,6 +467,7 @@ export const API_ENDPOINTS = {
     // ---------------- Memory configuration ----------------
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
+      embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -455,6 +475,16 @@ export const API_ENDPOINTS = {
       disableUserAgentAdd: `${API_BASE_URL}/memory/config/disable_useragent`,
       disableUserAgentRemove: (agentId: string | number) =>
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
+    },
+
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
     },
 
     // ---------------- Memory CRUD ----------------
@@ -565,6 +595,7 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
     install: (skillRepositoryId: number) =>

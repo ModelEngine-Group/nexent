@@ -26,6 +26,7 @@ import {
   InfoCircleOutlined,
 } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
+import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
 import {
   getQuotaConflictTranslationKey,
   type PlatformQuotaOverview,
@@ -42,6 +43,12 @@ const STROKE_COLORS = {
 };
 const GB = 1024 * 1024 * 1024;
 const MB = 1024 * 1024;
+const VIRTUAL_TENANT_IDS = new Set(["", "tenant_id", ASSET_OWNER_TENANT_ID]);
+
+function isDisplayableTenant(tenant: PlatformTenantQuota): boolean {
+  const normalizedTenantId = tenant.tenant_id?.trim() ?? "";
+  return !VIRTUAL_TENANT_IDS.has(normalizedTenantId);
+}
 
 function getProgressColor(usagePct: number | null | undefined): string {
   if (usagePct == null) return STROKE_COLORS.normal;
@@ -161,7 +168,8 @@ export function PlatformQuotaPanel() {
   };
 
   // Fair share reference
-  const tenantCount = data?.tenant_count || 0;
+  const displayTenants = (data?.tenants || []).filter(isDisplayableTenant);
+  const tenantCount = displayTenants.length;
   const capacityGb =
     data?.platform_capacity_bytes != null
       ? Math.round(data.platform_capacity_bytes / GB)
@@ -445,13 +453,14 @@ export function PlatformQuotaPanel() {
 
       {/* Per-Tenant Table */}
       <Table
-        dataSource={data?.tenants || []}
+        dataSource={displayTenants}
         columns={columns}
         rowKey="tenant_id"
         loading={loading}
         pagination={false}
         size="small"
         scroll={{ x: 890 }}
+        locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
       />
 
       {/* Capacity Settings Modal */}

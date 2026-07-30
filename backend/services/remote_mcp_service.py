@@ -36,6 +36,7 @@ from database.remote_mcp_db import (
     get_mcp_custom_headers_by_name_and_url,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
 from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
@@ -210,7 +211,11 @@ def _is_container_record(record: dict | None) -> bool:
     """
     if not record:
         return False
-    return record.get("container_id") is not None or record.get("config_json") is not None
+    config_json = record.get("config_json")
+    # API-type MCPs store OpenAPI JSON in config_json, not container config
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        return False
+    return record.get("container_id") is not None or config_json is not None
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +299,9 @@ async def add_remote_mcp_server_list(
     custom_headers: dict | None = None,
     source: str | None = "local",
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ):
     """Add a remote MCP server to the list.
 
@@ -334,6 +342,9 @@ async def add_remote_mcp_server_list(
         "source": source,
         "container_port": container_port,
         "registry_json": {"_toolNames": tool_names},
+        "group_ids": group_ids,
+        "ingroup_permission": ingroup_permission,
+        "shared_fields": shared_fields,
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -387,6 +398,10 @@ async def add_mcp_service(
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
+    skip_health_check: bool = False,
 ) -> None:
     """Add an MCP service record.
 
@@ -407,6 +422,8 @@ async def add_mcp_service(
         enabled: Whether the MCP is enabled
         container_id: Docker container ID
         container_port: Container port
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
     """
     status: bool | None = None
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
@@ -419,10 +436,43 @@ async def add_mcp_service(
 
     resolved_registry_json = registry_json or {}
     if server_url:
-        headers = _build_mcp_headers(authorization_token, custom_headers)
-        tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
-        if tool_names:
-            resolved_registry_json["_toolNames"] = tool_names
+        # API-type MCPs use OpenAPI JSON, not MCP protocol
+        is_api = isinstance(resolved_config_json, dict) and "openapi" in resolved_config_json
+        if is_api:
+            # Register OpenAPI service (same as agent config flow)
+            try:
+                from services.tool_configuration_service import import_openapi_service, _refresh_openapi_services_in_mcp
+                import_openapi_service(
+                    service_name=name,
+                    openapi_json=resolved_config_json,
+                    server_url=server_url,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    service_description=description,
+                    headers_template=custom_headers,
+                    force_update=True,
+                )
+                _refresh_openapi_services_in_mcp(tenant_id)
+            except Exception as exc:
+                logger.warning(f"Failed to register OpenAPI service '{name}': {exc}")
+            # Extract tool names from OpenAPI spec for display
+            api_tools = []
+            paths = resolved_config_json.get("paths", {}) or {}
+            for path, methods in paths.items():
+                if isinstance(methods, dict):
+                    for method_name, detail in methods.items():
+                        if isinstance(detail, dict):
+                            tool_name = detail.get("operationId") or detail.get("summary") or ""
+                            if tool_name:
+                                api_tools.append(tool_name)
+            if api_tools:
+                resolved_registry_json["_toolNames"] = api_tools
+        else:
+            headers = _build_mcp_headers(authorization_token, custom_headers)
+            if not skip_health_check:
+                tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+                if tool_names:
+                    resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
@@ -443,6 +493,9 @@ async def add_mcp_service(
             "tags": tags,
             "description": description,
             "config_json": resolved_config_json,
+            "group_ids": group_ids,
+            "ingroup_permission": ingroup_permission,
+            "shared_fields": shared_fields,
         },
         tenant_id=tenant_id,
         user_id=user_id,
@@ -462,6 +515,9 @@ async def add_container_mcp_service(
     market_id: int | None,
     port: int,
     mcp_config: MCPConfigRequest,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Add a container-based MCP service.
 
@@ -477,6 +533,8 @@ async def add_container_mcp_service(
         community_id: Linked community record ID
         port: Host port for the container
         mcp_config: MCP server configuration
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Returns:
         Container information dictionary
@@ -549,6 +607,8 @@ async def add_container_mcp_service(
             enabled=True,
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
+            group_ids=group_ids,
+            ingroup_permission=ingroup_permission,
         )
     except Exception as exc:
         logger.warning(f"Failed to start container MCP service: {exc}")
@@ -622,6 +682,9 @@ def update_mcp_service(
     config_json: dict | None,
     tags: list | None,
     market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -637,6 +700,8 @@ def update_mcp_service(
         config_json: MCP configuration JSON
         tags: MCP tags
         market_id: Linked market record ID
+        group_ids: Comma-separated group IDs that can access this MCP
+        ingroup_permission: Permission level: EDIT, READ_ONLY, PRIVATE
 
     Raises:
         McpNotFoundError: If MCP record is not found
@@ -644,6 +709,12 @@ def update_mcp_service(
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
         raise McpNotFoundError("MCP record not found")
+
+    # Check name uniqueness (exclude the current record itself)
+    if new_name != current_record.get("mcp_name"):
+        if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):
+            logger.error(f"MCP name already exists: {new_name} in tenant {tenant_id}")
+            raise McpNameConflictError("MCP name already exists")
 
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
     next_config_json = config_json if config_json is not None else current_config_json
@@ -663,6 +734,9 @@ def update_mcp_service(
         config_json=next_config_json,
         tags=tags,
         market_id=next_market_id,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
 
@@ -827,19 +901,30 @@ async def update_mcp_service_enabled(
             )
     elif enabled:
         server_url = current_record.get("mcp_server")
-        health_ok = await mcp_server_health(
-            remote_mcp_server=server_url,
-            authorization_token=authorization_token,
-            custom_headers=custom_headers,
-        )
-        update_mcp_record_status_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            status=bool(health_ok),
-        )
-        if not health_ok:
-            raise MCPConnectionError("MCP connection failed")
+        # Skip MCP protocol check for API-type MCPs
+        config_json = current_record.get("config_json")
+        api_type = isinstance(config_json, dict) and "openapi" in config_json
+        if api_type:
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=True,
+            )
+        else:
+            health_ok = await mcp_server_health(
+                remote_mcp_server=server_url,
+                authorization_token=authorization_token,
+                custom_headers=custom_headers,
+            )
+            update_mcp_record_status_by_id(
+                mcp_id=mcp_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=bool(health_ok),
+            )
+            if not health_ok:
+                raise MCPConnectionError("MCP connection failed")
 
     update_mcp_record_enabled_by_id(
         mcp_id=mcp_id,
@@ -920,10 +1005,42 @@ async def get_remote_mcp_server_list(
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
     can_edit_all = False
+    user_groups: list[str] | None = None
     if user_id:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
         user_role = str(user_tenant_record.get("user_role") or "").upper()
         can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        try:
+            raw_groups = query_group_ids_by_user(user_id) or []
+            user_groups = [str(g) for g in raw_groups]
+        except Exception:
+            user_groups = []
+
+    if user_groups is not None:
+        filtered_records = []
+        for record in mcp_records:
+            # NULL group_ids means public (backward compatible with pre-PR data)
+            if record.get("group_ids") is None:
+                filtered_records.append(record)
+                continue
+            record_group_ids = (record.get("group_ids") or "").strip()
+            # User can see MCPs they created
+            if str(record.get("created_by") or record.get("user_id") or "") == user_id:
+                filtered_records.append(record)
+                continue
+            # User can see MCPs where they belong to at least one allowed group
+            if user_groups:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    # Hide PRIVATE MCPs from non-creator group members (like agent behavior)
+                    ingroup_perm = (record.get("ingroup_permission") or "").upper()
+                    if ingroup_perm == "PRIVATE":
+                        continue
+                    filtered_records.append(record)
+                    continue
+        logger.info(f"[MCP group filter] user_id={user_id}, groups={user_groups}, "
+                     f"total={len(mcp_records)}, filtered={len(filtered_records)}")
+        mcp_records = filtered_records
 
     container_status_map = {}
     try:
@@ -946,6 +1063,18 @@ async def get_remote_mcp_server_list(
             permission = PERMISSION_READ
         else:
             permission = PERMISSION_EDIT if can_edit_all or str(created_by) == str(user_id) else PERMISSION_READ
+        # Public MCPs (NULL group_ids) are editable by all users
+        if record.get("group_ids") is None:
+            permission = PERMISSION_EDIT
+        # For group-shared MCPs, respect ingroup_permission
+        if permission == PERMISSION_READ and user_groups:
+            record_group_ids = (record.get("group_ids") or "").strip()
+            if record_group_ids:
+                allowed = [g.strip() for g in record_group_ids.split(",") if g.strip()]
+                if any(g in allowed for g in user_groups):
+                    ingroup_perm = (record.get("ingroup_permission") or "READ_ONLY").upper()
+                    if ingroup_perm == "EDIT":
+                        permission = PERMISSION_EDIT
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")
@@ -970,6 +1099,7 @@ async def get_remote_mcp_server_list(
             "enabled": record.get("enabled"),
             "source": record.get("source"),
             "update_time": record.get("update_time"),
+            "create_time": record.get("create_time"),
             "tags": record.get("tags") or [],
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),
@@ -977,6 +1107,9 @@ async def get_remote_mcp_server_list(
             "market_id": record.get("market_id"),
             "is_listed_in_repository": record.get("market_id") is not None,
             "container_status": container_status,
+            "group_ids": record.get("group_ids"),
+            "ingroup_permission": record.get("ingroup_permission"),
+            "shared_fields": record.get("shared_fields"),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
@@ -1179,6 +1312,10 @@ async def check_mcp_service_health(
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[dict]:
     """Get tools from an MCP service by ID.
 
+    For API-type MCPs (OpenAPI), tools are already registered in the database
+    via import_openapi_service.  Return them from the tool registry instead of
+    attempting an MCP-protocol connection.
+
     Args:
         tenant_id: Tenant ID
         mcp_id: MCP record ID
@@ -1194,6 +1331,22 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise McpNotFoundError("MCP record not found")
+
+    config_json = record.get("config_json")
+    registry_json = record.get("registry_json")
+    is_api_type = isinstance(config_json, dict) and "openapi" in config_json
+    if is_api_type:
+        # API-type MCPs have no MCP protocol endpoint.
+        # Return the tool names that were extracted during registration.
+        tool_names = []
+        if isinstance(registry_json, dict):
+            raw = registry_json.get("_toolNames")
+            if isinstance(raw, list):
+                tool_names = raw
+        return [
+            {"name": name, "description": ""}
+            for name in tool_names
+        ]
 
     service_name = record.get("mcp_name")
     server_url = record.get("mcp_server")
@@ -1246,6 +1399,11 @@ async def refresh_mcp_service_tool_count(
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
 
+    # Skip MCP protocol check for API-type MCPs (they use OpenAPI JSON, not MCP)
+    config_json = record.get("config_json")
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        return
+
     headers = {}
     if authorization_token:
         headers["Authorization"] = authorization_token
@@ -1280,6 +1438,9 @@ async def upload_and_start_mcp_image(
     port: int,
     service_name: str | None = None,
     env_vars: str | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1356,7 +1517,10 @@ async def upload_and_start_mcp_image(
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
         authorization_token=authorization_token,
-        container_port=port
+        container_port=port,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
     return {

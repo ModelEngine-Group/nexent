@@ -205,6 +205,35 @@ class TestAddMcpService:
         call_kwargs = mock_add.call_args[1]
         assert call_kwargs["custom_headers"] == {}
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_skip_health_check(self, mock_add, mock_auth):
+        """skip_health_check=True is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "market_id": 1,
+            "skip_health_check": True,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["skip_health_check"] is True
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_container_port(self, mock_add, mock_auth):
+        """container_port is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "container_port": 8080,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["container_port"] == 8080
+
 
 # ============================================================================
 # POST /mcp/add-from-config
@@ -306,6 +335,17 @@ class TestUpdateMcpService:
         assert resp.status_code == HTTPStatus.OK
         call_kwargs = mock_update.call_args[1]
         assert call_kwargs["custom_headers"] == {}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """McpNameConflictError should return 409 CONFLICT."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("MCP name already exists")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "existing-name", "server_url": "http://url",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.CONFLICT
 
 
 # ============================================================================

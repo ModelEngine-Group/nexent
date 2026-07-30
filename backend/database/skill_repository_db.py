@@ -19,6 +19,7 @@ _UPDATE_ALLOWED_FIELDS = frozenset({
     "skill_info_json",
     "skill_zip_base64",
     "status",
+    "content",
 })
 
 
@@ -66,6 +67,7 @@ def get_skill_repository_by_skill_id(
     skill_id: int,
     *,
     publisher_tenant_id: Optional[str] = None,
+    statuses: Optional[Collection[str]] = None,
 ) -> Optional[dict]:
     """Fetch an active repository listing by source skill_id."""
     with get_db_session() as session:
@@ -77,7 +79,9 @@ def get_skill_repository_by_skill_id(
             query = query.filter(
                 SkillRepository.publisher_tenant_id == publisher_tenant_id,
             )
-        record = query.first()
+        if statuses is not None:
+            query = query.filter(SkillRepository.status.in_(list(statuses)))
+        record = query.order_by(SkillRepository.update_time.desc()).first()
         return as_dict(record) if record else None
 
 
@@ -133,6 +137,7 @@ def list_skill_repository_summaries(
         query = session.query(
             SkillRepository.skill_repository_id,
             SkillRepository.skill_id,
+            SkillRepository.publisher_user_id,
             SkillRepository.submitted_by,
             SkillRepository.name,
             SkillRepository.description,
@@ -142,6 +147,7 @@ def list_skill_repository_summaries(
             SkillRepository.tags,
             SkillRepository.icon,
             SkillRepository.downloads,
+            SkillRepository.content,
             SkillRepository.create_time,
         )
         query = _apply_skill_repository_filters(
@@ -171,6 +177,7 @@ def list_skill_repository_summaries(
         {
             "skill_repository_id": row.skill_repository_id,
             "skill_id": row.skill_id,
+            "publisher_user_id": row.publisher_user_id,
             "submitted_by": row.submitted_by,
             "name": row.name,
             "description": row.description,
@@ -180,6 +187,7 @@ def list_skill_repository_summaries(
             "tags": row.tags or [],
             "icon": row.icon,
             "downloads": row.downloads or 0,
+            "content": row.content,
             "created_at": row.create_time.isoformat() if row.create_time else None,
         }
         for row in rows
@@ -235,6 +243,7 @@ def update_skill_repository_status_by_id(
     publisher_tenant_id: Optional[str] = None,
     publisher_user_id: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    content: Optional[str] = None,
 ) -> int:
     """Update repository listing status by primary key. Returns affected row count."""
     update_values: Dict[str, Any] = {
@@ -247,6 +256,8 @@ def update_skill_repository_status_by_id(
         update_values["publisher_user_id"] = publisher_user_id
     if submitted_by is not None:
         update_values["submitted_by"] = submitted_by
+    if content is not None:
+        update_values["content"] = content
 
     with get_db_session() as session:
         where_clauses = [
@@ -261,6 +272,29 @@ def update_skill_repository_status_by_id(
             update(SkillRepository)
             .where(*where_clauses)
             .values(**update_values)
+        )
+        return int(result.rowcount or 0)
+
+
+def reset_skill_repository_status(
+    *,
+    repository_id: int,
+    skill_id: int,
+    status: str,
+    publisher_tenant_id: str,
+) -> int:
+    """Set other active listings with the same skill and status to not_shared."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(SkillRepository)
+            .where(
+                SkillRepository.skill_id == skill_id,
+                SkillRepository.status == status,
+                SkillRepository.skill_repository_id != repository_id,
+                SkillRepository.publisher_tenant_id == publisher_tenant_id,
+                SkillRepository.delete_flag != "Y",
+            )
+            .values(status=STATUS_NOT_SHARED)
         )
         return int(result.rowcount or 0)
 
@@ -307,6 +341,7 @@ def list_skill_repository_by_skill_ids(
                 SkillRepository.skill_repository_id,
                 SkillRepository.skill_id,
                 SkillRepository.status,
+                SkillRepository.content,
                 SkillRepository.create_time,
             )
             .filter(
@@ -327,6 +362,7 @@ def list_skill_repository_by_skill_ids(
             "skill_repository_id": row.skill_repository_id,
             "skill_id": row.skill_id,
             "status": row.status,
+            "content": row.content,
             "create_time": row.create_time,
         }
         for row in rows

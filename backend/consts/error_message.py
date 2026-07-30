@@ -133,6 +133,8 @@ class ErrorMessage:
         ErrorCode.AIDP_CONFIG_INVALID: "AIDP configuration invalid. Please check URL and API key format.",
         ErrorCode.AIDP_CONNECTION_ERROR: "Failed to connect to AIDP. Please check network connection and URL.",
         ErrorCode.AIDP_AUTH_ERROR: "AIDP authentication failed. Please check your API key.",
+        ErrorCode.AIDP_RATE_LIMIT: "AIDP API rate limit exceeded. Please try again later.",
+        ErrorCode.AIDP_RESPONSE_ERROR: "Failed to parse AIDP response. Please check API URL.",
 
         # ==================== 14 Northbound / 北向接口 ====================
         ErrorCode.NORTHBOUND_REQUEST_FAILED: "Northbound request failed.",

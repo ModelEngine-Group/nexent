@@ -280,6 +280,13 @@ class AgentConfig(BaseModel):
         description="Authorized fine-grained context item inputs for SDK assembly",
         default=None
     )
+    pre_run_tool_events: List[Dict[str, Any]] = Field(
+        description=(
+            "Structured tool and result events completed before the model loop "
+            "and emitted through the normal streaming persistence path."
+        ),
+        default_factory=list,
+    )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
@@ -295,6 +302,19 @@ class AgentConfig(BaseModel):
     enable_planning: bool = Field(
         description="Whether to enable the planning phase before execution",
         default=False,
+    )
+    sandbox_policy: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Sandbox policy for LLM-generated Python code execution.  Keys: "
+            "level (local/docker/wasm), "
+            "scope (session/system), "
+            "docker_image, memory_limit_mb, cpu_quota, "
+            "network_disabled, timeout_seconds, shell_policy, "
+            "output_dir, auto_sync_outputs.  "
+            'Example: {"level": "docker", "scope": "session", '
+            '"docker_image": "nexent/nexent-sandbox:latest"}'
+        ),
+        default=None,
     )
 
 
@@ -340,6 +360,8 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
+    user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,
@@ -361,13 +383,28 @@ class AgentRunInfo(BaseModel):
                     "If provided, plan_repo will use Redis as primary storage with local fallback.",
         default=None
     )
+    sandbox_config: Optional[Any] = Field(
+        description=(
+            "Resolved SandboxConfig for sandbox isolation.  "
+            "Populated by the backend service layer from AgentConfig.sandbox_policy "
+            "and NEXENT_SANDBOX_* environment variables.  "
+            "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
+        ),
+        default=None,
+    )
+    minio_client: Optional[Any] = Field(
+        description=(
+            "MinIO client for syncing sandbox output files to object storage.  "
+            "Required when sandbox_config.auto_sync_outputs is True."
+        ),
+        default=None,
+    )
 
     class Config:
         arbitrary_types_allowed = True
 
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
-    memory_config: Dict[str, Any] = Field(description="Memory llm/embedder/vectorstore configuration")
     tenant_id: str = Field(description="Tenant id")
     user_id: str = Field(description="User id")
     agent_id: str = Field(description="Agent id")

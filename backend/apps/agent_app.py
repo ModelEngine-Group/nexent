@@ -355,18 +355,22 @@ async def list_all_agent_info_api(
     list all agent info
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(
+        user_id, auth_tenant_id, _ = get_current_user_info(
             authorization, request)
 
-        agent_list = await list_all_agent_info_impl(
+        if tenant_id is None:
+            agent_list = await list_all_agent_info_impl(
+                tenant_id=auth_tenant_id, user_id=user_id
+            )
+            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                asset_agent_list = await list_all_agent_info_impl(
+                    tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+                )
+                return agent_list + asset_agent_list
+            return agent_list
+        return await list_all_agent_info_impl(
             tenant_id=tenant_id, user_id=user_id
         )
-        if tenant_id != ASSET_OWNER_TENANT_ID:
-            asset_agent_list = await list_all_agent_info_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
-            )
-            return agent_list + asset_agent_list
-        return agent_list
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(

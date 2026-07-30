@@ -61,9 +61,12 @@ If you know the Agent Card address of the target agent, you can use the URL disc
 1. In the External A2A Agent list, click the "Add External Agent" button
 2. Select the "URL Discovery" tab
 3. Fill in the Agent Card URL address, for example: `https://example.com/.well-known/agent.json`
-4. Click the "Discover" button; the system will automatically retrieve the agent's related information
-5. After successful discovery, you can view the agent's name, description, capabilities and other information
-6. Click "Add to List" to complete the addition
+4. If the target Agent Card requires authentication, enter a JSON object in "Custom Request Headers", for example: `{"Authorization": "Bearer <token>"}`
+5. Click the "Discover" button; the system will automatically retrieve the agent's related information
+6. After successful discovery, you can view the agent's name, description, capabilities and other information
+7. Click "Add to List" to complete the addition
+
+> 💡 **Tip**: Custom request headers are saved with the external agent and used only to retrieve and refresh its Agent Card. They are never used for agent calls. When rediscovering the same URL, leaving this field empty keeps the current configuration; entering `{}` clears it.
 
 > 💡 **Tip**: The Agent Card is an Agent description file that complies with the A2A 1.0 specification, containing the agent's name, description, calling address, capabilities and other information.
 
@@ -103,8 +106,9 @@ In the External A2A Agent list, you can view and manage all discovered external 
 4. **Configure Calling Protocol**: Click the "Protocol Configuration" button to select the calling protocol for this agent:
    - **HTTP + JSON**: Use REST API style calls
    - **JSON-RPC**: Use JSON-RPC protocol calls
-5. **Refresh Agent Information**: If the agent information changes, click the "Refresh" button to re-fetch the latest Agent Card
-6. **Remove Agent**: Click the "Remove" button to delete the agent from the discovered list
+5. **Configure Call Authentication**: If the Agent Card declares `securitySchemes` and `securityRequirements`, click "Agent Authentication" and enter the required values. Nexent places each value in the header, query string, or cookie specified by the Card; fields in the same requirement must all be configured.
+6. **Refresh Agent Information**: If the agent information changes, click the "Refresh" button to re-fetch the latest Agent Card
+7. **Remove Agent**: Click the "Remove" button to delete the agent from the discovered list
 
 > 💡 **Use Cases**:
 > - Quickly integrate known third-party agent services through URL discovery

@@ -71,7 +71,7 @@ USAGE
 Usage: deploy/images/build.sh [options]
 
 Options:
-  --images LIST              Comma-separated image list: all,main,web,data-process,mcp,terminal,docs
+  --images LIST              Comma-separated image list: all,main,web,data-process,mcp,terminal,docs,sandbox
   --image IMAGE              Compatibility alias for --images with one image
   --all                      Build all images
   --main                     Build nexent/nexent
@@ -107,6 +107,7 @@ while [ $# -gt 0 ]; do
     --mcp) REQUESTED_IMAGES+=("mcp"); shift ;;
     --terminal) REQUESTED_IMAGES+=("terminal"); shift ;;
     --docs) REQUESTED_IMAGES+=("docs"); shift ;;
+    --sandbox) REQUESTED_IMAGES+=("sandbox"); shift ;;
     --components) COMPONENTS="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
@@ -149,7 +150,7 @@ add_image_if_missing() {
 }
 
 select_all_images() {
-  SELECTED_IMAGES=(main web data-process mcp terminal docs)
+  SELECTED_IMAGES=(main web data-process mcp terminal docs sandbox)
 }
 
 select_images_from_csv() {
@@ -167,7 +168,7 @@ select_images_from_csv() {
       all)
         select_all_images
         ;;
-      main|web|data-process|mcp|terminal|docs)
+      main|web|data-process|mcp|terminal|docs|sandbox)
         add_image_if_missing "$normalized"
         ;;
       *)
@@ -186,7 +187,7 @@ select_images_from_csv() {
 image_tui_multiselect() {
   [ -t 0 ] || return 1
 
-  local images=(main web data-process mcp terminal docs)
+  local images=(main web data-process mcp terminal docs sandbox)
   local details=(
     "$(deployment_i18n image_build.detail.main)"
     "$(deployment_i18n image_build.detail.web)"
@@ -194,8 +195,9 @@ image_tui_multiselect() {
     "$(deployment_i18n image_build.detail.mcp)"
     "$(deployment_i18n image_build.detail.terminal)"
     "$(deployment_i18n image_build.detail.docs)"
+    "Sandbox runtime for LLM-generated Python execution"
   )
-  local selected=(1 1 0 0 0 0)
+  local selected=(1 1 0 0 0 0 0)
   local cursor=0
   local i key key_tail selection
 
@@ -293,7 +295,7 @@ run_interactive_configuration() {
       else
         echo "Images:"
       fi
-      echo "  main, web, data-process, mcp, terminal, docs"
+      echo "  main, web, data-process, mcp, terminal, docs, sandbox"
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         IMAGES="$(prompt_choice "请输入镜像（默认：main,web）：" "main,web")"
       else
@@ -516,6 +518,7 @@ build_selected_image() {
       [ "$TERMINAL_VARIANT" = "conda" ] && image_name="nexent-ubuntu-terminal-conda"
       build_one "$image_name" "$DOCKERFILE_DIR/terminal/Dockerfile" --build-arg TERMINAL_VARIANT="$TERMINAL_VARIANT"
       ;;
+    sandbox) build_one nexent-sandbox "$DOCKERFILE_DIR/sandbox/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
     *)
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "不支持的镜像：$1" >&2
@@ -549,6 +552,9 @@ select_images_from_components() {
         ;;
       terminal)
         add_image_if_missing terminal
+        ;;
+      sandbox)
+        add_image_if_missing sandbox
         ;;
       *)
         if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then

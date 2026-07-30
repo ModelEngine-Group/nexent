@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -26,6 +26,8 @@ import {
 } from "@/services/userService";
 import {
   createGroup,
+  addUserToGroup,
+  removeUserFromGroup,
   type Group,
   type CreateGroupRequest,
 } from "@/services/groupService";
@@ -55,7 +57,12 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
   const users = data?.users || [];
   const total = data?.total || 0;
   const groups = groupsData?.groups || [];
+  // Refs to break stale closures inside useMemo([]) handlers below
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const editingUserRef = useRef(editingUser);
+  editingUserRef.current = editingUser;
   const [modalVisible, setModalVisible] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
 
@@ -69,7 +76,14 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
 
   const openEdit = (u: User) => {
     setEditingUser(u);
-    form.setFieldsValue({ username: u.username, role: u.role });
+    const currentGroupIds = groupsRef.current
+      .filter((g) => u.group_names?.includes(g.group_name))
+      .map((g) => g.group_id);
+    form.setFieldsValue({
+      username: u.username,
+      role: u.role,
+      group_ids: currentGroupIds,
+    });
     setModalVisible(true);
   };
 
@@ -92,11 +106,27 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       const values = await form.validateFields();
       if (!tenantId) throw new Error("No tenant selected");
 
-      if (editingUser) {
+      if (editingUserRef.current) {
+        const eu = editingUserRef.current;
         const updateData: UpdateUserRequest = {
           role: values.role,
         };
-        await updateUser(editingUser.id.toString(), updateData);
+        await updateUser(eu.id.toString(), updateData);
+
+        // Sync group membership changes
+        const selectedGroupIds: number[] = values.group_ids || [];
+        const previousGroupIds = groupsRef.current
+          .filter((g) => eu.group_names?.includes(g.group_name))
+          .map((g) => g.group_id);
+
+        const toAdd = selectedGroupIds.filter((id) => !previousGroupIds.includes(id));
+        const toRemove = previousGroupIds.filter((id) => !selectedGroupIds.includes(id));
+
+        await Promise.all([
+          ...toAdd.map((gid) => addUserToGroup(gid, eu.id)),
+          ...toRemove.map((gid) => removeUserFromGroup(gid, eu.id)),
+        ]);
+
         message.success(t("tenantResources.users.updated"));
       }
       setModalVisible(false);
@@ -267,6 +297,16 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
                 { label: t("user.role.dev"), value: "DEV" },
                 { label: t("user.role.user"), value: "USER" },
               ]}
+            />
+          </Form.Item>
+          <Form.Item name="group_ids" label={t("tenantResources.users.userGroup")}>
+            <Select
+              mode="multiple"
+              placeholder={t("tenantResources.groups.selectUsers")}
+              options={groups.map((g) => ({
+                label: g.group_name,
+                value: g.group_id,
+              }))}
             />
           </Form.Item>
         </Form>

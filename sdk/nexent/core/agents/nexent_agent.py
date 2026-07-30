@@ -23,13 +23,14 @@ from .core_agent import CoreAgent, convert_code_format
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
+    from .subagent_wrapper import SubAgentToolWrapper
 
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "math", "cmath", "statistics", "decimal", "fractions", "random",
     "collections", "itertools", "functools", "heapq", "bisect", "array", "copy",
-    "re", "string", "textwrap", "unicodedata", "difflib",
+    "re", "string", "textwrap", "unicodedata",
     "datetime", "time", "calendar",
     "base64", "hashlib", "hmac",
     "json", "csv",
@@ -46,6 +47,11 @@ def _tool_name(tool_obj: Any) -> str:
         or getattr(tool_obj, "__name__", None)
         or type(tool_obj).__name__
     )
+
+
+def _has_host_tools(tools: List[Any]) -> bool:
+    """Return whether the agent has tools marked for host-process execution."""
+    return any(getattr(tool, "_nexent_execute_on_host", False) for tool in tools)
 
 
 def _is_retriever_tool(tool_obj: Any) -> bool:
@@ -148,9 +154,13 @@ class NexentAgent:
                  model_config_list: List[ModelConfig],
                  stop_event: Event,
                  mcp_tool_collection=None,
-                 redis_client=None):
+                 redis_client=None,
+                 sandbox_config=None,
+                 minio_client=None,
+                 conversation_id=None,
+                 user_id=None):
         """
-        init the agent create factory
+        Initialize the NexentAgent factory.
 
         Args:
             observer: MessageObserver instance
@@ -158,6 +168,12 @@ class NexentAgent:
             stop_event: Threading event for stop control
             mcp_tool_collection: Optional MCP tool collection
             redis_client: Redis client for plan persistence
+            sandbox_config: Optional SandboxConfig for sandbox isolation.
+                When None, uses LocalPythonExecutor (backwards-compatible).
+            minio_client: Optional MinIO client for output file sync.
+                Required when sandbox_config.auto_sync_outputs is True.
+            conversation_id: Optional conversation id for plan persistence.
+            user_id: Optional user id for plan persistence.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -167,6 +183,10 @@ class NexentAgent:
         self.stop_event = stop_event
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
+        self.sandbox_config = sandbox_config
+        self.minio_client = minio_client
+        self.conversation_id = conversation_id
+        self.user_id = user_id
 
         self.agent = None
 
@@ -282,18 +302,66 @@ class NexentAgent:
                                        validate_url_access=validate_url_access,
                                        **params)
             elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                metadata = tool_config.metadata or {}
                 tools_obj = tool_class()
+                if tool_config.description is not None:
+                    tools_obj.description = tool_config.description
+                if tool_config.inputs is not None:
+                    tools_obj.inputs = json.loads(tool_config.inputs)
+                if tool_config.output_type is not None:
+                    tools_obj.output_type = tool_config.output_type
                 tools_obj.observer = self.observer
-                tools_obj.memory_config = tool_config.metadata.get(
-                    "memory_config", {}) if tool_config.metadata else {}
-                tools_obj.tenant_id = tool_config.metadata.get(
-                    "tenant_id", "") if tool_config.metadata else ""
-                tools_obj.user_id = tool_config.metadata.get(
-                    "user_id", "") if tool_config.metadata else ""
-                tools_obj.agent_id = tool_config.metadata.get(
-                    "agent_id", "") if tool_config.metadata else ""
-                tools_obj.memory_user_config = tool_config.metadata.get(
-                    "memory_user_config", None) if tool_config.metadata else None
+                tools_obj.memory_config = metadata.get(
+                    "memory_config", {}) if metadata else {}
+                tools_obj.tenant_id = metadata.get(
+                    "tenant_id", "") if metadata else ""
+                tools_obj.user_id = metadata.get(
+                    "user_id", "") if metadata else ""
+                tools_obj.agent_id = metadata.get(
+                    "agent_id", "") if metadata else ""
+                raw_conversation_id = (
+                    metadata.get("conversation_id", "") if metadata else ""
+                )
+                tools_obj.conversation_id = (
+                    str(raw_conversation_id)
+                    if raw_conversation_id not in (None, "")
+                    else ""
+                )
+                tools_obj.memory_user_config = metadata.get(
+                    "memory_user_config", None) if metadata else None
+                tools_obj.memory_service = metadata.get(
+                    "memory_service", None) if metadata else None
+                tools_obj.embedding_configured = metadata.get(
+                    "embedding_configured", True
+                ) if metadata else True
+                if class_name == "SearchMemoryTool":
+                    tools_obj.memory_context_service = metadata.get(
+                        "memory_context_service", None) if metadata else None
+                else:
+                    tools_obj.memory_context_service = None
+            elif class_name == "AidpSearchTool":
+                tools_obj = tool_class(**params)
+                tools_obj.observer = self.observer
+                # Install the KDS whitelist so the tool only retrieves from
+                # KBs the current user is permitted to see.  Guard against
+                # ``metadata=None`` the same way every other branch does
+                # (``.get(...) if tool_config.metadata else ...``).
+                allowed_raw = (
+                    tool_config.metadata.get("allowed_kds_set")
+                    if tool_config.metadata else None
+                )
+                if allowed_raw is not None:
+                    try:
+                        tools_obj.set_allowed_kds([str(k) for k in allowed_raw])
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to install Aidp whitelist from metadata: %s; "
+                            "falling back to no-op filtering", exc,
+                        )
+                        tools_obj.set_allowed_kds(None)
+                else:
+                    # Whitelist not set by backend → treat as uninstalled.
+                    tools_obj.set_allowed_kds(None)
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
@@ -331,50 +399,42 @@ class NexentAgent:
         params = tool_config.params or {}
 
         if class_name == "RunSkillScriptTool":
-            from nexent.core.tools.run_skill_script_tool import get_run_skill_script_tool
+            from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
             metadata = tool_config.metadata or {}
-            get_run_skill_script_tool(
+            return RunSkillScriptTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
             )
-            from nexent.core.tools.run_skill_script_tool import run_skill_script
-            return run_skill_script
         elif class_name == "ReadSkillMdTool":
-            from nexent.core.tools.read_skill_md_tool import get_read_skill_md_tool
+            from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
             metadata = tool_config.metadata or {}
-            get_read_skill_md_tool(
+            return ReadSkillMdTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_md_tool import read_skill_md
-            return read_skill_md
         elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import get_write_skill_file_tool
+            from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
             metadata = tool_config.metadata or {}
-            get_write_skill_file_tool(
+            return WriteSkillFileTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.write_skill_file_tool import write_skill_file
-            return write_skill_file
         elif class_name == "ReadSkillConfigTool":
-            from nexent.core.tools.read_skill_config_tool import get_read_skill_config_tool
+            from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
-            get_read_skill_config_tool(
+            return ReadSkillConfigTool(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-            from nexent.core.tools.read_skill_config_tool import read_skill_config
-            return read_skill_config
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
             return CreatePlanTool()
@@ -402,16 +462,63 @@ class NexentAgent:
                 tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
+            if source in {"local", "builtin", "mcp"}:
+                try:
+                    setattr(tool_obj, "_nexent_execute_on_host", True)
+                except (AttributeError, TypeError):
+                    pass
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
 
+    def _wrap_subagent(
+        self,
+        inner_agent: Any,
+        sub_agent_config: Any,
+        agent_id: Any = None,
+    ) -> "SubAgentToolWrapper":
+        """Wrap a sub-agent ``Tool`` so the observer sees nesting boundaries.
+
+        Both internal ``AgentConfig``-derived managed agents and external
+        ``ExternalA2AAgentConfig``-derived wrappers funnel through here, so
+        every nested invocation emits ``subagent_start``/``subagent_end``
+        regardless of which kind of sub-agent was added to ``managed_agents``.
+        """
+        from .subagent_wrapper import SubAgentToolWrapper
+
+        resolved_id = (
+            agent_id
+            if agent_id is not None
+            else getattr(sub_agent_config, "agent_id", None)
+            or getattr(sub_agent_config, "_sub_agent_id", None)
+        )
+        agent_name = (
+            getattr(sub_agent_config, "name", None)
+            or getattr(inner_agent, "name", None)
+            or "subagent"
+        )
+        return SubAgentToolWrapper(
+            inner_agent=inner_agent,
+            observer=self.observer,
+            agent_id=resolved_id,
+            agent_name=str(agent_name),
+        )
+
     def create_single_agent(
         self,
         agent_config: AgentConfig,
+        _managed_context: bool = False,
         *,
         context_items_override: Sequence["ContextItemInput"] | None = None,
     ) -> CoreAgent:
+        """
+        Build a CoreAgent from ``agent_config``.
+
+        Args:
+            agent_config: AgentConfig describing this agent.
+            _managed_context: Internal flag.  When True, skip sandbox creation so that
+                managed sub-agents share the parent's python_executor (smolagents contract).
+        """
         if not isinstance(agent_config, AgentConfig):
             raise TypeError("agent_config must be a AgentConfig object")
 
@@ -430,32 +537,28 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
-                # Build tools one-by-one so a single broken tool (e.g. a search
-                # tool missing its API key) is skipped with a warning instead
-                # of failing the whole agent. The agent still runs with the
-                # remaining tools.
-                tool_list = []
-                for tool_config in agent_config.tools:
-                    try:
-                        tool_obj = self.create_tool(tool_config)
-                        tool_list.append(
-                            _wrap_tool_with_monitoring(tool_obj, agent_config.name)
-                        )
-                    except Exception as tool_err:  # noqa: BLE001
-                        logger.warning(
-                            "Skipping tool %s for agent %s due to init error: %s",
-                            getattr(tool_config, "class_name", tool_config),
-                            agent_config.name,
-                            tool_err,
-                        )
+                tool_list = [
+                    _wrap_tool_with_monitoring(
+                        self.create_tool(tool_config),
+                        agent_config.name,
+                    )
+                    for tool_config in agent_config.tools
+                ]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create internal managed agents recursively
+                # Create managed agents recursively without creating a second sandbox.
+                raw_managed_agents = []
+                for sub_agent_config in agent_config.managed_agents:
+                    inner_agent = self.create_single_agent(
+                        sub_agent_config,
+                        _managed_context=True,
+                    )
+                    raw_managed_agents.append((inner_agent, sub_agent_config))
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config)
-                    for sub_agent_config in agent_config.managed_agents
+                    self._wrap_subagent(inner_agent, sub_agent_config)
+                    for inner_agent, sub_agent_config in raw_managed_agents
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
@@ -472,7 +575,13 @@ class NexentAgent:
                             stop_event=self.stop_event,
                             observer=self.observer
                         )
-                        managed_agents_list.append(wrapper)
+                        managed_agents_list.append(
+                            self._wrap_subagent(
+                                wrapper,
+                                ext_agent_config,
+                                agent_id=str(ext_agent_config.agent_id),
+                            )
+                        )
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
@@ -498,6 +607,54 @@ class NexentAgent:
                 items=context_items,
             )
 
+            # Build the code executor unless this is a managed sub-agent that
+            # shares the parent's executor. Generated Python remains in the
+            # configured sandbox; host-marked tools are exposed through proxies.
+            python_executor = None
+            if not _managed_context and self.sandbox_config is not None:
+                from .sandbox import build_python_executor, SandboxLevel
+                has_managed = bool(
+                    agent_config.managed_agents
+                    or getattr(agent_config, "external_a2a_agents", [])
+                )
+                python_executor = build_python_executor(
+                    config=self.sandbox_config,
+                    logger_=logger,
+                    managed_agents_exist=has_managed,
+                    host_tools_exist=_has_host_tools(tool_list),
+                )
+                # Eager warm-up for remote executors (skip for LOCAL which is instant).
+                if self.sandbox_config.level != SandboxLevel.LOCAL:
+                    try:
+                        warm_start = time.time()
+                        python_executor("[0, None]")
+                        warm_dur = time.time() - warm_start
+                        backend = getattr(python_executor, "_nexent_backend", "unknown")
+                        if backend == "local":
+                            logger.warning(
+                                "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
+                                "(scope=%s, warm-up %.2fs)",
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                                warm_dur,
+                            )
+                        else:
+                            logger.info(
+                                "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
+                                warm_dur,
+                                backend,
+                                self.sandbox_config.level.value,
+                                self.sandbox_config.scope.value,
+                            )
+                    except Exception as warm_err:
+                        logger.warning(
+                            "Sandbox warm-up failed (%s): %s",
+                            self.sandbox_config.level.value,
+                            warm_err,
+                        )
+                # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                self._sandbox_scope = self.sandbox_config.scope.value
+
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
@@ -514,7 +671,9 @@ class NexentAgent:
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
-                verification_config=getattr(agent_config, "verification_config", None),
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
+                executor=python_executor,
             )
             agent.stop_event = self.stop_event
 
@@ -680,6 +839,7 @@ class NexentAgent:
 
                 finally:
                     self._log_step_metrics()
+                    self._cleanup_sandbox()
 
             if final_answer_for_trace is not None:
                 if hasattr(self.agent, "step_metrics"):
@@ -780,3 +940,57 @@ class NexentAgent:
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+
+    def _cleanup_sandbox(self) -> None:
+        """
+        Clean up the sandbox executor after an agent run.
+
+        For ``scope=session``: the executor is immediately destroyed.
+        For ``scope=system``: the executor is returned to the warm pool for reuse.
+
+        Must run AFTER any output-sync logic, because the container filesystem
+        is inaccessible after the executor is released / destroyed.
+        """
+        executor = getattr(self.agent, "python_executor", None)
+        if executor is None:
+            return
+
+        scope = getattr(self, "_sandbox_scope", None)
+
+        # Sync outputs to MinIO before destroying the container.
+        if (
+            self.sandbox_config is not None
+            and self.sandbox_config.auto_sync_outputs
+            and self.minio_client is not None
+        ):
+            from .sandbox import _sync_outputs_to_minio
+            agent_run_id = getattr(self.agent, "agent_run_id", None) or "unknown"
+            try:
+                uploaded = _sync_outputs_to_minio(
+                    output_dir=self.sandbox_config.output_dir,
+                    agent_run_id=agent_run_id,
+                    minio_client=self.minio_client,
+                    bucket="nexent-artifacts",
+                    logger_=logger,
+                )
+                if uploaded:
+                    logger.info(
+                        "Synced %d output file(s) to MinIO for run %s",
+                        len(uploaded),
+                        agent_run_id,
+                    )
+            except Exception as exc:
+                logger.error("Output sync to MinIO failed: %s", exc)
+
+        # Release or destroy the executor.
+        if scope == "system":
+            # Return to pool for reuse.
+            from .sandbox import release_python_executor
+            release_python_executor(executor, logger)
+        else:
+            # Session scope or unknown — destroy the container.
+            from .sandbox import cleanup_executor
+            cleanup_executor(executor, logger, timeout=5.0)
+
+        # Clear the reference so GC can collect the wrapper objects.
+        self.agent.python_executor = None

@@ -50,6 +50,9 @@ type AddContainerMcpToolPayload = {
   market_id?: number;
   port: number;
   mcp_config: McpContainerConfigPayload;
+  group_ids?: string;
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
 };
 
 type PortConflictResult = {
@@ -294,13 +297,16 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       source: s.source as McpSource,
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
+      createTime: s.create_time,
       tags: s.tags || [],
       transportType:
-        (s.config_json !== undefined && s.config_json !== null) ||
-        (s.container_id !== undefined && s.container_id !== null) ||
-        (s.container_port !== undefined && s.container_port !== null)
-          ? McpTransportType.CONTAINER
-          : McpTransportType.URL,
+        s.config_json && typeof s.config_json === "object" && "openapi" in s.config_json
+          ? McpTransportType.URL
+          : (s.config_json !== undefined && s.config_json !== null) ||
+            (s.container_id !== undefined && s.container_id !== null) ||
+            (s.container_port !== undefined && s.container_port !== null)
+            ? McpTransportType.CONTAINER
+            : McpTransportType.URL,
       serverUrl: s.mcp_url,
       version: s.version ?? undefined,
       registryJson: s.registry_json ?? undefined,
@@ -315,6 +321,9 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       communityId: s.market_id ?? undefined,
       isListedInRepository: s.is_listed_in_repository ?? undefined,
       permission: s.permission ?? undefined,
+      groupIds: s.group_ids ?? undefined,
+      ingroupPermission: s.ingroup_permission ?? undefined,
+      sharedFields: s.shared_fields ?? undefined,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
@@ -456,13 +465,19 @@ export const cancelCommunityMcpReview = async (reviewId: number) => {
   }
 };
 
-export const approveCommunityMcpTool = async (reviewId: number) => {
+export const approveCommunityMcpTool = async (
+  reviewId: number,
+  content?: string
+) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewApprove,
       {
         method: "POST",
-        body: JSON.stringify({ review_id: reviewId }),
+        body: JSON.stringify({
+          review_id: reviewId,
+          ...(content ? { content } : {}),
+        }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -476,13 +491,19 @@ export const approveCommunityMcpTool = async (reviewId: number) => {
   }
 };
 
-export const rejectCommunityMcpTool = async (reviewId: number) => {
+export const rejectCommunityMcpTool = async (
+  reviewId: number,
+  content?: string
+) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewReject,
       {
         method: "POST",
-        body: JSON.stringify({ review_id: reviewId }),
+        body: JSON.stringify({
+          review_id: reviewId,
+          ...(content ? { content } : {}),
+        }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -505,6 +526,10 @@ export type PublishCommunityMcpToolPayload = {
   tags?: string[];
   mcp_server?: string;
   config_json?: McpContainerConfigPayload;
+  group_ids?: number[];
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
+  content?: string;
 };
 
 export const publishCommunityMcpTool = async (
@@ -562,6 +587,10 @@ export const updateCommunityMcpTool = async (payload: {
   mcp_server?: string;
   transport_type?: McpTransportType;
   config_json?: McpContainerConfigPayload;
+  group_ids?: number[];
+  ingroup_permission?: string;
+  shared_fields?: Record<string, boolean>;
+  content?: string;
 }) => {
   try {
     const response = await fetchWithAuth(

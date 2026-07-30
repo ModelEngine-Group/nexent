@@ -6,12 +6,13 @@ Used internally by Nexent to call external A2A agents as sub-agents (similar to 
 """
 import asyncio
 import logging
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+
 import aiohttp
-from typing import Any, AsyncIterator, Dict, List, Optional
 
 from database import a2a_agent_db
 from database.a2a_agent_db import _extract_protocol_type, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from utils.a2a_http_client import A2AHttpClient, build_a2a_headers
+from utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,8 @@ class A2AClientService:
         self,
         url: str,
         tenant_id: str,
-        user_id: str
+        user_id: str,
+        custom_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Discover an external A2A agent from a URL.
 
@@ -55,6 +57,7 @@ class A2AClientService:
             url: Direct URL to the Agent Card (e.g., https://example.com/.well-known/agent-xxx.json).
             tenant_id: Tenant ID for isolation.
             user_id: User who initiated the discovery.
+            custom_headers: Headers saved only for Agent Card discovery and refresh.
 
         Returns:
             Discovered agent information dict.
@@ -63,8 +66,12 @@ class A2AClientService:
             AgentDiscoveryError: If discovery fails.
         """
         try:
+            # custom_headers=None means preserve existing stored headers (don't pass anything to DB).
+            # custom_headers={} means explicitly clear stored headers.
             async with A2AHttpClient() as client:
                 headers = build_a2a_headers()
+                if custom_headers:
+                    headers.update(custom_headers)
                 card = await client.get_json(url, headers=headers)
 
             # Extract agent info from Card
@@ -117,7 +124,10 @@ class A2AClientService:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 raw_card=card,
-                supported_interfaces=supported_interfaces
+                supported_interfaces=supported_interfaces,
+                agent_card_headers=custom_headers,
+                security_schemes=card.get("securitySchemes"),
+                security_requirements=card.get("securityRequirements"),
             )
 
             logger.info(f"Discovered A2A agent {agent_id} from URL: {url}")
@@ -320,7 +330,9 @@ class A2AClientService:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 raw_card=agent_info,
-                supported_interfaces=supported_interfaces
+                supported_interfaces=supported_interfaces,
+                security_schemes=agent_info.get("securitySchemes"),
+                security_requirements=agent_info.get("securityRequirements"),
             )
 
             return result
@@ -473,7 +485,11 @@ class A2AClientService:
             AgentDiscoveryError: If refresh fails.
         """
         # Get current agent info
-        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_agent_card_headers=True,
+        )
         if not agent:
             raise AgentDiscoveryError(f"Agent {external_agent_id} not found")
 
@@ -524,7 +540,11 @@ class A2AClientService:
                     raise AgentDiscoveryError("No source URL available for refresh")
 
                 async with A2AHttpClient() as client:
-                    card = await client.get_json(source_url)
+                    card_headers = agent.get("agent_card_headers")
+                    headers = build_a2a_headers()
+                    if isinstance(card_headers, dict):
+                        headers.update(card_headers)
+                    card = await client.get_json(source_url, headers=headers)
 
                 # Extract updated info - use _extract_agent_url for A2A v1.0 standard
                 new_url = self._extract_agent_url(card)
@@ -559,7 +579,9 @@ class A2AClientService:
                         new_name=new_name,
                         new_description=new_description,
                         new_supported_interfaces=new_supported_interfaces,
-                        new_protocol_type=new_protocol_type
+                        new_protocol_type=new_protocol_type,
+                        new_security_schemes=card.get("securitySchemes", {}),
+                        new_security_requirements=card.get("securityRequirements", []),
                     )
                 elif update_agent_url:
                     # Only agent_url changed
@@ -575,7 +597,9 @@ class A2AClientService:
                         new_agent_url=new_url,
                         new_name=new_name,
                         new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces
+                        new_supported_interfaces=new_supported_interfaces,
+                        new_security_schemes=card.get("securitySchemes", {}),
+                        new_security_requirements=card.get("securityRequirements", []),
                     )
                 else:
                     # No changes to agent_url or protocol_type, just update metadata
@@ -586,7 +610,9 @@ class A2AClientService:
                         new_raw_card=card,
                         new_name=new_name,
                         new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces
+                        new_supported_interfaces=new_supported_interfaces,
+                        new_security_schemes=card.get("securitySchemes", {}),
+                        new_security_requirements=card.get("securityRequirements", []),
                     )
 
                 # Update availability
@@ -627,15 +653,10 @@ class A2AClientService:
     # =============================================================================
 
     def _build_endpoint_url(self, agent_url: str, protocol_type: str, streaming: bool = False) -> str:
-        """Build the complete endpoint URL by appending protocol-specific path.
+        """Build the request URL from the Agent Card protocol binding.
 
-        Args:
-            agent_url: Base agent URL from database.
-            protocol_type: Protocol type (JSONRPC, HTTP+JSON, GRPC).
-            streaming: Whether this is a streaming request.
-
-        Returns:
-            Complete endpoint URL with protocol path appended.
+        The Agent Card URL is a complete endpoint for JSON-RPC. HTTP+JSON URLs
+        identify the service base and require the A2A message operation suffix.
         """
         base_url = agent_url.rstrip("/")
         path_suffix = self._get_protocol_path(protocol_type, streaming)
@@ -644,12 +665,72 @@ class A2AClientService:
         return base_url
 
     def _get_protocol_path(self, protocol_type: str, streaming: bool) -> str:
-        """Get the path suffix for a given protocol type and streaming mode."""
+        """Get the required HTTP+JSON operation suffix for an A2A request."""
         if protocol_type == PROTOCOL_HTTP_JSON:
             return "/message:stream" if streaming else "/message:send"
-        if protocol_type == PROTOCOL_JSONRPC:
-            return "/v1"
         return ""
+
+    def _build_security_request_parts(
+        self,
+        agent: Dict[str, Any],
+    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+        """Build request authentication parts from the configured Card security scheme."""
+        schemes = agent.get("security_schemes") or {}
+        requirements = agent.get("security_requirements") or []
+        credentials = agent.get("security_credentials") or {}
+        if not requirements:
+            return {}, {}, {}
+
+        selected_index = agent.get("selected_security_requirement_index")
+        if selected_index is not None:
+            if not isinstance(selected_index, int) or not 0 <= selected_index < len(requirements):
+                raise AgentCallError("Selected Agent Card security requirement is invalid")
+            requirements = [requirements[selected_index]]
+
+        for requirement in requirements:
+            required_schemes = requirement.get("schemes", {}) if isinstance(requirement, dict) else {}
+            if not required_schemes:
+                return {}, {}, {}
+
+            headers: Dict[str, str] = {}
+            params: Dict[str, str] = {}
+            cookies: Dict[str, str] = {}
+            valid = True
+            for scheme_id in required_schemes:
+                credential = credentials.get(scheme_id)
+                scheme = schemes.get(scheme_id, {})
+                if not isinstance(scheme, dict) or not credential:
+                    valid = False
+                    break
+
+                http_auth_scheme = scheme.get("httpAuthSecurityScheme", {})
+                if http_auth_scheme:
+                    auth_scheme = http_auth_scheme.get("scheme") if isinstance(http_auth_scheme, dict) else None
+                    if not isinstance(auth_scheme, str) or not auth_scheme.strip():
+                        valid = False
+                        break
+                    bearer_format = http_auth_scheme.get("bearerFormat")
+                    if isinstance(bearer_format, str) and bearer_format.lower() == "jwt":
+                        auth_scheme = "Bearer"
+                    headers["Authorization"] = f"{auth_scheme} {credential}"
+                    continue
+
+                api_key_scheme = scheme.get("apiKeySecurityScheme", {})
+                location = api_key_scheme.get("location")
+                parameter_name = api_key_scheme.get("name")
+                if not parameter_name or location not in {"header", "query", "cookie"}:
+                    valid = False
+                    break
+                if location == "header":
+                    headers[parameter_name] = credential
+                elif location == "query":
+                    params[parameter_name] = credential
+                else:
+                    cookies[parameter_name] = credential
+            if valid:
+                return headers, params, cookies
+
+        raise AgentCallError("Configured credentials do not satisfy the Agent Card security requirements")
 
     async def call_agent(
         self,
@@ -672,7 +753,11 @@ class A2AClientService:
             AgentCallError: If the call fails.
         """
         # Get agent info
-        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
         if not agent:
             raise AgentCallError(f"Agent {external_agent_id} not found")
 
@@ -685,7 +770,10 @@ class A2AClientService:
         # Build complete endpoint URL with protocol path
         endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=False)
 
-        logger.info(f"[A2A-CLIENT] === Calling external A2A agent === id={external_agent_id}, url={endpoint_url}, protocol={protocol_type}, message={message}")
+        logger.info(
+            f"[A2A-CLIENT] Calling external agent id={external_agent_id}, "
+            f"url={endpoint_url}, protocol={protocol_type}"
+        )
 
         try:
             # Build request based on protocol type
@@ -705,11 +793,22 @@ class A2AClientService:
                     "message": message
                 }
 
-            logger.info(f"Calling external A2A agent {external_agent_id}: url={endpoint_url}, protocol={protocol_type}, payload={payload}")
+            logger.info(
+                f"Calling external A2A agent {external_agent_id}: "
+                f"url={endpoint_url}, protocol={protocol_type}"
+            )
 
             headers = build_a2a_headers()
+            auth_headers, auth_params, auth_cookies = self._build_security_request_parts(agent)
+            headers.update(auth_headers)
             async with A2AHttpClient() as client:
-                response = await client.post_json(endpoint_url, payload, headers)
+                response = await client.post_json(
+                    endpoint_url,
+                    payload,
+                    headers,
+                    params=auth_params,
+                    cookies=auth_cookies,
+                )
 
             # Parse response
             if "error" in response:
@@ -718,6 +817,14 @@ class A2AClientService:
 
             return response.get("result", response)
 
+        except A2AHttpStatusError as e:
+            logger.error(f"External agent {external_agent_id} returned HTTP {e.status}")
+            if e.status == 401:
+                raise AgentCallError(
+                    "External agent authentication failed (HTTP 401). "
+                    "Check the configured security credentials."
+                ) from e
+            raise AgentCallError(f"External agent request failed (HTTP {e.status})") from e
         except aiohttp.ClientError as e:
             logger.error(f"Failed to call agent {external_agent_id}: {e}")
             raise AgentCallError(f"Call failed: {str(e)}") from e
@@ -744,7 +851,11 @@ class A2AClientService:
             AgentCallError: If the call setup fails.
         """
         # Get agent info
-        agent = a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
         if not agent:
             raise AgentCallError(f"Agent {external_agent_id} not found")
 
@@ -774,13 +885,24 @@ class A2AClientService:
                 "message": message
             }
 
-        logger.info(f"Calling external A2A agent {external_agent_id} (streaming): url={endpoint_url}, protocol={protocol_type}, payload={payload}")
+        logger.info(
+            f"Calling external A2A agent {external_agent_id} (streaming): "
+            f"url={endpoint_url}, protocol={protocol_type}"
+        )
 
         headers = build_a2a_headers(api_key)
+        auth_headers, auth_params, auth_cookies = self._build_security_request_parts(agent)
+        headers.update(auth_headers)
 
         try:
             async with A2AHttpClient() as client:
-                async for event in client.post_stream(endpoint_url, payload, headers):
+                async for event in client.post_stream(
+                    endpoint_url,
+                    payload,
+                    headers,
+                    params=auth_params,
+                    cookies=auth_cookies,
+                ):
                     yield event
         except aiohttp.ClientError as e:
             logger.error(f"Streaming call failed for agent {external_agent_id}: {e}")

@@ -39,7 +39,7 @@ export function AgentRepositoryCard({
     ? [
         {
           key: "takeDown",
-          label: t("agentRepository.mine.reviewModal.takeDown"),
+          label: t("repository.listingStatus.takeDown"),
           icon: <PackageX className="size-3.5" aria-hidden />,
           danger: true,
           disabled: isTakingDown,

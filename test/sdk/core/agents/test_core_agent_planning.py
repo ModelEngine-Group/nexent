@@ -13,7 +13,7 @@ import json
 import sys
 import types
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -51,7 +51,17 @@ mock_jinja2.StrictUndefined = MagicMock()
 mock_smolagents = _mock_module("smolagents")
 
 mock_agents = _mock_module("smolagents.agents")
-mock_agents.CodeAgent = type("CodeAgent", (), {})
+class _CodeAgent:
+    def __init__(self, *args, **kwargs):
+        self.agent_name = kwargs.get("name", "agent")
+        self.model = kwargs.get("model")
+        self.logger = MagicMock()
+        self.tools = kwargs.get("tools", {}) or {}
+        self.managed_agents = kwargs.get("managed_agents", {}) or {}
+        self.code_block_tags = ["python", ""]
+
+
+mock_agents.CodeAgent = _CodeAgent
 mock_agents.AgentError = type("AgentError", (Exception,), {})
 mock_agents.ActionOutput = type("ActionOutput", (), {})
 mock_agents.RunResult = type("RunResult", (), {})
@@ -318,7 +328,7 @@ class _AgentPlan:
 
 
 def _make_core_agent(*, enable_planning=False, redis_client=None,
-                     context_manager=None):
+                     context_manager=None, conversation_id=None, user_id=None):
     """Construct a minimal CoreAgent-like object with just the plan methods.
 
     We bypass ``CoreAgent.__init__`` entirely (it calls the smolagents parent
@@ -332,7 +342,9 @@ def _make_core_agent(*, enable_planning=False, redis_client=None,
     agent.current_step_index = 0
     agent.lang = "en"
     agent.observer = MessageObserver()
-    agent.context_manager = context_manager
+    agent.conversation_id = conversation_id
+    agent.user_id = user_id
+    agent.context_runtime = SimpleNamespace(context_manager=context_manager)
     agent.tools = {}
     agent.managed_agents = {}
     agent.prompt_templates = {}
@@ -347,6 +359,21 @@ def _make_core_agent(*, enable_planning=False, redis_client=None,
 
 class TestEnablePlanningInit:
     """CoreAgent branches on enable_planning: PlanRepo instantiated only when True."""
+
+    def test_init_preserves_run_identity_and_pops_sdk_kwargs(self):
+        observer = MessageObserver()
+        agent = CoreAgent(
+            observer=observer,
+            enable_planning=False,
+            conversation_id=273,
+            user_id="user-1",
+            context_runtime=SimpleNamespace(),
+        )
+
+        assert agent.conversation_id == 273
+        assert agent.user_id == "user-1"
+        assert agent.enable_planning is False
+        assert agent.plan_repo is None
 
     def test_plan_repo_built_when_enabled(self):
         agent = _make_core_agent(enable_planning=True)
@@ -363,12 +390,19 @@ class TestEnablePlanningInit:
 
 
 class TestGetConversationAndUserId:
-    """Helpers read from context_manager; default to 0 / 'anonymous'."""
+    """Helpers prefer run identity and retain context-manager compatibility."""
 
-    def test_no_context_manager_returns_sentinels(self):
+    def test_no_run_identity_returns_sentinels(self):
         agent = _make_core_agent(enable_planning=True)
         assert agent._get_conversation_id() == 0
         assert agent._get_user_id() == "anonymous"
+
+    def test_reads_run_identity(self):
+        agent = _make_core_agent(
+            enable_planning=True, conversation_id=273, user_id="user-1"
+        )
+        assert agent._get_conversation_id() == 273
+        assert agent._get_user_id() == "user-1"
 
     def test_reads_from_context_manager(self):
         ctx = MagicMock()
