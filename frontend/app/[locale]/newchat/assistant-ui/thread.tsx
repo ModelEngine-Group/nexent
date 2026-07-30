@@ -78,7 +78,6 @@ import {
   type Nl2aMessage,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
