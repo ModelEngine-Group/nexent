@@ -4301,6 +4301,56 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stream_recovers_a2ui_action_agent_from_conversation(
+    monkeypatch,
+    mock_http_request,
+):
+    request = _a2ui_action_request(agent_id=None)
+    monkeypatch.setattr(
+        agent_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("user-a", "tenant-a", "en"),
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "get_conversation_service",
+        MagicMock(return_value={"conversation_id": 123, "agent_id": 7}),
+    )
+    monkeypatch.setattr(
+        agent_service, "update_conversation_chat_mode_service", MagicMock()
+    )
+    update_agent = MagicMock()
+    monkeypatch.setattr(
+        agent_service, "update_conversation_agent_id_service", update_agent
+    )
+    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", AsyncMock())
+    monkeypatch.setattr(agent_service, "save_messages", MagicMock())
+    monkeypatch.setattr(
+        agent_service,
+        "build_memory_context",
+        MagicMock(return_value=MagicMock(user_config=MagicMock(memory_switch=False))),
+    )
+
+    async def stream_chunks():
+        yield "data: chunk\n\n"
+
+    generate = MagicMock(return_value=stream_chunks())
+    monkeypatch.setattr(agent_service, "generate_stream", generate)
+
+    response = await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert isinstance(response, StreamingResponse)
+    assert request.agent_id == 7
+    update_agent.assert_called_once_with(
+        conversation_id=123,
+        agent_id=7,
+        user_id="user-a",
+    )
+    execution_request = generate.call_args.args[0]
+    assert execution_request.agent_id == 7
+
+
+@pytest.mark.asyncio
 @patch(
     "backend.services.agent_service._resolve_user_tenant_language",
     return_value=(None, None, "en"),

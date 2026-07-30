@@ -3158,6 +3158,10 @@ async def run_agent_stream(
         )
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
+        if agent_request.a2ui_action is not None and agent_request.agent_id is None:
+            conversation_agent_id = conversation.get("agent_id")
+            if conversation_agent_id is not None:
+                agent_request.agent_id = int(conversation_agent_id)
         update_conversation_chat_mode_service(
             conversation_id=agent_request.conversation_id,
             chat_mode="planning" if agent_request.enable_plan else "execution",

@@ -110,6 +110,21 @@ const HomeContent: FC<{
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const threadItems = useAuiState((s) => s.threads.threadItems);
+  const composerAgentId = useAuiState(
+    (s) =>
+      (s.composer.runConfig.custom as { agentId?: number | string } | undefined)
+        ?.agentId
+  );
+  const composerThreadId = useAuiState(
+    (s) =>
+      (s.composer.runConfig.custom as { threadId?: string } | undefined)
+        ?.threadId
+  );
+  const composerEnablePlan = useAuiState(
+    (s) =>
+      (s.composer.runConfig.custom as { enablePlan?: boolean } | undefined)
+        ?.enablePlan
+  );
   const ready = runtimeMainThreadId !== undefined && !isLoading;
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
@@ -194,6 +209,7 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+  const resolvedAgentId = activeAgentId ?? selectedAgent?.id;
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
     setChatMode(mode);
@@ -245,9 +261,15 @@ const HomeContent: FC<{
   // conversation_id returned in the response header, which we then reuse as
   // `threadId` for future runs in the same thread.
   useEffect(() => {
+    const hasCurrentRunConfig =
+      String(composerAgentId ?? "") === String(resolvedAgentId ?? "") &&
+      composerThreadId === activeConversationId &&
+      composerEnablePlan === (chatMode === "planning");
+    if (hasCurrentRunConfig) return;
+
     runtime.thread.composer.setRunConfig({
       custom: {
-        ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+        ...(resolvedAgentId ? { agentId: resolvedAgentId } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
         enablePlan: chatMode === "planning",
         ...(activeThreadId !== undefined
@@ -267,11 +289,14 @@ const HomeContent: FC<{
     });
   }, [
     runtime,
-    selectedAgent,
+    resolvedAgentId,
     activeConversationId,
     activeThreadId,
     chatMode,
     handleServerConversationId,
+    composerAgentId,
+    composerThreadId,
+    composerEnablePlan,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail

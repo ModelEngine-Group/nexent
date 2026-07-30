@@ -1,21 +1,75 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAui } from "@assistant-ui/react";
+import { renderMarkdown } from "@a2ui/markdown-it";
 import {
   A2uiSurface,
   basicCatalog,
+  createComponentImplementation,
+  MarkdownContext,
   type ReactComponentImplementation,
 } from "@a2ui/react/v0_9";
 import {
   A2uiMessageSchema,
+  Catalog,
   MessageProcessor,
   type A2uiClientAction,
   type A2uiMessage,
 } from "@a2ui/web_core/v0_9";
+import { ButtonApi } from "@a2ui/web_core/v0_9/basic_catalog";
+
+import styles from "./runtime.module.css";
 
 export const A2UI_BASIC_CATALOG_ID =
   "https://a2ui.org/specification/v0_9/basic_catalog.json";
+
+interface SubmissionState {
+  surfaceId: string;
+  submittedKeys: ReadonlySet<string>;
+}
+
+const SubmissionStateContext = createContext<SubmissionState | null>(null);
+
+const submissionKey = (surfaceId: string, componentId: string): string =>
+  `${surfaceId}\u0000${componentId}`;
+
+const SubmissionAwareButton = createComponentImplementation(
+  ButtonApi,
+  ({ props, buildChild, context }) => {
+    const submissionState = useContext(SubmissionStateContext);
+    const submitted =
+      submissionState?.submittedKeys.has(
+        submissionKey(submissionState.surfaceId, context.componentModel.id)
+      ) === true;
+
+    return (
+      <button
+        type="button"
+        onClick={props.action}
+        disabled={props.isValid === false || submitted}
+        data-a2ui-submitted={submitted ? "true" : undefined}
+      >
+        {props.child ? buildChild(props.child) : null}
+      </button>
+    );
+  }
+);
+
+const submissionAwareCatalog = new Catalog<ReactComponentImplementation>(
+  A2UI_BASIC_CATALOG_ID,
+  Array.from(basicCatalog.components.values(), (component) =>
+    component.name === "Button" ? SubmissionAwareButton : component
+  ),
+  Array.from(basicCatalog.functions.values())
+);
 
 export interface A2UIEnvelope {
   protocolVersion: "v0.9";
@@ -109,6 +163,10 @@ const findActionLabel = (
 
 export function A2UISurface({ surfaceId, messages, error }: A2UISurfaceData) {
   const aui = useAui();
+  const submittedKeysRef = useRef(new Set<string>());
+  const [submittedKeys, setSubmittedKeys] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const disposalTimers = useRef(
     new WeakMap<
       MessageProcessor<ReactComponentImplementation>,
@@ -119,8 +177,12 @@ export function A2UISurface({ surfaceId, messages, error }: A2UISurfaceData) {
     if (error) return { processor: null, error };
     try {
       const processor = new MessageProcessor<ReactComponentImplementation>(
-        [basicCatalog],
+        [submissionAwareCatalog],
         async (action) => {
+          const isFormSubmission = Object.keys(action.context).length > 0;
+          const key = submissionKey(action.surfaceId, action.sourceComponentId);
+          if (isFormSubmission && submittedKeysRef.current.has(key)) return;
+
           const label = findActionLabel(messages, action);
           aui.thread().append({
             role: "user",
@@ -132,9 +194,14 @@ export function A2UISurface({ surfaceId, messages, error }: A2UISurfaceData) {
                 data: { version: "v0.9", action },
               },
             ],
-            runConfig: aui.composer().getState().runConfig,
+            runConfig: aui.thread().composer().getState().runConfig,
             startRun: true,
           });
+
+          if (isFormSubmission) {
+            submittedKeysRef.current.add(key);
+            setSubmittedKeys(new Set(submittedKeysRef.current));
+          }
         }
       );
       for (const envelope of messages) {
@@ -173,6 +240,10 @@ export function A2UISurface({ surfaceId, messages, error }: A2UISurfaceData) {
   }, [runtime]);
 
   const surface = runtime.processor?.model.getSurface(surfaceId);
+  const submissionState = useMemo(
+    () => ({ surfaceId, submittedKeys }),
+    [surfaceId, submittedKeys]
+  );
   if (runtime.error || !surface) {
     return (
       <div className="my-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
@@ -181,8 +252,14 @@ export function A2UISurface({ surfaceId, messages, error }: A2UISurfaceData) {
     );
   }
   return (
-    <div className="my-3 rounded-lg border bg-background p-3">
-      <A2uiSurface surface={surface} />
+    <div
+      className={`${styles.surface} my-3 rounded-xl border bg-background p-4`}
+    >
+      <SubmissionStateContext.Provider value={submissionState}>
+        <MarkdownContext.Provider value={renderMarkdown}>
+          <A2uiSurface surface={surface} />
+        </MarkdownContext.Provider>
+      </SubmissionStateContext.Provider>
     </div>
   );
 }
