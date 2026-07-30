@@ -3,6 +3,7 @@
 import { useMessageTiming } from "@assistant-ui/react";
 import { ClockIcon } from "lucide-react";
 import { type FC } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   Tooltip,
@@ -23,6 +24,7 @@ export const MessageTiming: FC<MessageTimingProps> = ({
   className,
   side = "right",
 }) => {
+  const { t } = useTranslation();
   const timing = useMessageTiming();
   if (!timing?.totalStreamTime) return null;
 
@@ -31,7 +33,7 @@ export const MessageTiming: FC<MessageTimingProps> = ({
       <TooltipTrigger asChild>
         <span
           data-slot="aui-message-timing"
-          aria-label={`Generated in ${formatMs(timing.totalStreamTime)}`}
+          aria-label={t("chat.messageTiming.generatedIn", { time: formatMs(timing.totalStreamTime) })}
           className={cn(
             "text-muted-foreground inline-flex cursor-default items-center gap-1 text-xs",
             className
@@ -43,15 +45,15 @@ export const MessageTiming: FC<MessageTimingProps> = ({
       </TooltipTrigger>
       <TooltipContent side={side}>
         {timing.firstTokenTime !== undefined && (
-          <p>TTFT: {formatMs(timing.firstTokenTime)}</p>
+          <p>{t("chat.messageTiming.firstToken", { time: formatMs(timing.firstTokenTime) })}</p>
         )}
-        <p>Total: {formatMs(timing.totalStreamTime)}</p>
+        <p>{t("chat.messageTiming.total", { time: formatMs(timing.totalStreamTime) })}</p>
         {timing.tokensPerSecond !== undefined && (
           <p>{timing.tokensPerSecond.toFixed(1)} tok/s</p>
         )}
-        {timing.tokenCount !== undefined && <p>Tokens: {timing.tokenCount}</p>}
-        {timing.toolCallCount > 0 && <p>Tool calls: {timing.toolCallCount}</p>}
-        {timing.totalChunks > 0 && <p>Chunks: {timing.totalChunks}</p>}
+        {timing.tokenCount !== undefined && <p>{t("chat.messageTiming.tokens", { count: timing.tokenCount })}</p>}
+        {timing.toolCallCount > 0 && <p>{t("chat.messageTiming.toolCalls", { count: timing.toolCallCount })}</p>}
+        {timing.totalChunks > 0 && <p>{t("chat.messageTiming.chunks", { count: timing.totalChunks })}</p>}
       </TooltipContent>
     </Tooltip>
   );
