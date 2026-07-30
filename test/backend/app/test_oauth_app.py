@@ -20,6 +20,7 @@ consts_mock.const.ENABLE_WECHAT_OAUTH = False
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.SUPABASE_URL = "http://supabase.test"
 consts_mock.const.DEFAULT_TENANT_ID = "default"
+consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
@@ -304,6 +305,7 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["oauth_error"], "unsupported_provider")
 
     def test_success_returns_session_data(self):
+        auth_utils_mock.reset_mock()
         oauth_service_mock.reset_mock()
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
         database_oauth_mock.get_oauth_account_by_provider.return_value = {
@@ -323,7 +325,8 @@ class TestCallback(unittest.TestCase):
 
         auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
-        response = client.get("/user/oauth/callback?provider=github&code=valid_code")
+        with patch("apps.oauth_app.JWT_EXPIRY_SECONDS", 5432):
+            response = client.get("/user/oauth/callback?provider=github&code=valid_code")
 
         if response.status_code != HTTPStatus.OK:
             print("Response:", response.json())
@@ -335,7 +338,10 @@ class TestCallback(unittest.TestCase):
             data["data"]["session"]["access_token"],
             "eyJ.mock.jwt.token",
         )
-        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
+        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 5432)
+        auth_utils_mock.generate_session_jwt.assert_called_once_with(
+            "user-uuid-123", expires_in=5432
+        )
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
@@ -876,7 +882,7 @@ class TestCompleteOAuth(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertEqual(data["data"]["user"]["id"], "new-user")
-        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
+        self.assertEqual(data["data"]["session"]["expires_in_seconds"], 7200)
         complete_mock.assert_awaited_once_with(
             pending_token="pending.jwt",
             email="new@example.com",

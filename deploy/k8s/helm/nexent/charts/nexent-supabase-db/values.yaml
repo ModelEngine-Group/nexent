@@ -27,4 +27,4 @@ persistence:
 config:
   postgresDb: "supabase"
   postgresPort: "5436"
-  jwtExpiry: "3600"
+  jwtExpiry: "7200"

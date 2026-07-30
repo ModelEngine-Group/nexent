@@ -22,6 +22,7 @@ from consts.const import (
     SUPABASE_KEY,
     SERVICE_ROLE_KEY,
     DEBUG_JWT_EXPIRE_SECONDS,
+    JWT_EXPIRY_SECONDS,
     LANGUAGE,
 )
 from consts.exceptions import LimitExceededError, UnauthorizedError
@@ -312,7 +313,7 @@ def get_jwt_expiry_seconds(token: str) -> int:
         token: JWT token string
 
     Returns:
-        int: Token validity period (seconds), returns default value 3600 if parsing fails
+        int: Token validity period (seconds), returns configured default if parsing fails
     """
     try:
         # Speed mode: treat sessions as never expiring
@@ -345,7 +346,7 @@ def get_jwt_expiry_seconds(token: str) -> int:
         return expiry_seconds
     except Exception as e:
         logging.warning(f"Failed to get expiration time from token: {str(e)}")
-        return 3600  # supabase default setting
+        return JWT_EXPIRY_SECONDS
 
 
 def calculate_expires_at(token: Optional[str] = None) -> int:
@@ -362,7 +363,7 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
     if IS_SPEED_MODE:
         return int((datetime.now() + timedelta(days=3650)).timestamp())
 
-    expiry_seconds = get_jwt_expiry_seconds(token) if token else 3600
+    expiry_seconds = get_jwt_expiry_seconds(token) if token else JWT_EXPIRY_SECONDS
     return int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
 
 
@@ -548,7 +549,7 @@ def get_user_language(request: Request = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def generate_test_jwt(user_id: str, expires_in: int = 3600) -> str:
+def generate_test_jwt(user_id: str, expires_in: int = 7200) -> str:
     """
     Generate a simple unsigned JWT for testing purposes (HS256 with dummy secret)
     """
@@ -564,7 +565,9 @@ def generate_test_jwt(user_id: str, expires_in: int = 3600) -> str:
     return jwt.encode(payload, MOCK_JWT_SECRET_KEY, algorithm="HS256")
 
 
-def generate_session_jwt(user_id: str, expires_in: int = 3600, session_id: str = None) -> str:
+def generate_session_jwt(
+    user_id: str, expires_in: int = JWT_EXPIRY_SECONDS, session_id: str = None
+) -> str:
     """Generate a signed JWT compatible with the existing auth verification flow."""
     now = int(time.time())
     payload = {
