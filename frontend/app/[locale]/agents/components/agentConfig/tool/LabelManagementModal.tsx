@@ -37,7 +37,9 @@ export default function LabelManagementModal({
   // Collect all unique labels from dataSource for Select suggestions
   const allExistingLabels = useMemo(() => {
     const labelSet = new Set<string>();
-    dataSource.forEach((row) => row.labels.forEach((l: string) => labelSet.add(l)));
+    dataSource.forEach((row) =>
+      row.labels.forEach((l: string) => labelSet.add(l))
+    );
     return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
   }, [dataSource]);
 
@@ -51,7 +53,7 @@ export default function LabelManagementModal({
           name: tool.name,
           source: tool.source || "",
           labels: Array.isArray(tool.labels) ? [...tool.labels] : [],
-          updatedBy: tool.updated_by || "",
+          updatedBy: tool.updated_by_name || "",
         }));
         setDataSource(rows);
         builtRef.current = true;
@@ -73,12 +75,18 @@ export default function LabelManagementModal({
 
       // Persist to backend, then synchronously update cache so parent sees fresh data
       try {
-        await updateToolLabels(toolId, newLabels);
+        const result = await updateToolLabels(toolId, newLabels);
+        const updatedBy = result.updated_by_name || "";
+        setDataSource((prev) =>
+          prev.map((row) => (row.id === toolId ? { ...row, updatedBy } : row))
+        );
         // Synchronous cache update — no timing gaps, no refetch race
         queryClient.setQueryData(["tools"], (old: any[]) => {
           if (!old) return old;
           return old.map((tool: any) =>
-            tool.id === toolId ? { ...tool, labels: newLabels } : tool
+            tool.id === toolId
+              ? { ...tool, labels: newLabels, updated_by_name: updatedBy }
+              : tool
           );
         });
       } catch (err) {

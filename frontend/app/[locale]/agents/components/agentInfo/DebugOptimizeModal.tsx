@@ -196,7 +196,7 @@ export default function DebugOptimizeModal({
           </div>
           <div>
             <Text strong>{t("agent.debug.promptCompare.optimized", "Optimized")}</Text>
-            <div className="mt-2 border border-gray-200 rounded-md p-3">
+            <div className="mt-2 border border-gray-200 rounded-md p-3 bg-gray-50">
               {isOptimizing ? (
                 <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 520 }}>
                   <Spin size="medium" />

@@ -8,6 +8,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { type FC, type HTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export interface BranchPickerProps extends HTMLAttributes<HTMLDivElement> {
   hideWhenSingleBranch?: boolean;
@@ -18,6 +19,8 @@ export const BranchPicker: FC<BranchPickerProps> = ({
   hideWhenSingleBranch = true,
   ...props
 }) => {
+  const { t } = useTranslation();
+
   return (
     <BranchPickerPrimitive.Root
       hideWhenSingleBranch={hideWhenSingleBranch}
@@ -29,7 +32,7 @@ export const BranchPicker: FC<BranchPickerProps> = ({
     >
       <BranchPickerPrimitive.Previous
         className="hover:bg-accent flex size-6 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
-        aria-label="Previous branch"
+        aria-label={t("chat.branchPicker.previous")}
       >
         <ChevronLeftIcon className="size-3.5" />
       </BranchPickerPrimitive.Previous>
@@ -38,7 +41,7 @@ export const BranchPicker: FC<BranchPickerProps> = ({
       </span>
       <BranchPickerPrimitive.Next
         className="hover:bg-accent flex size-6 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
-        aria-label="Next branch"
+        aria-label={t("chat.branchPicker.next")}
       >
         <ChevronRightIcon className="size-3.5" />
       </BranchPickerPrimitive.Next>

@@ -11,6 +11,7 @@ import {
   type QuoteMessagePartComponent,
 } from "@assistant-ui/react";
 import { QuoteIcon, XIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 
@@ -198,6 +199,8 @@ function ComposerQuotePreviewDismiss({
   children,
   ...props
 }: ComponentProps<typeof ComposerPrimitive.QuoteDismiss>) {
+  const { t } = useTranslation();
+
   return (
     <ComposerPrimitive.QuoteDismiss
       data-slot="composer-quote-dismiss"
@@ -208,7 +211,7 @@ function ComposerQuotePreviewDismiss({
       {children ?? (
         <button
           type="button"
-          aria-label="Dismiss quote"
+          aria-label={t("chat.quote.dismiss")}
           className="hover:bg-accent text-muted-foreground/70 hover:text-foreground shrink-0 rounded-sm p-0.5 transition-colors"
         >
           <XIcon className="size-3.5" />

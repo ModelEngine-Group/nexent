@@ -17,6 +17,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 import {
   Popover,
   PopoverContent,
@@ -241,7 +242,7 @@ function ModelSelectorRoot({
 }
 
 export const modelSelectorTriggerVariants = cva(
-  "focus-visible:ring-ring/50 flex w-fit items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "focus-visible:ring-ring/50 flex w-fit cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -307,11 +308,13 @@ function ModelIcon({ children }: { children: ReactNode }) {
 }
 
 function ModelSelectorValue({
-  placeholder = "Select model",
+  placeholder,
   showEffort = true,
   className,
 }: ModelSelectorValueProps) {
+  const { t } = useTranslation();
   const { selectedModel, efforts, effort } = useModelSelectorContext();
+  const resolvedPlaceholder = placeholder ?? t("chat.modelSelector.selectModel");
 
   if (!selectedModel) {
     return (
@@ -319,7 +322,7 @@ function ModelSelectorValue({
         data-slot="model-selector-value"
         className={cn("text-muted-foreground", className)}
       >
-        {placeholder}
+        {resolvedPlaceholder}
       </span>
     );
   }
@@ -389,13 +392,15 @@ export type ModelSelectorSearchProps = ComponentPropsWithoutRef<
 >;
 
 function ModelSelectorSearch({
-  placeholder = "Search models...",
+  placeholder,
   ...props
 }: ModelSelectorSearchProps) {
+  const { t } = useTranslation();
+
   return (
     <CommandInput
       data-slot="model-selector-search"
-      placeholder={placeholder}
+      placeholder={placeholder ?? t("chat.modelSelector.searchModels")}
       {...props}
     />
   );
@@ -440,9 +445,11 @@ export type ModelSelectorEmptyProps = ComponentPropsWithoutRef<
 >;
 
 function ModelSelectorEmpty({ children, ...props }: ModelSelectorEmptyProps) {
+  const { t } = useTranslation();
+
   return (
     <CommandEmpty data-slot="model-selector-empty" {...props}>
-      {children ?? "No models found."}
+      {children ?? t("chat.modelSelector.noModels")}
     </CommandEmpty>
   );
 }
@@ -521,12 +528,14 @@ export type ModelSelectorEffortProps = ComponentPropsWithoutRef<"div"> & {
 };
 
 function ModelSelectorEffort({
-  label = "Thinking",
+  label,
   className,
   onKeyDown,
   ...props
 }: ModelSelectorEffortProps) {
+  const { t } = useTranslation();
   const { efforts, effort, setEffort } = useModelSelectorEfforts();
+  const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
 
   if (!efforts?.length) return null;
 
@@ -545,10 +554,10 @@ function ModelSelectorEffort({
       }}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className="text-muted-foreground text-xs">{resolvedLabel}</span>
       <div
         role="group"
-        aria-label={typeof label === "string" ? label : "Reasoning effort"}
+        aria-label={typeof resolvedLabel === "string" ? resolvedLabel : t("chat.modelSelector.reasoningEffort")}
         className="flex items-center gap-0.5"
       >
         {efforts.map((option) => {
@@ -561,7 +570,7 @@ function ModelSelectorEffort({
               data-state={isActive ? "on" : "off"}
               onClick={() => setEffort(option.id)}
               className={cn(
-                "focus-visible:ring-ring/50 rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
+                "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
                 isActive
                   ? "bg-accent text-accent-foreground font-medium"
                   : "text-muted-foreground hover:text-foreground",
