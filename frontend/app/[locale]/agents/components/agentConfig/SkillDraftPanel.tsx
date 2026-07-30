@@ -33,6 +33,7 @@ interface SkillDraftPanelProps {
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
   onTextareaScroll?: (tabPath: string) => void;
   groupSelectOptions?: Array<{ label: string; value: number }>;
+  groupNamesById?: Map<number, string>;
   className?: string;
 }
 
@@ -49,6 +50,7 @@ export default function SkillDraftPanel({
   shouldAutoScrollRef,
   onTextareaScroll,
   groupSelectOptions = [],
+  groupNamesById = new Map(),
   className,
 }: SkillDraftPanelProps) {
   const { t } = useTranslation("common");
@@ -241,6 +243,9 @@ export default function SkillDraftPanel({
                       placeholder={t("agent.userGroup")}
                       options={groupSelectOptions}
                       allowClear
+                      labelRender={({ label, value }) =>
+                        groupNamesById.get(Number(value)) ?? label
+                      }
                     />
                   </Form.Item>
                 </Col>
