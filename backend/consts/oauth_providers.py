@@ -111,11 +111,36 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
     enabled_check="ENABLE_WECHAT_OAUTH",
 )
 
+HUAWEI_PROVIDER = OAuthProviderDefinition(
+    name="huawei",
+    display_name="Huawei",
+    icon="huawei",
+    authorize_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/authorize",
+    authorize_params={"scope": "base.profile", "response_type": "code"},
+    token_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/accesstoken",
+    token_error_key="error",
+    token_error_message_key="error_description",
+    userinfo_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/userinfo",
+    userinfo_params={
+        "access_token": "{access_token}",
+        "client_id": f"{os.getenv('HUAWEI_OAUTH_CLIENT_ID')}",
+        "scope": "base.profile"
+    },
+    userinfo_field_map={
+        "id": "globalUserID",
+        "email": "email",
+        "username": "givenName",
+    },
+    client_id_env="HUAWEI_OAUTH_CLIENT_ID",
+    client_secret_env="HUAWEI_OAUTH_CLIENT_SECRET",
+)
+
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
     "gde": GDE_PROVIDER,
     "link_app": LINK_APP_PROVIDER,
+    "huawei": HUAWEI_PROVIDER
 }
 
 

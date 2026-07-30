@@ -18,6 +18,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 
 interface ThreadListSidebarProps extends SidebarProps {
@@ -30,6 +31,7 @@ export function ThreadListSidebar({
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
 
@@ -45,7 +47,7 @@ export function ThreadListSidebar({
           <SidebarHeader>
             <div className="flex flex-col items-center gap-2 p-1.5">
               <TooltipIconButton
-                tooltip="展开"
+                tooltip={t("chat.sidebar.expand")}
                 side="right"
                 variant="ghost"
                 size="icon"
@@ -55,7 +57,7 @@ export function ThreadListSidebar({
                 <PanelLeftIcon className="size-4" />
               </TooltipIconButton>
               <TooltipIconButton
-                tooltip="新对话"
+                tooltip={t("chat.sidebar.newConversation")}
                 side="right"
                 variant="ghost"
                 size="icon"
@@ -89,7 +91,7 @@ export function ThreadListSidebar({
             <div className="flex items-center gap-2 px-1">
               <ThreadListPrimitive.New className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate">
                 <PlusIcon className="size-4 shrink-0" />
-                新对话
+                {t("chat.sidebar.newConversation")}
               </ThreadListPrimitive.New>
               <SidebarTrigger className="size-8 shrink-0" />
             </div>

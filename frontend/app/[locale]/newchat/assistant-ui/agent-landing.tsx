@@ -9,6 +9,7 @@ import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useRouter } from "next/navigation";
 import type { PublishedAgent, Agent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useTranslation } from "react-i18next";
 
 const LAST_USED_AGENT_KEY = "nexent_last_used_agent_id";
 
@@ -27,6 +28,7 @@ export interface AgentLandingPageProps {
 }
 
 export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) => {
+  const { t } = useTranslation();
   const PAGE_SIZE = 6;
   const [page, setPage] = useState(1);
   const [lastUsedAgentId, setLastUsedAgentIdState] = useState<number | null>(null);
@@ -77,7 +79,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading agents...</p>
+          <p className="text-sm text-muted-foreground">{t("chat.chat.loadingAgents")}</p>
         </div>
       </div>
     );
@@ -93,10 +95,10 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
         <div className="flex w-full max-w-3xl flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              选择一个智能体开始对话
+              {t("chat.agentLanding.title")}
             </h1>
             <p className="mt-2 text-pretty text-sm text-muted-foreground">
-              每个智能体擅长不同的任务，选择合适的智能体可以获得更好的回答。
+              {t("chat.agentLanding.description")}
             </p>
           </div>
 
@@ -106,7 +108,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
               <Input
                 value={search}
                 onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="搜索智能体..."
+                placeholder={t("chat.agentLanding.searchPlaceholder")}
                 className="pl-9"
               />
             </div>
@@ -119,7 +121,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
           
           <div className="w-full">
             <div className="mb-2 w-full text-xs font-medium text-muted-foreground">
-              全部智能体
+              {t("chat.agentLanding.allAgents")}
             </div>
             {hasAgents ? (
               <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
@@ -151,8 +153,8 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({ onSelectAgent }) =
           )}
 
           <p className="text-xs text-muted-foreground">
-            共 {filteredAgents.length} 个智能体
-            {totalPages > 1 && `，第 ${page}/${totalPages} 页`}
+            {t("chat.agentLanding.agentCount", { count: filteredAgents.length })}
+            {totalPages > 1 && ` ${t("chat.agentLanding.pageInfo", { current: page, total: totalPages })}`}
           </p>
         </div>
       </div>
@@ -199,6 +201,7 @@ interface LastUsedAgentCardProps {
 }
 
 function LastUsedAgentCard({ agent, onSelect }: LastUsedAgentCardProps) {
+  const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
 
@@ -206,7 +209,7 @@ function LastUsedAgentCard({ agent, onSelect }: LastUsedAgentCardProps) {
     <div className="w-full">
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <History className="size-3.5" />
-        上次使用的智能体
+            {t("chat.agentLanding.lastUsed")}
       </div>
       <button
         type="button"
@@ -220,7 +223,7 @@ function LastUsedAgentCard({ agent, onSelect }: LastUsedAgentCardProps) {
           <div className="flex items-center gap-2">
             <p className="truncate font-semibold text-foreground">{displayName}</p>
             <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
-              继续对话
+              {t("chat.agentLanding.continue")}
             </span>
           </div>
           <p className="text-xs text-primary">{agent.name}</p>
@@ -302,6 +305,7 @@ function Pagination({ currentPage, totalPages, onPageChange, onPrev, onNext }: P
 }
 
 export function AgentLandingEmptyState() {
+  const { t } = useTranslation();
   const router = useRouter();
 
   const handleCreateAgent = () => {
@@ -316,14 +320,14 @@ export function AgentLandingEmptyState() {
         </div>
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-foreground">
-            还没有智能体
+            {t("chat.agentLanding.noAgents")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            创建一个智能体，开始你的 AI 对话之旅。
+            {t("chat.agentLanding.noAgentsDescription")}
           </p>
         </div>
         <Button onClick={handleCreateAgent} className="w-full">
-          创建智能体
+          {t("chat.agentLanding.createAgent")}
         </Button>
       </div>
     </div>
@@ -331,11 +335,13 @@ export function AgentLandingEmptyState() {
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
+
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
       <SearchIcon className="mb-3 size-10 text-muted-foreground/50" />
-      <p className="text-sm text-muted-foreground">未找到匹配的智能体</p>
-      <p className="mt-1 text-xs text-muted-foreground/70">尝试使用其他关键词搜索</p>
+      <p className="text-sm text-muted-foreground">{t("chat.agentLanding.noMatchingAgents")}</p>
+      <p className="mt-1 text-xs text-muted-foreground/70">{t("chat.agentLanding.tryAnotherSearch")}</p>
     </div>
   );
 }
