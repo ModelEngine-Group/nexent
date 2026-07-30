@@ -1,5 +1,6 @@
 import type * as React from "react";
-import { PanelLeftIcon, PlusIcon, MessageSquareIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { PanelLeftIcon, PlusIcon, Repeat2Icon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -32,6 +33,7 @@ export function ThreadListSidebar({
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
   const { t } = useTranslation();
+  const router = useRouter();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
 
@@ -68,7 +70,18 @@ export function ThreadListSidebar({
             </div>
           </SidebarHeader>
           <SidebarContent />
-          <SidebarFooter />
+          <SidebarFooter>
+            <TooltipIconButton
+              tooltip={t("chat.sidebar.switchToLegacy")}
+              side="right"
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={() => router.push("/chat")}
+            >
+              <Repeat2Icon className="size-4" />
+            </TooltipIconButton>
+          </SidebarFooter>
         </Sidebar>
       </div>
     );
@@ -99,7 +112,16 @@ export function ThreadListSidebar({
           <SidebarContent>
             <ThreadList generatedTitles={generatedTitles} />
           </SidebarContent>
-          <SidebarFooter />
+          <SidebarFooter>
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted"
+              onClick={() => router.push("/chat")}
+            >
+              <Repeat2Icon className="size-4 shrink-0" />
+              <span>{t("chat.sidebar.switchToLegacy")}</span>
+            </button>
+          </SidebarFooter>
         </Sidebar>
       </div>
     </ThreadListPrimitive.Root>

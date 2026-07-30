@@ -200,6 +200,7 @@
   "chat.threadList.older": "Older",
   "chat.sidebar.expand": "Expand",
   "chat.sidebar.newConversation": "New conversation",
+  "chat.sidebar.switchToLegacy": "Switch to legacy",
   "chat.modelSelector.selectModel": "Select model",
   "chat.modelSelector.searchModels": "Search models...",
   "chat.modelSelector.noModels": "No models found.",
