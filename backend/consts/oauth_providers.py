@@ -113,7 +113,7 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
 
 HUAWEI_PROVIDER = OAuthProviderDefinition(
     name="huawei",
-    display_name="huawei",
+    display_name="Huawei",
     icon="huawei",
     authorize_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/authorize",
     authorize_params={"scope": "base.profile", "response_type": "code"},
