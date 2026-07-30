@@ -23,13 +23,11 @@ from agents.create_agent_info import (
     create_model_config_list,
     join_minio_file_description_to_query,
 )
-from agents.nl2agent_agent import (
-    InstalledMcpToolRecommendation,
-    create_nl2agent_agent_config,
-)
+from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.tool_db import query_all_tools
+from tool_collection.mcp.nl2agent_mcp_tools import InstalledMcpToolRecommendation
 from utils.config_utils import tenant_config_manager
 from utils.context_utils import build_authorized_context_input
 

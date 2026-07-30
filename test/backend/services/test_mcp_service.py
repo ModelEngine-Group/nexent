@@ -125,14 +125,6 @@ stub_local_mcp.LOCAL_MCP_TOOL_NAME_OVERRIDES = {
     stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME:
         stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME,
 }
-stub_local_mcp.get_nl2agent_mcp_tool_descriptions = MagicMock(
-    return_value={
-        stub_nl2agent_mcp_tools.SEARCH_INSTALLED_MCP_TOOLS_NAME:
-            "Search installed MCP tools",
-        stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME:
-            "Build an NL2Agent output",
-    }
-)
 sys.modules['tool_collection'] = types.ModuleType("tool_collection")
 sys.modules['tool_collection.mcp'] = types.ModuleType("tool_collection.mcp")
 sys.modules['tool_collection.mcp.local_mcp_service'] = stub_local_mcp
