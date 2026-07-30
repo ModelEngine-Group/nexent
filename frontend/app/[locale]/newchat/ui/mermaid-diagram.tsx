@@ -58,6 +58,19 @@ const MERMAID_CONFIG = {
 
 let mermaidId = 0;
 
+function addSvgPadding(svg: string, padding = 12): string {
+  return svg.replace(
+    /viewBox="([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)"/,
+    (_match, x, y, width, height) => {
+      const values = [x, y, width, height].map(Number);
+      if (values.some((value) => !Number.isFinite(value))) return _match;
+
+      const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = values;
+      return `viewBox="${viewBoxX - padding} ${viewBoxY - padding} ${viewBoxWidth + padding * 2} ${viewBoxHeight + padding * 2}"`;
+    },
+  );
+}
+
 type MermaidZoomProps = {
   svg: string;
   children: ReactNode;
@@ -341,7 +354,7 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
 
         try {
           const { svg } = await mermaid.render(id, code, container);
-          if (!cancelled) setResult({ svg, error: null });
+          if (!cancelled) setResult({ svg: addSvgPadding(svg), error: null });
         } finally {
           container.remove();
         }
@@ -402,7 +415,7 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
       <div
         data-slot="mermaid-diagram"
         className={cn(
-          "aui-mermaid-diagram bg-muted rounded-b-lg p-2 [&_svg]:mx-auto",
+          "aui-mermaid-diagram bg-muted rounded-b-lg px-2 pt-10 pb-2 [&_svg]:mx-auto",
           className,
         )}
         dangerouslySetInnerHTML={{ __html: result.svg }}
