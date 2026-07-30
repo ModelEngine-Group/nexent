@@ -14,8 +14,6 @@ from consts.const import LANGUAGE
 from utils.prompt_template_utils import get_prompt_template
 
 NL2AGENT_NAME = "__nl2agent_runtime__"
-SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
-NL2A_WRAPPER_NAME = "nl2a_wrapper"
 MAX_TOOL_RECOMMENDATIONS = 5
 FEW_SHOT_EXAMPLE_COUNT = 2
 NL2A_SUBTYPES = Literal["local_mcp_recommendation", "agent_draft"]
@@ -410,11 +408,21 @@ def build_nl2a_wrapper(
 
 def build_nl2agent_system_prompt(
     language: str,
-    tool_name: str = SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    wrapper_name: str = NL2A_WRAPPER_NAME,
+    tool_name: str | None = None,
+    wrapper_name: str | None = None,
     max_results: int = MAX_TOOL_RECOMMENDATIONS,
 ) -> str:
     """Load and render the localized NL2Agent system prompt."""
+
+    from tool_collection.mcp.nl2agent_mcp_tools import (
+        NL2A_WRAPPER_NAME,
+        SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    )
+
+    if tool_name is None:
+        tool_name = SEARCH_INSTALLED_MCP_TOOLS_NAME
+    if wrapper_name is None:
+        wrapper_name = NL2A_WRAPPER_NAME
 
     template_language = (
         LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
@@ -430,16 +438,19 @@ def build_nl2agent_system_prompt(
 def create_nl2agent_agent_config(language: str) -> AgentConfig:
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
-    description = (
-        "Search the current tenant's installed and available MCP tools using keywords. "
-        "Returns a structured JSON observation ordered by relevance."
-        if language == LANGUAGE["EN"]
-        else "根据关键词搜索当前租户已安装且可用的 MCP 工具，并按匹配度返回结构化 JSON。"
+    from tool_collection.mcp.local_mcp_service import (
+        get_nl2agent_mcp_tool_descriptions,
     )
+    from tool_collection.mcp.nl2agent_mcp_tools import (
+        NL2A_WRAPPER_NAME,
+        SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    )
+
+    tool_descriptions = get_nl2agent_mcp_tool_descriptions()
     search_tool_config = ToolConfig(
         class_name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
         name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
-        description=description,
+        description=tool_descriptions[SEARCH_INSTALLED_MCP_TOOLS_NAME],
         inputs='{"keywords": "list[str]"}',
         output_type="object",
         params={},
@@ -449,11 +460,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
     wrapper_tool_config = ToolConfig(
         class_name=NL2A_WRAPPER_NAME,
         name=NL2A_WRAPPER_NAME,
-        description=(
-            "Validate and serialize NL2Agent recommendations or agent drafts."
-            if language == LANGUAGE["EN"]
-            else "校验并序列化 NL2Agent 工具推荐或智能体草稿。"
-        ),
+        description=tool_descriptions[NL2A_WRAPPER_NAME],
         inputs=json.dumps(
             {
                 "subtype": "str",

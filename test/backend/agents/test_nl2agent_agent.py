@@ -15,6 +15,11 @@ from agents.nl2agent_agent import (
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )
+from tool_collection.mcp.local_mcp_service import local_mcp_service
+from tool_collection.mcp.nl2agent_mcp_tools import (
+    NL2A_WRAPPER_NAME,
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
+)
 
 
 def _few_shot_examples(tool_name="weather_forecast"):
@@ -211,16 +216,23 @@ def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
     }
 
 
-def test_create_nl2agent_agent_config_has_only_runtime_tools():
-    config = create_nl2agent_agent_config("zh")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["zh", "en"])
+async def test_create_nl2agent_agent_config_has_only_runtime_tools(language):
+    config = create_nl2agent_agent_config(language)
+    registered_tools = await local_mcp_service.get_tools()
 
     assert config.name == "__nl2agent_runtime__"
     assert config.model_name == "main_model"
     assert config.max_steps == 5
     assert config.enable_planning is False
     assert [tool.name for tool in config.tools] == [
-        "search_installed_mcp_tools",
-        "nl2a_wrapper",
+        SEARCH_INSTALLED_MCP_TOOLS_NAME,
+        NL2A_WRAPPER_NAME,
+    ]
+    assert [tool.description for tool in config.tools] == [
+        registered_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].description,
+        registered_tools[NL2A_WRAPPER_NAME].description,
     ]
     assert all(tool.source == "mcp" for tool in config.tools)
     assert all(tool.usage == "outer-apis" for tool in config.tools)
@@ -234,7 +246,12 @@ def test_create_nl2agent_agent_config_has_only_runtime_tools():
         == "list[dict] with exactly 2 items | None"
     )
     assert all(tool.metadata is None for tool in config.tools)
-    assert "持久化由产品流程完成" in config.instructions
+    expected_persistence_rule = (
+        "Agent persistence is handled by the product flow"
+        if language == "en"
+        else "持久化由产品流程完成"
+    )
+    assert expected_persistence_rule in config.instructions
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,8 @@
 from fastmcp import FastMCP
 
-from agents.nl2agent_agent import (
+from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
-)
-from tool_collection.mcp.nl2agent_mcp_tools import (
     nl2a_wrapper as _nl2a_wrapper,
     search_installed_mcp_tools as _search_installed_mcp_tools,
 )
@@ -16,7 +14,7 @@ LOCAL_MCP_TOOL_NAME_OVERRIDES = {
 
 # Create MCP server
 local_mcp_service = FastMCP("local")
-local_mcp_service.tool(
+_search_installed_mcp_tool = local_mcp_service.tool(
     _search_installed_mcp_tools,
     name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
     description=(
@@ -27,7 +25,7 @@ local_mcp_service.tool(
     ),
     meta={"nexent_internal": True},
 )
-local_mcp_service.tool(
+_nl2a_wrapper_tool = local_mcp_service.tool(
     _nl2a_wrapper,
     name=NL2A_WRAPPER_NAME,
     description=(
@@ -38,6 +36,14 @@ local_mcp_service.tool(
     ),
     meta={"nexent_internal": True},
 )
+
+
+def get_nl2agent_mcp_tool_descriptions() -> dict[str, str]:
+    """Return descriptions from the registered NL2Agent MCP tools."""
+    return {
+        SEARCH_INSTALLED_MCP_TOOLS_NAME: _search_installed_mcp_tool.description,
+        NL2A_WRAPPER_NAME: _nl2a_wrapper_tool.description,
+    }
 
 
 @local_mcp_service.tool(name="test_tool_name",

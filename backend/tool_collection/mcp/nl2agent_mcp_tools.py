@@ -17,6 +17,9 @@ from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
+SEARCH_INSTALLED_MCP_TOOLS_NAME = "search_installed_mcp_tools"
+NL2A_WRAPPER_NAME = "nl2a_wrapper"
+
 
 def _dump_tool_search_observation(
     observation: SearchInstalledMcpToolsObservation

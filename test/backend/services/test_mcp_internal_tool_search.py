@@ -7,21 +7,19 @@ from fastmcp import FastMCP
 from mcp.types import Tool
 from pydantic import ValidationError
 
-from agents.nl2agent_agent import (
-    NL2A_WRAPPER_NAME,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    Nl2aAgentDraftInput,
-    Nl2aLocalMcpRecommendationInput,
-)
+from agents.nl2agent_agent import Nl2aAgentDraftInput, Nl2aLocalMcpRecommendationInput
 import services.nl2agent_service as nl2agent_service
 import services.tool_configuration_service as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
+    get_nl2agent_mcp_tool_descriptions,
     local_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
+    NL2A_WRAPPER_NAME,
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
     nl2a_wrapper,
     search_installed_mcp_tools,
 )
@@ -494,6 +492,10 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     assert tool.parameters["required"] == ["keywords"]
     assert tool.meta["nexent_internal"] is True
     assert "print(result)" in tool.description
+    assert get_nl2agent_mcp_tool_descriptions() == {
+        SEARCH_INSTALLED_MCP_TOOLS_NAME: tool.description,
+        NL2A_WRAPPER_NAME: wrapper_tool.description,
+    }
     assert wrapper_tool.name == NL2A_WRAPPER_NAME
     assert wrapper_tool.parameters["required"] == ["subtype"]
     assert set(wrapper_tool.parameters["properties"]) == {
