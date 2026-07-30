@@ -1199,8 +1199,8 @@ class TestRefreshAgentCard:
         assert "new_protocol_type" not in refresh_kwargs
 
     @pytest.mark.asyncio
-    async def test_refreshes_cache_with_changed_agent_url(self):
-        """Test refreshing persists a changed URL without changing the protocol."""
+    async def test_preserves_endpoint_when_card_has_no_protocol_interfaces(self):
+        """Test refreshing does not use the Card root URL without a matching interface."""
         from backend.services.a2a_client_service import A2AClientService
 
         service = A2AClientService()
@@ -1216,7 +1216,7 @@ class TestRefreshAgentCard:
             "url": "https://example.com/new",
             "supportedInterfaces": [],
         }
-        refreshed_agent = {"id": 1, "agent_url": "https://example.com/new"}
+        refreshed_agent = {"id": 1, "agent_url": "https://example.com/old"}
 
         with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
@@ -1233,7 +1233,7 @@ class TestRefreshAgentCard:
             tenant_id="tenant-1",
             user_id="user-1",
             new_raw_card=card,
-            new_agent_url="https://example.com/new",
+            new_agent_url=None,
             new_name="Test Agent",
             new_description="Updated endpoint",
             new_supported_interfaces=[],

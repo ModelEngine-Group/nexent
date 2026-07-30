@@ -546,13 +546,12 @@ class A2AClientService:
                         headers.update(card_headers)
                     card = await client.get_json(source_url, headers=headers)
 
-                # Extract updated info - use _extract_agent_url for A2A v1.0 standard
-                new_url = self._extract_agent_url(card)
+                new_supported_interfaces = card.get("supportedInterfaces")
+                new_url = self._extract_agent_url(card) if new_supported_interfaces is None else None
                 new_name = card.get("name")
                 new_description = card.get("description")
-                new_supported_interfaces = card.get("supportedInterfaces", [])
 
-                # The selected protocol is a user preference and must survive Card refreshes.
+                # The selected protocol and its endpoint must survive incomplete Card refreshes.
                 result = a2a_agent_db.refresh_external_agent_cache(
                     external_agent_id=external_agent_id,
                     tenant_id=tenant_id,
