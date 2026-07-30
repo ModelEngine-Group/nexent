@@ -234,7 +234,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           </div>
         </header>
 
-        <ThreadPrimitive.Viewport className="flex flex-1 flex-col overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
+        <ThreadPrimitive.Viewport className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
           {hasMessages ? (
             <ThreadMessages agent={agent} />
           ) : (
@@ -441,11 +441,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
     <MessagePrimitive.Root
       data-slot="aui_assistant-message-root"
       data-role="assistant"
-      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto w-full max-w-(--thread-max-width) duration-150"
+      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
       <div
         data-slot="aui_assistant-message-content"
-        className="text-foreground px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
+        className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
       >
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
