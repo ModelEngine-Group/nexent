@@ -3,6 +3,7 @@ import json
 import re
 
 import pytest
+from jinja2 import UndefinedError
 from pydantic import ValidationError
 
 from agents.nl2agent_agent import (
@@ -149,6 +150,22 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
         ast.parse(code_block)
     assert code_blocks[-1].count('{"user_input":') == 2
     assert "```" not in prompt
+
+
+def test_build_nl2agent_system_prompt_falls_back_to_chinese():
+    assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
+
+
+def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
+    prompt_loader = mocker.patch(
+        "agents.nl2agent_agent.get_prompt_template",
+        return_value={"system_prompt": "{{ missing_value }}"},
+    )
+
+    with pytest.raises(UndefinedError, match="missing_value"):
+        build_nl2agent_system_prompt("en")
+
+    prompt_loader.assert_called_once_with("nl2agent", "en")
 
 
 def test_nl2agent_models_preserve_tool_inputs_and_define_agent_draft():
