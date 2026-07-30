@@ -14,12 +14,15 @@ from agents.nl2agent_agent import (
 import services.nl2agent_service as nl2agent_service
 import services.tool_configuration_service as tool_configuration_service
 import tool_collection.mcp.local_mcp_service as local_mcp_service_module
+import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
+    local_mcp_service,
+)
+from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    local_mcp_service,
     nl2a_wrapper,
     search_installed_mcp_tools,
 )
@@ -34,12 +37,12 @@ def _unwrap_nl2a(result: str) -> dict:
 @pytest.mark.asyncio
 async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
     mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_http_request",
         return_value=SimpleNamespace(headers={"Authorization": "Bearer tenant-token"}),
     )
     get_current_user_id = mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_current_user_id",
         return_value=("user-a", "tenant-a"),
     )
@@ -109,7 +112,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
         side_effect=score_by_document,
     )
 
-    result = await search_installed_mcp_tools.fn(
+    result = await search_installed_mcp_tools(
         [" Weather ", "forecast", "WEATHER"]
     )
 
@@ -175,7 +178,7 @@ async def test_mcp_search_is_tenant_scoped_sorted_and_safe(mocker):
 @pytest.mark.asyncio
 async def test_mcp_search_returns_sanitized_contract_errors(mocker):
     for keywords in ([], ["   "]):
-        invalid_result = await search_installed_mcp_tools.fn(keywords)
+        invalid_result = await search_installed_mcp_tools(keywords)
         assert invalid_result == {
             "subtype": "local_mcp_recommendation",
             "status": "error",
@@ -184,12 +187,12 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
         }
 
     mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_http_request",
         return_value=SimpleNamespace(headers={"Authorization": "Bearer private-token"}),
     )
     mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_current_user_id",
         return_value=("user-a", "tenant-a"),
     )
@@ -199,7 +202,7 @@ async def test_mcp_search_returns_sanitized_contract_errors(mocker):
         side_effect=RuntimeError("private database details"),
     )
 
-    result = await search_installed_mcp_tools.fn(["private", "weather"])
+    result = await search_installed_mcp_tools(["private", "weather"])
 
     assert result == {
         "subtype": "local_mcp_recommendation",
@@ -237,7 +240,7 @@ async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
         ],
     }
 
-    result = await nl2a_wrapper.fn(
+    result = await nl2a_wrapper(
         subtype="local_mcp_recommendation",
         search_result=search_result,
         selected_tool_ids=[12],
@@ -251,7 +254,7 @@ async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
     }
 
     with pytest.raises(ValueError, match="not present in search_result"):
-        await nl2a_wrapper.fn(
+        await nl2a_wrapper(
             subtype="local_mcp_recommendation",
             search_result=search_result,
             selected_tool_ids=[999],
@@ -263,7 +266,7 @@ async def test_nl2a_wrapper_filters_real_search_results_and_wraps_errors():
             selected_tool_ids=[7, 7],
         )
 
-    error_result = await nl2a_wrapper.fn(
+    error_result = await nl2a_wrapper(
         subtype="local_mcp_recommendation",
         search_result={
             "subtype": "local_mcp_recommendation",
@@ -324,7 +327,7 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         "few_shot_examples": examples,
     }
 
-    result = _unwrap_nl2a(await nl2a_wrapper.fn(**payload))
+    result = _unwrap_nl2a(await nl2a_wrapper(**payload))
 
     assert result["subtype"] == "agent_draft"
     assert result["example_questions"] == [
@@ -357,7 +360,7 @@ async def test_nl2a_wrapper_renders_structured_agent_few_shots():
         "selected_tool_names": [],
         "few_shot_examples": None,
     }
-    no_tool_result = _unwrap_nl2a(await nl2a_wrapper.fn(**no_tool_payload))
+    no_tool_result = _unwrap_nl2a(await nl2a_wrapper(**no_tool_payload))
     assert no_tool_result["constraint_prompt"] == ""
     assert no_tool_result["few_shots_prompt"] is None
 
@@ -470,6 +473,12 @@ def test_agent_draft_wrapper_enforces_ordinary_agent_name_rules(
 
 @pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
+    local_tools = await local_mcp_service.get_tools()
+    assert local_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].fn is search_installed_mcp_tools
+    assert local_tools[NL2A_WRAPPER_NAME].fn is nl2a_wrapper
+    assert not hasattr(local_mcp_service_module, "search_installed_mcp_tools")
+    assert not hasattr(local_mcp_service_module, "nl2a_wrapper")
+
     parent = FastMCP("test-parent")
     parent.mount(
         local_mcp_service,
@@ -527,14 +536,27 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
 
 
 @pytest.mark.asyncio
+async def test_local_mcp_service_preserves_existing_demo_tool(capsys):
+    registered_tools = await local_mcp_service.get_tools()
+
+    result = await registered_tools["test_tool_name"].fn("sample", 2)
+
+    assert result == "success"
+    assert capsys.readouterr().out.splitlines() == [
+        "tool is called successfully",
+        "sample 2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_mcp_search_empty_result_returns_business_payload(mocker):
     mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_http_request",
         return_value=SimpleNamespace(headers={"Authorization": "Bearer tenant-token"}),
     )
     mocker.patch.object(
-        local_mcp_service_module,
+        nl2agent_mcp_tools_module,
         "get_current_user_id",
         return_value=("user-a", "tenant-a"),
     )
@@ -544,7 +566,7 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
         return_value=[],
     )
 
-    result = await search_installed_mcp_tools.fn(["weather"])
+    result = await search_installed_mcp_tools(["weather"])
 
     assert result == {
         "subtype": "local_mcp_recommendation",
