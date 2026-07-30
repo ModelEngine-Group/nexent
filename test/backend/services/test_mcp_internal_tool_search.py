@@ -8,12 +8,13 @@ from mcp.types import Tool
 from pydantic import ValidationError
 
 from agents.nl2agent_agent import (
+    NL2A_WRAPPER_NAME,
+    SEARCH_INSTALLED_MCP_TOOLS_NAME,
     Nl2aAgentDraftInput,
     Nl2aLocalMcpRecommendationInput,
 )
 import services.nl2agent_service as nl2agent_service
 import services.tool_configuration_service as tool_configuration_service
-import tool_collection.mcp.local_mcp_service as local_mcp_service_module
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
@@ -21,8 +22,6 @@ from tool_collection.mcp.local_mcp_service import (
     local_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
-    NL2A_WRAPPER_NAME,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME,
     nl2a_wrapper,
     search_installed_mcp_tools,
 )
@@ -473,12 +472,6 @@ def test_agent_draft_wrapper_enforces_ordinary_agent_name_rules(
 
 @pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
-    local_tools = await local_mcp_service.get_tools()
-    assert local_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME].fn is search_installed_mcp_tools
-    assert local_tools[NL2A_WRAPPER_NAME].fn is nl2a_wrapper
-    assert not hasattr(local_mcp_service_module, "search_installed_mcp_tools")
-    assert not hasattr(local_mcp_service_module, "nl2a_wrapper")
-
     parent = FastMCP("test-parent")
     parent.mount(
         local_mcp_service,

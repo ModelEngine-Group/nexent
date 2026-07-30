@@ -1,30 +1,19 @@
-"""Define and register the internal Local MCP tools used by NL2Agent."""
+"""Implement the internal Local MCP tools used by NL2Agent."""
 
 import logging
 import re
 import unicodedata
 from typing import Any, Literal
 
-from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
 
 from agents.nl2agent_agent import (
-    NL2A_WRAPPER_NAME,
-    SEARCH_INSTALLED_MCP_TOOLS_NAME,
     Nl2aFewShotExamples,
     SearchInstalledMcpToolsErrorObservation,
     SearchInstalledMcpToolsObservation,
     build_nl2a_wrapper,
 )
 from utils.auth_utils import get_current_user_id
-
-__all__ = [
-    "NL2A_WRAPPER_NAME",
-    "SEARCH_INSTALLED_MCP_TOOLS_NAME",
-    "nl2a_wrapper",
-    "register_nl2agent_mcp_tools",
-    "search_installed_mcp_tools",
-]
 
 logger = logging.getLogger(__name__)
 
@@ -127,31 +116,4 @@ async def nl2a_wrapper(
         example_questions=example_questions,
         selected_tool_names=selected_tool_names,
         few_shot_examples=few_shot_examples,
-    )
-
-
-def register_nl2agent_mcp_tools(mcp_service: FastMCP) -> None:
-    """Register NL2Agent's internal tools on the existing Local MCP service."""
-
-    mcp_service.tool(
-        search_installed_mcp_tools,
-        name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
-        description=(
-            "Search the current tenant's installed and available MCP tools using keywords. "
-            "Returns a structured JSON observation ordered by relevance. "
-            "Call the tool as `result = search_installed_mcp_tools(...)`, then use "
-            "`print(result)` to preserve the returned JSON unchanged in execution logs."
-        ),
-        meta={"nexent_internal": True},
-    )
-    mcp_service.tool(
-        nl2a_wrapper,
-        name=NL2A_WRAPPER_NAME,
-        description=(
-            "Build one NL2Agent output from subtype-specific parameters. Always pass "
-            "`subtype`. For `local_mcp_recommendation`, also pass `search_result` and "
-            "`selected_tool_ids`. For `agent_draft`, pass the agent draft fields. Call "
-            "the tool as `result = nl2a_wrapper(...)`, then use `print(result)`."
-        ),
-        meta={"nexent_internal": True},
     )

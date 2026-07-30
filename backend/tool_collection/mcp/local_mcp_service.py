@@ -1,9 +1,12 @@
 from fastmcp import FastMCP
 
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from agents.nl2agent_agent import (
     NL2A_WRAPPER_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    register_nl2agent_mcp_tools,
+)
+from tool_collection.mcp.nl2agent_mcp_tools import (
+    nl2a_wrapper as _nl2a_wrapper,
+    search_installed_mcp_tools as _search_installed_mcp_tools,
 )
 
 LOCAL_MCP_TOOL_NAME_OVERRIDES = {
@@ -13,7 +16,28 @@ LOCAL_MCP_TOOL_NAME_OVERRIDES = {
 
 # Create MCP server
 local_mcp_service = FastMCP("local")
-register_nl2agent_mcp_tools(local_mcp_service)
+local_mcp_service.tool(
+    _search_installed_mcp_tools,
+    name=SEARCH_INSTALLED_MCP_TOOLS_NAME,
+    description=(
+        "Search the current tenant's installed and available MCP tools using keywords. "
+        "Returns a structured JSON observation ordered by relevance. "
+        "Call the tool as `result = search_installed_mcp_tools(...)`, then use "
+        "`print(result)` to preserve the returned JSON unchanged in execution logs."
+    ),
+    meta={"nexent_internal": True},
+)
+local_mcp_service.tool(
+    _nl2a_wrapper,
+    name=NL2A_WRAPPER_NAME,
+    description=(
+        "Build one NL2Agent output from subtype-specific parameters. Always pass "
+        "`subtype`. For `local_mcp_recommendation`, also pass `search_result` and "
+        "`selected_tool_ids`. For `agent_draft`, pass the agent draft fields. Call "
+        "the tool as `result = nl2a_wrapper(...)`, then use `print(result)`."
+    ),
+    meta={"nexent_internal": True},
+)
 
 
 @local_mcp_service.tool(name="test_tool_name",
