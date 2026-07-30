@@ -61,29 +61,26 @@ def get_local_tools_description_zh() -> Dict[str, Dict]:
         init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
 
         init_params_list = []
-        # @tool-decorated functions become SimpleTool instances without a
-        # meaningful __init__ signature — skip param introspection for them.
-        if inspect.isclass(tool_class):
-            sig = inspect.signature(tool_class.__init__)
-            for param_name, param in sig.parameters.items():
-                if param_name == "self":
+        sig = inspect.signature(tool_class.__init__)
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            # Check if parameter has a default value and if it should be excluded
+            if param.default != inspect.Parameter.empty:
+                if hasattr(param.default, 'exclude') and param.default.exclude:
                     continue
 
-                # Check if parameter has a default value and if it should be excluded
-                if param.default != inspect.Parameter.empty:
-                    if hasattr(param.default, 'exclude') and param.default.exclude:
-                        continue
+            # Note: Pydantic Field doesn't have description_zh attribute
+            param_description_zh = getattr(param.default, 'description_zh', None) if hasattr(param.default, 'description_zh') else None
 
-                # Note: Pydantic Field doesn't have description_zh attribute
-                param_description_zh = getattr(param.default, 'description_zh', None) if hasattr(param.default, 'description_zh') else None
+            if param_description_zh is None and param_name in init_param_descriptions:
+                param_description_zh = init_param_descriptions[param_name].get('description_zh')
 
-                if param_description_zh is None and param_name in init_param_descriptions:
-                    param_description_zh = init_param_descriptions[param_name].get('description_zh')
-
-                init_params_list.append({
-                    "name": param_name,
-                    "description_zh": param_description_zh
-                })
+            init_params_list.append({
+                "name": param_name,
+                "description_zh": param_description_zh
+            })
 
         # Store complete inputs definition for runtime alignment
         tool_inputs = getattr(tool_class, 'inputs', {})
