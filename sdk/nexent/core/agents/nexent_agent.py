@@ -514,6 +514,7 @@ class NexentAgent:
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
+                verification_config=getattr(agent_config, "verification_config", None),
             )
             agent.stop_event = self.stop_event
 
