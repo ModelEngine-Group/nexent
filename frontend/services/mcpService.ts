@@ -909,4 +909,5 @@ export const updateToolLabels = async (toolId: string, labels: string[]) => {
     const result = await response.json().catch(() => ({}));
     throw new Error(result.detail || result.message || "Failed to update tool labels");
   }
+  return response.json();
 };

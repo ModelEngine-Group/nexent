@@ -100,6 +100,7 @@ export const fetchTools = async () => {
             })()
           : [],
       updated_by: tool.updated_by || "",
+      updated_by_name: tool.updated_by_name || "",
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {

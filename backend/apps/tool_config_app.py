@@ -19,6 +19,7 @@ from services.tool_configuration_service import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
+from database.user_tenant_db import get_user_email_map
 from utils.auth_utils import get_current_user_id
 
 router = APIRouter(prefix="/tool")
@@ -301,9 +302,15 @@ async def update_tool_labels_api(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail="Tool not found or access denied"
             )
+        updated_by_name = get_user_email_map([user_id]).get(user_id, "")
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"message": "Labels updated successfully", "status": "success", "labels": labels}
+            content={
+                "message": "Labels updated successfully",
+                "status": "success",
+                "labels": labels,
+                "updated_by_name": updated_by_name,
+            },
         )
     except HTTPException:
         raise
