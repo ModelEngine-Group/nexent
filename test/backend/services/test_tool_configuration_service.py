@@ -1918,7 +1918,8 @@ class TestIntegrationScenarios:
         mock_update_table.assert_called_once_with(
             tenant_id="test_tenant",
             user_id="test_user",
-            tool_list=local_tools + mcp_tools
+            tool_list=local_tools + mcp_tools,
+            enabled_mcp_names=set(),
         )
 
 
@@ -5459,6 +5460,7 @@ class TestUpdateToolListMcpErrorExplicit:
         # update_tool_table called with only local + langchain (mcp_tools is [])
         mock_update.assert_called_once_with(
             tenant_id="tenant1", user_id="user1", tool_list=[],
+            enabled_mcp_names=set(),
         )
 
 
