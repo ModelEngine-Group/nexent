@@ -202,6 +202,24 @@ def test_rendered_roles_and_sections_match_context_semantics():
     assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
 
 
+def test_agent_presearch_result_is_rendered_into_model_context():
+    result_text = "Found 2 relevant memories:\n[1] Likes fish\n[2] Dislikes fish"
+
+    messages = _messages(
+        memory_list=[{"memory": result_text, "memory_level": "agent"}],
+        language="en",
+    )
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+
+    assert "**Agent Level Memory:**" in rendered_text
+    assert result_text in rendered_text
+
+
 def test_app_context_compatibility_string_is_unchanged():
     assert build_app_context_string("App", "Description", "user") == (
         "Application: App\nDescription: Description\nCurrent user: user"

@@ -1980,7 +1980,7 @@ class TestCreateAgentConfig:
         context_kwargs = mocks["build_components"].call_args.kwargs
         assert context_kwargs["memory_list"] == [{
             "memory": result_text,
-            "memory_level": "retrieved",
+            "memory_level": "agent",
         }]
         assert "search_memory" not in context_kwargs["tools"]
         assert "search_memory" not in context_kwargs["memory_tool_policy"]

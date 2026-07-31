@@ -303,7 +303,7 @@ export function MemoryManager() {
       } else {
         await createMemoryRecord({
           layer: scope,
-          memory_type: values.memory_type,
+          memory_type: "long_term",
           content: values.content,
         });
         message.success("记忆已创建");
@@ -435,15 +435,15 @@ export function MemoryManager() {
                 : "编辑"
             }
           >
-              <Button
-                type="text"
-                aria-label="编辑记忆"
-                icon={<Edit3 size={17} />}
-                disabled={
-                  scope === "agent" && record.embedding_compatible === false
-                }
-                onClick={() => openEdit(record)}
-              />
+            <Button
+              type="text"
+              aria-label="编辑记忆"
+              icon={<Edit3 size={17} />}
+              disabled={
+                scope === "agent" && record.embedding_compatible === false
+              }
+              onClick={() => openEdit(record)}
+            />
           </Tooltip>
           <Tooltip title="删除">
             <Button
@@ -675,11 +675,12 @@ export function MemoryManager() {
               className="form-half"
             >
               <Select
-                disabled={!!editing}
-                options={Object.entries(typeMap).map(([value, meta]) => ({
-                  value,
-                  label: meta.label,
-                }))}
+                options={Object.entries(typeMap)
+                  .filter(([value]) => !(!editing && value !== "long_term"))
+                  .map(([value, meta]) => ({
+                    value,
+                    label: meta.label,
+                  }))}
               />
             </Form.Item>
             <Form.Item
@@ -689,7 +690,6 @@ export function MemoryManager() {
               className="form-half"
             >
               <Select
-                disabled={!editing}
                 options={Object.entries(statusMap).map(([value, meta]) => ({
                   value,
                   label: meta.label,
