@@ -3,7 +3,7 @@
 **Please do not report security vulnerabilities through public GitHub issues, discussions, or other public channels.**
 
 Instead, please disclose them responsibly by contacting our security team at:  
-📧 [chenshuangrui@gmail.com](mailto:chenshuangrui@gmail.com) 
+📧 [modelengine@163.com](mailto:modelengine@163.com) 
 
 ## What to Include:
 - Detailed description of the vulnerability
