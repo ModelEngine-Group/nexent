@@ -325,6 +325,11 @@ deployment_should_prompt_super_admin_password() {
     [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
 }
 
+deployment_should_prompt_root_dir() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" != "true" ] ||
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
+}
+
 deployment_require_env_example() {
   local example_file="$1"
   if [ ! -f "$example_file" ] || [ ! -r "$example_file" ]; then
@@ -1779,7 +1784,7 @@ deployment_apply_image_source() {
   export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
   export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
   export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
-  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
   export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
   export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
 
@@ -2150,7 +2155,7 @@ deployment_render_helm_monitoring_chart_values() {
   deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
   deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
   deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
-  deployment_render_monitoring_image_value minio docker.io/minio/minio "$minio_tag"
+  deployment_render_monitoring_image_value minio quay.io/minio/minio "$minio_tag"
   deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
   deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
   printf '  collector:\n'

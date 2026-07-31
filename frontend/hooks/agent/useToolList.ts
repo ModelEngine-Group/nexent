@@ -22,10 +22,10 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		enabled: options?.enabled ?? true,
 	});
 
-	const tools = query.data ?? [];
+	const tools = query.data;
 
 	const availableTools = useMemo(() => {
-		return (tools as any[]).filter((tool) => tool.is_available !== false);
+		return ((tools ?? []) as any[]).filter((tool) => tool.is_available !== false);
 	}, [tools]);
 
 	// Extract all unique labels from available tools (used by LabelManagementModal suggestions)

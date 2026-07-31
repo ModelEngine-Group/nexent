@@ -111,6 +111,23 @@ echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
 echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
 ! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
+echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"
+
+OFFLINE_HELP="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --help)"
+echo "$OFFLINE_HELP" | grep -q -- '--include-sandbox BOOL' || fail "offline package help should document --include-sandbox"
+
+SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
+echo "$SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: true' || fail "offline dry-run should show that the Sandbox image is enabled by default"
+echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "offline packages should include the Sandbox image by default"
+
+NO_SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --include-sandbox false --dry-run)"
+echo "$NO_SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: false' || fail "offline dry-run should show that the Sandbox image is disabled explicitly"
+! echo "$NO_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "--include-sandbox false should exclude the Sandbox image"
+
+if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --include-sandbox invalid --dry-run >"$TMP_DIR/invalid-include-sandbox.log" 2>&1; then
+  fail "--include-sandbox should accept only true or false"
+fi
+grep -q "Include sandbox must be 'true' or 'false'" "$TMP_DIR/invalid-include-sandbox.log" || fail "invalid --include-sandbox error should be explicit"
 
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
@@ -129,6 +146,9 @@ for target in docker k8s all; do
   [ -f "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" ] || fail "zip package should be created for target $target"
   grep -q "target: \"$target\"" "$package_dir/manifest.yaml" || fail "manifest should record target $target"
   grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Nexent image"
+  grep -q 'includeSandbox: "true"' "$package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is included by default"
+  grep -q "nexent/nexent-sandbox:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include the Sandbox image by default"
+  [ -f "$package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "offline package should save the Sandbox image tar by default"
 
   case "$target" in
     docker)
@@ -145,6 +165,22 @@ for target in docker k8s all; do
       ;;
   esac
 done
+
+sandbox_package_dir="$OUT_DIR/without-sandbox"
+PATH="$BIN_DIR:$PATH" \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 \
+    --platform amd64 \
+    --components infrastructure,application \
+    --image-source general \
+    --target docker \
+    --include-sandbox false \
+    --output-dir "$sandbox_package_dir" >"$TMP_DIR/without-sandbox.log"
+
+assert_common_package_files "$sandbox_package_dir"
+grep -q 'includeSandbox: "false"' "$sandbox_package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is excluded"
+! grep -q 'nexent-sandbox' "$sandbox_package_dir/manifest.yaml" || fail "--include-sandbox false should exclude the Sandbox image"
+[ ! -f "$sandbox_package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "--include-sandbox false should not save the Sandbox image tar"
 
 deploy_wrapper_dir="$OUT_DIR/deploy-wrapper"
 mkdir -p "$deploy_wrapper_dir/deploy/common" "$deploy_wrapper_dir/deploy/env"
@@ -280,7 +316,7 @@ push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -294,7 +330,7 @@ grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.loca
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \

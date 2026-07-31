@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore, type FC, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
   Mic,
@@ -46,6 +47,7 @@ export interface ComposerProps {
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -63,6 +65,7 @@ const TooltipWrapper: FC<{
 };
 
 const PlanView: FC = () => {
+  const { t } = useTranslation();
   const plan = useSyncExternalStore<PlanData | null>(
     planRegistry.subscribe,
     () => planRegistry.data,
@@ -73,11 +76,11 @@ const PlanView: FC = () => {
 
   return (
     <Collapsible asChild defaultOpen>
-      <section className="border-b border-border" aria-label="执行计划">
+      <section className="border-b border-border" aria-label={t("chat.composer.plan")}>
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-4 py-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/40 data-[state=open]:[&_svg.plan-chevron]:rotate-180"
+            className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/40 data-[state=closed]:[&_svg.plan-chevron]:rotate-180"
           >
             <ListChecks className="size-4 shrink-0 text-primary" aria-hidden />
             <span className="min-w-0 flex-1 truncate">{plan.title}</span>
@@ -140,7 +143,10 @@ export const Composer: FC<ComposerProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
+  const { t } = useTranslation();
+
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
       <PlanView />
@@ -159,7 +165,7 @@ export const Composer: FC<ComposerProps> = ({
             onClick={() => onChatModeChange("planning")}
           >
             <Lightbulb className={cn("size-3", chatMode === "planning" ? "text-blue-600" : "")} />
-            规划
+            {t("chat.composer.planning")}
           </Button>
           <Button
             variant="ghost"
@@ -171,7 +177,7 @@ export const Composer: FC<ComposerProps> = ({
             onClick={() => onChatModeChange("execution")}
           >
             <Play className="size-3" />
-            执行
+            {t("chat.composer.execution")}
           </Button>
         </div>
 
@@ -185,25 +191,27 @@ export const Composer: FC<ComposerProps> = ({
       >
         <ComposerAttachments />
         <ComposerPrimitive.Input
-          placeholder="发送消息..."
+          placeholder={t("chat.composer.placeholder")}
           className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
           rows={1}
           submitMode="enter"
           autoFocus
         />
         <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-          <ModelSelector
-            models={models}
-            value={selectedModelId}
-            onValueChange={onModelChange}
-            variant="ghost"
-            size="sm"
-            className="text-xs"
-          />
-          <div className="flex items-center gap-1">
+          {showModelSelector && (
+            <ModelSelector
+              models={models}
+              value={selectedModelId}
+              onValueChange={onModelChange}
+              variant="ghost"
+              size="sm"
+              className="text-xs"
+            />
+          )}
+          <div className="ml-auto flex items-center gap-1">
             <ComposerAddAttachment />
             <ComposerPrimitive.Dictate asChild>
-              <TooltipWrapper tooltip="语音输入">
+              <TooltipWrapper tooltip={t("chat.composer.voiceInput")}>
                 <Button variant="ghost" size="icon" className="size-8 text-muted-foreground">
                   <Mic className="size-4" />
                 </Button>
@@ -222,29 +230,33 @@ export const Composer: FC<ComposerProps> = ({
 // the click handler to actually fire. The tooltip wrapper sits outside so its
 // Trigger can use `asChild` against the Button. `AuiIf` toggles between the
 // two branches declaratively based on `thread.isRunning`.
-const ComposerSendOrCancel: FC = () => (
-  <>
-    <AuiIf condition={(s) => s.thread.isRunning}>
-      <TooltipWrapper tooltip="停止生成" side="top">
-        <ComposerPrimitive.Cancel asChild>
-          <Button
-            size="icon"
-            variant="outline"
-            className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
-          >
-            <Square className="size-4 fill-current" />
-          </Button>
-        </ComposerPrimitive.Cancel>
-      </TooltipWrapper>
-    </AuiIf>
-    <AuiIf condition={(s) => !s.thread.isRunning}>
-      <TooltipWrapper tooltip="发送" side="top">
-        <ComposerPrimitive.Send asChild>
-          <Button size="icon" className="size-8 rounded-full ml-2">
-            <ArrowUp className="size-5" />
-          </Button>
-        </ComposerPrimitive.Send>
-      </TooltipWrapper>
-    </AuiIf>
-  </>
-);
+const ComposerSendOrCancel: FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <AuiIf condition={(s) => s.thread.isRunning}>
+        <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} side="top">
+          <ComposerPrimitive.Cancel asChild>
+            <Button
+              size="icon"
+              variant="outline"
+              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
+            >
+              <Square className="size-4 fill-current" />
+            </Button>
+          </ComposerPrimitive.Cancel>
+        </TooltipWrapper>
+      </AuiIf>
+      <AuiIf condition={(s) => !s.thread.isRunning}>
+        <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
+          <ComposerPrimitive.Send asChild>
+            <Button size="icon" className="size-8 rounded-full ml-2">
+              <ArrowUp className="size-5" />
+            </Button>
+          </ComposerPrimitive.Send>
+        </TooltipWrapper>
+      </AuiIf>
+    </>
+  );
+};

@@ -135,7 +135,7 @@ class AgentAutomationRunner:
             )
             raise
         except Exception as exc:
-            return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(exc), None)
+            return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(exc))
 
     async def _execute_active_run(
         self,
@@ -144,7 +144,7 @@ class AgentAutomationRunner:
         scheduled: datetime,
         trigger_type: str,
     ) -> Dict[str, Any]:
-        capability_check = await validate_bindings_available(
+        capability_status = await validate_bindings_available(
             agent_id=task["agent_id"],
             tenant_id=task["tenant_id"],
             user_id=task["user_id"],
@@ -152,19 +152,18 @@ class AgentAutomationRunner:
             bindings=task.get("capability_bindings") or [],
             version_no=task.get("agent_version_no") or 0,
         )
-        if not capability_check["available"]:
+        if not capability_status["available"]:
             return self._fail_run(
                 run,
                 task,
                 "AUTOMATION_CAPABILITY_UNAVAILABLE",
                 "Required automation capability is unavailable.",
-                capability_check,
             )
 
         history_payload = get_conversation_history_service(task["conversation_id"], task["user_id"])
         history = _history_items(history_payload)
         stored_snapshot = task.get("runtime_snapshot") or {"agent_id": task["agent_id"]}
-        current_resolution = capability_check.get("resolution") or {}
+        current_resolution = capability_status.get("resolution") or {}
         current_agent_snapshot = current_resolution.get("agent_snapshot") or {}
         runtime_snapshot = {
             **stored_snapshot,
@@ -212,7 +211,6 @@ class AgentAutomationRunner:
             "generated_prompt": generated_prompt,
             "user_message_id": user_message_id,
             "assistant_message_id": result.get("assistant_message_id"),
-            "capability_check": capability_check,
         })
 
     def cancel_for_conversation(self, conversation_id: int, user_id: str) -> None:
@@ -224,12 +222,10 @@ class AgentAutomationRunner:
         task: Dict[str, Any],
         error_code: str,
         error_message: str,
-        capability_check: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return self._finish_run(run, task, AutomationRunStatus.FAILED.value, {
             "error_code": error_code,
             "error_message": error_message,
-            "capability_check": capability_check,
         })
 
     def _finish_run(

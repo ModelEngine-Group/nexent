@@ -422,6 +422,14 @@ class NexentRunAgentInput(RunAgentInput):
     forwarded_props: Dict[str, Any] = Field(alias="forwardedProps")
 
 
+class NL2AgentRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Agent turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
 class MessageUnit(BaseModel):
     type: str
     content: str
@@ -1506,6 +1514,7 @@ class AddMcpServiceRequest(BaseModel):
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
+    container_port: Optional[int] = Field(None, ge=1, le=65535, description="Container host port")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
@@ -1513,6 +1522,7 @@ class AddMcpServiceRequest(BaseModel):
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    skip_health_check: Optional[bool] = Field(None, description="Skip MCP protocol health check (for community URL fallback)")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
@@ -1550,7 +1560,7 @@ class UpdateMcpServiceRequest(BaseModel):
     mcp_id: int = Field(..., gt=0, description="MCP record ID")
     name: str = Field(..., min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
-    server_url: str = Field(..., min_length=1, description="New MCP server URL")
+    server_url: Optional[str] = Field(None, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
@@ -1561,7 +1571,7 @@ class UpdateMcpServiceRequest(BaseModel):
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
-    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
+    @field_validator("name", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):

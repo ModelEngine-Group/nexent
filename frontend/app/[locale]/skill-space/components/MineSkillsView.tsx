@@ -380,30 +380,25 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 };
 
 function getApplyButtonLabel(
-  isPendingReview: boolean,
-  hasSharedRepository: boolean,
+  hasRepositoryInfo: boolean,
   repositoryStatus: SkillRepositoryListingStatus,
   t: (key: string) => string
 ) {
-  if (isPendingReview) {
+  if (hasRepositoryInfo) {
     return getSkillRepositoryStatusLabel(t, repositoryStatus);
   }
-  return hasSharedRepository
-    ? t("skillRepository.mine.button.reapply")
-    : t("skillRepository.mine.button.apply");
+  return t("skillRepository.mine.button.apply");
 }
 
 function getMineSkillMenuItems({
   canPublish,
   hasRepositoryInfo,
-  isPendingReview,
   t,
   onViewReview,
   onDelete,
 }: {
   canPublish: boolean;
   hasRepositoryInfo: boolean;
-  isPendingReview: boolean;
   t: (key: string) => string;
   onViewReview: () => void;
   onDelete: () => void;
@@ -412,11 +407,7 @@ function getMineSkillMenuItems({
   if (canPublish && hasRepositoryInfo) {
     items.push({
       key: "review",
-      label: t(
-        isPendingReview
-          ? "skillRepository.mine.viewReviewProgress"
-          : "skillRepository.mine.viewRepositoryStatus"
-      ),
+      label: t("skillRepository.mine.viewReviewProgress"),
       icon: <ClipboardCheck className="size-3.5" aria-hidden />,
       onClick: onViewReview,
     });
@@ -462,18 +453,15 @@ function MineSkillCard({
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const sourceLabel = getSkillSourceLabel(skill.source, t);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
-  const isPendingReview = repositoryStatus === "pending_review";
-  const canApplyListing = canPublish && !isPendingReview;
+  const canApplyListing = canPublish && !hasRepositoryInfo;
   const applyButtonLabel = getApplyButtonLabel(
-    isPendingReview,
-    hasSharedRepository,
+    hasRepositoryInfo,
     repositoryStatus,
     t
   );
   const menuItems = getMineSkillMenuItems({
     canPublish,
     hasRepositoryInfo,
-    isPendingReview,
     t,
     onViewReview,
     onDelete,
@@ -586,7 +574,7 @@ function MineSkillCard({
                 type={hasSharedRepository ? "default" : "primary"}
                 className="w-full"
                 icon={<Power className="size-3.5" aria-hidden />}
-                disabled={!canPublish || isPendingReview}
+                disabled={!canPublish}
                 onClick={canApplyListing ? onApplyListing : onViewReview}
               >
                 {applyButtonLabel}

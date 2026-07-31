@@ -1072,6 +1072,32 @@ class SkillService:
             )
         return visible_skills
 
+    def list_visible_skill_permission_summaries(
+        self,
+        *,
+        tenant_id: Optional[str] = None,
+        user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """List lightweight visible-skill fields used by repository counts."""
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
+
+        user_role = _get_user_role(user_id)
+        user_group_ids = set(query_group_ids_by_user(user_id) or [])
+        return [
+            skill
+            for skill in skill_db.list_skill_permission_summaries(
+                effective_tenant_id
+            )
+            if can_view_skill(
+                skill=skill,
+                user_id=user_id,
+                user_role=user_role,
+                user_group_ids=user_group_ids,
+            )
+        ]
+
     def get_skill(self, skill_name: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Get a specific skill within a tenant.
 

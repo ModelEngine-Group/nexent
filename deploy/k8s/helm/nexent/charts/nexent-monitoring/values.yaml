@@ -41,7 +41,7 @@ images:
     tag: "26.3-alpine"
     pullPolicy: IfNotPresent
   minio:
-    repository: docker.io/minio/minio
+    repository: quay.io/minio/minio
     tag: "RELEASE.2023-12-20T01-00-02Z"
     pullPolicy: IfNotPresent
   redis:

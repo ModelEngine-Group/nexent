@@ -108,7 +108,7 @@ SUPABASE_JWT_SECRET = os.getenv(
 
 
 # OAuth Configuration
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "").rstrip("/")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # OAuth login mode:
@@ -206,6 +206,12 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv(
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+
+# AIDP Knowledge Base configuration
+ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
+AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
+AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
 DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 DEFAULT_APP_NAME_ZH = "Nexent 智能体"
@@ -401,6 +407,11 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 # Invite code
 INVITE_CODE = os.getenv("INVITE_CODE")
+
+# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+JWT_EXPIRY_SECONDS = int(os.getenv("JWT_EXPIRY", "7200") or 7200)
+if JWT_EXPIRY_SECONDS <= 0:
+    raise ValueError("JWT_EXPIRY must be a positive number of seconds")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)

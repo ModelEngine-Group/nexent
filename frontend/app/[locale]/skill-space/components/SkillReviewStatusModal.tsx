@@ -70,11 +70,17 @@ export function SkillReviewStatusModal({
     Modal.confirm({
       title: canTakeDown
         ? t("repository.listingStatus.confirmTakeDownTitle")
-        : t("skillRepository.reviewStatus.confirmWithdraw"),
-      content: title,
+        : t("repository.listingStatus.confirmCancelApplyTitle"),
+      content: canTakeDown
+        ? t("repository.listingStatus.confirmTakeDownContent", {
+            name: title,
+          })
+        : t("repository.listingStatus.confirmCancelApplyContent", {
+            name: title,
+          }),
       okText: canTakeDown
         ? t("repository.listingStatus.takeDown")
-        : t("skillRepository.reviewStatus.withdraw"),
+        : t("repository.listingStatus.cancelApply"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: onSetNotShared,
@@ -147,22 +153,16 @@ export function SkillReviewStatusModal({
         </div>
       </div>
 
-      <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-        <div className="flex justify-between gap-4">
-          <span>{t("skillRepository.reviewStatus.repositoryRecord")}</span>
-          <span className="font-medium text-slate-700 dark:text-slate-200">
-            #{repositoryInfo.skill_repository_id}
-          </span>
-        </div>
-        {submittedAt ? (
+      {submittedAt ? (
+        <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
           <div className="flex justify-between gap-4">
             <span>{t("repository.listingStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </Modal>
   );
 }

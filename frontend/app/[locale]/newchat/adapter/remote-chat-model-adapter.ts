@@ -5,11 +5,10 @@ import type {
   ChatModelRunOptions,
   ChatModelRunResult,
   CompleteAttachment,
+  ThreadMessage,
 } from "@assistant-ui/react";
-import type { ThreadMessage } from "@assistant-ui/core";
 
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 import {
   createA2UIDataPart,
@@ -33,6 +32,78 @@ interface SseChunk {
   agent_id?: number | string;
   agent_name?: string;
   depth?: number;
+}
+
+export interface Nl2aToolRecommendation {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  inputs: Record<string, unknown>;
+  score: number;
+}
+
+export interface Nl2AgentSelectedTool {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  inputs: string;
+}
+
+export interface Nl2AgentToolSelection {
+  type: "nl2agent_tool_selection";
+  tools: Nl2AgentSelectedTool[];
+}
+
+export type Nl2aLocalMcpRecommendationPayload =
+  | {
+      subtype: "local_mcp_recommendation";
+      status: "success";
+      recommendation_count: number;
+      recommendations: Nl2aToolRecommendation[];
+    }
+  | {
+      subtype: "local_mcp_recommendation";
+      status: "error";
+      code: "invalid_keywords" | "tool_search_failed";
+      retryable: true;
+    };
+
+export interface Nl2aAgentDraftPayload {
+  subtype: "agent_draft";
+  name: string;
+  display_name: string;
+  description: string;
+  duty_prompt: string;
+  constraint_prompt: string;
+  few_shots_prompt: string | null;
+  greeting_message: string;
+  example_questions: string[];
+}
+
+export type Nl2aPayload =
+  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
+
+export interface Nl2aMessage {
+  type: "nl2a";
+  tool_name?: string;
+  content: Nl2aPayload;
+}
+
+interface NexentRunConfig {
+  threadId?: string;
+  onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
+  resume?: boolean;
+  agentId?: number | string;
+  enablePlan?: boolean;
+  runtimeMode?: "nl2agent";
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -425,6 +496,7 @@ function extractAgentRunTime(content: string): string | undefined {
  * | step_count                   | text         | Current execution step number       |
  * | parse                         | tool-call    | Code parsing result                |
  * | execution_logs                | (attach)     | Attached to preceding tool result  |
+ * | nl2a                          | (metadata)   | NL2Agent structured output         |
  * | agent_new_run                 | text         | Agent basic information            |
  * | agent_finish                 | text         | Sub-agent run completion marker    |
  * | subagent_start               | subagent     | Opens a nested sub-agent card      |
@@ -483,6 +555,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "step_count":
     case "parse":
     case "card":
+    case "nl2a":
     case "skill_files":
     case "memory_search":
     case "plan":
@@ -547,6 +620,22 @@ function formatToolArguments(raw: unknown): string {
 function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
   contentParts.push(toolCallPart);
   return toolCallPart;
+}
+
+/**
+ * Parses an NL2Agent SSE chunk into frontend message metadata.
+ */
+function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
+  try {
+    return {
+      type: "nl2a",
+      tool_name: chunk.tool_name,
+      content: JSON.parse(chunk.content) as Nl2aPayload,
+    };
+  } catch (error) {
+    log.warn("[ChatModelAdapter] Failed to parse nl2a content:", error);
+    return null;
+  }
 }
 
 /**
@@ -824,9 +913,6 @@ export function clearStepTokenCounts(): void {
 }
 
 /**
- * Remote ChatModelAdapter for Nexent backend agent streaming.
-
-/**
  * Parse and build timing metadata from backend token_count chunk.
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
@@ -888,19 +974,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // It also injects `onServerConversationId` so we can report back the id
     // the backend auto-creates (via the `conversation_id` response header)
     // when this is the first message in a brand-new thread.
-    const customThreadId = runConfig?.custom as
-      | {
-          threadId?: string;
-          onServerConversationId?: (
-            serverId: string,
-            initialQuestion?: string
-          ) => void;
-          resume?: boolean;
-        }
-      | undefined;
-    const serverThreadId = customThreadId?.threadId;
-    const onServerConversationId = customThreadId?.onServerConversationId;
-    const isResume = customThreadId?.resume === true;
+    const custom = runConfig?.custom as NexentRunConfig | undefined;
+    const isNl2Agent = custom?.runtimeMode === "nl2agent";
+    const serverThreadId = custom?.threadId;
+    const onServerConversationId = custom?.onServerConversationId;
+    const isResume = !isNl2Agent && custom?.resume === true;
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -911,8 +989,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
 
-    const query =
+    const visibleQuery =
       lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
+    const selectionMetadata =
+      isNl2Agent && lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+          )?.nl2agentToolSelection
+        : undefined;
+    const query = selectionMetadata
+      ? JSON.stringify(selectionMetadata)
+      : visibleQuery;
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -957,15 +1045,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (hasServerConversationId) {
+    if (!isNl2Agent && hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
-    const custom = runConfig?.custom as
-      | { agentId?: number | string; enablePlan?: boolean; resume?: boolean }
-      | undefined;
-    if (custom?.agentId !== undefined && custom.agentId !== null) {
+    if (
+      !isNl2Agent &&
+      custom?.agentId !== undefined &&
+      custom.agentId !== null
+    ) {
       const numericAgentId =
         typeof custom.agentId === "string"
           ? Number(custom.agentId)
@@ -978,104 +1067,70 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (modelName) {
+    if (!isNl2Agent && modelName) {
       requestBody.model_id = Number(modelName);
     }
 
-    // Resume is explicit: an existing conversation may also receive a normal
-    // new user turn, so conversation_id alone must never select resume mode.
-    const url = isResume
-      ? `${API_ENDPOINTS.agent.run}?resume=true`
-      : API_ENDPOINTS.agent.run;
+    log.log(
+      "[ChatModelAdapter] Sending agent request through conversation service"
+    );
 
-    log.log(`[ChatModelAdapter] Sending request to ${url}`);
-
-    let response: Response;
+    let agentResponse:
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
+      agentResponse = await conversationService.runAgent(
+        {
+          ...requestBody,
+          query: String(requestBody.query || ""),
+          history: (requestBody.history || []) as Array<{
+            role: string;
+            content: string;
+          }>,
+          conversation_id: requestBody.conversation_id as number | undefined,
+          minio_files: requestBody.minio_files as any,
+          agent_id: requestBody.agent_id as number | undefined,
+          model_id: requestBody.model_id as number | undefined,
+          is_debug: false,
+          is_resume: isResume,
+          enable_plan: custom?.enablePlan === true,
+          runtime_mode: isNl2Agent ? "nl2agent" : undefined,
         },
-        body: JSON.stringify(requestBody),
-        signal: abortSignal,
-      });
+        abortSignal,
+        (conversationId) => {
+          const numericId = Number(conversationId);
+          if (
+            !Number.isNaN(numericId) &&
+            numericId > 0 &&
+            onServerConversationId
+          ) {
+            onServerConversationId(
+              String(numericId),
+              !isResume && !hasServerConversationId ? query : undefined
+            );
+          }
+        }
+      );
     } catch (error: unknown) {
-      if (error instanceof Error && error.name === "AbortError") {
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.message === "请求已被取消")
+      ) {
         log.log("[ChatModelAdapter] Request aborted by user");
         return;
       }
-      log.error("[ChatModelAdapter] Fetch error:", error);
+      log.error("[ChatModelAdapter] Agent request failed:", error);
       throw error;
     }
 
-    // Capture the server-issued conversation_id from the response header.
-    //
-    // When the request omits `conversation_id` (i.e. this is the first
-    // message in a brand-new thread) the backend auto-creates a conversation
-    // row and returns the new id via the `conversation_id` response header
-    // (mirrors the northbound `start_streaming_chat` pattern). We forward
-    // that id to the page so it can rebind `threadId` for subsequent runs in
-    // the same thread, preventing the frontend from triggering an extra
-    // `PUT /api/conversation/create` and creating a duplicate empty
-    // conversation.
-    //
-    // The header is also set on the non-streaming resume JSONResponse, so we
-    // pick it up there too without any extra work.
-    const headerConversationId = response.headers.get("conversation_id");
-    if (headerConversationId && onServerConversationId) {
-      const numericHeaderId = Number(headerConversationId);
-      if (!Number.isNaN(numericHeaderId) && numericHeaderId > 0) {
-        try {
-          onServerConversationId(
-            String(numericHeaderId),
-            !isResume && !hasServerConversationId ? query : undefined
-          );
-          log.log(
-            `[ChatModelAdapter] Captured server conversation_id from response header: ${numericHeaderId}`
-          );
-        } catch (cbError) {
-          // Callback failures must never break the stream — log and continue.
-          log.error(
-            "[ChatModelAdapter] onServerConversationId callback threw:",
-            cbError
-          );
-        }
-      }
-    }
-
-    if (!response.ok) {
-      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.detail || errorData.message || errorMessage;
-      } catch {
-        // Fall back to status text
-      }
-      log.error(`[ChatModelAdapter] HTTP error: ${errorMessage}`);
-      throw new Error(errorMessage);
-    }
-
-    if (!response.body) {
-      log.warn("[ChatModelAdapter] Empty response body");
+    if ("type" in agentResponse) {
+      log.log(
+        "[ChatModelAdapter] JSON response (resume finished):",
+        agentResponse.data
+      );
       return;
     }
 
-    // Detect JSON response (resume mode where the agent already finished)
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      try {
-        const data = await response.json();
-        log.log("[ChatModelAdapter] JSON response (resume finished):", data);
-      } catch {
-        // Ignore parse errors; nothing to stream
-      }
-      return;
-    }
-
-    // Stream SSE chunks
-    const reader = response.body.getReader();
+    const reader = agentResponse;
     const decoder = new TextDecoder();
     let buffer = "";
 
@@ -1137,11 +1192,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: string[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
+    let nl2a: Nl2aMessage | undefined;
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
       content,
+      metadata: nl2a ? { custom: { nl2a } } : undefined,
     });
 
     const streamStartTime = Date.now();
@@ -1249,6 +1306,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
+            continue;
+          }
+
+          if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
             continue;
           }
 
@@ -1445,6 +1511,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
+          } else if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
           } else if (chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
@@ -1622,15 +1694,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
 
       const finalResult = buildStreamResult(contentParts);
-      if (storedTiming) {
-        yield { ...finalResult, messageId, ...storedTiming } as any;
-      } else {
-        yield {
-          ...finalResult,
-          messageId,
-          ...buildTimingResult(streamStartTime, firstTokenTime, toolCallCount),
-        } as any;
-      }
+      const timingResult =
+        storedTiming ??
+        buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
+      yield {
+        ...finalResult,
+        messageId,
+        metadata: {
+          ...finalResult.metadata,
+          ...timingResult.metadata,
+        },
+      } as any;
     } finally {
       reader.releaseLock();
     }

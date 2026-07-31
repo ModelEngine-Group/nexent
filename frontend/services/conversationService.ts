@@ -923,9 +923,12 @@ export const conversationService = {
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
+      enable_plan?: boolean;
+      runtime_mode?: "nl2agent";
     },
-    signal?: AbortSignal
-  ) {
+    signal?: AbortSignal,
+    onConversationId?: (id: string) => void
+  ): Promise<ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }> {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -934,6 +937,7 @@ export const conversationService = {
         history: params.history,
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
+        enable_plan: params.enable_plan || false,
       };
 
       // Only include conversation_id if it has a value
@@ -953,7 +957,9 @@ export const conversationService = {
       }
 
       // Build URL with query parameters for resume mode
-      let url = API_ENDPOINTS.agent.run;
+      let url = params.runtime_mode === "nl2agent"
+        ? API_ENDPOINTS.agent.nl2agentRun
+        : API_ENDPOINTS.agent.run;
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");
@@ -968,6 +974,22 @@ export const conversationService = {
         body: JSON.stringify(requestParams),
         signal,
       });
+
+      const conversationId = response.headers.get("conversation_id");
+      if (conversationId && onConversationId) {
+        onConversationId(conversationId);
+      }
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          // Preserve the HTTP status when the error response is not JSON.
+        }
+        throw new Error(errorMessage);
+      }
 
       if (!response.body) {
         throw new Error("Response body is null");

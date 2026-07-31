@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { SubAgentContainer } from "../ui/subagent";
@@ -21,6 +22,7 @@ import {
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
+  groupPartByType,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -51,6 +53,8 @@ import {
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { ModelOption } from "../ui/model-selector";
+import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
   AssistantMessageAttachments,
   UserMessageAttachments,
@@ -62,6 +66,8 @@ import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
+import { ToolRecommendations } from "../ui/tool-recommendations";
+import { AgentDraftCard } from "../ui/agent-draft-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -70,17 +76,19 @@ import {
 import {
   getAgentRunTime,
   skillFileUploadsRegistry,
+  type Nl2aMessage,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
-  onBack: () => void;
+  onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 /**
@@ -125,7 +133,9 @@ export const Thread: FC<ThreadProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
+  const { t } = useTranslation();
   const models = useAgentModels(agent);
 
   const messages = useAuiState((s) => s.thread.messages);
@@ -138,7 +148,9 @@ export const Thread: FC<ThreadProps> = ({
   const hasMessages = messages.length > 0;
   const displayName = agent.display_name || agent.name;
   const conversationTitle =
-    generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
+    generatedTitle?.trim() ||
+    currentThreadTitle?.trim() ||
+    t("chat.thread.newChat");
 
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
@@ -184,6 +196,7 @@ export const Thread: FC<ThreadProps> = ({
         onModelChange={onModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
+        showModelSelector={showModelSelector}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -196,12 +209,13 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
-  onBack: () => void;
+  onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -217,32 +231,37 @@ const ThreadView: FC<ThreadViewProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector,
   hasMessages,
   displayName,
   conversationTitle,
   selection,
   onPanelClose,
 }) => {
+  const { t } = useTranslation();
+
   return (
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
+          {onBack && (
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <div className="flex flex-col">
             <span className="text-sm font-medium text-foreground">
               {hasMessages ? conversationTitle : displayName}
             </span>
             {hasMessages && (
               <span className="text-xs text-muted-foreground">
-                Conversation
+                {t("chat.thread.conversation")}
               </span>
             )}
           </div>
         </header>
 
-        <ThreadPrimitive.Viewport className="flex flex-1 flex-col overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
+        <ThreadPrimitive.Viewport className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
           {hasMessages ? (
             <ThreadMessages agent={agent} />
           ) : (
@@ -258,6 +277,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             onModelChange={onModelChange}
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -279,6 +299,7 @@ interface ThreadWelcomeContentProps {
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
   const aui = useAui();
+  const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
   const sampleQuestions = (agent.example_questions || []).slice(0, 4);
@@ -300,7 +321,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
 
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              你好，我是{displayName}
+              {t("chat.thread.helloAgent", { agent: displayName })}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
               {agent.greeting_message || agent.description}
@@ -311,7 +332,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
             <div className="w-full">
               <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <SparklesIcon className="size-3.5 text-primary" />
-                试试这些问题
+                {t("chat.thread.tryQuestions")}
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {sampleQuestions.map((q, index) => (
@@ -345,10 +366,12 @@ const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
 };
 
 const ThreadScrollToBottom: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <TooltipIconButton
-        tooltip="Scroll to bottom"
+        tooltip={t("chat.thread.scrollToBottom")}
         className="absolute -top-12 self-center rounded-full p-4"
       >
         <ArrowDownIcon />
@@ -368,6 +391,7 @@ const MessageError: FC = () => {
 };
 
 const AssistantWorkingIndicator: FC = () => {
+  const { t } = useTranslation();
   const isEmpty = useAuiState((s) => s.message.content.length === 0);
   if (isEmpty) {
     return (
@@ -376,7 +400,7 @@ const AssistantWorkingIndicator: FC = () => {
         className="text-muted-foreground inline-flex items-center gap-2 align-middle"
       >
         <DotMatrix state="connecting" aria-hidden />
-        <span className="text-sm">Connecting</span>
+        <span className="text-sm">{t("chat.thread.connecting")}</span>
       </span>
     );
   }
@@ -384,7 +408,7 @@ const AssistantWorkingIndicator: FC = () => {
     <span
       data-slot="aui_assistant-message-indicator"
       className="animate-pulse font-sans"
-      aria-label="Assistant is working"
+      aria-label={t("chat.thread.working")}
     >
       {"●"}
     </span>
@@ -392,6 +416,7 @@ const AssistantWorkingIndicator: FC = () => {
 };
 
 const AssistantCompletionIndicator: FC = () => {
+  const { t } = useTranslation();
   const isComplete = useAuiState((s) => s.message.status?.type === "complete");
 
   if (!isComplete) return null;
@@ -403,12 +428,13 @@ const AssistantCompletionIndicator: FC = () => {
       role="status"
     >
       <DotMatrix state="success" aria-hidden />
-      <span>Complete</span>
+      <span>{t("chat.thread.complete")}</span>
     </span>
   );
 };
 
 const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
+  const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -419,6 +445,10 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   const agentName = agent.display_name || agent.name;
 
   const agentRunTime = getAgentRunTime();
+  const nl2a = useAuiState(
+    (s) =>
+      (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
@@ -441,11 +471,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
     <MessagePrimitive.Root
       data-slot="aui_assistant-message-root"
       data-role="assistant"
-      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto w-full max-w-(--thread-max-width) duration-150"
+      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
       <div
         data-slot="aui_assistant-message-content"
-        className="text-foreground px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
+        className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
       >
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -465,8 +495,8 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             <span
               data-slot="aui_assistant-message-run-time"
               className="text-xs text-muted-foreground"
-              aria-label={`Agent run started at ${agentRunTime}`}
-              title={`Run started at ${agentRunTime}`}
+              aria-label={t("chat.thread.runStartedAt", { time: agentRunTime })}
+              title={t("chat.thread.runStartedAt", { time: agentRunTime })}
             >
               {agentRunTime}
             </span>
@@ -580,6 +610,13 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
+                if (part.name === "automation-proposal") {
+                  return (
+                    <AutomationProposalMessage
+                      proposal={part.data as AgentAutomationProposalData}
+                    />
+                  );
+                }
                 // The `subagent-boundary` stamp part is the seat of the
                 // group's header information. We let the header renderer
                 // paint it instead of returning it inside the body, so
@@ -613,6 +650,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} />
+        ) : nl2a?.content.subtype === "agent_draft" ? (
+          <AgentDraftCard draft={nl2a.content} />
+        ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
@@ -631,6 +673,8 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
 };
 
 const AssistantActionBar: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -639,7 +683,7 @@ const AssistantActionBar: FC = () => {
     >
       <div className="flex items-center gap-1">
         <ActionBarPrimitive.Copy asChild>
-          <TooltipIconButton tooltip="Copy">
+          <TooltipIconButton tooltip={t("chat.thread.copy")}>
             <AuiIf condition={(s) => s.message.isCopied}>
               <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
             </AuiIf>
@@ -649,14 +693,14 @@ const AssistantActionBar: FC = () => {
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
         <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton tooltip="Refresh">
+          <TooltipIconButton tooltip={t("chat.thread.refresh")}>
             <RefreshCwIcon />
           </TooltipIconButton>
         </ActionBarPrimitive.Reload>
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton
-              tooltip="More"
+              tooltip={t("chat.thread.more")}
               className="data-[state=open]:bg-accent"
             >
               <MoreHorizontalIcon />
@@ -671,7 +715,7 @@ const AssistantActionBar: FC = () => {
             <ActionBarPrimitive.ExportMarkdown asChild>
               <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
                 <DownloadIcon className="size-4" />
-                Export as Markdown
+                {t("chat.thread.exportMarkdown")}
               </ActionBarMorePrimitive.Item>
             </ActionBarPrimitive.ExportMarkdown>
           </ActionBarMorePrimitive.Content>
@@ -717,6 +761,8 @@ const UserMessage: FC = () => {
 };
 
 const UserActionBar: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -724,7 +770,10 @@ const UserActionBar: FC = () => {
       className="aui-user-action-bar-root flex flex-col items-end"
     >
       <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
+        <TooltipIconButton
+          tooltip={t("chat.thread.edit")}
+          className="aui-user-action-edit"
+        >
           <PencilIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
@@ -939,6 +988,7 @@ const SubAgentGroupRenderer: FC<{
 };
 
 const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
+  const { t } = useTranslation();
   // Subscribe to the current message so we can split the indices into image
   // vs. regular sources — `useAuiState` re-runs the selector on every change,
   // which keeps the counts accurate while a streaming run appends parts.
@@ -1008,12 +1058,16 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           className="inline-flex items-center gap-1 text-muted-foreground"
         >
           <FileTextIcon className="size-3.5" />
-          检索结果
+          {t("chat.thread.searchResults")}
         </span>
         <span className="text-foreground">
-          {sources.length > 0 ? `${sources.length} 个来源` : ""}
+          {sources.length > 0
+            ? t("chat.thread.sourceCount", { count: sources.length })
+            : ""}
           {sources.length > 0 && images.length > 0 ? ", " : ""}
-          {images.length > 0 ? `${images.length} 张图片` : ""}
+          {images.length > 0
+            ? t("chat.thread.imageCount", { count: images.length })
+            : ""}
         </span>
         {images.length > 0 ? (
           <ImageIcon className="size-3.5 text-muted-foreground" aria-hidden />

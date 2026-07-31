@@ -219,12 +219,33 @@ export interface AidpKnowledgeBaseItem {
   description?: string;
   document_count?: number;
   chunk_count?: number;
+  /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
+  permission?: "EDIT" | "READ_ONLY" | null;
+  /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. Ignored when PRIVATE. */
+  group_ids?: number[];
+  /** Nexent user_id of the KB creator (owner). */
+  created_by?: string;
+  /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
+  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
+  created_at?: string;
+  /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
+  updated_at?: string;
+  /** Embedding model name configured for this KB in AIDP. */
+  embedding_model?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {
   value: AidpKnowledgeBaseItem[];
   total_count?: number;
   next_link?: string | null;
+  has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface SkillParam {
@@ -537,6 +558,7 @@ export interface McpServer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  group_ids?: string;
 }
 
 // MCP tool interface definition

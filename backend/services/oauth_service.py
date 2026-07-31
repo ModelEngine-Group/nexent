@@ -21,6 +21,7 @@ from consts.const import (
     OAUTH_SSL_VERIFY,
     OAUTH_CA_BUNDLE,
     SUPABASE_JWT_SECRET,
+    JWT_EXPIRY_SECONDS,
 )
 from consts.exceptions import OAuthLinkError, OAuthProviderError
 from services.asset_owner_visibility import require_asset_owner_enabled
@@ -505,8 +506,10 @@ async def complete_pending_oauth_account(
         tenant_id=tenant_id,
     )
 
-    expiry_seconds = 3600
-    jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+    jwt_token = generate_session_jwt(
+        supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+    )
+    expiry_seconds = JWT_EXPIRY_SECONDS
     expires_at = calculate_expires_at(jwt_token)
 
     return {

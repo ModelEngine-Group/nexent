@@ -12,7 +12,14 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from pydantic_core import PydanticUndefined
 
-from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    DATA_PROCESS_SERVICE,
+    LOCAL_MCP_SERVER,
+    MCP_MANAGEMENT_API,
+)
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
@@ -37,6 +44,7 @@ from database.tool_db import (
     update_tool_table_from_scan_tool_list,
 )
 from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
@@ -354,6 +362,36 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
+    # v7.1: validate per-KB READ access for aidp_search so a tenant user
+    # cannot stash a forbidden kds_id in their tool config for later abuse.
+    if getattr(tool_info, "name", None) == "aidp_search":
+        params = tool_info.params or {}
+        kds_list = params.get("kds_list") or []
+        # ``kds_list`` may arrive as a JSON-encoded string (the
+        # legacy storage shape); decode it so we can validate each entry.
+        if isinstance(kds_list, str):
+            import json
+            try:
+                kds_list = json.loads(kds_list)
+            except json.JSONDecodeError:
+                kds_list = []
+        if kds_list:
+            try:
+                from ext_components.aidp.services import (
+                    aidp_permission_service as _aidp_perms,
+                )
+                for _kds_id in kds_list:
+                    _aidp_perms.require_permission(
+                        kb_id=_kds_id, user_id=user_id,
+                        tenant_id=tenant_id, required="READ",
+                    )
+            except Exception:
+                # Surface as ValidationError so the app layer returns 400.
+                from consts.exceptions import ValidationError
+                raise ValidationError(
+                    f"aidp_search kds_list contains a KB the user cannot read"
+                ) from None
+
     # Use version_no from request if provided, otherwise default to 0
     version_no = getattr(tool_info, 'version_no', 0)
     tool_instance = create_or_update_tool_by_tool_info(
@@ -406,6 +444,9 @@ async def get_tool_from_remote_mcp_server(
             tools = await client.list_tools()
 
             for tool in tools:
+                if isinstance(tool.meta, dict) and tool.meta.get("nexent_internal") is True:
+                    continue
+
                 input_schema = {
                     k: v
                     for k, v in jsonref.replace_refs(tool.inputSchema).items()
@@ -502,6 +543,10 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     else:
         tools_info = query_all_tools(tenant_id)
 
+    updated_by_email_map = get_user_email_map(
+        [tool.get("updated_by", "") for tool in tools_info]
+    )
+
     # Get description_zh from SDK for local tools (not persisted to DB)
     local_tool_descriptions = get_local_tools_description_zh()
 
@@ -570,7 +615,8 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "updated_by": tool.get("updated_by", "")
+            "updated_by": tool.get("updated_by", ""),
+            "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
         formatted_tools.append(formatted_tool)
     return formatted_tools
@@ -842,6 +888,25 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
+            if tool_name == "aidp_search":
+                # AIDP credentials are sourced from ``consts.const`` (i.e. the
+                # process environment). Inject them here exactly as
+                # ``create_agent_info`` does at runtime, so validation builds
+                # the same tool instance shape. Never trust client-submitted
+                # credentials.
+                if not AIDP_SERVER_URL:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_SERVER_URL before testing aidp_search"
+                    )
+                if not AIDP_API_KEY:
+                    raise ToolExecutionException(
+                        "AIDP is not configured for this deployment: "
+                        "set AIDP_API_KEY before testing aidp_search"
+                    )
+                filtered_params["server_url"] = AIDP_SERVER_URL
+                filtered_params["api_key"] = AIDP_API_KEY
+                filtered_params["tenant_id"] = AIDP_TENANT_ID
             tool_instance = tool_class(**filtered_params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:

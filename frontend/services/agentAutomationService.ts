@@ -1,6 +1,7 @@
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import type {
+  AgentAutomationPage,
   AgentAutomationRun,
   AgentAutomationProposalData,
   AgentAutomationTask,
@@ -15,6 +16,13 @@ interface AutomationTaskListFilters {
   status?: AutomationTaskListStatus;
   search?: string;
   agentName?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+interface AutomationRunListFilters {
+  page?: number;
+  pageSize?: number;
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -34,12 +42,14 @@ async function readResponse<T>(response: Response): Promise<T> {
 export const agentAutomationService = {
   async list(
     filters: AutomationTaskListFilters = {}
-  ): Promise<AgentAutomationTask[]> {
+  ): Promise<AgentAutomationPage<AgentAutomationTask>> {
     const query = new URLSearchParams();
     if (filters.status) query.set("status", filters.status);
     if (filters.search?.trim()) query.set("search", filters.search.trim());
     if (filters.agentName?.trim())
       query.set("agent_name", filters.agentName.trim());
+    query.set("page", String(filters.page ?? 1));
+    query.set("page_size", String(filters.pageSize ?? 20));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     const response = await fetch(
       `${API_ENDPOINTS.agentAutomation.list}${suffix}`,
@@ -47,7 +57,7 @@ export const agentAutomationService = {
         headers: getAuthHeaders(),
       }
     );
-    return readResponse<AgentAutomationTask[]>(response);
+    return readResponse<AgentAutomationPage<AgentAutomationTask>>(response);
   },
 
   async update(
@@ -94,11 +104,21 @@ export const agentAutomationService = {
     return readResponse<boolean>(response);
   },
 
-  async runs(taskId: number): Promise<AgentAutomationRun[]> {
-    const response = await fetch(API_ENDPOINTS.agentAutomation.runs(taskId), {
-      headers: getAuthHeaders(),
+  async runs(
+    taskId: number,
+    filters: AutomationRunListFilters = {}
+  ): Promise<AgentAutomationPage<AgentAutomationRun>> {
+    const query = new URLSearchParams({
+      page: String(filters.page ?? 1),
+      page_size: String(filters.pageSize ?? 10),
     });
-    return readResponse<AgentAutomationRun[]>(response);
+    const response = await fetch(
+      `${API_ENDPOINTS.agentAutomation.runs(taskId)}?${query.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    return readResponse<AgentAutomationPage<AgentAutomationRun>>(response);
   },
 
   async cancelRun(runId: number): Promise<AgentAutomationRun> {

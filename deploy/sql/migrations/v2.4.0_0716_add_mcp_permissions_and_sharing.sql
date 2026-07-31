@@ -61,4 +61,13 @@ SET ingroup_permission = 'EDIT'
 WHERE group_ids IS NULL
   AND delete_flag != 'Y';
 
+-- -------------------------------------------------------------------------
+-- Fix mcp_market_record_t unique index: use (tenant_id, mcp_name) instead
+-- of (mcp_name) to prevent cross-tenant name conflicts.
+-- -------------------------------------------------------------------------
+DROP INDEX IF EXISTS nexent.uq_mcp_market_name_active;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_market_name_active
+    ON nexent.mcp_market_record_t (tenant_id, mcp_name)
+    WHERE delete_flag = 'N' AND review_status = 'shared';
+
 COMMIT;

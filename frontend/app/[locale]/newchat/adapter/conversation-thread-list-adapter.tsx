@@ -19,6 +19,7 @@ import type {
 } from "@assistant-ui/react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
+import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
 import log from "@/lib/logger";
@@ -91,7 +92,7 @@ export const restoreHistoricalChatMode = (conversationId?: string): void => {
   );
 };
 
-const cacheHistoricalChatMode = (
+export const cacheHistoricalChatMode = (
   conversationId: string,
   chatMode: HistoricalChatMode | undefined
 ): void => {
@@ -157,6 +158,22 @@ const parseSearchImageUrls = (content: string): string[] => {
       : [];
   } catch {
     return [];
+  }
+};
+
+const parseAutomationProposal = (
+  content: string
+): AgentAutomationProposalData | null => {
+  try {
+    const value = JSON.parse(content) as unknown;
+    if (typeof value !== "object" || value === null) return null;
+
+    const proposal = value as AgentAutomationProposalData;
+    return typeof proposal.proposal_id === "number" && proposal.task
+      ? proposal
+      : null;
+  } catch {
+    return null;
   }
 };
 
@@ -709,6 +726,21 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const meta = buildMetadata();
               if (meta) errorPart.metadata = meta;
               content.push(errorPart);
+            }
+            continue;
+          }
+
+          if (part.type === "automation_proposal") {
+            flushReasoning();
+            const proposal = parseAutomationProposal(part.content);
+            if (proposal) {
+              content.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
+            } else {
+              log.warn("[history-adapter] Failed to parse automation proposal");
             }
             continue;
           }

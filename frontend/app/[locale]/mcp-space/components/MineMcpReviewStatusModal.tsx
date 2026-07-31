@@ -90,24 +90,12 @@ export default function MineMcpReviewStatusModal({
     });
   };
 
-  const confirmTakeDown = () => {
-    Modal.confirm({
-      title: t("repository.listingStatus.confirmTakeDownTitle"),
-      content: t("repository.listingStatus.confirmTakeDownContent", {
-        name: title,
-      }),
-      okText: t("repository.listingStatus.takeDown"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      centered: true,
-      onOk: async () => {
-        try {
-          if (onlineService) await onTakeDown(item, onlineService);
-        } catch {
-          throw new Error("Take down failed");
-        }
-      },
-    });
+  const confirmTakeDown = async () => {
+    try {
+      if (onlineService) await onTakeDown(item, onlineService);
+    } catch {
+      throw new Error("Take down failed");
+    }
   };
 
   return (

@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
 from consts.model import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from services.skill_repository_service import (
+    count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
     get_skill_repository_listing_detail_impl,
     install_skill_from_repository_impl,
@@ -114,6 +115,25 @@ async def list_my_editable_skills_api(
             f"Invalid my editable skills request parameters (ownership={ownership}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+
+@skill_repository_router.get("/mine/counts")
+async def count_my_editable_skills_api(
+    authorization: str = Header(None),
+):
+    """Count visible skills by ownership without loading full skill records."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = count_my_editable_skills_impl(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized my editable skill counts access attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
 
 
 @skill_repository_router.get("/{skill_repository_id}")

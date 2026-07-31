@@ -299,6 +299,9 @@ async def add_remote_mcp_server_list(
     custom_headers: dict | None = None,
     source: str | None = "local",
     container_port: int | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ):
     """Add a remote MCP server to the list.
 
@@ -339,6 +342,9 @@ async def add_remote_mcp_server_list(
         "source": source,
         "container_port": container_port,
         "registry_json": {"_toolNames": tool_names},
+        "group_ids": group_ids,
+        "ingroup_permission": ingroup_permission,
+        "shared_fields": shared_fields,
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -395,6 +401,7 @@ async def add_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    skip_health_check: bool = False,
 ) -> None:
     """Add an MCP service record.
 
@@ -424,28 +431,8 @@ async def add_mcp_service(
     resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
     if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-        # If the name exists but the existing MCP has group restrictions that make it
-        # invisible to this user, allow the installation anyway.
-        from database.remote_mcp_db import get_mcp_records_by_tenant
-        existing = [r for r in get_mcp_records_by_tenant(tenant_id) if r.get("mcp_name") == name]
-        if existing:
-            existing_rec = existing[0]
-            existing_group_ids = (existing_rec.get("group_ids") or "").strip()
-            if existing_group_ids:
-                created_by = str(existing_rec.get("created_by") or existing_rec.get("user_id") or "")
-                if created_by != user_id:
-                    from database.group_db import query_group_ids_by_user
-                    user_grps = [str(g) for g in (query_group_ids_by_user(user_id) or [])]
-                    allowed = [g.strip() for g in existing_group_ids.split(",") if g.strip()]
-                    if any(g in allowed for g in user_grps):
-                        logger.error(f"MCP name already exists: {name}")
-                        raise MCPNameIllegal("MCP name already exists")
-                else:
-                    logger.error(f"MCP name already exists: {name}")
-                    raise MCPNameIllegal("MCP name already exists")
-            else:
-                logger.error(f"MCP name already exists: {name}")
-                raise MCPNameIllegal("MCP name already exists")
+        logger.error(f"MCP name already exists: {name}")
+        raise MCPNameIllegal("MCP name already exists")
 
     resolved_registry_json = registry_json or {}
     if server_url:
@@ -482,9 +469,10 @@ async def add_mcp_service(
                 resolved_registry_json["_toolNames"] = api_tools
         else:
             headers = _build_mcp_headers(authorization_token, custom_headers)
-            tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
-            if tool_names:
-                resolved_registry_json["_toolNames"] = tool_names
+            if not skip_health_check:
+                tool_names = await _check_mcp_connectivity(server_url, headers, is_container, name)
+                if tool_names:
+                    resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
@@ -721,6 +709,12 @@ def update_mcp_service(
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
         raise McpNotFoundError("MCP record not found")
+
+    # Check name uniqueness (exclude the current record itself)
+    if new_name != current_record.get("mcp_name"):
+        if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):
+            logger.error(f"MCP name already exists: {new_name} in tenant {tenant_id}")
+            raise McpNameConflictError("MCP name already exists")
 
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
     next_config_json = config_json if config_json is not None else current_config_json
@@ -1105,6 +1099,7 @@ async def get_remote_mcp_server_list(
             "enabled": record.get("enabled"),
             "source": record.get("source"),
             "update_time": record.get("update_time"),
+            "create_time": record.get("create_time"),
             "tags": record.get("tags") or [],
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),
@@ -1317,6 +1312,10 @@ async def check_mcp_service_health(
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[dict]:
     """Get tools from an MCP service by ID.
 
+    For API-type MCPs (OpenAPI), tools are already registered in the database
+    via import_openapi_service.  Return them from the tool registry instead of
+    attempting an MCP-protocol connection.
+
     Args:
         tenant_id: Tenant ID
         mcp_id: MCP record ID
@@ -1332,6 +1331,22 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise McpNotFoundError("MCP record not found")
+
+    config_json = record.get("config_json")
+    registry_json = record.get("registry_json")
+    is_api_type = isinstance(config_json, dict) and "openapi" in config_json
+    if is_api_type:
+        # API-type MCPs have no MCP protocol endpoint.
+        # Return the tool names that were extracted during registration.
+        tool_names = []
+        if isinstance(registry_json, dict):
+            raw = registry_json.get("_toolNames")
+            if isinstance(raw, list):
+                tool_names = raw
+        return [
+            {"name": name, "description": ""}
+            for name in tool_names
+        ]
 
     service_name = record.get("mcp_name")
     server_url = record.get("mcp_server")
@@ -1423,6 +1438,9 @@ async def upload_and_start_mcp_image(
     port: int,
     service_name: str | None = None,
     env_vars: str | None = None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
 ) -> dict:
     """Upload MCP Docker image and start container.
 
@@ -1499,7 +1517,10 @@ async def upload_and_start_mcp_image(
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
         authorization_token=authorization_token,
-        container_port=port
+        container_port=port,
+        group_ids=group_ids,
+        ingroup_permission=ingroup_permission,
+        shared_fields=shared_fields,
     )
 
     return {

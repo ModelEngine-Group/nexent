@@ -3,7 +3,7 @@ from typing import Optional
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
-from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding
+from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
@@ -17,6 +17,7 @@ logger = logging.getLogger("model_health_service")
 
 DASHSCOPE_MODEL_FACTORY = "dashscope"
 TOKENPONY_MODEL_FACTORY = "tokenpony"
+SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
 PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
 
@@ -38,14 +39,16 @@ def _normalize_embedding_url(base_url: str) -> str:
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
     """Infer model_factory from base_url if not already set or is generic.
 
-    For embedding/multi_embedding, uses legacy logic (only dashscope) to avoid
-    changing existing behavior. For other types (VLM), uses extended inference
-    so tokenpony URLs can be recognized for catalog healthcheck.
+    For embedding/multi_embedding, recognizes dashscope and siliconflow URLs.
+    For other types (VLM), uses extended inference so tokenpony URLs can be
+    recognized for catalog healthcheck.
     """
-    # Embedding types: keep legacy behavior (only dashscope)
+    # Embedding types: infer from base_url host
     if model_type in EMBEDDING_TYPES:
         if "dashscope" in base_url.lower():
             return DASHSCOPE_MODEL_FACTORY
+        if "siliconflow" in base_url.lower():
+            return SILICONFLOW_MODEL_FACTORY  # stored as "silicon" for catalog consistency
         return current_factory
 
     # Non-embedding types (VLM, etc): use extended inference
@@ -101,7 +104,7 @@ async def _embedding_dimension_check(
                 ssl_verify=ssl_verify,
             )
         else:
-            embedding_instance = JinaEmbedding(
+            embedding_instance = SiliconflowMultimodalEmbedding(
                 api_key=model_api_key,
                 base_url=model_base_url,
                 model_name=model_name,
@@ -199,7 +202,7 @@ async def _perform_connectivity_check(
                 ssl_verify=ssl_verify,
             )
         else:
-            embedding = JinaEmbedding(
+            embedding = SiliconflowMultimodalEmbedding(
                 api_key=model_api_key,
                 base_url=model_base_url,
                 model_name=model_name,

@@ -12,6 +12,7 @@ DEFAULT_VERSION="latest"
 DEFAULT_PLATFORM="amd64"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/offline-package"
 DEFAULT_INCLUDE_SOURCE="false"
+DEFAULT_INCLUDE_SANDBOX="true"
 DEFAULT_TARGET="all"
 DEFAULT_COMPRESS="false"
 
@@ -19,6 +20,7 @@ VERSION=""
 PLATFORM=""
 OUTPUT_DIR=""
 INCLUDE_SOURCE=""
+INCLUDE_SANDBOX=""
 TARGET=""
 COMPRESS=""
 DRY_RUN="false"
@@ -52,6 +54,8 @@ show_help() {
     echo "                           默认：$DEFAULT_OUTPUT_DIR"
     echo "  --include-source BOOL   是否包含源码（true 或 false）"
     echo "                           默认：$DEFAULT_INCLUDE_SOURCE"
+    echo "  --include-sandbox BOOL  是否包含 Sandbox 镜像（true 或 false）"
+    echo "                           默认：$DEFAULT_INCLUDE_SANDBOX"
     echo "  --target TARGET         docker、k8s 或 all"
     echo "                           默认：$DEFAULT_TARGET"
     echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
@@ -86,6 +90,8 @@ show_help() {
   echo "                           Default: $DEFAULT_OUTPUT_DIR"
   echo "  --include-source BOOL   Include source code (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
+  echo "  --include-sandbox BOOL  Include the Sandbox image (true or false)"
+  echo "                           Default: $DEFAULT_INCLUDE_SANDBOX"
   echo "  --target TARGET         docker, k8s, or all"
   echo "                           Default: $DEFAULT_TARGET"
   echo "  --compress BOOL        Create zip archive after package build (true or false)"
@@ -125,6 +131,10 @@ parse_args() {
         ;;
       --include-source)
         INCLUDE_SOURCE="$2"
+        shift 2
+        ;;
+      --include-sandbox)
+        INCLUDE_SANDBOX="$2"
         shift 2
         ;;
       --target)
@@ -171,6 +181,7 @@ parse_args() {
   PLATFORM="${PLATFORM:-$DEFAULT_PLATFORM}"
   OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
   INCLUDE_SOURCE="${INCLUDE_SOURCE:-$DEFAULT_INCLUDE_SOURCE}"
+  INCLUDE_SANDBOX="${INCLUDE_SANDBOX:-$DEFAULT_INCLUDE_SANDBOX}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
 
@@ -195,6 +206,14 @@ parse_args() {
       echo "错误：Compress 必须是 'true' 或 'false'"
     else
       echo "Error: Compress must be 'true' or 'false'"
+    fi
+    exit 1
+  fi
+  if [[ "$INCLUDE_SANDBOX" != "true" && "$INCLUDE_SANDBOX" != "false" ]]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Include sandbox 必须是 'true' 或 'false'"
+    else
+      echo "Error: Include sandbox must be 'true' or 'false'"
     fi
     exit 1
   fi
@@ -223,6 +242,7 @@ show_dry_run_plan() {
     echo "平台：$PLATFORM"
     echo "输出目录：$OUTPUT_DIR"
     echo "包含源码：$INCLUDE_SOURCE"
+    echo "包含 Sandbox 镜像：$INCLUDE_SANDBOX"
     echo "目标：$TARGET"
     echo "压缩：$COMPRESS"
     echo "组件：$DEPLOYMENT_COMPONENTS"
@@ -242,6 +262,7 @@ show_dry_run_plan() {
     echo "Platform: $PLATFORM"
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
+    echo "Include Sandbox image: $INCLUDE_SANDBOX"
     echo "Target: $TARGET"
     echo "Compress: $COMPRESS"
     echo "Components: $DEPLOYMENT_COMPONENTS"
@@ -262,7 +283,7 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "sandbox" && echo "$NEXENT_SANDBOX_IMAGE"
+  [ "$INCLUDE_SANDBOX" = "true" ] && echo "$NEXENT_SANDBOX_IMAGE"
   true
 }
 
@@ -298,7 +319,7 @@ get_third_party_images() {
           "docker.io/langfuse/langfuse-worker:3" \
           "docker.io/langfuse/langfuse:3" \
           "docker.io/clickhouse/clickhouse-server:26.3-alpine" \
-          "docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+          "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
           "docker.io/redis:alpine" \
           "docker.io/postgres:15-alpine"; do
           echo_image_ref "$image"
@@ -650,6 +671,7 @@ create_manifest() {
     echo "platform: \"$PLATFORM\""
     echo "target: \"$TARGET\""
     echo "components: \"$DEPLOYMENT_COMPONENTS\""
+    echo "includeSandbox: \"$INCLUDE_SANDBOX\""
     echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
     echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
     echo "images:"

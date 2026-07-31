@@ -24,7 +24,7 @@ class MemoryHandler(ContextItemHandler):
         #         + recency * 0.2
         #         + authority_weight * 0.3
         #   Signals: item.metadata["retrieval_score"], item.metadata["created_at"],
-        #            item.authority_tier (user_agent > agent > user > tenant)
+        #            item.authority_tier (agent > user > tenant)
         return 1.0
 
     def reduce(

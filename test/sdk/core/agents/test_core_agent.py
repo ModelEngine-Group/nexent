@@ -961,6 +961,51 @@ def test_final_answer_error_creation():
         raise error
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Step 2:\nCalled tool 'python_interpreter'()",
+        "### Step 2:\n- Called tool 'python_interpreter'()",
+        "Observation: previous result",
+        '{"tool_calls":[{"name":"python_interpreter","arguments":"print(1)"}]}',
+        '```json\n{"action":"search","arguments":{"q":"GAIA"}}\n```',
+        "<code>print('missing closing tag')",
+    ],
+)
+def test_action_like_non_executable_output_is_not_a_final_answer(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        None,
+        42,
+        "",
+        "   ",
+        "The answer is 42.",
+        "I could not find enough evidence to answer.",
+        '{"answer":"42"}',
+        "{not valid json",
+        "```json```",
+        '["not an action record"]',
+    ],
+)
+def test_plain_answer_does_not_look_like_invalid_action(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "```<RUN>print('missing closing fence')",
+        '[{"action":"search","arguments":{"q":"GAIA"}}]',
+    ],
+)
+def test_additional_action_protocol_variants_are_invalid(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
+
+
 # ----------------------------------------------------------------------------
 # Additional edge case tests for parse_code_blobs
 # ----------------------------------------------------------------------------
@@ -2784,6 +2829,50 @@ def test_coerce_observer_arguments_stringifies_other_values():
     value = object()
 
     assert core_agent_module._coerce_observer_arguments(value) == str(value)
+
+
+def test_coerce_observer_arguments_replaces_callable_with_name():
+    """Callable objects are replaced with their ``name`` attribute."""
+    tool = type("FakeTool", (), {"name": "my_tool", "__call__": lambda self: None})()
+
+    assert core_agent_module._coerce_observer_arguments(tool) == "my_tool"
+
+
+def test_coerce_observer_arguments_replaces_callable_inside_nested_structures():
+    """Recursively replace callables inside dict/list/tuple — the
+    parallel_executor use case."""
+    tool_a = type("ToolA", (), {"name": "read_skill_config", "__call__": lambda self: None})()
+    tool_b = type("ToolB", (), {"name": "read_skill_md", "__call__": lambda self: None})()
+
+    # Simulate observed_forward kwargs for parallel_executor
+    kwargs = {
+        "tasks": [
+            (tool_a, {"skill_name": "data_analysis"}),
+            (tool_b, {"skill_name": "data_analysis"}, "readme"),
+        ],
+        "timeout": 30,
+        "max_workers": 2,
+    }
+    result = core_agent_module._coerce_observer_arguments(kwargs)
+
+    # callables replaced by name strings; tuples stay tuples; other values unchanged
+    expected_tasks = [
+        ("read_skill_config", {"skill_name": "data_analysis"}),
+        ("read_skill_md", {"skill_name": "data_analysis"}, "readme"),
+    ]
+    assert result == {"tasks": expected_tasks, "timeout": 30, "max_workers": 2}
+
+    # Verify the result is JSON-serializable (the whole point of the fix)
+    import json
+    json.dumps(result)
+
+
+def test_coerce_observer_arguments_preserves_tuple_type():
+    """Tuple without callables keeps its structure."""
+    value = ("a", "b", {"nested": 1})
+    result = core_agent_module._coerce_observer_arguments(value)
+    assert result == ("a", "b", {"nested": 1})
+    assert isinstance(result, tuple)
 
 
 def test_collect_call_arguments_extracts_literals_expressions_and_kwargs():

@@ -22,7 +22,7 @@ export default function CommunityQuickAddModal({
   controller,
 }: CommunityQuickAddModalProps) {
   const { t } = useTranslation("common");
-  const { source, draft, submitting, updateDraft, close, confirm } = controller;
+  const { source, draft, submitting, updateDraft, close, confirm, nameError } = controller;
 
   if (!source || !draft) return null;
 
@@ -84,7 +84,14 @@ export default function CommunityQuickAddModal({
               value={draft.name}
               onChange={(e) => updateDraft({ name: e.target.value })}
               autoComplete="off"
+              status={nameError ? "error" : undefined}
             />
+            <p className="mt-1 text-xs text-slate-400">
+              {t("mcpTools.addModal.renameBeforeInstallHint")}
+            </p>
+            {nameError ? (
+              <p className="mt-0.5 text-xs text-rose-500">{nameError}</p>
+            ) : null}
           </div>
 
           {/* Description */}
@@ -105,9 +112,28 @@ export default function CommunityQuickAddModal({
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 {t("mcpTools.addModal.containerPort")}
               </label>
-              <p className="text-sm font-medium text-slate-800">
-                {draft.containerPort ?? "-"}
-              </p>
+              <Input
+                value={draft.containerPort ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const num = parseInt(val, 10);
+                  if (val === "" || (Number.isFinite(num) && num >= 1 && num <= 65535)) {
+                    updateDraft({ containerPort: val === "" ? undefined : num });
+                  }
+                }}
+                type="number"
+                min={1}
+                max={65535}
+                autoComplete="off"
+              />
+              <div className="mt-3">
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  {t("mcpTools.addModal.containerConfig")}
+                </label>
+                <pre className="text-xs text-slate-600 bg-slate-50 rounded-lg p-3 overflow-auto max-h-32 whitespace-pre-wrap break-all">
+                  {draft.containerConfigJson || t("mcpTools.detail.noDescription")}
+                </pre>
+              </div>
             </div>
           ) : (
             <div>
