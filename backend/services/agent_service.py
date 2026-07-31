@@ -12,8 +12,6 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
-from nexent.core.agents.context_input import ContextInput
-from nexent.core.agents.context import ContextItemInput
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -74,7 +72,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -94,7 +92,7 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
+    generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     get_conversation_service,
     get_current_run_user_message_id,
     get_latest_assistant_message,
@@ -119,6 +117,7 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
+from utils.context_utils import build_authorized_context_input
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -940,7 +939,6 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -1045,9 +1043,6 @@ async def _stream_agent_chunks(
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
-
-            if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
                 artifact_content = data.get("content")
@@ -1644,34 +1639,40 @@ def _validate_requested_output_tokens_for_agent(
     if requested_output_tokens is None:
         return
 
-    model_id = request.model_id
-    if model_id is None and request.agent_id is not None:
+    # Validate against every configured model — the user can switch models at
+    # chat time, so requested_output_tokens must not exceed any model's limit.
+    model_ids = list(request.model_ids or [])
+    if not model_ids and request.agent_id is not None:
         try:
             existing_agent = search_agent_info_by_agent_id(
                 agent_id=request.agent_id,
                 tenant_id=tenant_id,
                 version_no=request.version_no,
             )
-            model_id = existing_agent.get("model_id")
+            model_ids = list(existing_agent.get("model_ids") or [])
         except Exception as exc:
             logger.warning(
-                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                "Could not resolve existing agent models for requested_output_tokens validation: %s",
                 exc,
             )
 
-    if model_id is None:
+    if not model_ids:
         return
 
-    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            (
-                "requested_output_tokens cannot exceed the selected model "
-                f"max_output_tokens ({max_output_tokens})"
-            ),
-        )
+    for model_id in model_ids:
+        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+        if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+            model_display = (
+                model_info.get("display_name") if model_info else f"model_id={model_id}"
+            )
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                (
+                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
+                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
+                ),
+            )
 
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
@@ -2731,44 +2732,6 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
-def _build_authorized_context_input(agent_run_info, historical_context=None) -> ContextInput:
-    """Freeze configured context and authorized history into one item snapshot."""
-    if historical_context is None:
-        fallback_turns = []
-        pending_user = None
-        for index, entry in enumerate(agent_run_info.history or ()):
-            if entry.role == MESSAGE_ROLE["USER"]:
-                pending_user = (index, entry)
-            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
-                user_index, user_entry = pending_user
-                fallback_turns.append({
-                    "user_message": user_entry.content,
-                    "assistant_final_answer": entry.content,
-                    "attachments": [],
-                    "user_message_id": -(user_index + 1),
-                    "assistant_message_id": -(index + 1),
-                })
-                pending_user = None
-        historical_context = {"conversation_turns": fallback_turns}
-    history_items = []
-    summary = historical_context.get("history_summary")
-    if summary:
-        history_items.append(ContextItemInput(
-            id=f"history_summary:{summary['unit_id']}", type="history_summary",
-            content=summary, source=("conversation_history",),
-        ))
-    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
-        history_items.append(ContextItemInput(
-            id=f"conversation_turn:{turn['user_message_id']}:{turn['assistant_message_id']}",
-            type="conversation_turn", content=turn,
-            source=("conversation_history",),
-            metadata={"layout_order": order},
-        ))
-    return ContextInput(
-        items=tuple(agent_run_info.agent_config.context_items or ()) + tuple(history_items),
-    )
-
-
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2815,7 +2778,7 @@ async def prepare_agent_run(
             historical_context = load_historical_context(
                 agent_request.conversation_id, current_message_id, user_id, tenant_id
             )
-    agent_run_info.context_input = _build_authorized_context_input(
+    agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
     agent_run_info.conversation_id = agent_request.conversation_id
@@ -3805,7 +3768,6 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
     Returns:
         A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
     """
-    from nexent.core.agents.sandbox import SandboxConfig
     from consts.const import (
         NEXENT_SANDBOX_DEFAULT_LEVEL,
         NEXENT_SANDBOX_DEFAULT_SCOPE,

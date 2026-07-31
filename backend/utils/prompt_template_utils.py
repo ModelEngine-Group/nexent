@@ -68,6 +68,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             - 'generate_title': Title generation template
             - 'document_summary': Document summary template (Map stage)
             - 'cluster_summary_reduce': Cluster summary reduce template (Reduce stage)
+            - 'nl2agent': NL2Agent runtime system prompt
         language: Language code ('zh' or 'en')
         **kwargs: Additional parameters, for agent type need to pass is_manager parameter
 
@@ -126,6 +127,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'agent_automation': {
             LANGUAGE["ZH"]: 'backend/prompts/agent_automation_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/agent_automation_en.yaml'
+        },
+        'nl2agent': {
+            LANGUAGE["ZH"]: 'backend/prompts/nl2agent_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/nl2agent_en.yaml'
         }
     }
 

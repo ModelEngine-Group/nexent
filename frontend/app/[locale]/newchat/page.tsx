@@ -40,6 +40,10 @@ function useLocalChatRuntime(): AssistantRuntime {
 }
 
 export default function Home() {
+  return <PersistentChatHome />;
+}
+
+const PersistentChatHome: FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -88,7 +92,7 @@ export default function Home() {
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-}
+};
 
 /**
  * Inner component that has access to the AuiState via useAuiState hook.
