@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock, call
 import json
 import redis
 
+from backend.services import redis_service as redis_service_module
 from backend.services.redis_service import RedisService, get_redis_service
 
 
@@ -1095,12 +1096,14 @@ class TestRedisService(unittest.TestCase):
         
         self.assertTrue(result)
         self.mock_redis_client.setex.assert_called_once()
-        # Verify TTL is 30 days in seconds
+        # Verify the configured default TTL.
         call_args = self.mock_redis_client.setex.call_args
-        self.assertEqual(call_args[0][1], 30 * 24 * 60 * 60)
+        self.assertEqual(
+            call_args[0][1],
+            redis_service_module.REDIS_ERROR_INFO_TTL_SECONDS,
+        )
         self.assertEqual(call_args[0][2], "Test error reason")
-        # Verify get was called to verify the save
-        self.mock_redis_client.get.assert_called_once()
+        self.mock_redis_client.get.assert_not_called()
 
     def test_save_error_info_empty_task_id(self):
         """Test save_error_info returns False when task_id is empty"""
@@ -1139,16 +1142,6 @@ class TestRedisService(unittest.TestCase):
         result = self.redis_service.save_error_info("task-123", "Error")
         self.assertFalse(result)
 
-    def test_save_error_info_verification_fails(self):
-        """Test save_error_info when verification get returns None"""
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.setex.return_value = True
-        self.mock_redis_client.get.return_value = None  # Verification fails
-        
-        result = self.redis_service.save_error_info("task-123", "Error")
-        # Should still return True because setex succeeded
-        self.assertTrue(result)
-
     def test_save_error_info_redis_error(self):
         """Test save_error_info handles Redis errors gracefully"""
         self.redis_service._client = self.mock_redis_client
@@ -1157,15 +1150,66 @@ class TestRedisService(unittest.TestCase):
         result = self.redis_service.save_error_info("task-123", "Error")
         self.assertFalse(result)
 
-    def test_save_error_info_verification_redis_error(self):
-        """Test save_error_info returns False when verification raises Redis error"""
+    def test_cleanup_error_info_keys_removes_orphans_and_repairs_ttl(self):
         self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.setex.return_value = True
-        self.mock_redis_client.get.side_effect = redis.RedisError("Connection failed")
-        
-        # Should return False because verification failed with exception
-        result = self.redis_service.save_error_info("task-123", "Error")
-        self.assertFalse(result)
+        self.redis_service._backend_client = self.mock_backend_client
+        keys = [
+            "error:reason:orphan",
+            "error:reason:legacy",
+            "error:reason:long-lived",
+        ]
+        self.mock_redis_client.scan_iter.return_value = iter(keys)
+
+        backend_pipe = MagicMock()
+        backend_pipe.execute.return_value = [0, 1, 1]
+        self.mock_backend_client.pipeline.return_value = backend_pipe
+
+        ttl_pipe = MagicMock()
+        ttl_pipe.execute.return_value = [-1, -1, 999999]
+        expire_pipe = MagicMock()
+        expire_pipe.execute.return_value = [True, True]
+        self.mock_redis_client.pipeline.side_effect = [
+            ttl_pipe,
+            expire_pipe,
+        ]
+        self.mock_redis_client.delete.return_value = 1
+
+        result = self.redis_service.cleanup_error_info_keys(
+            ttl_seconds=604800,
+            scan_count=100,
+        )
+
+        self.assertEqual(result, {
+            "scanned": 3,
+            "deleted_orphans": 1,
+            "ttl_repaired": 2,
+        })
+        self.mock_redis_client.scan_iter.assert_called_once_with(
+            match="error:reason:*",
+            count=100,
+        )
+        self.mock_redis_client.delete.assert_called_once_with(
+            "error:reason:orphan"
+        )
+        expire_pipe.expire.assert_has_calls([
+            call("error:reason:legacy", 604800),
+            call("error:reason:long-lived", 604800),
+        ])
+
+    def test_cleanup_error_info_keys_rejects_invalid_limits(self):
+        self.redis_service._client = self.mock_redis_client
+
+        result = self.redis_service.cleanup_error_info_keys(
+            ttl_seconds=0,
+            scan_count=100,
+        )
+
+        self.assertEqual(result, {
+            "scanned": 0,
+            "deleted_orphans": 0,
+            "ttl_repaired": 0,
+        })
+        self.mock_redis_client.scan_iter.assert_not_called()
 
     # ------------------------------------------------------------------
     # Test save_progress_info

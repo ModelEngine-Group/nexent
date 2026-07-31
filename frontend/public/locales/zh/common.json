@@ -742,6 +742,8 @@
   "knowledgeBase.hint.changeName": "请修改知识库名称后继续",
   "knowledgeBase.upload.dragHint": "点击或拖拽文件到此区域上传，为知识库添加知识",
   "knowledgeBase.upload.supportedFormats": "支持 PDF、Word、Excel、PPT、纯文本、CSV、TSV、Markdown、JSON、EPUB、HTML、XML 文件格式",
+  "knowledgeBase.upload.fileSizeLimit": "单个文件不得超过20M",
+  "knowledgeBase.upload.fileTooLarge": "文件过大，知识库暂不支持",
   "knowledgeBase.upload.completed": "上传完成",
   "knowledgeBase.upload.fileCount": "{{count}} 个文件",
   "knowledgeBase.upload.status.uploading": "上传中",

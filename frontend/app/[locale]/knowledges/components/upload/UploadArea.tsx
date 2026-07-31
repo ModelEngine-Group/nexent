@@ -2,13 +2,14 @@ import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallbac
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
-import { App } from 'antd';
+import { App, Upload } from 'antd';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
 import log from "@/lib/logger";
 import { 
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
+  validateKnowledgeBaseFileSize,
   validateFileType,
 } from '@/services/uploadService';
 
@@ -254,7 +255,15 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         format: (percent?: number) =>
           percent ? `${parseFloat(percent.toFixed(2))}%` : "0%",
       },
-      beforeUpload: (file) => validateFileType(file, t, message),
+      beforeUpload: (file) => {
+        if (
+          !validateKnowledgeBaseFileSize(file, t, message) ||
+          !validateFileType(file, t, message)
+        ) {
+          return Upload.LIST_IGNORE;
+        }
+        return true;
+      },
     };
 
     // Clear previous selection when user starts a new selection via click

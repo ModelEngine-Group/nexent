@@ -98,7 +98,7 @@ def _compute_split_wait_timeout(parts_count: int) -> int:
     waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
     dynamic_timeout = base_timeout + \
         max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
-    return min(MAX_TIMEOUT, max(base_timeout, dynamic_timeout))
+    return min(MAX_TIMEOUT, dynamic_timeout)
 
 
 def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:

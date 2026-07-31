@@ -2541,3 +2541,34 @@ def test_cleanup_source_failure_is_warning_only(monkeypatch):
     assert out["source_cleanup"]["attempted"] is True
     assert out["source_cleanup"]["success"] is False
     assert "boom" in (out["source_cleanup"]["error"] or "")
+
+
+def test_parse_failure_info_accepts_json_and_plain_text(monkeypatch):
+    import_tasks_with_fake_ray(monkeypatch)
+    utils = sys.modules["backend.data_process.utils"]
+
+    assert utils._parse_failure_info('{"message": "failed"}') == (
+        {"message": "failed"},
+        None,
+    )
+    assert utils._parse_failure_info("plain failure") == (
+        None,
+        "plain failure",
+    )
+    assert utils._parse_failure_info("") == (None, None)
+
+
+def test_get_all_task_ids_uses_scan_instead_of_keys(monkeypatch):
+    import_tasks_with_fake_ray(monkeypatch)
+    utils = sys.modules["backend.data_process.utils"]
+    redis_client = types.SimpleNamespace(
+        scan_iter=lambda **kwargs: iter([
+            b"celery-task-meta-task-1",
+            "celery-task-meta-task-2",
+        ]),
+    )
+
+    assert utils.get_all_task_ids_from_redis(redis_client) == [
+        "task-1",
+        "task-2",
+    ]
