@@ -3699,7 +3699,7 @@
   "a2a.server.usageTitle": "How to use these endpoints",
   "a2a.server.localDevHint": "For local development: prepend the base URL to the paths above. Use localhost:5013/api (Docker) or localhost:30013/api (k8s).",
   "a2a.server.productionHint": "For production: replace localhost:5013 (Docker) or localhost:30013 (k8s) with your server domain or public IP (keeping the port).",
-  "a2a.server.urlHint": "Append the base URL to access. For local dev: localhost:5013/api (Docker) or localhost:30013/api (k8s)."
+  "a2a.server.urlHint": "Append the base URL to access. For local dev: localhost:5013/api (Docker) or localhost:30013/api (k8s).",
   "a2a.service.discoverFailed": "Failed to discover agent",
   "a2a.service.listFailed": "Failed to get list",
   "a2a.service.getFailed": "Failed to get details",
