@@ -47,6 +47,7 @@ export interface ComposerProps {
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -142,6 +143,7 @@ export const Composer: FC<ComposerProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
   const { t } = useTranslation();
 
@@ -196,15 +198,17 @@ export const Composer: FC<ComposerProps> = ({
           autoFocus
         />
         <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-          <ModelSelector
-            models={models}
-            value={selectedModelId}
-            onValueChange={onModelChange}
-            variant="ghost"
-            size="sm"
-            className="text-xs"
-          />
-          <div className="flex items-center gap-1">
+          {showModelSelector && (
+            <ModelSelector
+              models={models}
+              value={selectedModelId}
+              onValueChange={onModelChange}
+              variant="ghost"
+              size="sm"
+              className="text-xs"
+            />
+          )}
+          <div className="ml-auto flex items-center gap-1">
             <ComposerAddAttachment />
             <ComposerPrimitive.Dictate asChild>
               <TooltipWrapper tooltip={t("chat.composer.voiceInput")}>
@@ -230,29 +234,29 @@ const ComposerSendOrCancel: FC = () => {
   const { t } = useTranslation();
 
   return (
-  <>
-    <AuiIf condition={(s) => s.thread.isRunning}>
-      <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} side="top">
-        <ComposerPrimitive.Cancel asChild>
-          <Button
-            size="icon"
-            variant="outline"
-            className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
-          >
-            <Square className="size-4 fill-current" />
-          </Button>
-        </ComposerPrimitive.Cancel>
-      </TooltipWrapper>
-    </AuiIf>
-    <AuiIf condition={(s) => !s.thread.isRunning}>
-      <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
-        <ComposerPrimitive.Send asChild>
-          <Button size="icon" className="size-8 rounded-full ml-2">
-            <ArrowUp className="size-5" />
-          </Button>
-        </ComposerPrimitive.Send>
-      </TooltipWrapper>
-    </AuiIf>
+    <>
+      <AuiIf condition={(s) => s.thread.isRunning}>
+        <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} side="top">
+          <ComposerPrimitive.Cancel asChild>
+            <Button
+              size="icon"
+              variant="outline"
+              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
+            >
+              <Square className="size-4 fill-current" />
+            </Button>
+          </ComposerPrimitive.Cancel>
+        </TooltipWrapper>
+      </AuiIf>
+      <AuiIf condition={(s) => !s.thread.isRunning}>
+        <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
+          <ComposerPrimitive.Send asChild>
+            <Button size="icon" className="size-8 rounded-full ml-2">
+              <ArrowUp className="size-5" />
+            </Button>
+          </ComposerPrimitive.Send>
+        </TooltipWrapper>
+      </AuiIf>
     </>
   );
 };
