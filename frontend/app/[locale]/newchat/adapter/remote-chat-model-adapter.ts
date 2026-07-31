@@ -167,6 +167,29 @@ export interface StepTokenCount {
   contextWindowTokens: number | null;
 }
 
+/**
+ * Parsed ReAct self-verification payload from a backend `verification` SSE chunk.
+ * All fields mirror the backend VerificationResult.to_payload() shape.
+ */
+export interface VerificationContent {
+  phase: string;
+  event: string;
+  round: number;
+  severity: string;
+  score: number;
+  failed_criteria: string[];
+  repair_instruction: string;
+  user_visible_note: string;
+  message: string;
+  passed: boolean;
+}
+
+export interface VerificationPanelPart {
+  type: "verification-panel";
+  results: VerificationContent[];
+  completed: boolean;
+}
+
 // Accumulated total duration across all steps
 let accumulatedDuration = 0;
 
@@ -506,7 +529,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "execution_logs":
       return null;
     default:
-      return "text";
+      return null;
   }
 }
 
@@ -781,6 +804,31 @@ export function parsePlanStepUpdate(content: string): { stepId: string; status: 
     if (payload.step_id === undefined || !payload.status) return null;
     return { stepId: String(payload.step_id), status: payload.status };
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Parses the inner JSON payload of a backend `verification` SSE chunk.
+ * Returns null for unparseable content so callers skip silently.
+ */
+export function parseVerification(chunk: { content: string }): VerificationContent | null {
+  try {
+    const data = JSON.parse(chunk.content);
+    return {
+      phase: String(data.phase || "start"),
+      event: String(data.event || "unknown"),
+      round: Number(data.round || 0),
+      severity: String(data.severity || "info"),
+      score: Number(data.score ?? 1.0),
+      failed_criteria: Array.isArray(data.failed_criteria) ? data.failed_criteria.map(String) : [],
+      repair_instruction: String(data.repair_instruction ?? ""),
+      user_visible_note: String(data.user_visible_note ?? ""),
+      message: String(data.message ?? ""),
+      passed: Boolean(data.passed ?? false),
+    };
+  } catch {
+    log.warn("[ChatModelAdapter] Failed to parse verification content:", chunk.content);
     return null;
   }
 }
@@ -1118,6 +1166,27 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchImagesAccumulator: string[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
+    let verificationPanel: VerificationPanelPart | null = null;
+
+    const updateVerificationPanel = (result: VerificationContent): boolean => {
+      if (!verificationPanel) {
+        // The final-answer verifier emits `start` before evaluating the answer.
+        // Earlier step-level checks must not create a final verification panel.
+        if (result.phase !== "start") return false;
+        verificationPanel = {
+          type: "verification-panel",
+          results: [],
+          completed: false,
+        };
+        contentParts.push(verificationPanel);
+      }
+      verificationPanel.results.push(result);
+      return true;
+    };
+
+    const completeVerificationPanel = () => {
+      if (verificationPanel) verificationPanel.completed = true;
+    };
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1262,6 +1331,25 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // Do NOT yield image parts inline — they are emitted globally after
             // final_answer below.
             continue;
+          }
+
+          // Aggregate all verification events into one live panel. The first
+          // `start` event creates the panel; subsequent events update its results.
+          if (chunk.type === "verification") {
+            const parsed = parseVerification(chunk);
+            if (parsed) {
+              flushOpenReasoning();
+              if (updateVerificationPanel(parsed)) {
+                yield buildStreamResult(contentParts);
+              }
+            }
+            continue;
+          }
+
+          // The final answer terminates the self-check lifecycle. Mark the
+          // existing panel complete before exposing the final answer text.
+          if (chunk.type === "final_answer") {
+            completeVerificationPanel();
           }
 
           // Sub-agent boundary handling. ``subagent_start`` pushes a new
@@ -1462,7 +1550,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
+          } else if (chunk.type === "verification") {
+            const parsed = parseVerification(chunk);
+            if (parsed) {
+              if (currentReasoningPart) {
+                currentReasoningPart.status = { type: "done" };
+                contentParts.push(currentReasoningPart);
+                currentReasoningPart = null;
+              }
+              if (updateVerificationPanel(parsed)) {
+                yield buildStreamResult(contentParts);
+              }
+            }
           } else {
+            if (chunk.type === "final_answer") {
+              completeVerificationPanel();
+            }
             const partType = mapChunkType(chunk.type);
             if (partType === "reasoning") {
               currentReasoningPart = makeReasoningPart(
