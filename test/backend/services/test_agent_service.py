@@ -191,6 +191,12 @@ sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_in
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
+sys.modules['utils.context_utils'] = MagicMock()
+sys.modules['utils.context_utils'].build_authorized_context_input = (
+    lambda agent_run_info, historical_context=None: MockContextInput(
+        items=tuple(agent_run_info.agent_config.context_items or ())
+    )
+)
 
 # Mock str_utils with actual convert_list_to_string implementation
 def mock_convert_list_to_string(items):
@@ -14689,80 +14695,197 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
 
 
 
-def test_validate_requested_output_tokens_no_requested_tokens():
-    """_validate_requested_output_tokens_for_agent should return when requested_output_tokens is None."""
-    from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-    from backend.services.agent_service import AgentInfoRequest
+class TestValidateRequestedOutputTokensForAgent:
+    """Tests for _validate_requested_output_tokens_for_agent (lines 1639-1680).
 
-    request = AgentInfoRequest(
-        agent_id=1,
-        model_id=1,
-        requested_output_tokens=None  # None case
-    )
-    # Should not raise
-    _validate_requested_output_tokens_for_agent(request, "tenant1")
+    Overrides the module-level autouse fixtures that stub out the validator
+    and get_valid_model_ids, so the REAL function code is exercised here.
+    """
 
+    @pytest.fixture(autouse=True)
+    def _stub_requested_output_tokens_validator(self):
+        """Override module-level autouse: do NOT patch the real function."""
+        yield
 
-def test_validate_requested_output_tokens_model_id_from_agent():
-    """_validate_requested_output_tokens_for_agent should get model_id from agent if not in request."""
-    from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-    from backend.services.agent_service import AgentInfoRequest
+    @pytest.fixture(autouse=True)
+    def _stub_get_valid_model_ids(self):
+        """Override module-level autouse: do NOT patch get_valid_model_ids."""
+        yield
 
-    request = AgentInfoRequest(
-        agent_id=1,
-        model_id=None,  # No model_id in request
-        requested_output_tokens=1000
-    )
+    def test_no_requested_tokens(self):
+        """Should return early when requested_output_tokens is None."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
 
-    with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
-        mock_search.return_value = {"model_id": 5}
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1],
+            requested_output_tokens=None  # None case -- early return
+        )
+        # Should not raise
+        _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+    def test_model_ids_from_agent(self):
+        """Should get model_ids from existing agent when not in request."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=None,  # No model_ids in request -- must look up existing agent
+            requested_output_tokens=1000
+        )
+
+        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+            mock_search.return_value = {"model_ids": [5]}
+            with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+                mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
+
+                # Should not raise since 1000 < 2000
+                _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+                # Verify agent lookup was called
+                mock_search.assert_called_once_with(agent_id=1, tenant_id="tenant1", version_no=0)
+                mock_model.assert_called_once_with(5, tenant_id="tenant1")
+
+    def test_exceeds_limit(self):
+        """Should raise when tokens exceed any model's max_output_tokens."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+        from backend.services.agent_service import AppException
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1],  # model_ids provided in request -- no agent search needed
+            requested_output_tokens=5000  # Exceeds limit
+        )
+
         with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
-            mock_model.return_value = {"max_output_tokens": 2000}
+            mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
 
-            # Should not raise since 1000 < 2000
+            # Should raise AppException
+            with pytest.raises(AppException, match="max_output_tokens"):
+                _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+    def test_agent_search_error(self):
+        """Should handle agent search error gracefully (log warning, return)."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=None,  # No model_ids -- must look up existing agent
+            requested_output_tokens=1000
+        )
+
+        with patch("backend.services.agent_service.search_agent_info_by_agent_id", side_effect=Exception("DB error")):
+            # Should not raise, just log warning and return (model_ids stays empty)
             _validate_requested_output_tokens_for_agent(request, "tenant1")
 
+    def test_multi_model_one_exceeds(self):
+        """Should fail when any one of multiple models has a lower max_output_tokens."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+        from backend.services.agent_service import AppException
 
-def test_validate_requested_output_tokens_exceeds_limit():
-    """_validate_requested_output_tokens_for_agent should raise when tokens exceed limit."""
-    from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-    from backend.services.agent_service import AgentInfoRequest
-    from backend.services.agent_service import AppException
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1, 2, 3],  # 3 models configured
+            requested_output_tokens=3000
+        )
 
-    request = AgentInfoRequest(
-        agent_id=1,
-        model_id=1,  # model_id provided - will be used directly
-        requested_output_tokens=5000  # Exceeds limit
-    )
+        model_db = {
+            1: {"max_output_tokens": 8192, "display_name": "model_a"},
+            2: {"max_output_tokens": 2048, "display_name": "model_b"},  # 3000 > 2048
+            3: {"max_output_tokens": 4096, "display_name": "model_c"},
+        }
 
-    with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
-        mock_model.return_value = {"max_output_tokens": 2000}
+        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+            mock_model.side_effect = lambda mid, tenant_id: model_db.get(mid)
 
-        # Should raise AppException
-        try:
+            with pytest.raises(AppException) as exc_info:
+                _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+            # The error message should mention model_b (the one that was exceeded)
+            assert "model_b" in str(exc_info.value)
+
+    def test_model_info_none(self):
+        """Should skip a model when get_model_by_model_id returns None (model not found)."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1],
+            requested_output_tokens=1000
+        )
+
+        with patch("backend.services.agent_service.get_model_by_model_id", return_value=None):
+            # Should not raise -- model_info is None, max_output_tokens is None, so skip
             _validate_requested_output_tokens_for_agent(request, "tenant1")
-            assert False, "Should have raised exception"
-        except AppException as e:
-            # AppException is expected
-            assert "max_output_tokens" in str(e).lower() or "exceed" in str(e).lower()
-        except Exception as e:
-            # Other exception also acceptable
-            pass
 
+    def test_max_output_tokens_none(self):
+        """Should skip when model_info has no max_output_tokens field."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
 
-def test_validate_requested_output_tokens_agent_search_error():
-    """_validate_requested_output_tokens_for_agent should handle agent search error."""
-    from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-    from backend.services.agent_service import AgentInfoRequest
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1],
+            requested_output_tokens=1000
+        )
 
-    request = AgentInfoRequest(
-        agent_id=1,
-        model_id=None,
-        requested_output_tokens=1000
-    )
+        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+            mock_model.return_value = {"display_name": "test_model"}  # No max_output_tokens key
 
-    with patch("backend.services.agent_service.search_agent_info_by_agent_id", side_effect=Exception("DB error")):
-        # Should not raise, just log warning
+            # Should not raise -- max_output_tokens is None, so the check is skipped
+            _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+    def test_boundary_equal(self):
+        """Should pass when requested_output_tokens equals max_output_tokens exactly."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=[1],
+            requested_output_tokens=2000  # Exactly equals max
+        )
+
+        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+            mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
+
+            # Should not raise -- 2000 is not > 2000
+            _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+    def test_empty_model_ids_from_agent(self):
+        """Should return when existing agent has empty model_ids list."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=1,
+            model_ids=None,
+            requested_output_tokens=1000
+        )
+
+        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+            mock_search.return_value = {"model_ids": []}  # Empty list
+            # Should not raise -- model_ids is empty, so return early
+            _validate_requested_output_tokens_for_agent(request, "tenant1")
+
+    def test_no_agent_id(self):
+        """Should return early when model_ids is empty and agent_id is None."""
+        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
+        from backend.services.agent_service import AgentInfoRequest
+
+        request = AgentInfoRequest(
+            agent_id=None,  # No agent_id -- can't look up existing
+            model_ids=None,
+            requested_output_tokens=1000
+        )
+
+        # Should not raise -- no model_ids and no agent_id to look up
         _validate_requested_output_tokens_for_agent(request, "tenant1")
 
 

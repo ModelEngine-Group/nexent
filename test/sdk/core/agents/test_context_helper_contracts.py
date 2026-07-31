@@ -189,6 +189,27 @@ def test_formatting_empty_and_tool_variants():
     assert "presigned_url" in en_description
 
 
+def test_memory_formatting_renders_agent_presearch_and_ignores_retired_levels():
+    result_text = "Found 1 relevant memories:\n[1] Existing preference"
+
+    rendered = _format_memory_context(
+        [{"memory": result_text, "memory_level": "agent"}],
+        language="en",
+    )
+
+    assert "**Agent Level Memory:**" in rendered
+    assert result_text in rendered
+    assert "user_agent" not in rendered
+    assert _format_memory_context(
+        [{"memory": "retired", "memory_level": "user_agent"}],
+        language="en",
+    ) == ""
+    assert _format_memory_context(
+        [{"memory": "unknown", "memory_level": "retrieved"}],
+        language="en",
+    ) == ""
+
+
 def _direct_item(item_id, item_type, content, metadata=None):
     return ContextItem(
         id=item_id,

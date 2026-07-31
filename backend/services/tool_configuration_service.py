@@ -44,6 +44,7 @@ from database.tool_db import (
     update_tool_table_from_scan_tool_list,
 )
 from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
@@ -443,6 +444,9 @@ async def get_tool_from_remote_mcp_server(
             tools = await client.list_tools()
 
             for tool in tools:
+                if isinstance(tool.meta, dict) and tool.meta.get("nexent_internal") is True:
+                    continue
+
                 input_schema = {
                     k: v
                     for k, v in jsonref.replace_refs(tool.inputSchema).items()
@@ -539,6 +543,10 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     else:
         tools_info = query_all_tools(tenant_id)
 
+    updated_by_email_map = get_user_email_map(
+        [tool.get("updated_by", "") for tool in tools_info]
+    )
+
     # Get description_zh from SDK for local tools (not persisted to DB)
     local_tool_descriptions = get_local_tools_description_zh()
 
@@ -607,7 +615,8 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "updated_by": tool.get("updated_by", "")
+            "updated_by": tool.get("updated_by", ""),
+            "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
         formatted_tools.append(formatted_tool)
     return formatted_tools

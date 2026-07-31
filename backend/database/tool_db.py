@@ -310,6 +310,32 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
     logger.info("Updated tool table in PG database")
 
 
+def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: str) -> int:
+    """
+    Mark all tool records belonging to a deleted MCP server as unavailable.
+
+    Keeps the tool rows in place (agents may still reference them via tool
+    instances) but hides them from the agent tool selection list, which only
+    shows tools where is_available != False.
+
+    Args:
+        tenant_id: Tenant ID (stored as ToolInfo.author)
+        mcp_server_name: MCP server name (stored as ToolInfo.usage)
+        user_id: User ID performing the deletion
+
+    Returns:
+        Number of tool records updated
+    """
+    with get_db_session() as session:
+        updated = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id,
+            ToolInfo.source == ToolSourceEnum.MCP.value,
+            ToolInfo.usage == mcp_server_name,
+        ).update({"is_available": False, "updated_by": user_id})
+        return updated or 0
+
+
 def add_tool_field(tool_info):
     with get_db_session() as session:
         # Query if there is an existing ToolInstance

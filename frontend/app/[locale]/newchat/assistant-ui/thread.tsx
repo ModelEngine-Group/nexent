@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { SubAgentContainer } from "../ui/subagent";
@@ -21,6 +22,7 @@ import {
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
+  groupPartByType,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -63,6 +65,8 @@ import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
+import { ToolRecommendations } from "../ui/tool-recommendations";
+import { AgentDraftCard } from "../ui/agent-draft-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -71,18 +75,19 @@ import {
 import {
   getAgentRunTime,
   skillFileUploadsRegistry,
+  type Nl2aMessage,
 } from "../adapter/remote-chat-model-adapter";
 import { cn } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
-  onBack: () => void;
+  onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 /**
@@ -119,6 +124,7 @@ export const Thread: FC<ThreadProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -176,6 +182,7 @@ export const Thread: FC<ThreadProps> = ({
         onModelChange={onModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
+        showModelSelector={showModelSelector}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -188,12 +195,13 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
-  onBack: () => void;
+  onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -209,6 +217,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector,
   hasMessages,
   displayName,
   conversationTitle,
@@ -221,9 +230,11 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
+          {onBack && (
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <div className="flex flex-col">
             <span className="text-sm font-medium text-foreground">
               {hasMessages ? conversationTitle : displayName}
@@ -250,6 +261,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             onModelChange={onModelChange}
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -419,6 +431,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   const agentName = agent.display_name || agent.name;
 
   const agentRunTime = getAgentRunTime();
+  const nl2a = useAuiState(
+    (s) =>
+      (
+        s.message.metadata?.custom as
+          | { nl2a?: Nl2aMessage }
+          | undefined
+      )?.nl2a,
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
@@ -592,6 +612,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} />
+        ) : nl2a?.content.subtype === "agent_draft" ? (
+          <AgentDraftCard draft={nl2a.content} />
+        ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}

@@ -50,6 +50,15 @@ function isDisplayableTenant(tenant: PlatformTenantQuota): boolean {
   return !VIRTUAL_TENANT_IDS.has(normalizedTenantId);
 }
 
+type QuotaUnit = "GB" | "MB";
+
+function toQuotaInput(bytes: number): { value: number; unit: QuotaUnit } {
+  if (bytes >= GB && bytes % GB === 0) {
+    return { value: bytes / GB, unit: "GB" };
+  }
+  return { value: Math.floor(bytes / MB), unit: "MB" };
+}
+
 function getProgressColor(usagePct: number | null | undefined): string {
   if (usagePct == null) return STROKE_COLORS.normal;
   if (usagePct >= 100) return STROKE_COLORS.blocked;
@@ -63,7 +72,7 @@ export function PlatformQuotaPanel() {
   const [data, setData] = useState<PlatformQuotaOverview | null>(null);
   const [editingTenant, setEditingTenant] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<number | null>(null);
-  const [editUnit, setEditUnit] = useState<"GB" | "MB">("GB");
+  const [editUnit, setEditUnit] = useState<QuotaUnit>("GB");
   const [capacityModalOpen, setCapacityModalOpen] = useState(false);
   const [capacityValue, setCapacityValue] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -108,25 +117,129 @@ export function PlatformQuotaPanel() {
   // Inline edit for tenant hard quota
   const startEditTenant = (record: PlatformTenantQuota) => {
     setEditingTenant(record.tenant_id);
-    if (record.hard_limit_bytes != null && record.hard_limit_bytes < GB) {
-      setEditUnit("MB");
-      setEditValue(Math.round(record.hard_limit_bytes / MB));
-    } else {
+    if (record.hard_limit_bytes == null) {
       setEditUnit("GB");
-      setEditValue(
-        record.hard_limit_bytes == null
-          ? null
-          : Math.round(record.hard_limit_bytes / GB)
-      );
+      setEditValue(null);
+      return;
     }
+    const quota = toQuotaInput(record.hard_limit_bytes);
+    setEditUnit(quota.unit);
+    setEditValue(quota.value);
+  };
+
+  const getMaximumAssignableBytes = (
+    record: PlatformTenantQuota
+  ): number | null => {
+    if (data?.platform_capacity_bytes == null) return null;
+    return Math.max(
+      (data.remaining_allocatable_bytes || 0) + (record.hard_limit_bytes || 0),
+      0
+    );
+  };
+
+  const showQuotaAdjustedMessage = (
+    record: PlatformTenantQuota,
+    requestedValue: number,
+    requestedUnit: QuotaUnit,
+    appliedValue: number,
+    appliedUnit: QuotaUnit
+  ) => {
+    message.warning({
+      key: `quota-adjusted-${record.tenant_id}`,
+      content: t("quota.adjustedToMaximum", {
+        requested: `${requestedValue} ${requestedUnit}`,
+        maximum: `${appliedValue} ${appliedUnit}`,
+        defaultValue:
+          "The requested quota {{requested}} exceeds the available capacity and has been adjusted to {{maximum}}.",
+      }),
+    });
+  };
+
+  const adjustQuotaToMaximum = (
+    record: PlatformTenantQuota,
+    requestedValue: number,
+    requestedUnit: QuotaUnit
+  ): { value: number; unit: QuotaUnit; adjusted: boolean } => {
+    const maximumBytes = getMaximumAssignableBytes(record);
+    const requestedBytes = requestedValue * (requestedUnit === "GB" ? GB : MB);
+    if (maximumBytes == null || requestedBytes <= maximumBytes) {
+      return {
+        value: requestedValue,
+        unit: requestedUnit,
+        adjusted: false,
+      };
+    }
+
+    const maximum = toQuotaInput(maximumBytes);
+    return { ...maximum, adjusted: true };
+  };
+
+  const handleEditValueChange = (
+    record: PlatformTenantQuota,
+    value: number | null
+  ) => {
+    if (value == null) {
+      setEditValue(null);
+      return;
+    }
+
+    const result = adjustQuotaToMaximum(record, value, editUnit);
+    if (result.adjusted) {
+      if (result.value < 1) {
+        message.error(t("quota.noAllocatableCapacity"));
+        return;
+      }
+      setEditUnit(result.unit);
+      setEditValue(result.value);
+      showQuotaAdjustedMessage(
+        record,
+        value,
+        editUnit,
+        result.value,
+        result.unit
+      );
+      return;
+    }
+    setEditValue(value);
   };
 
   const saveTenantQuota = async (tenantId: string) => {
+    const record = data?.tenants.find(
+      (tenant) => tenant.tenant_id === tenantId
+    );
+    if (editValue != null && editValue < 1) {
+      message.error(t("quota.positiveQuotaRequired"));
+      return;
+    }
+
+    let valueToSave = editValue;
+    let unitToSave = editUnit;
+    if (record && editValue != null) {
+      const result = adjustQuotaToMaximum(record, editValue, editUnit);
+      if (result.adjusted) {
+        if (result.value < 1) {
+          message.error(t("quota.noAllocatableCapacity"));
+          return;
+        }
+        valueToSave = result.value;
+        unitToSave = result.unit;
+        setEditUnit(result.unit);
+        setEditValue(result.value);
+        showQuotaAdjustedMessage(
+          record,
+          editValue,
+          editUnit,
+          result.value,
+          result.unit
+        );
+      }
+    }
+
     setSaving(true);
     try {
       await quotaService.setTenantHardQuota(tenantId, {
-        hard_limit_gb: editUnit === "GB" ? editValue : undefined,
-        hard_limit_mb: editUnit === "MB" ? editValue : undefined,
+        hard_limit_gb: unitToSave === "GB" ? valueToSave : undefined,
+        hard_limit_mb: unitToSave === "MB" ? valueToSave : undefined,
       });
       message.success(t("quota.tenantQuotaUpdated", "Tenant quota updated"));
       setEditingTenant(null);
@@ -190,24 +303,33 @@ export function PlatformQuotaPanel() {
     : 0;
   const tenantQuotaBounds = (record: PlatformTenantQuota) => {
     const unitBytes = editUnit === "GB" ? GB : MB;
-    const min = Math.ceil(record.actual_bytes / unitBytes);
+    const min = Math.max(1, Math.ceil(record.actual_bytes / unitBytes));
     if (data?.platform_capacity_bytes == null) return { min, max: undefined };
-    const current = record.hard_limit_bytes || 0;
     const max = Math.floor(
-      ((data.remaining_allocatable_bytes || 0) + current) / unitBytes
+      (getMaximumAssignableBytes(record) || 0) / unitBytes
     );
     return { min, max: max >= min ? max : undefined };
   };
 
-  const changeEditUnit = (nextUnit: "GB" | "MB") => {
+  const changeEditUnit = (nextUnit: QuotaUnit, record: PlatformTenantQuota) => {
     if (nextUnit === editUnit) return;
     const currentBytes =
       editValue == null ? null : editValue * (editUnit === "GB" ? GB : MB);
+    if (nextUnit === "GB" && currentBytes != null && currentBytes % GB !== 0) {
+      const current = toQuotaInput(currentBytes);
+      message.warning({
+        key: `quota-unit-adjusted-${record.tenant_id}`,
+        content: t("quota.valueRequiresMb", {
+          value: `${current.value} ${current.unit}`,
+          defaultValue:
+            "The current quota is {{value}}, so the unit remains MB to avoid changing its value.",
+        }),
+      });
+      return;
+    }
     setEditUnit(nextUnit);
     setEditValue(
-      currentBytes == null
-        ? null
-        : Math.round(currentBytes / (nextUnit === "GB" ? GB : MB))
+      currentBytes == null ? null : currentBytes / (nextUnit === "GB" ? GB : MB)
     );
   };
 
@@ -230,11 +352,10 @@ export function PlatformQuotaPanel() {
             <Space>
               <InputNumber
                 value={editValue}
-                onChange={(v) => setEditValue(v)}
+                onChange={(v) => handleEditValueChange(record, v)}
                 addonAfter={editUnit}
                 style={{ width: 120 }}
                 min={bounds.min}
-                max={bounds.max}
                 precision={0}
                 autoFocus
                 onPressEnter={() => saveTenantQuota(record.tenant_id)}
@@ -243,7 +364,7 @@ export function PlatformQuotaPanel() {
                 size="small"
                 options={["GB", "MB"]}
                 value={editUnit}
-                onChange={(value) => changeEditUnit(value as "GB" | "MB")}
+                onChange={(value) => changeEditUnit(value as QuotaUnit, record)}
               />
               <Button
                 size="small"

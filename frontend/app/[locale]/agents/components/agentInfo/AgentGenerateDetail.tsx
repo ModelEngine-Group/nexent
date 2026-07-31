@@ -184,6 +184,18 @@ export default function AgentGenerateDetail({}) {
     );
   }, [availableLlmModels, editedAgent.model, editedAgent.model_ids]);
 
+  // The output reserve cap must be safe for every configured model — the user
+  // can switch models at chat time, so use the minimum max_output_tokens across
+  // all selected models as the upper bound.
+  const minModelMaxOutputTokens = useMemo(() => {
+    const ids = editedAgent.model_ids || [];
+    const tokens = availableLlmModels
+      .filter((m) => ids.includes(m.id))
+      .map((m) => m.maxOutputTokens)
+      .filter((t): t is number => t != null && t > 0);
+    return tokens.length > 0 ? Math.min(...tokens) : undefined;
+  }, [availableLlmModels, editedAgent.model_ids]);
+
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
@@ -264,7 +276,7 @@ export default function AgentGenerateDetail({}) {
         form.validateFields(["requestedOutputTokens"]).catch(() => {});
       }
     });
-  }, [form, selectedMainAgentModel?.maxOutputTokens]);
+  }, [form, minModelMaxOutputTokens]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -1286,12 +1298,12 @@ export default function AgentGenerateDetail({}) {
                 tooltip={t("agent.requestedOutputTokens.tooltip")}
                 rules={[
                   { type: "number", min: 1, message: t("agent.requestedOutputTokens.error") },
-                  ...(selectedMainAgentModel?.maxOutputTokens
+                  ...(minModelMaxOutputTokens
                     ? [{
                         type: "number" as const,
-                        max: selectedMainAgentModel.maxOutputTokens,
+                        max: minModelMaxOutputTokens,
                         message: t("agent.requestedOutputTokens.maxError", {
-                          max: selectedMainAgentModel.maxOutputTokens,
+                          max: minModelMaxOutputTokens,
                         }),
                       }]
                     : []),
@@ -1299,7 +1311,7 @@ export default function AgentGenerateDetail({}) {
               >
                 <InputNumber
                   min={1}
-                  max={selectedMainAgentModel?.maxOutputTokens}
+                  max={minModelMaxOutputTokens}
                   precision={0}
                   placeholder={selectedMainAgentModel?.defaultOutputReserveTokens
                     ? String(selectedMainAgentModel.defaultOutputReserveTokens)

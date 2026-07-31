@@ -1892,7 +1892,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": False,
                 "enable_context_manager": enable_context_manager,
             }
@@ -1980,7 +1980,7 @@ class TestCreateAgentConfig:
         context_kwargs = mocks["build_components"].call_args.kwargs
         assert context_kwargs["memory_list"] == [{
             "memory": result_text,
-            "memory_level": "retrieved",
+            "memory_level": "agent",
         }]
         assert "search_memory" not in context_kwargs["tools"]
         assert "search_memory" not in context_kwargs["memory_tool_policy"]
@@ -2106,7 +2106,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -2178,7 +2178,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = [
@@ -2254,7 +2254,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = [
@@ -2331,7 +2331,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -2404,7 +2404,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2470,7 +2470,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": None,  # Test None case
+                "model_ids": None,  # Test None case
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -2576,7 +2576,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2691,7 +2691,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2803,7 +2803,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2914,7 +2914,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3009,7 +3009,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3129,7 +3129,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3242,7 +3242,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3335,7 +3335,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3389,7 +3389,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -3436,7 +3436,7 @@ class TestCreateAgentConfig:
                     "name": "test_agent", "description": "desc",
                     "duty_prompt": "d", "constraint_prompt": "c",
                     "few_shots_prompt": "f", "max_steps": 5,
-                    "model_id": 123, "provide_run_summary": False,
+                    "model_ids": [123], "provide_run_summary": False,
                 }
                 mock_get_template.return_value = {"system_prompt": "{{duty}}"}
                 mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
@@ -6622,7 +6622,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
                 "name": "test_agent", "description": "desc",
                 "duty_prompt": "", "constraint_prompt": "",
                 "few_shots_prompt": "", "max_steps": 5,
-                "model_id": 1, "provide_run_summary": False,
+                "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }
             mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
@@ -6681,7 +6681,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
                 "name": "test_agent", "description": "desc",
                 "duty_prompt": "", "constraint_prompt": "",
                 "few_shots_prompt": "", "max_steps": 5,
-                "model_id": 1, "provide_run_summary": False,
+                "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }
             mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
