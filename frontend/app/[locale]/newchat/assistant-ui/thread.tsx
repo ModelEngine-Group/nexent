@@ -656,6 +656,70 @@ export const ThreadMessages: FC<{
   backendMessageIdsByAuiId,
   onToggleShareMessage,
 }) => {
+  const { t } = useTranslation();
+  const messages = useAuiState((s) => s.thread.messages);
+  const shareMessageGroups = useMemo(() => {
+    const groups: { key: string; messageIndexes: number[]; userMessageId?: number }[] = [];
+
+    messages.forEach((message, index) => {
+      if (message.role === "user") {
+        groups.push({
+          key: String(message.id),
+          messageIndexes: [index],
+          userMessageId: backendMessageIdsByAuiId?.get(String(message.id)),
+        });
+        return;
+      }
+
+      const currentGroup = groups.at(-1);
+      if (currentGroup) currentGroup.messageIndexes.push(index);
+      else groups.push({ key: String(message.id), messageIndexes: [index] });
+    });
+
+    return groups;
+  }, [backendMessageIdsByAuiId, messages]);
+
+  const messageComponents = useMemo(
+    () => ({
+      UserMessage: () => <UserMessage readOnly={readOnly} />,
+      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} />,
+    }),
+    [agent, readOnly],
+  );
+
+  if (shareMode) {
+    return (
+      <>
+        {shareMessageGroups.map((group) => {
+          const shareSelected =
+            group.userMessageId !== undefined && (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+          return (
+            <div
+              key={group.key}
+              className={`relative mb-4 w-full rounded-xl px-2 pt-1 pb-2 ${
+                shareSelected ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]" : ""
+              }`}
+            >
+              {group.userMessageId !== undefined && (
+                <label className="absolute -left-6 top-3 z-10 flex cursor-pointer items-center justify-center">
+                  <input
+                    type="checkbox"
+                    aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+                    checked={shareSelected}
+                    onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                  />
+                </label>
+              )}
+              {group.messageIndexes.map((index) => (
+                <ThreadPrimitive.MessageByIndex key={index} index={index} components={messageComponents} />
+              ))}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
   return (
     <ThreadPrimitive.Messages>
       {({ message }) => {
