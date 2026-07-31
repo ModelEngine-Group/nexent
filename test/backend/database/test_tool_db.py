@@ -128,7 +128,8 @@ from backend.database.tool_db import (
     check_tool_is_available,
     delete_tools_by_agent_id,
     search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized
+    check_tool_list_initialized,
+    set_mcp_tools_unavailable,
 )
 
 class MockToolInstance:
@@ -1016,6 +1017,48 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
         "is_available": False  # Should be False for invalid tool name
     })
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
+
+
+def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
+    """Test marking all tools of a deleted MCP server as unavailable."""
+    session, query = mock_session
+    mock_update = MagicMock(return_value=3)
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_unavailable(
+        tenant_id="tenant1", mcp_server_name="deleted_server", user_id="user1")
+
+    assert result == 3
+    mock_update.assert_called_once_with(
+        {"is_available": False, "updated_by": "user1"})
+
+
+def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
+    """Test set_mcp_tools_unavailable returns 0 when no tool rows match."""
+    session, query = mock_session
+    mock_update = MagicMock(return_value=None)  # None from SQLAlchemy edge case
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_unavailable(
+        tenant_id="tenant1", mcp_server_name="missing_server", user_id="user1")
+
+    assert result == 0
 
 
 def test_add_tool_field(monkeypatch, mock_session):
