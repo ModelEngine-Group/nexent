@@ -6,6 +6,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button, message } from "antd";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   AuiIf,
   ThreadListItemPrimitive,
@@ -282,13 +283,14 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
+  const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
-  const thread = aui.threadListItem().getState();
+  const thread = aui.threadListItem.getState();
   const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
   const handleRename = useCallback(async (newTitle: string) => {
     try {
-      await aui.threadListItem().rename(newTitle);
+      await aui.threadListItem.rename(newTitle);
       log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
       setIsEditing(false);
     } catch (error) {
@@ -350,12 +352,20 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               <PencilIcon className="size-4" />
               {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
-            <ThreadListItemPrimitive.Delete asChild>
-              <ThreadListItemMorePrimitive.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10">
-                <TrashIcon className="size-4" />
-                {t("chat.threadList.delete")}
-              </ThreadListItemMorePrimitive.Item>
-            </ThreadListItemPrimitive.Delete>
+            <ThreadListItemMorePrimitive.Item
+              onSelect={(e) => {
+                e.preventDefault();
+                confirm({
+                  title: t("chat.threadList.delete"),
+                  content: t("chat.threadList.confirmDeletionDescription"),
+                  onOk: () => aui.threadListItem.delete(),
+                });
+              }}
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+            >
+              <TrashIcon className="size-4" />
+              {t("chat.threadList.delete")}
+            </ThreadListItemMorePrimitive.Item>
           </ThreadListItemMorePrimitive.Content>
         </ThreadListItemMorePrimitive.Root>
       )}
@@ -368,7 +378,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
+  const status = aui.threadListItem.getState().status as string;
   const isRunning = status === "running" || status === "streaming";
 
   return (
