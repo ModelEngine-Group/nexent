@@ -721,8 +721,6 @@ def refresh_external_agent_cache(
 
         if new_raw_card is not None:
             agent.raw_card = new_raw_card
-        if new_agent_url is not None:
-            agent.agent_url = new_agent_url
         if new_name is not None:
             agent.name = new_name
         if new_description is not None:
@@ -731,21 +729,30 @@ def refresh_external_agent_cache(
             agent.version = new_version
         if new_streaming is not None:
             agent.streaming = new_streaming
+        selected_protocol_type = new_protocol_type or agent.protocol_type
         if new_supported_interfaces is not None:
             agent.supported_interfaces = new_supported_interfaces
+            interface = _find_interface_by_protocol_type(
+                new_supported_interfaces,
+                selected_protocol_type,
+            )
+            if interface:
+                agent.agent_url = interface.get("url", agent.agent_url)
+        elif new_agent_url is not None:
+            agent.agent_url = new_agent_url
         if new_security_schemes is not None:
             agent.security_schemes = new_security_schemes
         if new_security_requirements is not None:
             agent.security_requirements = new_security_requirements
         if new_protocol_type is not None:
             agent.protocol_type = new_protocol_type
-            # Update agent_url based on the selected protocol type
-            interface = _find_interface_by_protocol_type(
-                agent.supported_interfaces,
-                new_protocol_type
-            )
-            if interface:
-                agent.agent_url = interface.get("url", agent.agent_url)
+            if new_supported_interfaces is None:
+                interface = _find_interface_by_protocol_type(
+                    agent.supported_interfaces,
+                    new_protocol_type,
+                )
+                if interface:
+                    agent.agent_url = interface.get("url", agent.agent_url)
 
         agent.cached_at = now
         agent.cache_expires_at = expires_at
