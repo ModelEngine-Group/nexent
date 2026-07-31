@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+
 # Environment variables are now configured in conftest.py
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
