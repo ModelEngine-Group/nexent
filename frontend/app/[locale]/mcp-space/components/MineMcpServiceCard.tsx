@@ -117,7 +117,9 @@ export default function MineMcpServiceCard({
     if (hasOnlineRecord) {
       items.push({
         key: "unpublish-online-version",
-        label: isPending ? "撤回审核" : t("mcpTools.mine.unpublishOnlineVersion"),
+        label: isPending
+          ? t("mcpTools.mine.reviewModal.cancelApply")
+          : t("mcpTools.mine.unpublishOnlineVersion"),
         icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
         danger: true,
         disabled: unpublishing,

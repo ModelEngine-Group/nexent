@@ -588,7 +588,7 @@ function MineView({
   ) => {
     const sharedFields = item.service.sharedFields;
     if (!sharedFields || !Object.values(sharedFields).some(Boolean)) {
-      message.warning("未勾选共享配置信息");
+      message.warning(t("mcpTools.mine.sharedFieldsRequired"));
       return;
     }
     if (item.kind === "community") {
@@ -662,14 +662,14 @@ function MineView({
       const isInitialPublish = item.kind === "local" && !onlineService?.marketId;
       message.success(
         isInitialPublish
-          ? "上架申请成功"
-          : "上架申请成功"
+          ? t("mcpTools.mine.publishApplySuccess")
+          : t("mcpTools.mine.submitVersionUpdateSuccess")
       );
       // Optimistically update local cache to show pending status
       updateLocalReviewStatus(item, "pending");
       await refreshMineData();
     } catch {
-      message.error("上架申请失败");
+      message.error(t("mcpTools.mine.publishApplyFailed"));
     } finally {
       setPublishingKey(null);
     }
@@ -698,7 +698,9 @@ function MineView({
     if (!onlineService.communityId) return;
     const isPendingReview = onlineService.reviewStatus === "pending";
     modal.confirm({
-      title: isPendingReview ? "确认撤回审核？" : t("mcpTools.mine.unpublishOnlineVersionTitle"),
+      title: isPendingReview
+        ? t("mcpTools.mine.reviewModal.confirmCancelApplyTitle")
+        : t("mcpTools.mine.unpublishOnlineVersionTitle"),
       content: isPendingReview
         ? t("mcpTools.mine.reviewModal.cancelApply")
         : t("mcpTools.mine.unpublishOnlineVersionDescription", {
