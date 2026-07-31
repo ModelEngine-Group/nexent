@@ -427,6 +427,28 @@ class TestDetectContainerPort:
         docker_container_client.client.images.get.side_effect = Exception("image not found")
         assert docker_container_client._detect_container_port("img", 40000) == 40000
 
+    def test_detect_port_from_cmd_flag_invalid_value(self, docker_container_client):
+        """Fall back to default when the `--port <N>` value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["--transport", "streamable", "--port", "not-a-number"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_from_eq_flag_invalid_value(self, docker_container_client):
+        """Fall back to default when the `--port=<N>` value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["--port=abc"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_from_env_invalid_value(self, docker_container_client):
+        """Fall back to default when the PORT env value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["python", "-m", "server"],
+            env=["PORT=not-a-number"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
 
 # ---------------------------------------------------------------------------
 # Test start_container
