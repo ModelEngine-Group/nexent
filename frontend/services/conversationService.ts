@@ -137,6 +137,7 @@ export const conversationService = {
     mode: "all" | "selected";
     selected_user_message_ids?: number[];
     expire_time?: string | null;
+    render_version?: "legacy" | "newchat";
   }) {
     const response = await fetch(
       API_ENDPOINTS.share.createConversation(params.conversationId),
@@ -147,6 +148,7 @@ export const conversationService = {
           mode: params.mode,
           selected_user_message_ids: params.selected_user_message_ids || [],
           expire_time: params.expire_time || null,
+          render_version: params.render_version || "legacy",
         }),
       }
     );

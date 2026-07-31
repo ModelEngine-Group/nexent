@@ -21,7 +21,7 @@ import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import type { ConversationListItem } from "@/types/conversation";
-import type { ApiMessage } from "@/types/conversation";
+import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -289,12 +289,13 @@ const restoreAttachments = (
   });
 };
 
-class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
+export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   private loadGeneration = 0;
 
   constructor(
     private readonly getRemoteId: () => string | undefined,
     private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
+    private readonly loadDetail?: () => Promise<ApiConversationDetail | undefined>,
   ) {}
 
   async load(): Promise<ExportedMessageRepository & { unstable_resume?: boolean }> {
@@ -320,8 +321,9 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     // Translate backend `ApiMessage` items into assistant-ui content parts.
     // Historical thinking output is restored as completed reasoning content,
     // while the final answer remains a separate text part.
-    const response = await conversationService.getDetail(Number(remoteId));
-    const detail = response.data?.[0];
+    const detail = this.loadDetail
+      ? await this.loadDetail()
+      : (await conversationService.getDetail(Number(remoteId))).data?.[0];
     if (!detail) {
       return { messages: [] };
     }
@@ -945,6 +947,65 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
   };
 
   return Provider;
+};
+
+const createShareHistoryProvider = (
+  snapshot: ApiConversationDetail,
+): FC<PropsWithChildren> => {
+  const Provider: FC<PropsWithChildren> = ({ children }) => {
+    const aui = useAui();
+    const history = useMemo(
+      () =>
+        new RemoteConversationHistoryAdapter(
+          () => aui.threadListItem().getState().remoteId,
+          () => aui.threadListItem().initialize(),
+          async () => snapshot,
+        ),
+      [aui],
+    );
+    const adapters = useMemo(() => ({ history }), [history]);
+    return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
+  };
+  return Provider;
+};
+
+/**
+ * Creates a single, read-only thread adapter for a public new-chat share.
+ * It deliberately reuses RemoteConversationHistoryAdapter so the snapshot is
+ * reconstructed with the exact same Tool Call, Reasoning, source and
+ * attachment mapping used by a normal historical conversation.
+ */
+export const createShareThreadListAdapter = (
+  snapshot: ApiConversationDetail,
+): RemoteThreadListAdapter => {
+  const remoteId = String(snapshot.conversation_id);
+  const title = (snapshot as ApiConversationDetail & { conversation_title?: string })
+    .conversation_title || "Shared conversation";
+  const metadata: RemoteThreadMetadata = {
+    remoteId,
+    status: "regular",
+    title,
+  };
+
+  return {
+    unstable_Provider: createShareHistoryProvider(snapshot),
+    async list(): Promise<RemoteThreadListResponse> {
+      return { threads: [metadata] };
+    },
+    async initialize(): Promise<RemoteThreadInitializeResponse> {
+      return { remoteId, externalId: remoteId };
+    },
+    async fetch(): Promise<RemoteThreadMetadata> {
+      return metadata;
+    },
+    async rename(): Promise<void> {},
+    async archive(): Promise<void> {},
+    async unarchive(): Promise<void> {},
+    async delete(): Promise<void> {},
+    async generateTitle() {
+      return createAssistantStream(() => {});
+    },
+  };
 };
 
 // ---------------------------------------------------------------------------
