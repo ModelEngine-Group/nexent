@@ -66,6 +66,10 @@ class GenerateA2UITool(Tool):
     name = "generate_a2ui"
     description = (
         "Generate an interactive UI when structured presentation or user input is more useful than plain text. "
+        "When the current user explicitly asks to create, generate, regenerate, or show an interactive UI, "
+        "you must invoke this tool for that turn even if a similar UI was generated earlier. "
+        "Each invocation creates a new independent surface. "
+        "Do not claim that a UI was generated unless this tool returns status 'rendered'. "
         "The UI is validated and cannot execute business operations directly."
     )
     inputs = {

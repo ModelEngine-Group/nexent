@@ -58,6 +58,15 @@ def test_declares_local_catalog_metadata():
     assert getattr(GenerateA2UITool, "usage", None) is None
 
 
+def test_description_requires_explicit_repeat_generation_before_success_claim():
+    description = GenerateA2UITool.description
+
+    assert "must invoke this tool for that turn" in description
+    assert "even if a similar UI was generated earlier" in description
+    assert "Each invocation creates a new independent surface" in description
+    assert "unless this tool returns status 'rendered'" in description
+
+
 def test_default_model_factory_does_not_duplicate_stream_argument(mocker):
     model_class = mocker.patch("nexent.core.tools.generate_a2ui_tool.OpenAIModel")
     tool = GenerateA2UITool(
