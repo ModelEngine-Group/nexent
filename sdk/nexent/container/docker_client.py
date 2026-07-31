@@ -173,6 +173,51 @@ class DockerContainerClient(ContainerClient):
 
         return None
 
+    def _detect_container_port(self, image_name: str, default_port: int) -> int:
+        """Detect the container-internal port the MCP server listens on.
+
+        Uploaded MCP images often hardcode a listening port in their
+        CMD/ENTRYPOINT (e.g. ``--port 3033``) which differs from the host port
+        we publish. Detecting it lets us map host:<host_port> ->
+        container:<container_port>.
+
+        Args:
+            image_name: Docker image name/tag
+            default_port: Fallback port when nothing can be detected
+
+        Returns:
+            The container-internal port the MCP server is expected to listen on
+        """
+        try:
+            image_obj = self.client.images.get(image_name)
+            config = image_obj.attrs.get("Config", {}) or {}
+            cmd_parts = [
+                *(config.get("Entrypoint") or []),
+                *(config.get("Cmd") or []),
+            ]
+            for i, part in enumerate(cmd_parts):
+                if part in ("--port", "-p"):
+                    if i + 1 < len(cmd_parts):
+                        try:
+                            return int(cmd_parts[i + 1])
+                        except (TypeError, ValueError):
+                            pass
+                elif isinstance(part, str) and part.startswith("--port="):
+                    try:
+                        return int(part.split("=", 1)[1])
+                    except (TypeError, ValueError):
+                        pass
+            for env_item in config.get("Env") or []:
+                if isinstance(env_item, str) and env_item.startswith("PORT="):
+                    try:
+                        return int(env_item.split("=", 1)[1])
+                    except (TypeError, ValueError):
+                        pass
+        except Exception as e:
+            logger.warning(
+                f"Failed to detect container port for {image_name}: {e}")
+        return default_port
+
     def find_free_port(self, start_port: int = 5020, max_attempts: int = 100) -> int:
         """
         Find an available port on host
@@ -318,6 +363,12 @@ class DockerContainerClient(ContainerClient):
         else:
             image_name = "alpine:latest"
 
+        # The container-internal port the MCP server listens on may differ from
+        # the host port (e.g. an uploaded image hardcoding --port 3033). Map
+        # host:<host_port> -> container:<container_port> so the health check on
+        # the host port reaches the server.
+        container_port = self._detect_container_port(image_name, host_port)
+
         full_command_to_run = full_command
 
         container_config = {
@@ -338,7 +389,7 @@ class DockerContainerClient(ContainerClient):
 
         # Only publish ports when running locally; inside Docker network DNS is used.
         if not DockerContainerClient._is_running_in_docker():
-            container_config["ports"] = {f"{host_port}/tcp": host_port}
+            container_config["ports"] = {f"{container_port}/tcp": host_port}
 
         try:
             if full_command_to_run:
