@@ -398,12 +398,20 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         return False
 
 
-def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], tenant_id: str, user_id: str, version_no: int = 0):
+def update_related_agents(
+    parent_agent_id: int,
+    related_agent_ids: List[int],
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    related_agents: Optional[List[dict]] = None,
+):
     """
     Update related agents for a parent agent by replacing all existing relations.
     Default version_no=0 updates the draft version.
 
     This function handles both creation and deletion of relations in a single transaction.
+    If related_agents is provided, it will also save the pinned version for each relation.
 
     Args:
         parent_agent_id: ID of the parent agent
@@ -411,7 +419,17 @@ def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], te
         tenant_id: Tenant ID
         user_id: User ID for audit trail
         version_no: Version number to filter. Default 0 = draft/editing state
+        related_agents: Optional list of dicts with 'agent_id' and 'version_no' keys
     """
+    # Build a version mapping if related_agents is provided
+    version_map: dict = {}
+    if related_agents:
+        for rel in related_agents:
+            agent_id = rel.get("agent_id")
+            agent_version_no = rel.get("version_no")
+            if agent_id is not None:
+                version_map[agent_id] = agent_version_no
+
     with get_db_session() as session:
         # Get current relations
         current_relations = session.query(AgentRelation).filter(
@@ -430,6 +448,8 @@ def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], te
         ids_to_delete = current_related_ids - new_related_ids
         # Find IDs to add (in new but not in current)
         ids_to_add = new_related_ids - current_related_ids
+        # Find IDs to update (version_no changed)
+        ids_to_update = current_related_ids & new_related_ids
 
         # Soft delete removed relations
         if ids_to_delete:
@@ -453,9 +473,22 @@ def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], te
                 "created_by": user_id,
                 "updated_by": user_id
             }
+            # Add selected_agent_version_no if available
+            if child_agent_id in version_map:
+                relation_info["selected_agent_version_no"] = version_map[child_agent_id]
+
             new_relation = AgentRelation(
                 **filter_property(relation_info, AgentRelation))
             session.add(new_relation)
+
+        # Update version_no for existing relations if needed
+        if ids_to_update and version_map:
+            for rel in current_relations:
+                if rel.selected_agent_id in ids_to_update:
+                    new_version_no = version_map.get(rel.selected_agent_id)
+                    if new_version_no is not None:
+                        rel.selected_agent_version_no = new_version_no
+                        rel.updated_by = user_id
 
 
 def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):

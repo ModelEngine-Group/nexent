@@ -35,6 +35,24 @@ def search_version_by_version_no(
         return as_dict(version) if version else None
 
 
+def search_version_name_by_version_no(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> Optional[str]:
+    """
+    Search version_name by version_no, including soft-deleted versions.
+    Used for displaying version info in sub-agent relations.
+    """
+    with get_db_session() as session:
+        version = session.query(AgentVersion).filter(
+            AgentVersion.agent_id == agent_id,
+            AgentVersion.version_no == version_no,
+            AgentVersion.tenant_id == tenant_id,
+        ).first()
+        return version.version_name if version else None
+
+
 def search_version_by_id(
     version_id: int,
     tenant_id: str,

@@ -217,6 +217,7 @@ export const fetchPublishedAgentList = async () => {
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
+      version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
     }));
@@ -438,6 +439,7 @@ export interface UpdateAgentInfoPayload {
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
   related_agent_ids?: number[];
+  related_agents?: { agent_id: number; version_no: number }[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;
   greeting_message?: string;
@@ -821,8 +823,13 @@ export const searchAgentInfo = async (
       enabled: data.enabled,
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],
+<<<<<<< HEAD
       sub_agent_id_list: data.sub_agent_id_list || [],
       external_sub_agent_id_list: data.external_sub_agent_id_list || [],
+=======
+      sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
+      sub_agent_relations: data.sub_agent_relations || [],
+>>>>>>> e442a097d (子agent添加版本号展示)
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
