@@ -1346,9 +1346,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          // The final answer terminates the self-check lifecycle. Mark the
-          // existing panel complete before exposing the final answer text.
-          if (chunk.type === "final_answer") {
+          // The final answer (or other terminal events) terminates the self-check lifecycle.
+          // Mark the existing panel complete before exposing terminal output.
+          if (
+            chunk.type === "final_answer" ||
+            chunk.type === "error" ||
+            chunk.type === "agent_finish" ||
+            chunk.type === "max_steps_reached"
+          ) {
             completeVerificationPanel();
           }
 
