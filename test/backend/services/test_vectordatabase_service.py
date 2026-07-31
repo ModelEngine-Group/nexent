@@ -135,6 +135,11 @@ class MockJinaEmbedding:
         pass
 
 
+class MockSiliconflowMultimodalEmbedding:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
 class MockBaseEmbedding:
     pass
 
@@ -143,6 +148,7 @@ embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
 embedding_model_module.JinaEmbedding = MockJinaEmbedding
 embedding_model_module.BaseEmbedding = MockBaseEmbedding
 embedding_model_module.DashScopeMultimodalEmbedding = MockDashScopeMultimodalEmbedding
+embedding_model_module.SiliconflowMultimodalEmbedding = MockSiliconflowMultimodalEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
 
 # Mock nexent.core.models.rerank_model with proper class exports
@@ -5958,6 +5964,42 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.DashScopeMultimodalEmbedding')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_embedding_model_by_id_dashscope_multi_embedding(
+        self, mock_get_model_name, mock_dashscope_class, mock_get_model
+    ):
+        """Test that a DashScope model selected by ID uses its matching client."""
+        from backend.services.vectordatabase_service import get_embedding_model_by_id
+
+        mock_get_model.return_value = {
+            "model_id": 48,
+            "model_type": "multi_embedding",
+            "model_factory": "dashscope",
+            "model_name": "multimodal-embedding-v1",
+            "model_repo": "dashscope",
+            "api_key": "dashscope-key",
+            "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            "max_tokens": 1024,
+            "ssl_verify": True,
+        }
+        mock_get_model_name.return_value = "multimodal-embedding-v1"
+        mock_instance = MagicMock()
+        mock_dashscope_class.return_value = mock_instance
+
+        model, model_id = get_embedding_model_by_id("tenant-1", 48)
+
+        self.assertIs(model, mock_instance)
+        self.assertEqual(model_id, 48)
+        mock_dashscope_class.assert_called_once_with(
+            api_key="dashscope-key",
+            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            model_name="multimodal-embedding-v1",
+            embedding_dim=1024,
+            ssl_verify=True,
+        )
+
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
     def test_get_embedding_model_by_id_model_not_found(self, mock_get_model):
         """
         Test get_embedding_model_by_id when model is not found.
@@ -6917,6 +6959,21 @@ class TestCoverageImprovement(unittest.TestCase):
             })
         # Should return a DashScopeMultimodalEmbedding instance (mocked)
         self.assertIsNotNone(result)
+
+    def test_create_embedding_model_siliconflow(self):
+        """Siliconflow multi-embedding models use their provider-specific client."""
+        from backend.services.vectordatabase_service import _create_embedding_model
+        with patch('backend.services.vectordatabase_service.get_model_name_from_config',
+                   return_value="Qwen/Qwen3-VL-Embedding-8B"):
+            result = _create_embedding_model({
+                "model_name": "Qwen/Qwen3-VL-Embedding-8B",
+                "model_type": "multi_embedding",
+                "model_factory": "silicon",
+                "api_key": "test-key",
+                "base_url": "https://api.siliconflow.cn/v1/embeddings",
+            })
+
+        self.assertIsInstance(result, MockSiliconflowMultimodalEmbedding)
 
     # Tests for create_knowledge_base - is_multimodal=False with embedding_model_name (line 668)
     @patch('backend.services.vectordatabase_service.get_embedding_model')

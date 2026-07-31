@@ -109,7 +109,7 @@ function AgentRepositoryDetailError({
         {t("agentRepository.detail.loadError")}
       </p>
       <Button type="primary" onClick={onRetry} loading={isFetching}>
-        {t("agentRepository.detail.retry")}
+        {t("repository.common.retry")}
       </Button>
     </div>
   );

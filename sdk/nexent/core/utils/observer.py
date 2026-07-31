@@ -1,8 +1,13 @@
 import json
 import re
 from collections import deque
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any
+
+
+_NL2A_WRAPPER_PATTERN = re.compile(r"<nl2a>\s*(.*?)\s*</nl2a>", re.DOTALL)
 
 
 class ProcessType(Enum):
@@ -26,12 +31,16 @@ class ProcessType(Enum):
 
     CARD = "card"  # content that needs to be rendered by the front end using cards
     TOOL = "tool"  # tool name
+    NL2A = "nl2a"  # structured NL2Agent runtime output
     SKILL_ARTIFACT = "skill_artifact"  # structured file output from a skill script
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
     VERIFICATION = "verification"  # layered ReAct self-verification status
     PLAN = "plan"  # structured plan JSON for planning feature
     PLAN_STEP_UPDATE = "plan_step_update"  # single plan step status update
+
+    SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
+    SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
 
 
 # message transformer base class
@@ -100,12 +109,13 @@ class MessageObserver:
     # set the maximum buffer size, can be adjusted according to needs
     MAX_TOKEN_BUFFER_SIZE = 10
 
-    def __init__(self, lang="zh"):
+    def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # unified output to the front end string, changed to queue
         self.message_query = []
 
         # control output language
         self.lang = lang
+        self.enable_nl2a_wrapper = enable_nl2a_wrapper
 
         # initialize message transformer
         self._init_message_transformers()
@@ -124,6 +134,14 @@ class MessageObserver:
         self.in_think_mode = False
         self.think_start_pattern = re.compile(r"<think>")
         self.think_end_pattern = re.compile(r"</think>")
+
+        # Sub-agent nesting depth. 0 = main agent, +1 per entered sub-agent.
+        # Context-local storage prevents concurrently executing tools from
+        # affecting each other's frontend nesting hierarchy.
+        self._current_depth: ContextVar[int] = ContextVar("current_depth", default=0)
+        self._tool_call_id: ContextVar[str | None] = ContextVar(
+            "tool_call_id", default=None
+        )
 
     def _init_message_transformers(self):
         """initialize the mapping of message type to transformer"""
@@ -144,6 +162,7 @@ class MessageObserver:
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
+            ProcessType.NL2A: default_transformer,
             ProcessType.SKILL_ARTIFACT: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
             ProcessType.VERIFICATION: default_transformer,
@@ -286,6 +305,28 @@ class MessageObserver:
                 Message(self.current_mode, buffer_text).to_json())
             self.token_buffer.clear()
 
+    @staticmethod
+    def _extract_nl2a_wrapper(content):
+        """Extract one valid NL2Agent JSON wrapper from tool execution logs."""
+        if not isinstance(content, str):
+            return None, content
+
+        match = _NL2A_WRAPPER_PATTERN.search(content)
+        if match is None:
+            return None, content
+
+        visible_content = (
+            content[:match.start()] + content[match.end():]
+        ).strip()
+        try:
+            payload = json.loads(match.group(1))
+        except (json.JSONDecodeError, TypeError):
+            return None, visible_content
+
+        if not isinstance(payload, dict):
+            return None, visible_content
+        return json.dumps(payload, ensure_ascii=False), visible_content
+
     def add_message(self, agent_name, process_type, content, **kwargs):
         """add message to the queue"""
         transformer = self.transformers.get(
@@ -293,12 +334,93 @@ class MessageObserver:
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
 
+        if (
+            self.enable_nl2a_wrapper
+            and process_type == ProcessType.EXECUTION_LOGS
+        ):
+            nl2a_content, formatted_content = self._extract_nl2a_wrapper(
+                formatted_content
+            )
+            if nl2a_content is not None:
+                self.message_query.append(
+                    Message(ProcessType.NL2A, nl2a_content).to_json()
+                )
+
         tool_name = kwargs.get("tool_name")
         tool_arguments = kwargs.get("tool_arguments")
+        tool_call_id = kwargs.get("tool_call_id") or self._tool_call_id.get()
+        agent_id = kwargs.get("agent_id")
 
         self.message_query.append(
             Message(process_type, formatted_content, tool_name=tool_name,
-                    tool_arguments=tool_arguments).to_json())
+                    tool_arguments=tool_arguments,
+                    tool_call_id=tool_call_id,
+                    agent_id=agent_id,
+                    depth=self._current_depth.get()).to_json())
+
+    @contextmanager
+    def tool_call_context(self, tool_call_id: str):
+        """Associate observer output with one executing tool invocation."""
+        token = self._tool_call_id.set(tool_call_id)
+        try:
+            yield
+        finally:
+            self._tool_call_id.reset(token)
+
+    def add_subagent_start(self, agent_id, agent_name, task=None):
+        """Emit a subagent_start boundary and push the nesting depth.
+
+        The chunk's ``content`` is a JSON blob so the downstream persistence
+        layer (which only stores ``content`` for each unit) keeps enough
+        information to reconstruct the sub-agent card on history replay.
+
+        Args:
+            agent_id: Stable identifier of the sub-agent.
+            agent_name: Display name surfaced on the frontend sub-agent card.
+            task: Optional task text forwarded from the parent's call (e.g.
+                ``task="search the weather"``).
+        """
+        depth = self._current_depth.get() + 1
+        self._current_depth.set(depth)
+        payload = json.dumps(
+            {
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "task": task if task is not None else "",
+            },
+            ensure_ascii=False,
+        )
+        self.message_query.append(
+            Message(
+                ProcessType.SUBAGENT_START,
+                payload,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                depth=depth,
+            ).to_json()
+        )
+
+    def add_subagent_end(self, agent_id, agent_name):
+        """Emit a subagent_end boundary and pop the nesting depth.
+
+        Depth is clamped at 0 to stay resilient against unbalanced starts/ends
+        from upstream tooling.
+        """
+        depth = self._current_depth.get()
+        payload = json.dumps(
+            {"agent_id": agent_id, "agent_name": agent_name},
+            ensure_ascii=False,
+        )
+        self.message_query.append(
+            Message(
+                ProcessType.SUBAGENT_END,
+                payload,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                depth=max(depth, 1),
+            ).to_json()
+        )
+        self._current_depth.set(max(0, depth - 1))
 
     def add_model_reasoning_content(self, reasoning_content):
         """
@@ -328,11 +450,16 @@ class MessageObserver:
 # fixed MessageObserver output format
 class Message:
     def __init__(self, message_type: ProcessType, content, tool_name: str = None,
-                 tool_arguments: dict = None):
+                 tool_arguments: dict = None, agent_id=None, agent_name: str = None,
+                 depth: int = 0, tool_call_id: str | None = None):
         self.message_type = message_type
         self.content = content
         self.tool_name = tool_name
         self.tool_arguments = tool_arguments
+        self.agent_id = agent_id
+        self.agent_name = agent_name
+        self.depth = depth
+        self.tool_call_id = tool_call_id
 
     # generate json format and convert to string
     def to_json(self):
@@ -347,4 +474,14 @@ class Message:
             result["tool_name"] = self.tool_name
         if self.tool_arguments is not None:
             result["tool_arguments"] = self.tool_arguments
+        if self.tool_call_id is not None:
+            result["tool_call_id"] = self.tool_call_id
+        # Sub-agent metadata. Only emitted when populated so legacy consumers
+        # see byte-for-byte identical payloads for non-subagent chunks.
+        if self.agent_id is not None:
+            result["agent_id"] = self.agent_id
+        if self.agent_name is not None:
+            result["agent_name"] = self.agent_name
+        if self.depth:
+            result["depth"] = self.depth
         return json.dumps(result, ensure_ascii=False)

@@ -6,7 +6,7 @@ import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
 import { Badge, message, Tabs, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { Info, Trash2, Settings } from "lucide-react";
+import { Eye, Pencil, Trash2, Settings } from "lucide-react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   deleteSkill,
@@ -245,6 +245,8 @@ export default function SkillManagement({
         const isSelected = originalSelectedSkillIdsSet.has(
           Number(skill.skill_id)
         );
+        const canEditSkill =
+          !isReadOnly && skill.permission === "EDIT" && Boolean(onEditSkill);
         const hasConfigurableParams =
           Array.isArray(skill.config_schemas) &&
           skill.config_schemas.length > 0;
@@ -282,11 +284,23 @@ export default function SkillManagement({
                 <button
                   type="button"
                   onClick={(event) => handleInfoClick(skill, event)}
-                  aria-label={t("skillPool.viewDetails")}
-                  title={t("skillPool.viewDetails")}
+                  aria-label={t(
+                    canEditSkill
+                      ? "skillManagement.edit.title"
+                      : "skillPool.viewDetails"
+                  )}
+                  title={t(
+                    canEditSkill
+                      ? "skillManagement.edit.title"
+                      : "skillPool.viewDetails"
+                  )}
                   className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
                 >
-                  <Info className="size-4" />
+                  {canEditSkill ? (
+                    <Pencil className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
                 </button>
                 <button
                   type="button"

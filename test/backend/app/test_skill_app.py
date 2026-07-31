@@ -2699,7 +2699,8 @@ class TestBuildModelConfigFromTenant:
                     "display_name": "GPT-4",
                     "api_key": "test-key",
                     "base_url": "https://api.openai.com",
-                    "model_factory": "openai"
+                    "model_factory": "openai",
+                    "ssl_verify": True
                 }
                 mock_get_model.return_value = "gpt-4"
 
@@ -2712,9 +2713,27 @@ class TestBuildModelConfigFromTenant:
                 assert config.url == "https://api.openai.com"
                 assert config.temperature == 0.1
                 assert config.top_p == 0.95
-                assert config.ssl_verify == True
+                assert config.ssl_verify is True
                 assert config.model_factory == "openai"
                 assert config.prompt_cache["mode"] == "openai_automatic"
+
+    def test_build_model_config_ssl_verify_default_false(self, mocker):
+        """Test that ssl_verify defaults to False when not present in config."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
+                sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
+                mock_config_mgr.get_model_config.return_value = {
+                    "display_name": "GPT-4",
+                    "api_key": "test-key",
+                    "base_url": "https://api.openai.com",
+                    "model_factory": "openai"
+                }
+                mock_get_model.return_value = "gpt-4"
+
+                from backend.apps.skill_app import _build_model_config_from_tenant
+                config = _build_model_config_from_tenant("tenant123")
+
+                assert config.ssl_verify is False
 
     def test_build_model_config_missing_quick_config(self, mocker):
         """Test error when tenant has no LLM model configured."""

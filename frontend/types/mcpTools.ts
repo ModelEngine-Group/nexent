@@ -130,6 +130,7 @@ export interface CommunityMcpCard {
   name: string;
   version?: string;
   description: string;
+  content?: string;
   status: string;
   createdAt: string;
   updatedAt?: string;
@@ -167,6 +168,7 @@ export interface McpServiceItem {
   source: McpSource;
   enabled: McpServiceStatus;
   updatedAt: string;
+  createTime: string;
   tags: string[];
   transportType: McpTransportType;
   serverUrl: string;

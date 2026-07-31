@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -243,6 +244,7 @@ class TestMessageObserver:
         observer_en = MessageObserver(lang="en")
         assert observer_en.lang == "en"
         assert observer_en.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+        assert observer_en.enable_nl2a_wrapper is False
 
         # Test Chinese
         observer_zh = MessageObserver(lang="zh")
@@ -271,6 +273,176 @@ class TestMessageObserver:
         message_data = json.loads(cached_messages[0])
         assert message_data["type"] == ProcessType.STEP_COUNT.value
         assert "Step 3" in message_data["content"]
+
+    def test_add_message_uses_context_tool_call_id_when_explicit_value_is_none(self):
+        """Preserve the active tool ID when a caller passes an empty override."""
+        observer = MessageObserver(lang="en")
+
+        with observer.tool_call_context("call-123"):
+            observer.add_message(
+                "test_agent",
+                ProcessType.SEARCH_CONTENT,
+                "results",
+                tool_call_id=None,
+            )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+        assert message_data["tool_call_id"] == "call-123"
+
+    def test_add_subagent_start_serializes_payload_and_increments_depth(self, observer):
+        """Emit a nested sub-agent start event with replay metadata."""
+        observer.add_subagent_start("agent-1", "Researcher", task="Analyze Chinese content")
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        assert message_data == {
+            "type": ProcessType.SUBAGENT_START.value,
+            "content": json.dumps(
+                {
+                    "agent_id": "agent-1",
+                    "agent_name": "Researcher",
+                    "task": "Analyze Chinese content",
+                },
+                ensure_ascii=False,
+            ),
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "depth": 1,
+        }
+        assert observer._current_depth.get() == 1
+
+    def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
+        """Close sub-agent events without allowing the nesting depth below zero."""
+        observer.add_subagent_end("agent-1", "Researcher")
+
+        message_data = json.loads(observer.get_cached_message()[0])
+
+        assert message_data == {
+            "type": ProcessType.SUBAGENT_END.value,
+            "content": json.dumps(
+                {"agent_id": "agent-1", "agent_name": "Researcher"},
+                ensure_ascii=False,
+            ),
+            "agent_id": "agent-1",
+            "agent_name": "Researcher",
+            "depth": 1,
+        }
+        assert observer._current_depth.get() == 0
+
+    def test_subagent_depth_isolated_across_threads(self, observer):
+        """Keep independent sub-agent depths for concurrent tool execution."""
+        barrier = threading.Barrier(2)
+
+        def run_subagent(agent_id, agent_name):
+            observer.add_subagent_start(agent_id, agent_name)
+            barrier.wait(timeout=5)
+            observer.add_message(agent_name, ProcessType.OTHER, "working")
+            observer.add_subagent_end(agent_id, agent_name)
+
+        first = threading.Thread(
+            target=run_subagent,
+            args=("agent-1", "Researcher"),
+        )
+        second = threading.Thread(
+            target=run_subagent,
+            args=("agent-2", "Writer"),
+        )
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+        assert all(message["depth"] == 1 for message in messages)
+        assert observer._current_depth.get() == 0
+
+    def test_execution_logs_extract_nl2a_before_visible_content(self):
+        """Extract NL2Agent JSON from wrapper tool execution logs."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        payload = {
+            "status": "success",
+            "recommendation_count": 0,
+            "recommendations": [],
+        }
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a>\n{json.dumps(payload)}\n</nl2a>\nNL2A payload generated.",
+        )
+
+        messages = [
+            json.loads(message)
+            for message in observer.get_cached_message()
+        ]
+        assert [message["type"] for message in messages] == [
+            ProcessType.NL2A.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == payload
+        assert messages[1]["content"] == "NL2A payload generated."
+
+    def test_final_answer_never_extracts_nl2a(self):
+        """Do not retain final-answer wrapper extraction as a fallback."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = '<nl2a>{"status":"success"}</nl2a>\nVisible answer.'
+
+        observer.add_message("agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
+
+    def test_execution_logs_drop_invalid_nl2a_without_emitting_chunk(self):
+        """Hide an invalid tool wrapper without emitting malformed data."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            "<nl2a>{invalid json}</nl2a>\nWrapper failed.",
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper failed.",
+        }
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            {"status": "success"},
+            "Ordinary execution output without a wrapper.",
+        ],
+    )
+    def test_nl2a_extractor_preserves_content_without_a_string_wrapper(
+        self,
+        content,
+    ):
+        payload, visible_content = MessageObserver._extract_nl2a_wrapper(content)
+
+        assert payload is None
+        assert visible_content == content
+
+    def test_execution_logs_reject_nl2a_json_that_is_not_an_object(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            '<nl2a>["not", "an", "object"]</nl2a>\nWrapper rejected.',
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper rejected.",
+        }
 
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
@@ -1000,6 +1172,7 @@ class TestProcessTypeEnum:
             "PICTURE_WEB",
             "CARD",
             "TOOL",
+            "NL2A",
             "MEMORY_SEARCH",
             "MAX_STEPS_REACHED",
             "VERIFICATION",

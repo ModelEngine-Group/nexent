@@ -182,7 +182,7 @@ def test_guardrail_wrap_tools_no_engine_is_noop():
 # ---------------------------------------------------------------------------
 
 import threading as _threading
-from nexent.core.agents.core_agent import FinalAnswerError
+from nexent.core.agents.core_agent import FinalAnswerError, InvalidActionFormatError
 
 
 def _make_step_agent(rule, messages, model_output="ok"):
@@ -275,6 +275,69 @@ def test_step_stream_checkpoint1_pass():
     with pytest.raises(FinalAnswerError):
         next(agent._step_stream(action_step))
     assert agent.model.call_count == 1  # model called
+
+
+@pytest.mark.parametrize(
+    "model_output",
+    [
+        "Step 2:\nCalled tool 'python_interpreter'()",
+        '{"tool_calls":[{"name":"python_interpreter","arguments":"print(1)"}]}',
+    ],
+)
+def test_step_stream_rejects_non_executable_action_record(model_output):
+    """Action-shaped parse failures must retry through AgentError, not terminate as final answers."""
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(rule, messages=[_msg("user", "solve this")], model_output=model_output)
+    action_step = MagicMock()
+    action_step.is_final_answer = False
+
+    with pytest.raises(InvalidActionFormatError):
+        next(agent._step_stream(action_step))
+
+    assert action_step.model_output == model_output
+    assert not action_step.is_final_answer
+
+
+def test_run_stream_retries_invalid_action_then_returns_real_final_answer():
+    """A malformed action consumes a step, and the loop continues to a semantic final answer."""
+    from types import SimpleNamespace
+
+    from smolagents.agents import ActionOutput
+    from smolagents.memory import FinalAnswerStep
+
+    agent = object.__new__(CoreAgent)
+    agent.agent_name = "test"
+    agent.name = "test"
+    agent.observer = MagicMock()
+    agent.stop_event = _threading.Event()
+    agent.memory = SimpleNamespace(steps=[])
+    agent.logger = MagicMock()
+    agent.enable_planning = False
+    agent.final_answer_checks = None
+    agent.verification_config = AgentVerificationConfig(enabled=False)
+    agent._finalize_step = MagicMock()
+    agent._collect_step_metrics = MagicMock()
+    calls = 0
+
+    def fake_step_stream(action_step):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            action_step.model_output = "Step 2:\nCalled tool 'python_interpreter'()"
+            raise InvalidActionFormatError("retry with executable action", agent.logger)
+        yield ActionOutput(output="The verified answer is 42.", is_final_answer=True)
+
+    agent._step_stream = fake_step_stream
+
+    results = list(agent._run_stream("solve this", max_steps=3))
+
+    assert calls == 2
+    assert len(agent.memory.steps) == 2
+    assert isinstance(agent.memory.steps[0].error, InvalidActionFormatError)
+    assert agent.memory.steps[0].is_final_answer is False
+    assert agent.memory.steps[1].is_final_answer is True
+    assert isinstance(results[-1], FinalAnswerStep)
+    assert "42" in str(results[-1].output)
 
 
 def test_step_stream_checkpoint2_mask():

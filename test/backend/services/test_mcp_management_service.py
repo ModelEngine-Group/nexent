@@ -58,6 +58,9 @@ from backend.services.mcp_management_service import (
     _resolve_author_display_name,
     _resolve_user_email,
     _validate_market_status_transition,
+    _mcp_notification_details,
+    _create_mcp_pending_review_notification,
+    _handle_mcp_review_status_notifications,
     list_community_mcp_services,
     list_community_mcp_tag_stats,
     list_community_mcp_review_services,
@@ -117,6 +120,99 @@ PENDING_RECORD = {
 
 
 # ============================================================================
+# Notification helper tests
+# ============================================================================
+
+class TestMcpNotificationHelpers(unittest.TestCase):
+    """Cover MCP repository notification payload helpers."""
+
+    def test_notification_details_includes_content_when_provided(self):
+        details = _mcp_notification_details(
+            name="svc",
+            market_id=1,
+            source_mcp_id=9,
+            content="looks good",
+        )
+        self.assertEqual(
+            details,
+            {
+                "name": "svc",
+                "market_id": 1,
+                "source_mcp_id": 9,
+                "content": "looks good",
+            },
+        )
+
+    def test_notification_details_omits_empty_content_by_default(self):
+        details = _mcp_notification_details(
+            name="svc",
+            market_id=1,
+            source_mcp_id=9,
+            content=None,
+        )
+        self.assertNotIn("content", details)
+
+    def test_notification_details_includes_empty_content_when_requested(self):
+        details = _mcp_notification_details(
+            name="svc",
+            market_id=1,
+            source_mcp_id=9,
+            content="",
+            include_empty_content=True,
+        )
+        self.assertEqual(details["content"], "")
+
+    @patch("backend.services.mcp_management_service.create_repository_pending_review_notification")
+    def test_create_pending_review_notification(self, mock_create):
+        _create_mcp_pending_review_notification(
+            tenant_id="tid",
+            user_id="uid",
+            market_id=2,
+            name="new-svc",
+            source_mcp_id=1,
+            content="please review",
+        )
+        mock_create.assert_called_once()
+        kwargs = mock_create.call_args.kwargs
+        self.assertEqual(kwargs["unique_id"], 2)
+        self.assertEqual(kwargs["details"]["content"], "please review")
+
+    @patch("backend.services.mcp_management_service.deactivate_notifications")
+    @patch("backend.services.mcp_management_service.create_repository_review_notification")
+    def test_handle_review_status_notifications_shared_with_content(
+        self, mock_review, mock_deactivate
+    ):
+        _handle_mcp_review_status_notifications(
+            current_status="pending_review",
+            new_status="shared",
+            record=PENDING_RECORD,
+            market_id=2,
+            user_id="admin",
+            content="approved note",
+        )
+        mock_review.assert_called_once()
+        self.assertEqual(mock_review.call_args.kwargs["details"]["content"], "approved note")
+        mock_deactivate.assert_called_once()
+
+    @patch("backend.services.mcp_management_service.deactivate_notifications")
+    @patch("backend.services.mcp_management_service.create_repository_review_notification")
+    def test_handle_review_status_notifications_without_content(
+        self, mock_review, mock_deactivate
+    ):
+        _handle_mcp_review_status_notifications(
+            current_status="pending_review",
+            new_status="rejected",
+            record=PENDING_RECORD,
+            market_id=2,
+            user_id="admin",
+            content=None,
+        )
+        details = mock_review.call_args.kwargs["details"]
+        self.assertNotIn("content", details)
+        mock_deactivate.assert_called_once()
+
+
+# ============================================================================
 # Helper / utility function tests
 # ============================================================================
 
@@ -124,9 +220,10 @@ class TestToCommunityCard(unittest.TestCase):
     """Test _to_community_card transforms a DB row to the API response shape."""
 
     def test_market_record_shared(self):
-        card = _to_community_card(MARKET_RECORD)
+        card = _to_community_card({**MARKET_RECORD, "content": "listing note"})
         self.assertEqual(card["marketId"], 1)
         self.assertEqual(card["communityId"], 1)
+        self.assertEqual(card["content"], "listing note")
         self.assertEqual(card["name"], "svc1")
         self.assertEqual(card["reviewStatus"], "approved")
         self.assertEqual(card["installCount"], 5)
@@ -770,6 +867,35 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
 
+    @patch('backend.services.mcp_management_service.create_repository_review_notification')
+    @patch('backend.services.mcp_management_service.deactivate_notifications')
+    @patch('backend.services.mcp_management_service.update_mcp_record_market_id_by_id')
+    @patch('backend.services.mcp_management_service.update_mcp_market_status')
+    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    async def test_approve_shared_with_content(
+        self, mock_get, mock_tenant, mock_status, mock_link_mcp, mock_deactivate, mock_review
+    ):
+        mock_get.return_value = {
+            **PENDING_RECORD, "source_mcp_id": 1,
+            "tenant_id": "tid", "user_id": "uid",
+        }
+        mock_tenant.return_value = {"user_role": "ADMIN"}
+        await change_mcp_market_status(
+            tenant_id="tid", user_id="admin_uid",
+            market_id=2, new_status="shared", content="looks good",
+        )
+        mock_status.assert_called_once_with(
+            market_id=2, user_id="admin_uid",
+            review_status="shared", submitted_by=None,
+            content="looks good",
+        )
+        mock_review.assert_called_once()
+        self.assertEqual(
+            mock_review.call_args.kwargs["details"]["content"], "looks good"
+        )
+        mock_deactivate.assert_called_once()
+
     @patch('backend.services.mcp_management_service.update_mcp_record_market_id_by_id')
     @patch('backend.services.mcp_management_service.update_mcp_market_status')
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
@@ -787,6 +913,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="admin_uid",
             review_status="shared", submitted_by=None,
+            content=None,
         )
         mock_link_mcp.assert_called_once_with(
             mcp_id=1, tenant_id="tid", user_id="uid", market_id=2,
@@ -805,6 +932,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="admin_uid",
             review_status="rejected", submitted_by=None,
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.update_mcp_market_status')
@@ -822,6 +950,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=1, user_id="uid",
             review_status="pending_review", submitted_by="user@test.com",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.update_mcp_market_status')
@@ -837,6 +966,7 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         mock_status.assert_called_once_with(
             market_id=2, user_id="uid",
             review_status="not_shared", submitted_by=None,
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
@@ -878,6 +1008,7 @@ class TestApproveCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         mock_change.assert_called_once_with(
             tenant_id="tid", user_id="admin_uid",
             market_id=10, new_status="shared",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
@@ -905,6 +1036,7 @@ class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         mock_change.assert_called_once_with(
             tenant_id="tid", user_id="admin_uid",
             market_id=10, new_status="rejected",
+            content=None,
         )
 
     @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')

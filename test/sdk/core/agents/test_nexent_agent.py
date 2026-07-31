@@ -1,3 +1,4 @@
+import importlib
 import json
 import sys
 import types
@@ -118,6 +119,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    NL2A = "nl2a"
 
 
 @dataclass
@@ -367,6 +369,10 @@ with patch.dict("sys.modules", module_mocks):
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
 
+# Retain the tested module after patch.dict restores the module registry so it
+# can be reloaded by tests that exercise conditional imports.
+sys.modules["sdk.nexent.core.agents.nexent_agent"] = nexent_agent
+
 
 # Keep the lightweight runtime modules available for create_single_agent()
 # tests.  They exercise runtime selection after the import-time patch.dict
@@ -498,8 +504,39 @@ def mock_core_agent():
 
 
 # ----------------------------------------------------------------------------
-# Tests for helper functions (_has_host_tools, _is_retriever_tool)
+# Tests for type-only imports and helper functions
 # ----------------------------------------------------------------------------
+
+
+def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
+    """Verify type-only imports resolve their expected public symbols."""
+    context_module = types.ModuleType("sdk.nexent.core.agents.context")
+    context_item_input = type("ContextItemInput", (), {})
+    context_module.ContextItemInput = context_item_input
+
+    subagent_module = types.ModuleType("sdk.nexent.core.agents.subagent_wrapper")
+    subagent_tool_wrapper = type("SubAgentToolWrapper", (), {})
+    subagent_module.SubAgentToolWrapper = subagent_tool_wrapper
+
+    agent_model_module = types.ModuleType("sdk.nexent.core.agents.agent_model")
+    agent_model_module.AgentConfig = AgentConfig
+    agent_model_module.AgentHistory = AgentHistory
+    agent_model_module.ModelConfig = ModelConfig
+    agent_model_module.ToolConfig = ToolConfig
+
+    monkeypatch.setattr("typing.TYPE_CHECKING", True)
+    with patch.dict(
+        sys.modules,
+        {
+            **module_mocks,
+            "sdk.nexent.core.agents.agent_model": agent_model_module,
+            "sdk.nexent.core.agents.context": context_module,
+            "sdk.nexent.core.agents.subagent_wrapper": subagent_module,
+        },
+    ):
+        reloaded_module = importlib.reload(nexent_agent)
+        assert reloaded_module.ContextItemInput is context_item_input
+        assert reloaded_module.SubAgentToolWrapper is subagent_tool_wrapper
 
 
 def test_has_host_tools_with_host_tool():
@@ -2204,7 +2241,6 @@ class TestCreateMcpTool:
         with pytest.raises(ValueError, match="test_tool not found in MCP server"):
             nexent_agent_instance.create_mcp_tool("test_tool")
 
-
 class TestCreateBuiltinTool:
     """Tests for create_builtin_tool method."""
 
@@ -3385,6 +3421,42 @@ class TestCreateSingleAgent:
         with pytest.raises(TypeError, match="agent_config must be a AgentConfig object"):
             nexent_agent_instance.create_single_agent("not_an_agent_config")
 
+    def test_wrap_subagent_uses_config_identity_and_name(self, nexent_agent_instance):
+        """Test _wrap_subagent loads the wrapper and resolves managed-agent metadata."""
+        inner_agent = MagicMock()
+        sub_agent_config = types.SimpleNamespace(agent_id="managed-1", name="Research agent")
+
+        wrapped_agent = nexent_agent_instance._wrap_subagent(inner_agent, sub_agent_config)
+
+        assert wrapped_agent._inner is inner_agent
+        assert wrapped_agent._observer is nexent_agent_instance.observer
+        assert wrapped_agent._agent_id == "managed-1"
+        assert wrapped_agent._agent_name == "Research agent"
+
+    def test_create_single_agent_passes_context_item_override(
+        self, nexent_agent_instance, mock_model_config, mock_core_agent
+    ):
+        """Test create_single_agent converts the supplied context input sequence into runtime state."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        context_item = MagicMock()
+        agent_config = AgentConfig(
+            name="context_agent",
+            description="Agent with runtime context",
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
+            result = nexent_agent_instance.create_single_agent(
+                agent_config,
+                context_items_override=(context_item,),
+            )
+
+        context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
+        assert result is mock_core_agent
+        assert context_runtime.items == [context_item]
+
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
         nexent_agent_instance.model_config_list = [mock_model_config]
@@ -3480,10 +3552,12 @@ class TestCreateSingleAgent:
                 assert a2a_agent_info is not None
                 assert hasattr(a2a_agent_info, 'agent_id')
 
-                # Verify wrapper was passed to CoreAgent
+                # Verify the A2A agent is nested in the managed-agent observer wrapper.
                 mock_core_agent_fn.assert_called_once()
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert len(managed) == 1
+                assert managed[0]._inner is mock_wrapper_instance
 
     def test_create_single_agent_with_multiple_external_a2a_agents(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """Test create_single_agent correctly creates multiple external A2A agent wrappers."""
@@ -3526,10 +3600,13 @@ class TestCreateSingleAgent:
 
                 assert mock_wrapper_class.call_count == 2
 
-                # Verify both wrappers were passed to CoreAgent
+                # Verify both A2A agents are nested in managed-agent observer wrappers.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
-                assert mock_wrapper_instance_1 in core_agent_call_kwargs["managed_agents"]
-                assert mock_wrapper_instance_2 in core_agent_call_kwargs["managed_agents"]
+                managed = core_agent_call_kwargs["managed_agents"]
+                assert [wrapped_agent._inner for wrapped_agent in managed] == [
+                    mock_wrapper_instance_1,
+                    mock_wrapper_instance_2,
+                ]
 
     def test_create_single_agent_with_external_a2a_agent_import_error(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent handles import error for ExternalA2AAgentWrapper."""
@@ -3627,12 +3704,12 @@ class TestCreateSingleAgent:
                 # Verify external wrapper was created
                 mock_wrapper_class.assert_called_once()
 
-                # Verify CoreAgent received both sub-agent and external wrapper
+                # Verify CoreAgent received wrappers around both managed agents.
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
                 managed = core_agent_call_kwargs["managed_agents"]
                 assert len(managed) == 2
-                assert isinstance(managed[0], mock_core_agent_class)  # Sub-agent
-                assert managed[1] == mock_wrapper_instance  # External wrapper
+                assert isinstance(managed[0]._inner, mock_core_agent_class)
+                assert managed[1]._inner is mock_wrapper_instance
 
 
 class TestAddHistoryToAgentEdgeCases:
@@ -4575,6 +4652,7 @@ class TestCreateLocalToolMemory:
                 "tenant_id": "tenant_123",
                 "user_id": "user_456",
                 "agent_id": "agent_789",
+                "conversation_id": 101,
                 "memory_user_config": {"version": "v1"}
             }
         )
@@ -4593,10 +4671,15 @@ class TestCreateLocalToolMemory:
             assert result.user_id == "user_456"
             # Verify agent_id was set
             assert result.agent_id == "agent_789"
+            # Verify conversation_id was set for short-term memory isolation
+            assert result.conversation_id == "101"
             # Verify memory_user_config was set
             assert result.memory_user_config == {"version": "v1"}
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
+            assert result.description == "desc"
+            assert result.inputs == {}
+            assert result.output_type == "string"
         finally:
             if original_value is not None:
                 nexent_agent.__dict__["StoreMemoryTool"] = original_value
@@ -4621,7 +4704,8 @@ class TestCreateLocalToolMemory:
                 "memory_config": {"type": "vector"},
                 "tenant_id": "tenant_abc",
                 "user_id": "user_def",
-                "agent_id": "agent_ghi"
+                "agent_id": "agent_ghi",
+                "conversation_id": "conversation_jkl",
             }
         )
 
@@ -4635,6 +4719,7 @@ class TestCreateLocalToolMemory:
             assert result.memory_config == {"type": "vector"}
             # Verify tenant_id was set
             assert result.tenant_id == "tenant_abc"
+            assert result.conversation_id == "conversation_jkl"
             # Verify observer was set
             assert result.observer == nexent_agent_instance.observer
         finally:
@@ -4671,6 +4756,7 @@ class TestCreateLocalToolMemory:
             assert result.tenant_id == ""
             assert result.user_id == ""
             assert result.agent_id == ""
+            assert result.conversation_id == ""
             assert result.memory_user_config is None
         finally:
             if original_value is not None:
@@ -4767,3 +4853,780 @@ class TestMonitoringHelpers:
 
         result = nexent_agent._build_tool_input(empty_func, (), {})
         assert result == {}
+
+
+# ----------------------------------------------------------------------------
+# Tests for _wrap_tool_with_monitoring wrapper invocations (lines 88-149)
+# Existing tests only verify wrapping; these tests actually CALL the wrappers
+# so the inner monitored_span / set_monitored_output / monitored_forward /
+# monitored_callable bodies execute.
+# ----------------------------------------------------------------------------
+
+
+class TestWrapToolMonitoringInvocation:
+    """Tests that invoke the wrapped functions to cover inner function bodies."""
+
+    def _make_monitoring_manager(self):
+        """Create a mock monitoring manager with context-manager support."""
+
+        class _CtxMgr:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *args):
+                return False
+
+        mm = MagicMock()
+        mm.start_agent_run.return_value = _CtxMgr()
+        mm.trace_tool_call.side_effect = lambda *a, **kw: _CtxMgr()
+        mm.trace_retriever_call.side_effect = lambda *a, **kw: _CtxMgr()
+        mm.set_tool_output = MagicMock()
+        mm.set_retriever_output = MagicMock()
+        mm.trace_agent_step.side_effect = lambda *a, **kw: _CtxMgr()
+        return mm
+
+    def test_sync_forward_invocation_covers_monitored_paths(self):
+        """Invoke wrapped forward to cover monitored_span + set_monitored_output (sync, non-retriever)."""
+        mm = self._make_monitoring_manager()
+
+        class NonRetrieverTool:
+            def forward(self, x=1):
+                return f"result_{x}"
+
+        tool = NonRetrieverTool()
+        tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(tool, "test_agent")
+            result = wrapped.forward(x=42)
+
+        assert result == "result_42"
+        mm.trace_tool_call.assert_called_once()
+        mm.set_tool_output.assert_called_once_with("result_42")
+
+    def test_async_forward_invocation_covers_async_monitored_forward(self):
+        """Invoke wrapped async forward to cover async monitored_forward body (lines 106-112)."""
+        import asyncio
+        mm = self._make_monitoring_manager()
+
+        class AsyncTool:
+            async def forward(self, q="hello"):
+                return f"async_{q}"
+
+        tool = AsyncTool()
+        tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(tool, "agent_async")
+            result = asyncio.get_event_loop().run_until_complete(
+                wrapped.forward(q="world")
+            )
+
+        assert result == "async_world"
+        mm.trace_tool_call.assert_called_once()
+        mm.set_tool_output.assert_called_once_with("async_world")
+
+    def test_retriever_tool_sync_forward_covers_retriever_paths(self):
+        """Invoke wrapped forward on a retriever tool to cover trace_retriever_call + set_retriever_output."""
+        mm = self._make_monitoring_manager()
+
+        class KnowledgeBaseSearchTool:
+            def forward(self, query=""):
+                return [{"content": "doc1"}]
+
+        tool = KnowledgeBaseSearchTool()
+        tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(tool, "agent_r")
+            result = wrapped.forward(query="test")
+
+        assert result == [{"content": "doc1"}]
+        mm.trace_retriever_call.assert_called_once()
+        mm.trace_tool_call.assert_not_called()
+        mm.set_retriever_output.assert_called_once_with([{"content": "doc1"}])
+
+    def test_sync_callable_invocation_covers_monitored_callable(self):
+        """Invoke wrapped callable (sync, no forward) to cover lines 140-144."""
+        mm = self._make_monitoring_manager()
+
+        def my_tool(x=1):
+            return x * 2
+
+        my_tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(my_tool, "callable_agent")
+            result = wrapped(x=21)
+
+        assert result == 42
+        mm.trace_tool_call.assert_called_once()
+        mm.set_tool_output.assert_called_once_with(42)
+
+    def test_async_callable_invocation_covers_async_monitored_callable(self):
+        """Invoke wrapped async callable to cover lines 130-136."""
+        import asyncio
+        mm = self._make_monitoring_manager()
+
+        async def async_func(val=0):
+            return val + 100
+
+        async_func._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(async_func, "agent_ac")
+            result = asyncio.get_event_loop().run_until_complete(
+                wrapped(val=5)
+            )
+
+        assert result == 105
+        mm.trace_tool_call.assert_called_once()
+        mm.set_tool_output.assert_called_once_with(105)
+
+    def test_retriever_callable_invocation_covers_retriever_callable_paths(self):
+        """Invoke wrapped retriever callable (no forward) to cover retriever branches."""
+        mm = self._make_monitoring_manager()
+
+        class SearchMemoryTool:
+            def __call__(self, query=""):
+                return "memory_result"
+
+        tool = SearchMemoryTool()
+        tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            wrapped = _wrap_tool_with_monitoring(tool, "agent_mem")
+            result = wrapped(query="hi")
+
+        assert result == "memory_result"
+        mm.trace_retriever_call.assert_called_once()
+        mm.set_retriever_output.assert_called_once_with("memory_result")
+
+    def test_non_callable_non_forward_object_returns_unchanged(self):
+        """An object with no forward and not callable hits the final return (line 149)."""
+        mm = self._make_monitoring_manager()
+
+        class PlainObject:
+            pass
+
+        tool = PlainObject()
+        tool._nexent_monitoring_wrapped = False
+
+        with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
+            result = _wrap_tool_with_monitoring(tool, "agent_plain")
+
+        assert result is tool
+        mm.trace_tool_call.assert_not_called()
+
+
+# ----------------------------------------------------------------------------
+# Tests for create_local_tool AidpSearchTool branch (lines 343-364)
+# ----------------------------------------------------------------------------
+
+
+class TestCreateLocalToolAidpSearchTool:
+    """Tests for the AidpSearchTool branch in create_local_tool."""
+
+    def test_aidp_search_tool_with_allowed_kds_set(self, nexent_agent_instance):
+        """AidpSearchTool with allowed_kds_set in metadata installs whitelist."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AidpSearchTool",
+            name="aidp_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "val"},
+            source="local",
+            metadata={"allowed_kds_set": ["kb1", "kb2"]},
+        )
+
+        original = nexent_agent.__dict__.get("AidpSearchTool")
+        nexent_agent.__dict__["AidpSearchTool"] = mock_tool_class
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original is not None:
+                nexent_agent.__dict__["AidpSearchTool"] = original
+            elif "AidpSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AidpSearchTool"]
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with(param1="val")
+        mock_tool_instance.set_allowed_kds.assert_called_once_with(["kb1", "kb2"])
+        assert mock_tool_instance.observer == nexent_agent_instance.observer
+
+    def test_aidp_search_tool_without_metadata(self, nexent_agent_instance):
+        """AidpSearchTool with metadata=None calls set_allowed_kds(None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AidpSearchTool",
+            name="aidp_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="local",
+            metadata=None,
+        )
+
+        original = nexent_agent.__dict__.get("AidpSearchTool")
+        nexent_agent.__dict__["AidpSearchTool"] = mock_tool_class
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original is not None:
+                nexent_agent.__dict__["AidpSearchTool"] = original
+            elif "AidpSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AidpSearchTool"]
+
+        assert result is mock_tool_instance
+        mock_tool_instance.set_allowed_kds.assert_called_once_with(None)
+
+    def test_aidp_search_tool_set_allowed_kds_raises_exception(self, nexent_agent_instance):
+        """When set_allowed_kds raises, falls back to set_allowed_kds(None)."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.set_allowed_kds.side_effect = [RuntimeError("boom"), None]
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="AidpSearchTool",
+            name="aidp_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="local",
+            metadata={"allowed_kds_set": ["kb1"]},
+        )
+
+        original = nexent_agent.__dict__.get("AidpSearchTool")
+        nexent_agent.__dict__["AidpSearchTool"] = mock_tool_class
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original is not None:
+                nexent_agent.__dict__["AidpSearchTool"] = original
+            elif "AidpSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["AidpSearchTool"]
+
+        assert result is mock_tool_instance
+        # First call with ["kb1"] raises, fallback call with None
+        assert mock_tool_instance.set_allowed_kds.call_count == 2
+        mock_tool_instance.set_allowed_kds.assert_any_call(["kb1"])
+        mock_tool_instance.set_allowed_kds.assert_any_call(None)
+
+
+# ----------------------------------------------------------------------------
+# Tests for create_builtin_tool CreatePlanTool / UpdatePlanStepTool (lines 439-443)
+# ----------------------------------------------------------------------------
+
+
+class TestCreateBuiltinToolPlanTools:
+    """Tests for CreatePlanTool and UpdatePlanStepTool in create_builtin_tool."""
+
+    def test_create_builtin_tool_create_plan_tool(self, nexent_agent_instance):
+        """create_builtin_tool with CreatePlanTool returns CreatePlanTool instance."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="CreatePlanTool",
+            name="create_plan",
+            description="Create a plan",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.plan_tools": MagicMock(CreatePlanTool=mock_tool_class),
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with()
+
+    def test_create_builtin_tool_update_plan_step_tool(self, nexent_agent_instance):
+        """create_builtin_tool with UpdatePlanStepTool returns UpdatePlanStepTool instance."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="UpdatePlanStepTool",
+            name="update_plan_step",
+            description="Update a plan step",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.plan_tools": MagicMock(UpdatePlanStepTool=mock_tool_class),
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with()
+
+
+# ----------------------------------------------------------------------------
+# Tests for agent_run_with_observer token_usage extraction (lines 767-768, 770)
+# ----------------------------------------------------------------------------
+
+
+class TestAgentRunWithTokenUsage:
+    """Tests for token_usage extraction in agent_run_with_observer."""
+
+    def test_agent_run_extracts_token_usage_from_step_log(self, nexent_agent_instance, mock_core_agent):
+        """Verify token_usage.input_tokens and output_tokens are read and accumulated."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.stop_event.is_set.return_value = False
+
+        mock_action_step = MagicMock(spec=ActionStep)
+        mock_action_step.timing = MagicMock(duration=1.0)
+        mock_action_step.step_number = 1
+        mock_action_step.error = None
+        mock_action_step.output = "done"
+        mock_action_step.token_usage = MagicMock(input_tokens=100, output_tokens=50)
+
+        mock_core_agent.run.return_value = [mock_action_step]
+
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+        # Find TOKEN_COUNT payloads and check step tokens appear
+        token_payloads = [
+            json.loads(call.args[2])
+            for call in mock_core_agent.observer.add_message.call_args_list
+            if len(call.args) >= 3 and call.args[1] == ProcessType.TOKEN_COUNT
+        ]
+        assert any(p.get("step_input_tokens") == 100 for p in token_payloads)
+        assert any(p.get("step_output_tokens") == 50 for p in token_payloads)
+
+    def test_agent_run_accumulates_output_tokens_across_steps(self, nexent_agent_instance, mock_core_agent):
+        """Verify total_output_tokens accumulates across multiple steps."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.stop_event.is_set.return_value = False
+
+        step1 = MagicMock(spec=ActionStep)
+        step1.timing = MagicMock(duration=1.0)
+        step1.step_number = 1
+        step1.error = None
+        step1.output = "step1"
+        step1.token_usage = MagicMock(input_tokens=50, output_tokens=20)
+
+        step2 = MagicMock(spec=ActionStep)
+        step2.timing = MagicMock(duration=2.0)
+        step2.step_number = 2
+        step2.error = None
+        step2.output = "final_answer"
+        step2.token_usage = MagicMock(input_tokens=60, output_tokens=30)
+
+        mock_core_agent.run.return_value = [step1, step2]
+
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+        token_payloads = [
+            json.loads(call.args[2])
+            for call in mock_core_agent.observer.add_message.call_args_list
+            if len(call.args) >= 3 and call.args[1] == ProcessType.TOKEN_COUNT
+        ]
+        total_outputs = [p.get("total_output_tokens") for p in token_payloads if p.get("total_output") is not None]
+        # At least one payload should have accumulated output tokens
+        if total_outputs:
+            assert max(total_outputs) >= 20
+
+
+# ----------------------------------------------------------------------------
+# Tests for _log_step_metrics N/A path (line 885)
+# ----------------------------------------------------------------------------
+
+
+class TestLogStepMetricsNA:
+    """Tests for _log_step_metrics when total_raw == 0 (line 885)."""
+
+    def test_log_step_metrics_total_raw_zero_gives_na(self, nexent_agent_instance, mock_core_agent):
+        """When total_raw == 0, total_save_str should be 'N/A'."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_core_agent.step_metrics = [
+            {
+                "main_llm": {"input_tokens": 10, "output_tokens": 5},
+                "compression": {"input_tokens": 8, "output_tokens": 4},
+                "memory_state": {"estimated_input_tokens": 9, "estimated_output_tokens": 5},
+                "uncompressed_mem_est_input": 0,
+                "compression_ratio": 10.0,
+                "cache_hit": False,
+                "step_number": 1,
+            }
+        ]
+
+        import io
+        captured = io.StringIO()
+        mock_file = MagicMock()
+        mock_file.__enter__ = MagicMock(return_value=captured)
+        mock_file.__exit__ = MagicMock(return_value=False)
+
+        with patch("builtins.open", return_value=mock_file):
+            nexent_agent_instance._log_step_metrics()
+
+        output = captured.getvalue()
+        assert "N/A" in output
+
+
+# ----------------------------------------------------------------------------
+# Tests for _cleanup_sandbox MinIO sync and executor release (lines 966-989)
+# ----------------------------------------------------------------------------
+
+
+class TestCleanupSandboxAdvanced:
+    """Tests for _cleanup_sandbox MinIO sync and scope-based executor cleanup."""
+
+    def test_cleanup_sandbox_minio_sync_success(self, nexent_agent_instance, mock_core_agent):
+        """MinIO sync success path uploads files and logs."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_executor = MagicMock()
+        mock_core_agent.python_executor = mock_executor
+        nexent_agent_instance._sandbox_scope = "session"
+
+        mock_sandbox_config = MagicMock()
+        mock_sandbox_config.auto_sync_outputs = True
+        mock_sandbox_config.output_dir = "/tmp/output"
+        nexent_agent_instance.sandbox_config = mock_sandbox_config
+
+        mock_minio = MagicMock()
+        nexent_agent_instance.minio_client = mock_minio
+        mock_core_agent.agent_run_id = "run-123"
+
+        mock_sync = MagicMock(return_value=["file1.txt", "file2.txt"])
+        mock_cleanup = MagicMock()
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module._sync_outputs_to_minio = mock_sync
+        mock_sandbox_module.cleanup_executor = mock_cleanup
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_sync.assert_called_once_with(
+            output_dir="/tmp/output",
+            agent_run_id="run-123",
+            minio_client=mock_minio,
+            bucket="nexent-artifacts",
+            logger_=ANY,
+        )
+        mock_cleanup.assert_called_once()
+
+    def test_cleanup_sandbox_minio_sync_exception(self, nexent_agent_instance, mock_core_agent):
+        """MinIO sync exception is caught and logged (does not crash)."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_executor = MagicMock()
+        mock_core_agent.python_executor = mock_executor
+        nexent_agent_instance._sandbox_scope = "session"
+
+        mock_sandbox_config = MagicMock()
+        mock_sandbox_config.auto_sync_outputs = True
+        mock_sandbox_config.output_dir = "/tmp/output"
+        nexent_agent_instance.sandbox_config = mock_sandbox_config
+        nexent_agent_instance.minio_client = MagicMock()
+
+        mock_sync = MagicMock(side_effect=RuntimeError("MinIO down"))
+        mock_cleanup = MagicMock()
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module._sync_outputs_to_minio = mock_sync
+        mock_sandbox_module.cleanup_executor = mock_cleanup
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_cleanup.assert_called_once()
+
+    def test_cleanup_sandbox_system_scope_releases_executor(self, nexent_agent_instance, mock_core_agent):
+        """System scope calls release_python_executor instead of cleanup_executor."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_executor = MagicMock()
+        mock_core_agent.python_executor = mock_executor
+        nexent_agent_instance._sandbox_scope = "system"
+
+        nexent_agent_instance.sandbox_config = None
+        nexent_agent_instance.minio_client = None
+
+        mock_release = MagicMock()
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.release_python_executor = mock_release
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_release.assert_called_once_with(mock_executor, ANY)
+
+    def test_cleanup_sandbox_minio_sync_no_uploaded_files(self, nexent_agent_instance, mock_core_agent):
+        """MinIO sync returns empty list, no log message about sync."""
+        nexent_agent_instance.agent = mock_core_agent
+        mock_executor = MagicMock()
+        mock_core_agent.python_executor = mock_executor
+        nexent_agent_instance._sandbox_scope = "session"
+
+        mock_sandbox_config = MagicMock()
+        mock_sandbox_config.auto_sync_outputs = True
+        mock_sandbox_config.output_dir = "/tmp/output"
+        nexent_agent_instance.sandbox_config = mock_sandbox_config
+        nexent_agent_instance.minio_client = MagicMock()
+
+        mock_sync = MagicMock(return_value=[])
+        mock_cleanup = MagicMock()
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module._sync_outputs_to_minio = mock_sync
+        mock_sandbox_module.cleanup_executor = mock_cleanup
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            nexent_agent_instance._cleanup_sandbox()
+
+        mock_sync.assert_called_once()
+        mock_cleanup.assert_called_once()
+
+
+# ----------------------------------------------------------------------------
+# Tests for create_single_agent sandbox build + plan wiring (lines 615-694)
+# ----------------------------------------------------------------------------
+
+
+class TestCreateSingleAgentSandboxAndPlanning:
+    """Tests for sandbox build and plan-tool wiring in create_single_agent."""
+
+    def _run_create_single_agent(self, nexent_agent_instance, mock_model_config,
+                                  mock_core_agent, agent_config):
+        """Helper to invoke create_single_agent with CoreAgent mocked."""
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_cls:
+            return nexent_agent_instance.create_single_agent(agent_config), mock_cls
+
+    def _make_sandbox_level(self):
+        """Create a stub for SandboxLevel that supports .value and enum equality."""
+        from enum import Enum
+
+        class SandboxLevel(str, Enum):
+            LOCAL = "local"
+            DOCKER = "docker"
+            WASM = "wasm"
+
+        return SandboxLevel
+
+    def _make_sandbox_config(self, level_value, scope_value="session"):
+        """Create a sandbox_config mock with proper enum-like level and scope."""
+        SandboxLevel = self._make_sandbox_level()
+        mock_sandbox_config = MagicMock()
+        mock_sandbox_config.level = SandboxLevel(level_value)
+        mock_sandbox_config.scope = MagicMock()
+        mock_sandbox_config.scope.value = scope_value
+        return mock_sandbox_config
+
+    def test_sandbox_build_local_level_skips_warmup(self, nexent_agent_instance, mock_model_config, mock_core_agent):
+        """Sandbox with LOCAL level skips warm-up call (lines 615-626)."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config("local")
+
+        mock_build = MagicMock(return_value=MagicMock())
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+
+        agent_config = AgentConfig(
+            name="sandbox_agent",
+            description="Agent with sandbox",
+            prompt_templates={"system": "test"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+            enable_planning=False,
+        )
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            result, mock_cls = self._run_create_single_agent(
+                nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
+            )
+
+        mock_build.assert_called_once()
+        assert nexent_agent_instance._sandbox_scope == "session"
+
+    def test_sandbox_build_docker_level_with_warmup(self, nexent_agent_instance, mock_model_config, mock_core_agent):
+        """Sandbox with DOCKER level triggers warm-up (lines 627-648)."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config("docker")
+
+        mock_executor = MagicMock()
+        mock_executor._nexent_backend = "docker"
+        mock_build = MagicMock(return_value=mock_executor)
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+
+        agent_config = AgentConfig(
+            name="docker_agent",
+            description="Agent with docker sandbox",
+            prompt_templates={"system": "test"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+            enable_planning=False,
+        )
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            result, mock_cls = self._run_create_single_agent(
+                nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
+            )
+
+        mock_build.assert_called_once()
+        # Warm-up call should have happened: executor("[0, None]")
+        mock_executor.assert_called_once_with("[0, None]")
+
+    def test_sandbox_build_docker_warmup_fallback_local(self, nexent_agent_instance, mock_model_config, mock_core_agent):
+        """Warm-up detects fallback to local backend (lines 633-640)."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config("docker")
+
+        mock_executor = MagicMock()
+        mock_executor._nexent_backend = "local"  # fallback to local
+        mock_build = MagicMock(return_value=mock_executor)
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+
+        agent_config = AgentConfig(
+            name="fallback_agent",
+            description="Agent with fallback",
+            prompt_templates={"system": "test"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+        )
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            result, _ = self._run_create_single_agent(
+                nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
+            )
+
+        mock_build.assert_called_once()
+
+    def test_sandbox_build_warmup_error(self, nexent_agent_instance, mock_model_config, mock_core_agent):
+        """Warm-up exception is caught and logged (lines 649-654)."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        SandboxLevel = self._make_sandbox_level()
+
+        nexent_agent_instance.sandbox_config = self._make_sandbox_config("docker")
+
+        mock_executor = MagicMock(side_effect=RuntimeError("sandbox unreachable"))
+        mock_build = MagicMock(return_value=mock_executor)
+
+        mock_sandbox_module = MagicMock()
+        mock_sandbox_module.build_python_executor = mock_build
+        mock_sandbox_module.SandboxLevel = SandboxLevel
+
+        agent_config = AgentConfig(
+            name="err_agent",
+            description="Agent with warm-up error",
+            prompt_templates={"system": "test"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+        )
+
+        with patch.dict("sys.modules", {
+            "sdk.nexent.core.agents.sandbox": mock_sandbox_module,
+        }):
+            # Should NOT raise despite warm-up failure
+            result, _ = self._run_create_single_agent(
+                nexent_agent_instance, mock_model_config, mock_core_agent, agent_config
+            )
+
+        mock_build.assert_called_once()
+
+    def test_plan_tool_wiring_when_planning_enabled(self, nexent_agent_instance, mock_model_config, mock_core_agent):
+        """When enable_planning=True, plan tool deps are wired (lines 683-694)."""
+        nexent_agent_instance.model_config_list = [mock_model_config]
+        nexent_agent_instance.sandbox_config = None
+
+        # Set up mock_core_agent.tools with create_plan and update_plan_step
+        mock_create_plan = MagicMock()
+        mock_update_step = MagicMock()
+        mock_core_agent.tools = {
+            "create_plan": mock_create_plan,
+            "update_plan_step": mock_update_step,
+        }
+        mock_core_agent.plan_repo = MagicMock()
+        mock_core_agent._on_plan_created = MagicMock()
+        mock_core_agent._on_step_updated = MagicMock()
+        mock_core_agent._get_conversation_id = MagicMock()
+        mock_core_agent._get_user_id = MagicMock()
+        mock_core_agent.enable_planning = True
+
+        agent_config = AgentConfig(
+            name="planning_agent",
+            description="Agent with planning",
+            prompt_templates={"system": "test"},
+            tools=[],
+            max_steps=5,
+            model_name="test_model",
+            provide_run_summary=False,
+            managed_agents=[],
+            enable_planning=True,
+        )
+
+        with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent):
+            nexent_agent_instance.create_single_agent(agent_config)
+
+        # Verify create_plan wired
+        assert mock_create_plan.observer is mock_core_agent.observer
+        assert mock_create_plan.plan_repo is mock_core_agent.plan_repo
+        assert mock_create_plan._on_plan_created is mock_core_agent._on_plan_created
+        assert mock_create_plan._get_conversation_id is mock_core_agent._get_conversation_id
+        assert mock_create_plan._get_user_id is mock_core_agent._get_user_id
+
+        # Verify update_step wired
+        assert mock_update_step.observer is mock_core_agent.observer
+        assert mock_update_step.plan_repo is mock_core_agent.plan_repo
+        assert mock_update_step._on_step_updated is mock_core_agent._on_step_updated
+        assert mock_update_step._get_conversation_id is mock_core_agent._get_conversation_id
+        assert mock_update_step._get_user_id is mock_core_agent._get_user_id

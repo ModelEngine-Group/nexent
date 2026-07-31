@@ -24,7 +24,6 @@ import {
   toPrettyRegistryJson,
 } from "@/lib/mcpTools";
 import type { CommunityMcpCard } from "@/types/mcpTools";
-import RegistryStatusBadge from "../../shared/StatusBadge";
 import JsonPreviewModal from "../../shared/JsonPreviewModal";
 import TransportIcon from "../../shared/TransportIcon";
 
@@ -59,9 +58,6 @@ export default function McpCommunityDetailModal({
   );
   const serverTypeText = t(getTransportLabelKey(service.transportType));
   const sourceText = t("mcpTools.source.community");
-  const reviewTypeText = service.reviewType
-    ? t(`mcpTools.review.type.${service.reviewType}`)
-    : undefined;
 
   return (
     <>
@@ -76,7 +72,7 @@ export default function McpCommunityDetailModal({
         wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS}`}
         styles={mcpToolsModalChromeStyles()}
       >
-        <div className="bg-gradient-to-b from-slate-50 to-white">
+        <div className="max-h-[80vh] overflow-y-auto bg-gradient-to-b from-slate-50 to-white">
           {/* Header */}
           <div className="border-b border-slate-200/60 bg-white px-6 py-5">
             <div className="flex items-start justify-between gap-4">
@@ -93,7 +89,7 @@ export default function McpCommunityDetailModal({
                     </h2>
                   </div>
                 </div>
-                <p className="mt-1.5 text-sm text-slate-500 truncate">
+                <p className="mt-1.5 text-sm text-slate-500">
                   {service.description || t("mcpTools.detail.noDescription")}
                 </p>
               </div>
@@ -116,28 +112,9 @@ export default function McpCommunityDetailModal({
                 />
                 <InfoRow
                   icon={<Calendar className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.community.publishedAt")}
+                  label={t("repository.listingStatus.submittedAt")}
                   value={formatRegistryDate(service.createdAt)}
                 />
-                {service.updatedAt ? (
-                  <InfoRow
-                    icon={<Calendar className="h-3.5 w-3.5" />}
-                    label={t("mcpTools.detail.updatedAt")}
-                    value={formatRegistryDate(service.updatedAt)}
-                  />
-                ) : null}
-                <InfoRow
-                  icon={<Zap className="h-3.5 w-3.5" />}
-                  label={t("mcpTools.detail.status")}
-                  customValue={<RegistryStatusBadge status={service.status} />}
-                />
-                {reviewTypeText ? (
-                  <InfoRow
-                    icon={<FileText className="h-3.5 w-3.5" />}
-                    label={t("mcpTools.review.typeLabel")}
-                    value={reviewTypeText}
-                  />
-                ) : null}
               </div>
             </section>
 
@@ -184,6 +161,28 @@ export default function McpCommunityDetailModal({
                             : "bg-slate-100 text-slate-400"
                         }`}>
                           {service.sharedFields?.containerConfigJson ? t("mcpTools.detail.shared") : t("mcpTools.detail.notShared")}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {service.configJson && typeof service.configJson === "object" && "mcpServers" in service.configJson ? (
+                    <div>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">容器配置</label>
+                      <div className="flex items-center justify-between">
+                        <Button
+                          size="small"
+                          onClick={() => setShowConfigJsonModal(true)}
+                          icon={<FileText className="h-3.5 w-3.5" />}
+                        >
+                          {t("mcpTools.detail.viewConfigJson")}
+                        </Button>
+                        <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          service.sharedFields?.containerConfigJson
+                            ? "bg-green-50 text-green-700"
+                            : "bg-slate-100 text-slate-400"
+                        }`}>
+                          {service.sharedFields?.containerConfigJson ? "已共享" : "未共享"}
                         </span>
                       </div>
                     </div>

@@ -23,11 +23,16 @@ class _Memory:
 
 
 class _Response:
-    content = json.dumps({
-        "task_overview": "task", "completed_work": "work",
-        "key_decisions": "decision", "pending_items": "pending",
-        "context_to_preserve": "context",
-    })
+    content = (
+        "# Compact Result of History\n\n"
+        "## Task Overview\n\ntask\n\n"
+        "## Completed Work\n\nwork\n\n"
+        "## Key Decisions\n\ndecision\n\n"
+        "## Unresolved Issues\n\nunresolved\n\n"
+        "## Pending Items\n\npending\n\n"
+        "## Next Steps\n\nnext\n\n"
+        "## Context to Preserve\n\ncontext"
+    )
     token_usage = None
 
 
@@ -52,7 +57,7 @@ class PlanningStep:
 def _summary_and_turns():
     return [
         ContextItemInput(id="summary:10", type="history_summary", content={
-            "unit_id": 10, "summary": {"task_overview": "old"},
+            "unit_id": 10, "summary": "old summary text",
             "covered_through_message_id": 20,
         }),
         ContextItemInput(id="turn:21:22", type="conversation_turn", content={
@@ -126,7 +131,7 @@ def test_summary_two_uses_summary_one_and_only_turns_after_its_coverage(monkeypa
     inputs = [
         ContextItemInput(id="summary:one", type="history_summary", content={
             "unit_id": 101,
-            "summary": {"task_overview": "SUMMARY ONE CHECKPOINT"},
+            "summary": "SUMMARY ONE CHECKPOINT",
             "covered_through_message_id": 12,
         }),
         ContextItemInput(id="turn:13:14", type="conversation_turn", content={

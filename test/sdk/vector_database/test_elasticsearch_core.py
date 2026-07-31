@@ -844,7 +844,7 @@ def test_vectorize_documents_small_batch(elasticsearch_core_instance):
 def test_vectorize_documents_multimodal_sets_multi_embedding(elasticsearch_core_instance):
     embedding_model = MagicMock()
     embedding_model.model_type = "multimodal"
-    embedding_model.get_multimodal_embeddings.return_value = [[0.1, 0.2], [0.3, 0.4]]
+    embedding_model.get_multimodal_embeddings.return_value = [[0, 1], [0.3, 0.4]]
 
     documents = [
         {
@@ -879,6 +879,8 @@ def test_vectorize_documents_multimodal_sets_multi_embedding(elasticsearch_core_
         text_doc = next(doc for doc in doc_entries if doc["process_source"] != "UniversalImageExtractor")
         assert "multi_embedding" in image_doc
         assert "embedding" in text_doc
+        assert image_doc["multi_embedding"] == [0.3, 0.4]
+        assert all(isinstance(value, float) for value in text_doc["embedding"])
 
 
 def test_vectorize_documents_text_embedding_skips_images(elasticsearch_core_instance):
@@ -2058,3 +2060,293 @@ class TestAdditionalElasticsearchCoreCoverage:
             mock_msearch.return_value = {"responses": []}
             assert elasticsearch_core_instance.multi_search([{}], "idx") == {"responses": []}
             mock_msearch.assert_called_once_with(body=[{}], index="idx")
+
+
+class TestElasticsearchCoreAdditionalCoverage:
+    """Additional coverage targets identified via coverage report."""
+
+    def test_apply_bulk_settings_exception_path(self, elasticsearch_core_instance, caplog):
+        """Cover exception path in _apply_bulk_settings (lines 267-268)."""
+        with caplog.at_level("WARNING"):
+            with patch.object(elasticsearch_core_instance.client.indices, "put_settings",
+                              side_effect=RuntimeError("ES error")):
+                elasticsearch_core_instance._apply_bulk_settings("test_index")
+                assert any("Failed to apply bulk settings" in m for m in caplog.messages)
+
+    def test_restore_normal_settings_exception_path(self, elasticsearch_core_instance, caplog):
+        """Cover exception path in _restore_normal_settings (lines 280-281)."""
+        with caplog.at_level("WARNING"):
+            with patch.object(elasticsearch_core_instance.client.indices, "put_settings",
+                              side_effect=RuntimeError("ES error")):
+                elasticsearch_core_instance._restore_normal_settings("test_index")
+                assert any("Failed to restore settings" in m for m in caplog.messages)
+
+    def test_small_batch_insert_skipped_when_no_docs(self, elasticsearch_core_instance, caplog):
+        """Cover the empty docs path in _small_batch_insert (lines 419-421)."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "text"
+        with caplog.at_level("INFO"):
+            with patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+                 patch("time.time", lambda: 1642234567):
+                result = elasticsearch_core_instance._small_batch_insert(
+                    "idx", [], "content", mock_emb
+                )
+        assert result == 0
+        assert any("Small batch insert skipped" in m for m in caplog.messages)
+
+    def test_normalize_embedding_vector_non_list(self, elasticsearch_core_instance):
+        """Cover _normalize_embedding_vector with non-list input (line 476)."""
+        result = elasticsearch_core_instance._normalize_embedding_vector("not a list")
+        assert result == "not a list"
+
+    def test_normalize_embedding_vector_mixed_types(self, elasticsearch_core_instance):
+        """Cover _normalize_embedding_vector with mixed int/float/bool values."""
+        result = elasticsearch_core_instance._normalize_embedding_vector(
+            [1, 2.0, True, "text"]
+        )
+        assert result == [1.0, 2.0, True, "text"]
+
+    def test_prepare_small_batch_embeddings_non_multimodal(
+        self, elasticsearch_core_instance
+    ):
+        """Cover _prepare_small_batch_embeddings non-multimodal path."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "text"
+        mock_emb.get_embeddings.return_value = [[0.1] * 4]
+
+        docs = [{"content": "hello", "process_source": "CustomProc"}]
+        processed, embeddings = elasticsearch_core_instance._prepare_small_batch_embeddings(
+            docs, "content", mock_emb
+        )
+        assert embeddings == [[0.1] * 4]
+        mock_emb.get_embeddings.assert_called_once_with(["hello"])
+
+    def test_prepare_small_batch_embeddings_non_multimodal_filters_images(
+        self, elasticsearch_core_instance
+    ):
+        """Cover _prepare_small_batch_embeddings filtering out UniversalImageExtractor docs."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "text"
+        mock_emb.get_embeddings.return_value = [[0.1]]
+
+        docs = [
+            {"content": "text doc", "process_source": "Unstructured"},
+            {"content": "skip this", "process_source": "UniversalImageExtractor", "image_bytes": b"x"},
+        ]
+        processed, embeddings = elasticsearch_core_instance._prepare_small_batch_embeddings(
+            docs, "content", mock_emb
+        )
+        assert len(processed) == 1
+        assert processed[0]["content"] == "text doc"
+        mock_emb.get_embeddings.assert_called_once_with(["text doc"])
+
+    def test_build_bulk_operations_normalizes_embedding(self, elasticsearch_core_instance):
+        """Cover _build_bulk_operations (lines 604-606) with int embedding values."""
+        mock_emb = MagicMock()
+        mock_emb.embedding_model_name = "test-model"
+        docs = [{"content": "test"}]
+        ops = elasticsearch_core_instance._build_bulk_operations(
+            "idx", docs, [[1, 2, 3]], mock_emb
+        )
+        # All int values should be converted to float
+        assert ops[1]["embedding"] == [1.0, 2.0, 3.0]
+        assert "embedding_model_name" in ops[1]
+
+    def test_build_bulk_operations_multi_embedding(self, elasticsearch_core_instance):
+        """Cover _build_bulk_operations using multi_embedding for image docs."""
+        mock_emb = MagicMock()
+        mock_emb.embedding_model_name = "test-model"
+        docs = [{"content": "img", "process_source": "UniversalImageExtractor"}]
+        ops = elasticsearch_core_instance._build_bulk_operations(
+            "idx", docs, [[0.1, 0.2]], mock_emb
+        )
+        assert "multi_embedding" in ops[1]
+        assert "embedding" not in ops[1]
+
+    def test_large_batch_insert_progress_callback_loop(
+        self, elasticsearch_core_instance
+    ):
+        """Cover progress callback invocation inside _large_batch_insert (lines 628-631)."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "text"
+        mock_emb.embedding_model_name = "m"
+        mock_emb.get_embeddings.return_value = [[0.1], [0.2]]
+
+        docs = [{"content": "a"}, {"content": "b"}]
+        progress_calls = []
+
+        def track(done, total):
+            progress_calls.append((done, total))
+
+        with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+             patch.object(elasticsearch_core_instance, "_force_refresh_with_retry", return_value=True):
+            mock_bulk.return_value = {"errors": False, "items": []}
+            elasticsearch_core_instance._large_batch_insert(
+                "idx", docs, batch_size=2, content_field="content",
+                embedding_model=mock_emb, embedding_batch_size=2,
+                progress_callback=track
+            )
+        assert progress_calls == [(2, 2)]
+
+    def test_accurate_search_with_dict_filter(self, elasticsearch_core_instance):
+        """Cover accurate_search with filter parameter (lines 1034-1041)."""
+        with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec, \
+             patch.object(elasticsearch_core_module, "calculate_term_weights", return_value={}), \
+             patch.object(elasticsearch_core_module, "build_weighted_query",
+                          return_value={"query": {"match": {"content": "q"}}}):
+            mock_exec.return_value = []
+            result = elasticsearch_core_instance.accurate_search(
+                ["idx"],
+                "q",
+                top_k=5,
+                filter={"term": {"path_or_url": "/a/b.pdf"}}
+            )
+            mock_exec.assert_called_once()
+            _, query = mock_exec.call_args[0]
+            assert "bool" in query["query"]
+            assert query["query"]["bool"]["filter"] == [{"term": {"path_or_url": "/a/b.pdf"}}]
+
+    def test_accurate_search_with_list_filter(self, elasticsearch_core_instance):
+        """Cover accurate_search with filter as list."""
+        with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec, \
+             patch.object(elasticsearch_core_module, "calculate_term_weights", return_value={}), \
+             patch.object(elasticsearch_core_module, "build_weighted_query",
+                          return_value={"query": {"match": {"content": "q"}}}):
+            mock_exec.return_value = []
+            elasticsearch_core_instance.accurate_search(
+                ["idx"], "q", top_k=5, filter=[{"term": {"a": 1}}, {"term": {"b": 2}}]
+            )
+            _, query = mock_exec.call_args[0]
+            assert query["query"]["bool"]["filter"] == [{"term": {"a": 1}}, {"term": {"b": 2}}]
+
+    def test_semantic_search_with_dict_filter(self, elasticsearch_core_instance):
+        """Cover semantic_search with dict filter (lines 1092-1093 knn_filter branch)."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "text"
+        mock_emb.get_embeddings.return_value = [[0.1] * 8]
+        with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec:
+            mock_exec.return_value = []
+            elasticsearch_core_instance.semantic_search(
+                ["idx"], "q", mock_emb, top_k=5,
+                filter={"term": {"path_or_url": "/x.pdf"}}
+            )
+            _, query = mock_exec.call_args[0]
+            assert query["knn"]["filter"] == {"term": {"path_or_url": "/x.pdf"}}
+
+    def test_semantic_search_multimodal_combines_results(self, elasticsearch_core_instance):
+        """Cover semantic_search multimodal branch (lines 1093-1116)."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "multimodal"
+        mock_emb.get_embeddings.return_value = [[0.1] * 8]
+        with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec:
+            mock_exec.side_effect = [
+                [{"score": 0.9, "document": {"content": "text"}, "index": "idx"}],
+                [{"score": 0.8, "document": {"content": "image"}, "index": "idx"}],
+            ]
+            result = elasticsearch_core_instance.semantic_search(
+                ["idx"], "q", mock_emb, top_k=5
+            )
+            assert len(result) == 2
+            assert mock_exec.call_count == 2
+
+    def test_hybrid_search_multimodal_text_and_image_results(
+        self, elasticsearch_core_instance
+    ):
+        """Cover hybrid_search multimodal scoring paths (lines 1225, 1242-1258)."""
+        mock_emb = MagicMock()
+        mock_emb.model_type = "multimodal"
+        with patch.object(elasticsearch_core_instance, "accurate_search") as mock_acc, \
+             patch.object(elasticsearch_core_instance, "semantic_search") as mock_sem:
+            mock_acc.return_value = [
+                {"score": 10.0, "document": {"id": "doc1", "content": "t", "process_source": "Unstructured"}, "index": "idx"}
+            ]
+            mock_sem.return_value = [
+                {"score": 0.9, "document": {"id": "doc1", "content": "t", "process_source": "Unstructured"}, "index": "idx"},
+                {"score": 0.8, "document": {"id": "doc2", "content": "i", "process_source": "UniversalImageExtractor"}, "index": "idx"},
+            ]
+            result = elasticsearch_core_instance.hybrid_search(
+                ["idx"], "q", mock_emb, top_k=5, weight_accurate=0.3
+            )
+            assert len(result) == 2
+            doc_ids = [r["document"]["id"] for r in result]
+            assert "doc1" in doc_ids
+            assert "doc2" in doc_ids
+
+    def test_get_documents_detail_success(self, elasticsearch_core_instance):
+        """Cover get_documents_detail success path (lines 1275-1310)."""
+        elasticsearch_core_instance.client = MagicMock()
+        elasticsearch_core_instance.client.search.return_value = {
+            "aggregations": {
+                "unique_sources": {
+                    "buckets": [
+                        {
+                            "doc_count": 5,
+                            "file_sample": {
+                                "hits": {
+                                    "hits": [{
+                                        "_source": {
+                                            "path_or_url": "/a.pdf",
+                                            "filename": "a.pdf",
+                                            "file_size": 1024,
+                                            "create_time": "2025-01-01T00:00:00",
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        result = elasticsearch_core_instance.get_documents_detail("idx")
+        assert len(result) == 1
+        assert result[0]["path_or_url"] == "/a.pdf"
+        assert result[0]["chunk_count"] == 5
+
+    def test_get_documents_detail_error_returns_empty(self, elasticsearch_core_instance, caplog):
+        """Cover get_documents_detail exception path."""
+        elasticsearch_core_instance.client = MagicMock()
+        elasticsearch_core_instance.client.search.side_effect = RuntimeError("boom")
+        result = elasticsearch_core_instance.get_documents_detail("idx")
+        assert result == []
+        assert any("Error getting file list" in m for m in caplog.messages)
+
+    def test_get_indices_detail_success(self, elasticsearch_core_instance):
+        """Cover get_indices_detail success path (lines 1311-1375)."""
+        elasticsearch_core_instance.client = MagicMock()
+        elasticsearch_core_instance.client.indices.stats.return_value = {
+            "indices": {
+                "idx": {
+                    "primaries": {
+                        "docs": {"count": 100},
+                        "store": {"size_in_bytes": 2048},
+                        "search": {"query_total": 50},
+                        "request_cache": {"hit_count": 10},
+                    }
+                }
+            }
+        }
+        elasticsearch_core_instance.client.indices.get_settings.return_value = {
+            "idx": {"settings": {"index": {"creation_date": "1642234567000"}}}
+        }
+        elasticsearch_core_instance.client.search.return_value = {
+            "aggregations": {
+                "unique_path_or_url_count": {"value": 10},
+                "process_sources": {"buckets": [{"key": "Unstructured"}]},
+                "embedding_models": {"buckets": [{"key": "jina-clip-v2"}]},
+            }
+        }
+        result = elasticsearch_core_instance.get_indices_detail(["idx"], embedding_dim=1024)
+        assert "idx" in result
+        info = result["idx"]["base_info"]
+        assert info["doc_count"] == 10
+        assert info["chunk_count"] == 100
+        assert info["embedding_model"] == "jina-clip-v2"
+
+    def test_get_indices_detail_error_returns_error_entry(self, elasticsearch_core_instance):
+        """Cover get_indices_detail exception path."""
+        elasticsearch_core_instance.client = MagicMock()
+        elasticsearch_core_instance.client.indices.stats.side_effect = RuntimeError("boom")
+        result = elasticsearch_core_instance.get_indices_detail(["idx"])
+        assert "idx" in result
+        assert "error" in result["idx"]

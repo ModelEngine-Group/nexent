@@ -45,6 +45,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           enabled: server.enabled,
           source: server.source,
           update_time: server.update_time,
+          create_time: server.create_time,
           tags: server.tags || [],
           container_port: server.container_port,
           registry_json: server.registry_json,
@@ -854,4 +855,60 @@ export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
       message: t('mcpService.message.networkError')
     };
   }
+};
+
+export interface OpenApiServiceInput {
+  service_name: string;
+  server_url: string;
+  openapi_json: Record<string, unknown>;
+  headers_template?: Record<string, unknown> | null;
+}
+
+export const getOpenApiServices = async () => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to load OpenAPI services");
+  }
+  return result.data || [];
+};
+
+export const importOpenApiService = async (input: OpenApiServiceInput) => {
+  const response = await fetch(API_ENDPOINTS.tool.openapiService, {
+    method: "POST",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to import OpenAPI service");
+  }
+  return result;
+};
+
+export const deleteOpenApiService = async (serviceName: string) => {
+  const response = await fetch(API_ENDPOINTS.tool.deleteOpenapiService(serviceName), {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.detail || result.message || "Failed to delete OpenAPI service");
+  }
+  return result;
+};
+
+export const updateToolLabels = async (toolId: string, labels: string[]) => {
+  const response = await fetch(API_ENDPOINTS.tool.updateLabels, {
+    method: "PUT",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ tool_id: parseInt(toolId, 10), labels }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || result.message || "Failed to update tool labels");
+  }
+  return response.json();
 };

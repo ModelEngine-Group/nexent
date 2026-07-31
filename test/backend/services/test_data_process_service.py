@@ -576,11 +576,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_task())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.celery_app')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
         Async implementation of get_all_tasks testing.
 
@@ -592,7 +592,7 @@ class TestDataProcessService(unittest.TestCase):
         4. Tasks can be filtered based on their properties
         5. The combined task list is returned with all task details
         """
-        # Setup mocks
+        # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
             'worker1': [{'id': 'task1'}, {'id': 'task2'}]
@@ -600,7 +600,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
         }
-        mock_get_inspector.return_value = mock_inspector
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
 
         mock_get_redis_task_ids.return_value = ['task2', 'task4', 'task5']
 
@@ -620,15 +622,14 @@ class TestDataProcessService(unittest.TestCase):
         # Get all tasks with filtering (excludes task5 which has no index_name and task_name)
         result = await self.service.get_all_tasks(filter=True)
 
-        # Verify result (task5 has no index_name and task_name, so it's filtered out)
-        # Only task1 and task2 have valid index_name + task_name
-        self.assertEqual(len(result), 2)
+        # task1-task4 have index_name + task_name; task5 is filtered out
+        self.assertEqual(len(result), 4)
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
 
-        # Verify result should include all 3 unique tasks
-        self.assertEqual(len(result), 3)
+        # All unique task IDs from Celery + Redis
+        self.assertEqual(len(result), 5)
 
     def test_get_all_tasks(self):
         """
@@ -640,11 +641,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_all_tasks())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.celery_app')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
         Test get_all_tasks when Redis query fails.
 
@@ -659,7 +660,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
         }
-        mock_get_inspector.return_value = mock_inspector
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
 
         # Mock Redis to raise an exception
         mock_get_redis_task_ids.side_effect = Exception(
@@ -2437,26 +2440,48 @@ class TestDataProcessService(unittest.TestCase):
                 )
             )
 
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['task-1'])
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
     @patch('backend.services.data_process_service.get_task_info')
-    def test_get_all_tasks_handles_string_kwargs_and_bad_json(self, mock_get_task_info, _mock_ids):
+    def test_get_all_tasks_handles_string_kwargs_and_bad_json(
+        self, mock_get_task_info, _mock_ids, mock_celery_app
+    ):
         """Cover runtime kwargs normalization fallback branches."""
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {
+            "w1": [{
+                "id": "task-1",
+                "name": "data_process.tasks.process",
+                "kwargs": "{bad-json"
+            }]
+        }
+        mock_inspector.reserved.return_value = {
+            "w1": [{
+                "id": "task-2",
+                "name": "data_process.tasks.forward",
+                "kwargs": ["not-a-dict"],
+            }]
+        }
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+
         async def _run():
-            mock_inspector = MagicMock()
-            mock_inspector.active.return_value = {
-                "w1": [{
-                    "id": "task-1",
-                    "name": "data_process.tasks.process",
-                    "kwargs": "{bad-json"
-                }]
-            }
-            mock_inspector.reserved.return_value = {}
-            self.service._inspector = mock_inspector
-            self.service._inspector_last_time = time.time()
-            # get_task_info returns empty task_name, but runtime meta should backfill it
-            mock_get_task_info.return_value = {"id": "task-1", "task_name": "", "index_name": ""}
+            async def _task_info(task_id):
+                return {
+                    "id": task_id,
+                    "task_name": "",
+                    "index_name": "",
+                    "path_or_url": "",
+                    "original_filename": "",
+                }
+
+            mock_get_task_info.side_effect = _task_info
             rows = await self.service.get_all_tasks(filter=False)
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), 2)
+            by_id = {row["id"]: row for row in rows}
+            self.assertEqual(by_id["task-1"]["task_name"], "process")
+            self.assertEqual(by_id["task-2"]["task_name"], "forward")
 
         asyncio.run(_run())
 

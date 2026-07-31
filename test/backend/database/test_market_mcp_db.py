@@ -358,6 +358,20 @@ class TestUpdateMcpMarketRecord:
             ingroup_permission="EDIT",
         )
 
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_with_content(self, mock_session):
+        """Test update_mcp_market_record persists listing content/note."""
+        session = MockSession()
+        session.update = MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_record(
+            market_id=1, user_id="uid",
+            content="please review this listing",
+        )
+        update_fields = session.update.call_args[0][0]
+        assert update_fields["content"] == "please review this listing"
+
 
 class TestApplyGroupPermissionFilter:
     """Test _apply_group_permission_filter directly with mocked or_."""
@@ -520,6 +534,21 @@ class TestUpdateMcpMarketStatus:
             market_id=1, user_id="uid", review_status="pending_review",
             submitted_by="user@example.com",
         )
+
+    @patch('backend.database.market_mcp_db.get_db_session')
+    def test_update_status_with_content(self, mock_session):
+        session = MockSession()
+        session.update = MagicMock()
+        session.first = lambda: MagicMock()
+        mock_session.return_value = session
+
+        update_mcp_market_status(
+            market_id=1, user_id="uid", review_status="rejected",
+            content="needs more documentation",
+        )
+        update_fields = session.update.call_args[0][0]
+        assert update_fields["content"] == "needs more documentation"
+        assert update_fields["review_status"] == "rejected"
 
 
 class TestListMcpMarketRecordsByStatus:

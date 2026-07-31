@@ -14,6 +14,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
+import { configService } from "@/services/configService";
 import {
   analyzeAutomationMessage,
   canAnalyzeAutomationMessage,
@@ -76,13 +77,10 @@ const getConfiguredShareBaseUrl = async () => {
   }
 
   try {
-    const response = await fetch("/api/frontend-config", { cache: "no-store" });
-    if (response.ok) {
-      const data = await response.json();
-      const runtimeBaseUrl = data.shareBaseUrl?.trim();
-      cachedShareBaseUrl = runtimeBaseUrl || null;
-      return cachedShareBaseUrl;
-    }
+    const data = await configService.fetchRuntimeFrontendConfig();
+    const runtimeBaseUrl = data.shareBaseUrl?.trim();
+    cachedShareBaseUrl = runtimeBaseUrl || null;
+    return cachedShareBaseUrl;
   } catch (error) {
     log.warn("Failed to load runtime frontend config", error);
   }
@@ -170,6 +168,7 @@ export function ChatInterface() {
   const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(
     new Map()
   );
+  const titleGenerationConversationIdsRef = useRef<Set<number>>(new Set());
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content.
@@ -932,6 +931,27 @@ export function ChatInterface() {
             t("chatInterface.newConversation"),
             agentIdForRun
           );
+
+          if (!titleGenerationConversationIdsRef.current.has(conversationId)) {
+            titleGenerationConversationIdsRef.current.add(conversationId);
+            void conversationService
+              .generateTitle({
+                conversation_id: conversationId,
+                question: userMessageContent,
+              })
+              .then((title) => {
+                if (title) {
+                  conversationManagement.setConversationTitle(title);
+                }
+                void conversationManagement.fetchConversationList().catch((error) => {
+                  log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+                });
+              })
+              .catch((error) => {
+                titleGenerationConversationIdsRef.current.delete(conversationId);
+                log.error(t("chatStreamHandler.generateTitleFailed"), error);
+              });
+          }
         },
         false, // isDebug: false for normal chat mode
         t

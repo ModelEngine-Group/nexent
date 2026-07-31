@@ -9,10 +9,15 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { Chat } from "./assistant-ui/chat";
+import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
 import {
+  cacheHistoricalChatMode,
   conversationThreadListAdapter,
   generateConversationTitle,
+  restoreHistoricalChatMode,
+  restoreHistoricalPlan,
+  setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
@@ -35,11 +40,26 @@ function useLocalChatRuntime(): AssistantRuntime {
 }
 
 export default function Home() {
+  return <PersistentChatHome />;
+}
+
+const PersistentChatHome: FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [requestedThreadId, setRequestedThreadId] = useState<
+    string | undefined
+  >(undefined);
+
+  useEffect(() => {
+    const conversationId = new URLSearchParams(window.location.search).get(
+      "conversation_id",
+    );
+    setRequestedThreadId(conversationId || undefined);
+  }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
     runtimeHook: () => useLocalChatRuntime(),
     adapter: conversationThreadListAdapter,
+    threadId: requestedThreadId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -72,7 +92,7 @@ export default function Home() {
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-}
+};
 
 /**
  * Inner component that has access to the AuiState via useAuiState hook.
@@ -95,7 +115,7 @@ const HomeContent: FC<{
   onAgentSelected,
   onBack,
 }) => {
-
+  const [chatMode, setChatMode] = useState<ChatMode>("execution");
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -137,6 +157,7 @@ const HomeContent: FC<{
       const numericId = String(Number(serverId));
       if (previous !== numericId) {
         map.set(threadId, numericId);
+        cacheHistoricalChatMode(numericId, chatMode);
         // Trigger a re-render so the `setRunConfig` effect below picks up the
         // new id. We don't store the map in state because we never need to
         // diff/render it directly — only react when an entry changes.
@@ -157,7 +178,7 @@ const HomeContent: FC<{
           });
       }
     },
-    [],
+    [chatMode],
   );
 
   const activeThread = (threadItems as ReadonlyArray<{
@@ -179,6 +200,10 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+
+  const handleChatModeChange = useCallback((mode: ChatMode) => {
+    setChatMode(mode);
+  }, []);
 
   const shouldRestoreAgentRef = useRef(true);
   const previousActiveThreadIdRef = useRef(activeThreadId);
@@ -216,6 +241,7 @@ const HomeContent: FC<{
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
+        enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
               onServerConversationId: (
@@ -236,8 +262,27 @@ const HomeContent: FC<{
     selectedAgent,
     activeConversationId,
     activeThreadId,
+    chatMode,
     handleServerConversationId,
   ]);
+
+  // Restore historical plan and chat mode from the same conversation detail
+  // response that the history adapter uses to load messages.
+  useEffect(() => {
+    setHistoricalChatModeListener((mode) => {
+      setChatMode(mode);
+    });
+    return () => setHistoricalChatModeListener(undefined);
+  }, [activeThreadId]);
+
+  useEffect(() => {
+    const conversationId = activeConversationId
+      ? String(activeConversationId)
+      : undefined;
+    restoreHistoricalPlan(conversationId);
+
+    restoreHistoricalChatMode(conversationId);
+  }, [activeConversationId, activeThreadId]);
 
   // Publish the server conversation id registry to the thread-list adapter so
   // `generateTitle` can wait for the real backend id before issuing its
@@ -259,11 +304,12 @@ const HomeContent: FC<{
   }, [onBack]);
 
   const handleAgentSelectedFromLanding = useCallback(
-    (agent: Agent) => {
+    async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
+      await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
-    [onAgentSelected],
+    [runtime, onAgentSelected],
   );
 
   // Conditional rendering must happen after all hooks
@@ -290,6 +336,8 @@ const HomeContent: FC<{
           selectedAgent={selectedAgent}
           onAgentSelected={handleAgentSelectedFromLanding}
           onBack={handleThreadBack}
+          chatMode={chatMode}
+          onChatModeChange={handleChatModeChange}
         />
       </div>
     </div>

@@ -8,6 +8,7 @@ import { ExclamationCircleFilled } from "@ant-design/icons";
 import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
+import { processProviderResponse } from "@/lib/providerError";
 import {
   CapacityCoverage,
   ModelOption,
@@ -15,6 +16,7 @@ import {
   ModelSource,
 } from "@/types/modelConfig";
 import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
 
 import { ModelEditDialog, ProviderConfigEditDialog } from "./ModelEditDialog";
 import {
@@ -285,12 +287,12 @@ export const ModelDeleteDialog = ({
     switch (source) {
       case MODEL_SOURCES.SILICON:
         return (
-          <img src="/siliconflow.png" alt="SiliconFlow" className="w-5 h-5" />
+          <img src={publicAsset("/siliconflow.png")} alt="SiliconFlow" className="w-5 h-5" />
         );
       case MODEL_SOURCES.MODELENGINE:
         return (
           <img
-            src="/modelengine-logo.png"
+            src={publicAsset("/modelengine-logo.png")}
             alt="ModelEngine"
             className="w-5 h-5"
           />
@@ -308,12 +310,12 @@ export const ModelDeleteDialog = ({
           </span>
         );
       case MODEL_SOURCES.DASHSCOPE:
-        return <img src="/aliyuncs.png" alt="DashScope" className="w-5 h-5" />;
+        return <img src={publicAsset("/aliyuncs.png")} alt="DashScope" className="w-5 h-5" />;
       case MODEL_SOURCES.TOKENPONY:
-        return <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />;
+        return <img src={publicAsset("/tokenpony.png")} alt="TokenPony" className="w-5 h-5" />;
       case MODEL_SOURCES.VOLCENGINE:
         return (
-          <img src="/volcengine.png" alt="VolcEngine" className="w-5 h-5" />
+          <img src={publicAsset("/volcengine.png")} alt="VolcEngine" className="w-5 h-5" />
         );
       default:
         return (
@@ -520,11 +522,24 @@ export const ModelDeleteDialog = ({
         return;
       }
 
-      const providerRows = (result || []).map((providerModel: any) =>
+      const { models: providerRows, error } = processProviderResponse(
+        result || [],
+        provider,
+        t
+      );
+
+      if (error) {
+        message.error(error);
+        setProviderModels([]);
+        setPendingSelectedProviderIds(new Set());
+        return;
+      }
+
+      const providerRowsWithSaved = providerRows.map((providerModel: any) =>
         overlaySavedModelConfig(providerModel, provider, modelType)
       );
 
-      setProviderModels(providerRows);
+      setProviderModels(providerRowsWithSaved);
       // Initialize pending selected switch states (based on current models status)
       const currentIds = new Set(
         models
@@ -533,17 +548,15 @@ export const ModelDeleteDialog = ({
       );
       setPendingSelectedProviderIds(
         new Set(
-          providerRows
+          providerRowsWithSaved
             .map((pm: any) => pm.id)
             .filter((id: string) => currentIds.has(id))
         )
       );
-      if (!result || result.length === 0) {
-        message.error(t("model.dialog.error.noModelsFetched"));
-      }
     } catch (e) {
-      message.error(t("model.dialog.error.noModelsFetched"));
       log.error("Failed to prefetch provider models", e);
+      setProviderModels([]);
+      setPendingSelectedProviderIds(new Set());
     }
   };
 

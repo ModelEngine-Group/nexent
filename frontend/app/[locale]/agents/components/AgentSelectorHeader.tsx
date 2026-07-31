@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -27,24 +28,27 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/lib/agentImportUtils";
+import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
+  onOpenGenerationAssistant: () => void;
+  isGenerationAssistantOpen?: boolean;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
+  onOpenGenerationAssistant,
+  isGenerationAssistantOpen = false,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -57,10 +61,9 @@ export default function AgentSelectorHeader({
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
   const { token } = theme?.useToken?.() || {};
-  const { user } = useAuthorizationContext();
 
-  // Fetch agent list internally
-  const { agents } = useAgentList(user?.tenantId ?? null);
+  // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
+  const { agents } = useAgentList("");
 
   // Store state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
@@ -146,44 +149,16 @@ export default function AgentSelectorHeader({
   );
 
   // Handle import agent
-  const handleImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
+  const handleImportAgent = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+      },
+      message: message,
+      t: t,
+      log: log,
+    });
   };
 
   // Handle view call relationship
@@ -209,7 +184,12 @@ export default function AgentSelectorHeader({
   const handleExportAgent = async (agent: Agent) => {
     try {
       const result = await exportAgent(Number(agent.id));
-      if (result.success && result.data) {
+      if (!result.success) {
+        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        return;
+      }
+
+      if (result.data) {
         const blob = new Blob([JSON.stringify(result.data, null, 2)], {
           type: "application/json",
         });
@@ -221,12 +201,9 @@ export default function AgentSelectorHeader({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.message.agentExportSuccess"));
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.agentImportFailed")
-        );
       }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
     } catch (error) {
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
@@ -671,6 +648,7 @@ export default function AgentSelectorHeader({
                 </div>
               )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
+              classNames={{ root: "agent-selector-dropdown" }}
               styles={{
                 root: {
                   width: 'calc(100% - 32px)',
@@ -715,7 +693,7 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex justify-end"
           >
-          <Flex align="center" gap={12} wrap="nowrap" justify="flex-end" className="w-full mr-6">
+          <Flex align="center" gap={12} wrap="wrap" justify="flex-end" className="w-full mr-6">
             {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
               <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
                 <History size={16} />
@@ -727,8 +705,8 @@ export default function AgentSelectorHeader({
                 </span>
               </div>
             )}
-            <Flex align="center" gap={12} wrap="nowrap">
-              <Flex align="center" gap={8} className="ml-4">
+            <Flex align="center" gap={12} wrap="wrap">
+              <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                 <Button
                   size="middle"
                   onClick={enterCreateMode}
@@ -745,12 +723,24 @@ export default function AgentSelectorHeader({
                   <FileInput className="w-4 h-4" />
                   <span>{t("agentConfig.button.import")}</span>
                 </Button>
+                <Button
+                  size="middle"
+                  onClick={onOpenGenerationAssistant}
+                  disabled={isGenerationAssistantOpen}
+                  className="flex shrink-0 items-center gap-1 whitespace-nowrap"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span className="whitespace-nowrap">
+                    {t("agentConfig.button.generationAssistant")}
+                  </span>
+                </Button>
               </Flex>
 
               <Button
                 icon={<GitBranch size={16} />}
                 onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
                 type={isShowVersionManagePanel ? "primary" : "default"}
+                disabled={isGenerationAssistantOpen}
               >
                 {t("agent.version.manage")}
               </Button>

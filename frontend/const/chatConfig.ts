@@ -1,3 +1,5 @@
+ import { resourcesCustom } from "@/app/i18n";
+
 // Chat related configuration
 export const chatConfig = {
   // Supported text file MIME types
@@ -31,7 +33,7 @@ export const chatConfig = {
 
   // File limit configuration
   maxFileCount: 50,
-  maxFileSize: 10 * 1024 * 1024, // Maximum 10MB per file
+  maxFileSize: (Number((resourcesCustom?.zh?.custom as any)?.['FILE_UPLOAD_SIZE_LIMIT']) || 10) * 1024 * 1024, // Maximum 10MB - 100MB per file
 
   // Supported image file extensions
   imageExtensions: ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"],
@@ -136,6 +138,7 @@ export const chatConfig = {
     PARSE: "parse" as const,
     TOOL: "tool" as const,
     EXECUTION_LOGS: "execution_logs" as const,
+    TOOL_CALL: "tool_call" as const,
     ERROR: "error" as const,
     STEP_COUNT: "step_count" as const,
     TOKEN_COUNT: "token_count" as const,

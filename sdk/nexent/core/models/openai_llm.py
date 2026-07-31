@@ -38,6 +38,16 @@ logger = logging.getLogger("openai_llm")
 
 
 class OpenAIModel(OpenAIServerModel):
+    def _prepare_completion_kwargs(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Override to force flatten_messages_as_text=False for VLM.
+        VLM content is always a list of typed blocks (e.g. image_url + text).
+        It must never be flattened into a plain string, regardless of the
+        model_factory setting (e.g. "modelengine").
+        """
+        kwargs.setdefault("flatten_messages_as_text", False)
+        return super()._prepare_completion_kwargs(*args, **kwargs)
+
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,

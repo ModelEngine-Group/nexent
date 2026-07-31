@@ -34,6 +34,7 @@ import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
 import { useTokenPonyModelList } from "@/hooks/model/useTokenponyModelList";
 import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
 import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -2178,7 +2179,7 @@ export const ModelAddDialog = ({
                   rel="noopener noreferrer"
                 >
                   <img
-                    src="/modelengine-logo.png"
+                    src={publicAsset("/modelengine-logo.png")}
                     alt="ModelEngine"
                     className="h-4 ml-1.5 cursor-pointer"
                   />
@@ -2193,7 +2194,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/siliconflow.png"
+                        src={publicAsset("/siliconflow.png")}
                         alt="SiliconFlow"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2206,7 +2207,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="DashScope"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2219,7 +2220,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/tokenpony.png"
+                        src={publicAsset("/tokenpony.png")}
                         alt="TokenPony"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2236,7 +2237,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/volcengine.png"
+                        src={publicAsset("/volcengine.png")}
                         alt="VolcEngine"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2249,7 +2250,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2266,7 +2267,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/volcengine.png"
+                        src={publicAsset("/volcengine.png")}
                         alt="VolcEngine"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2279,7 +2280,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2296,7 +2297,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/openai.png"
+                        src={publicAsset("/openai.png")}
                         alt="OpenAI"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2309,7 +2310,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/kimi.png"
+                        src={publicAsset("/kimi.png")}
                         alt="Kimi"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2322,7 +2323,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/deepseek.png"
+                        src={publicAsset("/deepseek.png")}
                         alt="Deepseek"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2335,7 +2336,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2353,7 +2354,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/openai.png"
+                        src={publicAsset("/openai.png")}
                         alt="OpenAI"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2366,7 +2367,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2379,7 +2380,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/jina.png"
+                        src={publicAsset("/jina.png")}
                         alt="Jina"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2392,7 +2393,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/baai.png"
+                        src={publicAsset("/baai.png")}
                         alt="Baai"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2410,7 +2411,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2423,7 +2424,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/deepseek.png"
+                        src={publicAsset("/deepseek.png")}
                         alt="Deepseek"
                         className="h-4 ml-1.5 cursor-pointer"
                       />

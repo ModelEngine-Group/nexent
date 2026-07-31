@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,13 +14,17 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import {
+  invalidateSkillRepositoryCaches,
+  SKILLS_LIST_QUERY_KEY,
   useCreateSkillRepositoryListing,
   useInstallSkillFromRepository,
+  useMyEditableSkillCounts,
   useMyEditableSkills,
   useSkillRepositoryListingDetail,
   useSkillRepositoryListings,
   useUpdateSkillRepositoryStatus,
 } from "@/hooks/skillRepository/useSkillRepositoryListings";
+import { parseSkillReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { ApiError } from "@/services/api";
 import { deleteSkillByName } from "@/services/skillService";
 import { cn } from "@/lib/utils";
@@ -31,15 +38,26 @@ import type {
 import type { Skill } from "@/types/agentConfig";
 import { CountBadge } from "./components/SkillRepositoryControls";
 import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailModal";
-import { MineSkillsView } from "./components/MineSkillsView";
+import {
+  isNewSkillPaddingItem,
+  MineSkillsView,
+} from "./components/MineSkillsView";
 import { RepositoryView } from "./components/RepositoryView";
 import { ReviewSkillList } from "./components/ReviewSkillList";
 import {
-  getSkillRepositoryStatusLabel,
-  STATUS_LABEL_KEYS,
-} from "./components/skillRepositoryShared";
-import SkillBuildModal from "../agents/components/agentConfig/SkillBuildModal";
-import SkillDetailModal from "../agents/components/agentConfig/SkillDetailModal";
+  SkillRepositoryReviewConfirmModal,
+  type SkillRepositoryReviewAction,
+} from "./components/SkillRepositoryReviewConfirmModal";
+import { getSkillRepositoryStatusLabel } from "./components/skillRepositoryShared";
+
+const SkillBuildModal = dynamic(
+  () => import("../agents/components/agentConfig/SkillBuildModal"),
+  { ssr: false }
+);
+const SkillDetailModal = dynamic(
+  () => import("../agents/components/agentConfig/SkillDetailModal"),
+  { ssr: false }
+);
 
 enum SkillRepositoryTab {
   REPOSITORY = "repository",
@@ -50,6 +68,7 @@ enum SkillRepositoryTab {
 const REPOSITORY_PAGE_SIZE = 6;
 const MINE_PAGE_SIZE = 6;
 const REVIEW_PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 300;
 const skillRepositoryTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
 };
@@ -65,27 +84,37 @@ const STATUS_ACTION_LABEL_KEYS: Partial<
 export default function SkillRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
   const { user } = useAuthorizationContext();
   const { message, modal } = App.useApp();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const queryClient = useQueryClient();
 
   const [tab, setTab] = useState<SkillRepositoryTab>(
     SkillRepositoryTab.REPOSITORY
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
+  const [debouncedRepositorySearch, setDebouncedRepositorySearch] =
+    useState("");
   const [minePage, setMinePage] = useState(1);
   const [mineOwnership, setMineOwnership] =
     useState<MineOwnershipFilter>("all");
   const [mineSearch, setMineSearch] = useState("");
+  const [debouncedMineSearch, setDebouncedMineSearch] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [detailRepositoryId, setDetailRepositoryId] = useState<number | null>(
     null
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
+  const [skillBuildLoaded, setSkillBuildLoaded] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
+  const [skillDetailLoaded, setSkillDetailLoaded] = useState(false);
   const [viewingSkill, setViewingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
@@ -93,19 +122,65 @@ export default function SkillRepositoryPage() {
     useState<SkillRepositoryListingItem | null>(null);
   const [copyTargetName, setCopyTargetName] = useState("");
   const [copyNameError, setCopyNameError] = useState<string | null>(null);
+  const [reviewListing, setReviewListing] =
+    useState<SkillRepositoryListingItem | null>(null);
+  const [reviewAction, setReviewAction] =
+    useState<SkillRepositoryReviewAction | null>(null);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === SkillRepositoryTab.MINE) {
+      setTab(SkillRepositoryTab.MINE);
+      return;
+    }
+    if (tabParam === SkillRepositoryTab.REPOSITORY) {
+      setTab(SkillRepositoryTab.REPOSITORY);
+      return;
+    }
+    if (tabParam === SkillRepositoryTab.REVIEW && isAdmin) {
+      setTab(SkillRepositoryTab.REVIEW);
+    }
+  }, [searchParams, isAdmin]);
 
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
   const isMineTab = tab === SkillRepositoryTab.MINE;
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedRepositorySearch(repositorySearch),
+      SEARCH_DEBOUNCE_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [repositorySearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedMineSearch(mineSearch),
+      SEARCH_DEBOUNCE_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [mineSearch]);
+
+  const reviewDeepLink = useMemo(
+    () => parseSkillReviewDeepLinkParams(searchParams),
+    [searchParams]
+  );
+
+  const handleReviewDeepLinkConsumed = useCallback(() => {
+    router.replace(`/${locale}/skill-space?tab=mine`);
+  }, [locale, router]);
 
   const repositoryParams = useMemo(
     () => ({
       status: "shared" as const,
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
-      ...(repositorySearch.trim() ? { search: repositorySearch.trim() } : {}),
+      ...(debouncedRepositorySearch.trim()
+        ? { search: debouncedRepositorySearch.trim() }
+        : {}),
     }),
-    [repositoryPage, repositorySearch]
+    [debouncedRepositorySearch, repositoryPage]
   );
 
   const mineParams = useMemo(
@@ -113,12 +188,14 @@ export default function SkillRepositoryPage() {
       ownership: mineOwnership,
       page: minePage,
       page_size: MINE_PAGE_SIZE,
-      ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
-      ...(mineOwnership === "all" && !mineSearch.trim()
+      ...(debouncedMineSearch.trim()
+        ? { search: debouncedMineSearch.trim() }
+        : {}),
+      ...(mineOwnership === "all" && !debouncedMineSearch.trim()
         ? { new_skill_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch]
+    [debouncedMineSearch, mineOwnership, minePage]
   );
 
   const reviewParams = useMemo(
@@ -152,10 +229,18 @@ export default function SkillRepositoryPage() {
     refetch: refetchMine,
   } = useMyEditableSkills(mineParams, isMineTab);
 
-  const { data: mineCountData } = useMyEditableSkills(
-    { page: 1, page_size: 1, ownership: "all" },
-    true
-  );
+  const { data: deepLinkMineData, isLoading: isDeepLinkMineLoading } =
+    useMyEditableSkills(
+      {
+        ownership: "all",
+        page: 1,
+        page_size: 100,
+        new_skill_padding: false,
+      },
+      isMineTab && reviewDeepLink != null
+    );
+
+  const { data: mineCountData } = useMyEditableSkillCounts();
 
   const {
     data: reviewData,
@@ -203,6 +288,19 @@ export default function SkillRepositoryPage() {
   const mineItems = mineData?.items ?? [];
   const mineTotal = mineData?.pagination?.total ?? 0;
   const mineCounts = mineData?.counts ?? { all: 0, created: 0, others: 0 };
+  const deepLinkFallbackSkill = useMemo(() => {
+    if (!reviewDeepLink) {
+      return null;
+    }
+    const items = deepLinkMineData?.items ?? [];
+    return (
+      items.find(
+        (item): item is MyEditableSkillItem =>
+          !isNewSkillPaddingItem(item) &&
+          item.skill_id === reviewDeepLink.skillId
+      ) ?? null
+    );
+  }, [deepLinkMineData?.items, reviewDeepLink]);
   const reviewItems = reviewData?.items ?? [];
   const reviewTotal = reviewData?.pagination?.total ?? 0;
   const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
@@ -214,6 +312,33 @@ export default function SkillRepositoryPage() {
   const installingRepositoryId = installMutation.isPending
     ? (installMutation.variables?.skillRepositoryId ?? null)
     : null;
+
+  useEffect(() => {
+    const total = repositoryData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / REPOSITORY_PAGE_SIZE));
+    if (repositoryPage > totalPages) {
+      setRepositoryPage(totalPages);
+    }
+  }, [repositoryData?.pagination?.total, repositoryPage]);
+
+  useEffect(() => {
+    const total = mineData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / MINE_PAGE_SIZE));
+    if (minePage > totalPages) {
+      setMinePage(totalPages);
+    }
+  }, [mineData?.pagination?.total, minePage]);
+
+  useEffect(() => {
+    const total = reviewData?.pagination?.total;
+    if (total == null) return;
+    const totalPages = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+    if (reviewPage > totalPages) {
+      setReviewPage(totalPages);
+    }
+  }, [reviewData?.pagination?.total, reviewPage]);
 
   const getDuplicateSkillNames = (error: unknown): string[] | null => {
     const detail =
@@ -292,12 +417,14 @@ export default function SkillRepositoryPage() {
 
   const handleUpdateStatus = async (
     listing: SkillRepositoryListingItem,
-    status: SkillRepositoryListingStatus
+    status: SkillRepositoryListingStatus,
+    content?: string
   ) => {
     try {
       await updateStatusMutation.mutateAsync({
         skillRepositoryId: listing.skill_repository_id,
         status,
+        content,
       });
       message.success(
         t("skillRepository.action.success", {
@@ -325,31 +452,34 @@ export default function SkillRepositoryPage() {
     });
     message.success(
       wasShared
-        ? t("skillRepository.mine.takeDownSuccess")
-        : t("skillRepository.mine.withdrawSuccess")
+        ? t("repository.mine.takeDownSuccess")
+        : t("repository.mine.cancelApplySuccess")
     );
   };
 
+  const refreshSkillCaches = async () => {
+    await Promise.all([
+      invalidateSkillRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [SKILLS_LIST_QUERY_KEY] }),
+    ]);
+  };
+
   const handleSkillBuildSuccess = async () => {
-    await refetchMine().catch(() => {});
+    await refreshSkillCaches().catch(() => {});
     setEditingSkill(null);
   };
 
-  const confirmUpdateStatus = (
+  const openReviewConfirmModal = (
     listing: SkillRepositoryListingItem,
-    status: SkillRepositoryListingStatus
+    action: SkillRepositoryReviewAction
   ) => {
-    modal.confirm({
-      title: t("skillRepository.action.confirmTitle", {
-        action: STATUS_ACTION_LABEL_KEYS[status]
-          ? t(STATUS_ACTION_LABEL_KEYS[status])
-          : getSkillRepositoryStatusLabel(t, status),
-      }),
-      content: listing.name,
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      onOk: () => handleUpdateStatus(listing, status),
-    });
+    setReviewListing(listing);
+    setReviewAction(action);
+  };
+
+  const closeReviewConfirmModal = () => {
+    setReviewListing(null);
+    setReviewAction(null);
   };
 
   const confirmTakeDown = (listing: SkillRepositoryListingItem) => {
@@ -408,7 +538,7 @@ export default function SkillRepositoryPage() {
                     className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                   >
                     <Inbox className="size-4" aria-hidden />
-                    {t("skillRepository.page.tab.repository")}
+                    {t("repository.page.tab.repository")}
                     <CountBadge count={repositoryTabCount} />
                   </TabsTrigger>
                   <TabsTrigger
@@ -425,7 +555,7 @@ export default function SkillRepositoryPage() {
                       className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                     >
                       <ShieldCheck className="size-4" aria-hidden />
-                      {t("skillRepository.page.tab.review")}
+                      {t("repository.page.tab.review")}
                       <CountBadge count={pendingReviewCount} strong />
                     </TabsTrigger>
                   ) : null}
@@ -479,13 +609,18 @@ export default function SkillRepositoryPage() {
                   onRetry={() => refetchMine()}
                   onCreateSkill={() => {
                     setEditingSkill(null);
+                    setSkillBuildLoaded(true);
                     setSkillBuildOpen(true);
                   }}
                   onEditSkill={(skill) => {
                     setEditingSkill(skill);
+                    setSkillBuildLoaded(true);
                     setSkillBuildOpen(true);
                   }}
-                  onViewSkill={(skill) => setViewingSkill(skill)}
+                  onViewSkill={(skill) => {
+                    setSkillDetailLoaded(true);
+                    setViewingSkill(skill);
+                  }}
                   onDeleteSkill={async (skill) => {
                     const name = skill.name?.trim();
                     if (!name) {
@@ -495,12 +630,12 @@ export default function SkillRepositoryPage() {
                     const result = await deleteSkillByName(name);
                     if (!result.success) {
                       message.error(
-                        result.message || t("skillRepository.delete.failed")
+                        result.message || t("repository.mine.deleteFailed")
                       );
                       throw new Error(result.message || "Delete skill failed");
                     }
-                    message.success(t("skillRepository.delete.success"));
-                    await refetchMine();
+                    message.success(t("repository.mine.deleteSuccess"));
+                    await refreshSkillCaches();
                   }}
                   onApplyListing={async (skill, payload) => {
                     try {
@@ -508,7 +643,7 @@ export default function SkillRepositoryPage() {
                         skillId: skill.skill_id,
                         payload,
                       });
-                      message.success(t("skillRepository.mine.applySuccess"));
+                      message.success(t("repository.mine.applySuccess"));
                     } catch (error) {
                       if (
                         error instanceof ApiError &&
@@ -520,12 +655,16 @@ export default function SkillRepositoryPage() {
                       message.error(
                         error instanceof Error
                           ? error.message
-                          : t("skillRepository.mine.applyError")
+                          : t("repository.mine.applyError")
                       );
                     }
                   }}
                   isUpdatingStatus={updateStatusMutation.isPending}
                   onSetNotShared={handleSetNotShared}
+                  reviewDeepLink={reviewDeepLink}
+                  deepLinkFallbackSkill={deepLinkFallbackSkill}
+                  deepLinkFallbackLoading={isDeepLinkMineLoading}
+                  onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
                 />
               ) : isReviewTab ? (
                 <ReviewSkillList
@@ -541,10 +680,10 @@ export default function SkillRepositoryPage() {
                   updatingRepositoryId={updatingRepositoryId}
                   onDetailClick={openDetail}
                   onApprove={(listing) =>
-                    confirmUpdateStatus(listing, "shared")
+                    openReviewConfirmModal(listing, "approve")
                   }
                   onReject={(listing) =>
-                    confirmUpdateStatus(listing, "rejected")
+                    openReviewConfirmModal(listing, "reject")
                   }
                 />
               ) : null}
@@ -603,30 +742,52 @@ export default function SkillRepositoryPage() {
           )}
         </div>
       </Modal>
-      <SkillBuildModal
-        isOpen={skillBuildOpen}
-        editingSkill={editingSkill}
-        onCancel={() => {
-          setSkillBuildOpen(false);
-          setEditingSkill(null);
+      <SkillRepositoryReviewConfirmModal
+        open={reviewAction != null && reviewListing != null}
+        action={reviewAction}
+        listing={reviewListing}
+        loading={updateStatusMutation.isPending}
+        onClose={closeReviewConfirmModal}
+        onConfirm={async (content) => {
+          if (!reviewListing || !reviewAction) {
+            return;
+          }
+          await handleUpdateStatus(
+            reviewListing,
+            reviewAction === "approve" ? "shared" : "rejected",
+            content
+          );
+          closeReviewConfirmModal();
         }}
-        onSuccess={handleSkillBuildSuccess}
       />
-      <SkillDetailModal
-        open={viewingSkill != null}
-        skill={
-          viewingSkill
-            ? ({
-                skill_id: viewingSkill.skill_id,
-                name: viewingSkill.name || "",
-                description: viewingSkill.description || "",
-                source: viewingSkill.source || "custom",
-                tags: viewingSkill.tags || [],
-              } satisfies Skill)
-            : null
-        }
-        onClose={() => setViewingSkill(null)}
-      />
+      {skillBuildLoaded ? (
+        <SkillBuildModal
+          isOpen={skillBuildOpen}
+          editingSkill={editingSkill}
+          onCancel={() => {
+            setSkillBuildOpen(false);
+            setEditingSkill(null);
+          }}
+          onSuccess={handleSkillBuildSuccess}
+        />
+      ) : null}
+      {skillDetailLoaded ? (
+        <SkillDetailModal
+          open={viewingSkill != null}
+          skill={
+            viewingSkill
+              ? ({
+                  skill_id: viewingSkill.skill_id,
+                  name: viewingSkill.name || "",
+                  description: viewingSkill.description || "",
+                  source: viewingSkill.source || "custom",
+                  tags: viewingSkill.tags || [],
+                } satisfies Skill)
+              : null
+          }
+          onClose={() => setViewingSkill(null)}
+        />
+      ) : null}
     </ConfigProvider>
   );
 }

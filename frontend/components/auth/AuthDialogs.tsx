@@ -9,6 +9,8 @@ import Image from "next/image";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGlobalConfigStore } from "@/stores/global";
+import { publicAsset } from "@/lib/publicAsset";
 
 /**
  * Authentication dialogs component
@@ -16,6 +18,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
  */
 export function AuthDialogs() {
   const { t } = useTranslation("common");
+  const { config } = useGlobalConfigStore();
 
   const {
     isAuthPromptModalOpen,
@@ -46,7 +49,7 @@ export function AuthDialogs() {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
-              src="/modelengine-logo.png"
+              src={publicAsset("/modelengine-logo.png")}
               alt="ModelEngine Logo"
               width={80}
               height={80}
@@ -98,17 +101,19 @@ export function AuthDialogs() {
           </div>
 
           {/* GitHub support */}
-          <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
-            <GithubOutlined className="text-base" />
-            <a
-              href="https://github.com/ModelEngine-Group/nexent"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t("page.loginPrompt.githubSupport")}
-            </a>
-            <span></span>
-          </div>
+          { config.aboutConfig === 'open' && (
+            <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+              <GithubOutlined className="text-base" />
+              <a
+                href="https://github.com/ModelEngine-Group/nexent"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("page.loginPrompt.githubSupport")}
+              </a>
+              <span></span>
+            </div>
+          )}
         </div>
       </Modal>
 
