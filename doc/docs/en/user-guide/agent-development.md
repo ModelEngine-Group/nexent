@@ -417,7 +417,7 @@ Content-Type: application/json
 ```
 
 > 💡 **Tips**:
-> - For local development, replace the `/nb/a2a` prefix with `http://localhost:5013/nb/a2a`
+> - For local development, replace the `/nb/a2a` prefix with `http://localhost:5013/nb/a2a`(30013 if k8s)
 > - For production environments, replace the prefix with your server domain name or public IP address
 
 > ⚠️ **Notes**:
