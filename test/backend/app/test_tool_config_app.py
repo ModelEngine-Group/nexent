@@ -1193,12 +1193,14 @@ class TestErrorHandling:
 class TestUpdateToolLabelsAPI:
     """Test endpoint for updating tool labels"""
 
+    @patch('apps.tool_config_app.get_user_email_map')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('database.tool_db.update_tool_labels')
-    def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id):
+    def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id, mock_get_user_email_map):
         """Test successful labels update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_labels.return_value = True
+        mock_get_user_email_map.return_value = {"user123": "editor@example.com"}
 
         response = client.put(
             "/tool/labels",
@@ -1209,6 +1211,7 @@ class TestUpdateToolLabelsAPI:
         data = response.json()
         assert data["status"] == "success"
         assert data["labels"] == ["database", "search"]
+        assert data["updated_by_name"] == "editor@example.com"
         mock_get_user_id.assert_called_once_with(None)
         mock_update_labels.assert_called_once_with(
             1, "tenant456", ["database", "search"], "user123"

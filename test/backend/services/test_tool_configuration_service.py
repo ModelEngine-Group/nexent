@@ -1088,6 +1088,27 @@ class TestListAllToolsWithLabels:
         assert result[0]["tool_id"] == 1
         mock_query.assert_called_once_with("tenant1")
 
+    @patch('backend.services.tool_configuration_service.get_user_email_map')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    async def test_list_all_tools_resolves_updated_by_name(
+        self, mock_query, mock_descriptions, mock_user_email_map
+    ):
+        """The tool list exposes a readable last editor instead of an internal ID."""
+        mock_query.return_value = [
+            {"tool_id": 1, "name": "t1", "description": "d1", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": "",
+             "updated_by": "internal-user-id"}
+        ]
+        mock_descriptions.return_value = {}
+        mock_user_email_map.return_value = {"internal-user-id": "editor@example.com"}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert result[0]["updated_by_name"] == "editor@example.com"
+        mock_user_email_map.assert_called_once_with(["internal-user-id"])
+
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_tools_by_labels')
     async def test_list_all_tools_with_labels(self, mock_query_by_labels, mock_descriptions):

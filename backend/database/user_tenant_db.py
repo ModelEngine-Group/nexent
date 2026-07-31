@@ -53,6 +53,25 @@ def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_user_email_map(user_ids: List[str]) -> Dict[str, str]:
+    """Return active user email addresses keyed by user ID."""
+    unique_user_ids = list({user_id for user_id in user_ids if user_id})
+    if not unique_user_ids:
+        return {}
+
+    with get_db_session() as session:
+        rows = session.query(UserTenant.user_id, UserTenant.user_email).filter(
+            UserTenant.user_id.in_(unique_user_ids),
+            UserTenant.delete_flag == "N",
+        ).all()
+
+    return {
+        user_id: user_email
+        for user_id, user_email in rows
+        if user_email
+    }
+
+
 def get_all_tenant_ids() -> list[str]:
     """
     Get all unique tenant IDs from the database
