@@ -190,6 +190,7 @@
   "chat.threadList.loading": "正在加载对话",
   "chat.threadList.rename": "重命名",
   "chat.threadList.delete": "删除",
+  "chat.threadList.confirmDeletionDescription": "确定要删除这个对话吗？此操作无法撤销。",
   "chat.threadList.renameFailed": "重命名对话失败",
   "chat.threadList.running": "正在运行中",
   "chat.threadList.completed": "已完成",
