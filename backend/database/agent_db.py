@@ -400,35 +400,36 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
 
 def update_related_agents(
     parent_agent_id: int,
-    related_agent_ids: List[int],
     tenant_id: str,
     user_id: str,
-    version_no: int = 0,
     related_agents: Optional[List[dict]] = None,
+    version_no: int = 0,
 ):
     """
     Update related agents for a parent agent by replacing all existing relations.
     Default version_no=0 updates the draft version.
 
     This function handles both creation and deletion of relations in a single transaction.
-    If related_agents is provided, it will also save the pinned version for each relation.
+    related_agents is the single source of truth: each item has 'agent_id' and optional 'version_no'.
 
     Args:
         parent_agent_id: ID of the parent agent
-        related_agent_ids: List of child agent IDs to be related
         tenant_id: Tenant ID
         user_id: User ID for audit trail
+        related_agents: List of dicts with 'agent_id' and optional 'version_no' keys
         version_no: Version number to filter. Default 0 = draft/editing state
-        related_agents: Optional list of dicts with 'agent_id' and 'version_no' keys
     """
-    # Build a version mapping if related_agents is provided
+    # Derive related_agent_ids and version_map from related_agents
+    new_related_ids: set = set()
     version_map: dict = {}
     if related_agents:
         for rel in related_agents:
             agent_id = rel.get("agent_id")
-            agent_version_no = rel.get("version_no")
             if agent_id is not None:
-                version_map[agent_id] = agent_version_no
+                new_related_ids.add(agent_id)
+                version_no_val = rel.get("version_no")
+                if version_no_val is not None:
+                    version_map[agent_id] = version_no_val
 
     with get_db_session() as session:
         # Get current relations
@@ -441,8 +442,6 @@ def update_related_agents(
 
         current_related_ids = {
             rel.selected_agent_id for rel in current_relations}
-        new_related_ids = set(
-            related_agent_ids) if related_agent_ids else set()
 
         # Find IDs to delete (in current but not in new)
         ids_to_delete = current_related_ids - new_related_ids

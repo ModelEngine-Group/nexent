@@ -80,7 +80,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list, query_current_version_no, search_version_name_by_version_no
+from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -1486,21 +1486,38 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             main_agent_id=agent_id, tenant_id=tenant_id)
         agent_info["sub_agent_id_list"] = sub_agent_id_list
 
-        # Enrich sub-agent relations with version names
+        # Enrich sub-agent relations with version names (batch query)
         relations = query_sub_agent_relations(agent_id, tenant_id, version_no)
         enriched_relations = []
+
+        # Collect all (agent_id, version_no) pairs for batch lookup
+        lookup_agent_ids = set()
+        lookup_version_nos = set()
+        for rel in relations:
+            aid = rel.get("selected_agent_id")
+            vno = rel.get("selected_agent_version_no")
+            if aid and vno is not None:
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(vno)
+
+        # Batch query all version names at once
+        version_name_map: dict = {}
+        if lookup_agent_ids and lookup_version_nos:
+            batch_results = batch_search_version_names(
+                agent_ids=list(lookup_agent_ids),
+                tenant_id=tenant_id,
+                version_nos=list(lookup_version_nos),
+            )
+            for item in batch_results:
+                key = (item["agent_id"], item["version_no"])
+                version_name_map[key] = item["version_name"]
+
         for rel in relations:
             selected_agent_id = rel.get("selected_agent_id")
             selected_version_no = rel.get("selected_agent_version_no")
-
             version_name = None
             if selected_agent_id and selected_version_no is not None:
-                # Use search_version_name_by_version_no to find the version name
-                # This works even if the version has been soft-deleted
-                version_name = search_version_name_by_version_no(
-                    selected_agent_id, tenant_id, selected_version_no
-                )
-
+                version_name = version_name_map.get((selected_agent_id, selected_version_no))
             enriched_relations.append({
                 "agent_id": selected_agent_id,
                 "version_no": selected_version_no,
@@ -1878,18 +1895,20 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                     main_agent_id=left_ele, tenant_id=tenant_id)
                 search_list.extend(sub_ids)
 
-            # Update related agents
-            # Convert related_agents to list of dicts if provided
-            related_agents_dicts = None
+            # Update related agents - use related_agents if provided, otherwise build from IDs
             if request.related_agents:
                 related_agents_dicts = [
                     {"agent_id": ra.agent_id, "version_no": ra.version_no}
                     for ra in request.related_agents
                 ]
+            else:
+                related_agents_dicts = [
+                    {"agent_id": aid, "version_no": None}
+                    for aid in related_agent_ids
+                ]
 
             update_related_agents(
                 parent_agent_id=agent_id,
-                related_agent_ids=related_agent_ids,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 related_agents=related_agents_dicts,

@@ -242,12 +242,12 @@ export default function CollaborativeAgent() {
                   key={`internal-${agent.id}`}
                   closable={!isReadOnly}
                   onClose={!isReadOnly ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
-                  className="bg-blue-50 text-blue-700 border-blue-200"
+                  className="!inline-flex !items-center !whitespace-nowrap !py-1.5 !px-3 !text-sm !bg-blue-50 !text-blue-700 !border !border-blue-200 !rounded-lg !shadow-sm hover:!shadow-md hover:!border-blue-400 transition-all"
                 >
-                  <span className="flex items-center gap-1">
-                    {agent.display_name || agent.name}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium">{agent.display_name || agent.name}</span>
                     {agent.version_name && (
-                      <span className="text-xs text-blue-400">{agent.version_name}</span>
+                      <span className="text-xs text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded">{agent.version_name}</span>
                     )}
                   </span>
                 </Tag>
@@ -263,14 +263,11 @@ export default function CollaborativeAgent() {
                   key={`external-${agent.id}`}
                   closable={!isReadOnly}
                   onClose={!isReadOnly ? () => handleRemoveExternalAgent(agent.id) : undefined}
-                  className="bg-green-50 text-green-700 border-green-200"
+                  className="!inline-flex !items-center !whitespace-nowrap !py-1.5 !px-3 !text-sm !bg-green-50 !text-green-700 !border !border-green-200 !rounded-lg !shadow-sm hover:!shadow-md hover:!border-green-400 transition-all"
                 >
-                  <span className="inline-flex items-center gap-1">
-                    <Globe size={12} />
-                    {agent.name}
-                    {agent.version && (
-                      <span className="text-xs text-green-400">v{agent.version}</span>
-                    )}
+                  <span className="inline-flex items-center gap-1.5">
+                    <Globe size={14} />
+                    <span className="font-medium">{agent.name}</span>
                   </span>
                 </Tag>
               ))}

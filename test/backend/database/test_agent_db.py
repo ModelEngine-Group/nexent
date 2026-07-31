@@ -689,7 +689,7 @@ def test_update_related_agents_add_new(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.AgentRelation", MockAgentRelationClass)
 
     # Execute - add new relations [2, 3]
-    update_related_agents(1, [2, 3], "tenant1", "user1")
+    update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2}, {"agent_id": 3}])
 
     # Verify: should add 2 new relations, no deletions
     assert session.add.call_count == 2
@@ -732,7 +732,7 @@ def test_update_related_agents_delete_existing(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
     # Execute - remove all relations (empty list)
-    update_related_agents(1, [], "tenant1", "user1")
+    update_related_agents(1, "tenant1", "user1", related_agents=[])
 
     # Verify: should soft delete 2 relations, add none
     mock_update.assert_called_once()
@@ -790,7 +790,7 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.AgentRelation", MockAgentRelationClass)
 
     # Execute - replace [2, 3] with [3, 4] (delete 2, add 4)
-    update_related_agents(1, [3, 4], "tenant1", "user1")
+    update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 3}, {"agent_id": 4}])
 
     # Verify: should delete 2 (relation with selected_agent_id=2), add 4
     mock_update.assert_called_once()
@@ -825,7 +825,7 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
     # Execute - same relations [2, 3]
-    update_related_agents(1, [2, 3], "tenant1", "user1")
+    update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2}, {"agent_id": 3}])
 
     # Verify: no deletions, no additions
     session.add.assert_not_called()

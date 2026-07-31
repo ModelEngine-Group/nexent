@@ -35,22 +35,34 @@ def search_version_by_version_no(
         return as_dict(version) if version else None
 
 
-def search_version_name_by_version_no(
-    agent_id: int,
+def batch_search_version_names(
+    agent_ids: List[int],
     tenant_id: str,
-    version_no: int,
-) -> Optional[str]:
+    version_nos: List[int],
+) -> List[dict]:
     """
-    Search version_name by version_no, including soft-deleted versions.
-    Used for displaying version info in sub-agent relations.
+    Batch query version names for multiple (agent_id, version_no) pairs.
+
+    Returns list of dicts: [{"agent_id": int, "version_no": int, "version_name": Optional[str]}]
     """
+    if not agent_ids or not version_nos:
+        return []
+
     with get_db_session() as session:
-        version = session.query(AgentVersion).filter(
-            AgentVersion.agent_id == agent_id,
-            AgentVersion.version_no == version_no,
+        versions = session.query(AgentVersion).filter(
+            AgentVersion.agent_id.in_(agent_ids),
+            AgentVersion.version_no.in_(version_nos),
             AgentVersion.tenant_id == tenant_id,
-        ).first()
-        return version.version_name if version else None
+        ).all()
+
+        result = []
+        for v in versions:
+            result.append({
+                "agent_id": v.agent_id,
+                "version_no": v.version_no,
+                "version_name": v.version_name,
+            })
+        return result
 
 
 def search_version_by_id(
