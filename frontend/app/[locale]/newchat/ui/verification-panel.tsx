@@ -45,7 +45,11 @@ export const VerificationPanel: FC<VerificationPanelProps> = ({
       ? "text-red-600 dark:text-red-400"
       : "text-emerald-700 dark:text-emerald-400"
     : "text-blue-600 dark:text-blue-400";
-  const headerLabel = completed ? "自检完成" : "自检中";
+  const headerLabel = completed
+    ? hasBlockingFailure
+      ? t("taskWindow.verification.finalFail")
+      : t("taskWindow.verification.finalPass")
+    : t("taskWindow.verification.start");
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="my-3 w-full">
