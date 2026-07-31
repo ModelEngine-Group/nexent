@@ -18,6 +18,7 @@ export default function CollaborativeAgent() {
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const updateSubAgentIds = useAgentConfigStore((state) => state.updateSubAgentIds);
+  const updateSubAgentRelations = useAgentConfigStore((state) => state.updateSubAgentRelations);
   const updateExternalSubAgentIds = useAgentConfigStore((state) => state.updateExternalSubAgentIds);
 
   const { availableAgents: internalAgents } = usePublishedAgentList();
@@ -40,10 +41,31 @@ export default function CollaborativeAgent() {
   // Related internal agent IDs
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list) ? editedAgent.sub_agent_id_list : [];
 
-  // Related internal agents (from published list)
+  // Map of agent_id -> saved version info (from snapshot)
+  const savedVersionMap = (() => {
+    const map: Record<number, { version_no: number; version_name?: string }> = {};
+    (editedAgent?.sub_agent_relations || []).forEach((rel) => {
+      if (rel.version_no !== null && rel.version_no !== undefined) {
+        map[rel.agent_id] = {
+          version_no: rel.version_no,
+          version_name: rel.version_name,
+        };
+      }
+    });
+    return map;
+  })();
+
+  // Related internal agents (from published list) with saved version info
   const relatedInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
     (agent: Agent) => relatedAgentIds.includes(Number(agent.id))
-  );
+  ).map((agent: Agent) => {
+    const savedVersion = savedVersionMap[Number(agent.id)];
+    return {
+      ...agent,
+      // Override version_name with saved version from sub_agent_relations
+      version_name: savedVersion?.version_name || agent.version_name || null,
+    };
+  });
 
   // Available internal agents (exclude already related ones and current agent)
   const availableInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
@@ -82,6 +104,18 @@ export default function CollaborativeAgent() {
   const handleSelectInternalAgent = (agentId: number) => {
     const newRelatedAgentIds = [...(Array.isArray(relatedAgentIds) ? relatedAgentIds : []), agentId];
     updateSubAgentIds(newRelatedAgentIds);
+
+    // Sync sub_agent_relations: add new agent with its current published version_no
+    const selectedAgent = (Array.isArray(internalAgents) ? internalAgents : []).find(
+      (a: Agent) => Number(a.id) === agentId
+    );
+    const currentVersionNo = selectedAgent?.current_version_no ?? null;
+    const existingRelations = editedAgent?.sub_agent_relations || [];
+    const newRelations = [
+      ...existingRelations,
+      { agent_id: agentId, version_no: currentVersionNo, version_name: selectedAgent?.version_name },
+    ];
+    updateSubAgentRelations(newRelations);
   };
 
   // Add external agent
@@ -108,6 +142,13 @@ export default function CollaborativeAgent() {
       (id: number) => id !== agentId
     );
     updateSubAgentIds(newRelatedAgentIds);
+
+    // Sync sub_agent_relations: remove the agent
+    const existingRelations = editedAgent?.sub_agent_relations || [];
+    const newRelations = existingRelations.filter(
+      (rel: { agent_id: number; version_no: number | null; version_name?: string }) => rel.agent_id !== agentId
+    );
+    updateSubAgentRelations(newRelations);
   };
 
   // Remove external agent
@@ -137,7 +178,14 @@ export default function CollaborativeAgent() {
       label: t("collaborativeAgent.internalAgents"),
       children: availableInternalAgents.map((agent: Agent) => ({
         key: `internal-${agent.id}`,
-        label: agent.display_name || agent.name,
+        label: (
+          <div className="flex items-center justify-between w-full">
+            <span>{agent.display_name || agent.name}</span>
+            {agent.version_name && (
+              <span className="text-xs text-gray-400 ml-2">{agent.version_name}</span>
+            )}
+          </div>
+        ),
         onClick: () => handleSelectInternalAgent(Number(agent.id)),
       })),
     },
@@ -149,10 +197,15 @@ export default function CollaborativeAgent() {
       children: availableExternalForSelection.map((agent: A2AExternalAgent) => ({
         key: `external-${agent.id}`,
         label: (
-          <span className="flex items-center gap-2">
-            <Globe size={12} />
-            {agent.name}
-          </span>
+          <div className="flex items-center justify-between w-full">
+            <span className="flex items-center gap-2">
+              <Globe size={12} />
+              {agent.name}
+            </span>
+            {agent.version && (
+              <span className="text-xs text-gray-400 ml-2">v{agent.version}</span>
+            )}
+          </div>
         ),
         onClick: () => handleSelectExternalAgent(agent.id),
       })),
@@ -191,7 +244,12 @@ export default function CollaborativeAgent() {
                   onClose={!isReadOnly ? () => handleRemoveInternalAgent(Number(agent.id)) : undefined}
                   className="bg-blue-50 text-blue-700 border-blue-200"
                 >
-                  {agent.display_name || agent.name}
+                  <span className="flex items-center gap-1">
+                    {agent.display_name || agent.name}
+                    {agent.version_name && (
+                      <span className="text-xs text-blue-400">{agent.version_name}</span>
+                    )}
+                  </span>
                 </Tag>
               ))}
               </Flex>
@@ -210,6 +268,9 @@ export default function CollaborativeAgent() {
                   <span className="inline-flex items-center gap-1">
                     <Globe size={12} />
                     {agent.name}
+                    {agent.version && (
+                      <span className="text-xs text-green-400">v{agent.version}</span>
+                    )}
                   </span>
                 </Tag>
               ))}

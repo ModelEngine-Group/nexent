@@ -82,7 +82,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list, query_current_version_no
+from database.agent_version_db import query_version_list, query_current_version_no, search_version_name_by_version_no
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -1490,9 +1490,33 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         sub_agent_id_list = query_sub_agents_id_list(
             main_agent_id=agent_id, tenant_id=tenant_id)
         agent_info["sub_agent_id_list"] = sub_agent_id_list
+
+        # Enrich sub-agent relations with version names
+        relations = query_sub_agent_relations(agent_id, tenant_id, version_no)
+        enriched_relations = []
+        for rel in relations:
+            selected_agent_id = rel.get("selected_agent_id")
+            selected_version_no = rel.get("selected_agent_version_no")
+
+            version_name = None
+            if selected_agent_id and selected_version_no is not None:
+                # Use search_version_name_by_version_no to find the version name
+                # This works even if the version has been soft-deleted
+                version_name = search_version_name_by_version_no(
+                    selected_agent_id, tenant_id, selected_version_no
+                )
+
+            enriched_relations.append({
+                "agent_id": selected_agent_id,
+                "version_no": selected_version_no,
+                "version_name": version_name,
+            })
+
+        agent_info["sub_agent_relations"] = enriched_relations
     except Exception as e:
         logger.error(f"Failed to get sub agent id list: {str(e)}")
         agent_info["sub_agent_id_list"] = []
+        agent_info["sub_agent_relations"] = []
 
     try:
         skill_service = SkillService()
@@ -1854,11 +1878,20 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 search_list.extend(sub_ids)
 
             # Update related agents
+            # Convert related_agents to list of dicts if provided
+            related_agents_dicts = None
+            if request.related_agents:
+                related_agents_dicts = [
+                    {"agent_id": ra.agent_id, "version_no": ra.version_no}
+                    for ra in request.related_agents
+                ]
+
             update_related_agents(
                 parent_agent_id=agent_id,
                 related_agent_ids=related_agent_ids,
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=user_id,
+                related_agents=related_agents_dicts,
             )
     except ValueError:
         # Re-raise ValueError (circular dependency) as-is
