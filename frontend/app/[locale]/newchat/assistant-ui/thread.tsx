@@ -276,7 +276,9 @@ export const Thread: FC<ThreadProps> = ({
         selected_user_message_ids: Array.from(selectedShareMessageIds),
         render_version: "newchat",
       });
-      const runtimeConfig = await configService.fetchRuntimeFrontendConfig().catch(() => ({}));
+      const runtimeConfig = await configService
+        .fetchRuntimeFrontendConfig()
+        .catch((): { shareBaseUrl?: string } => ({}));
       const baseUrl = (
         runtimeConfig.shareBaseUrl || process.env.NEXT_PUBLIC_SHARE_BASE_URL || window.location.origin
       ).replace(/\/$/, "");
