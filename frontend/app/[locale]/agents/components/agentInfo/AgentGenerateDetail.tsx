@@ -37,6 +37,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
 import { canManageModels } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
@@ -50,6 +51,14 @@ import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
+
+/** Roles that can edit group settings for any agent (mirrors backend CAN_EDIT_ALL_USER_ROLES). */
+const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
 
 export default function AgentGenerateDetail({}) {
   const { t } = useTranslation("common");
@@ -75,6 +84,15 @@ export default function AgentGenerateDetail({}) {
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
   const editable = !isReadOnly;
+
+  // Group settings (用户组 / 组内权限) are editable only by creator or admin roles
+  const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
+  const isCreator =
+    isCreatingMode ||
+    (!!editedAgent.created_by &&
+      !!user?.id &&
+      String(editedAgent.created_by) === String(user.id));
+  const canEditGroupSettings = isAdmin || isCreator;
 
   const { defaultLlmModelConfig } = useConfig();
   const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
@@ -1242,6 +1260,7 @@ export default function AgentGenerateDetail({}) {
                     placeholder={t("agent.userGroup")}
                     options={groupSelectOptions}
                     allowClear
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>
@@ -1257,6 +1276,7 @@ export default function AgentGenerateDetail({}) {
                       { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
                       { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
                     ]}
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>

@@ -32,6 +32,7 @@ export type EditableAgent = Pick<
   | "display_name"
   | "description"
   | "author"
+  | "created_by"
   | "model"
   | "model_ids"
   | "max_step"
@@ -167,6 +168,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     display_name: "",
     description: "",
     author: "",
+    created_by: null,
     model: llmConfig?.name || "",
     model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
@@ -204,6 +206,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         display_name: agent.display_name || "",
         description: agent.description,
         author: agent.author || "",
+        created_by: agent.created_by ?? null,
         model: agent.model,
         model_ids: agent.model_ids || [],
         max_step: agent.max_step,
