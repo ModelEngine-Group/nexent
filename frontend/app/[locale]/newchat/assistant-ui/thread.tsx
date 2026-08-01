@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { SubAgentContainer } from "../ui/subagent";
@@ -21,6 +22,7 @@ import {
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
+  groupPartByType,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -63,6 +65,8 @@ import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
+import { ToolRecommendations } from "../ui/tool-recommendations";
+import { AgentDraftCard } from "../ui/agent-draft-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -71,18 +75,21 @@ import {
 import {
   getAgentRunTime,
   skillFileUploadsRegistry,
+  type Nl2aMessage,
+  type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
-  onBack: () => void;
+  onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
 }
 
 /**
@@ -119,6 +126,7 @@ export const Thread: FC<ThreadProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -176,6 +184,7 @@ export const Thread: FC<ThreadProps> = ({
         onModelChange={onModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
+        showModelSelector={showModelSelector}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -188,12 +197,13 @@ export const Thread: FC<ThreadProps> = ({
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
-  onBack: () => void;
+  onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -209,6 +219,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector,
   hasMessages,
   displayName,
   conversationTitle,
@@ -221,9 +232,11 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
+          {onBack && (
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
           <div className="flex flex-col">
             <span className="text-sm font-medium text-foreground">
               {hasMessages ? conversationTitle : displayName}
@@ -250,6 +263,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             onModelChange={onModelChange}
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -419,6 +433,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   const agentName = agent.display_name || agent.name;
 
   const agentRunTime = getAgentRunTime();
+  const nl2a = useAuiState(
+    (s) =>
+      (
+        s.message.metadata?.custom as
+          | { nl2a?: Nl2aMessage }
+          | undefined
+      )?.nl2a,
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
@@ -514,8 +536,6 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               typeof partType === "string" &&
               partType.startsWith("group-subagent-")
             ) {
-              // `GroupPart` always carries `indices`; the runtime check
-              // above narrows the union so this cast is safe.
               const groupPart = part as unknown as {
                 type: string;
                 indices: readonly number[];
@@ -523,6 +543,20 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               };
               return renderSubAgentGroup(groupPart, children);
             }
+
+            if (partType === "verification-panel") {
+              const verificationPanel = part as typeof part & {
+                results?: VerificationContent[];
+                completed?: boolean;
+              };
+              return (
+                <VerificationPanel
+                  results={verificationPanel.results ?? []}
+                  completed={verificationPanel.completed === true}
+                />
+              );
+            }
+
             switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
@@ -530,14 +564,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return (
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
+                      count={(part as typeof part & { indices?: unknown[] }).indices?.length ?? 0}
+                      active={(part as typeof part & { status?: { type?: string } }).status?.type === "running"}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
               case "group-reasoning": {
-                const running = part.status.type === "running";
+                const running = (part as typeof part & { status?: { type?: string } }).status?.type === "running";
                 return (
                   <Reasoning.Root defaultOpen={running} >
                     <GroupReasoningTrigger active={running} />
@@ -548,11 +582,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 );
               }
               case "group-source":
-                return <SourceGroupButton indices={part.indices} />;
+                return <SourceGroupButton indices={(part as typeof part & { indices?: unknown[] }).indices ?? []} />;
               case "group-default":
                 return <>{children}</>;
               case "text": {
-                const textPart = part as typeof part & { isError?: boolean };
+                const textPart = part as typeof part & { isError?: boolean; text?: string };
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -566,7 +600,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "reasoning":
                 return <Reasoning {...part} /> ;
               case "tool-call":
-                return part.toolUI ?? <ToolFallback {...part} />;
+                return (part as typeof part & { toolUI?: unknown }).toolUI ?? <ToolFallback {...part} />;
               case "indicator":
                 return <AssistantWorkingIndicator />;
               case "source":
@@ -575,23 +609,24 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
-                if (part.name === "automation-proposal") {
+                if ((part as typeof part & { name?: string }).name === "automation-proposal") {
                   return (
                     <AutomationProposalMessage
-                      proposal={part.data as AgentAutomationProposalData}
+                      proposal={(part as typeof part & { data?: unknown }).data as AgentAutomationProposalData}
                     />
                   );
                 }
-                // The `subagent-boundary` stamp part is the seat of the
-                // group's header information. We let the header renderer
-                // paint it instead of returning it inside the body, so
-                // suppress here when it lands as a leaf of the chain.
-                return part.dataRendererUI;
+                return (part as typeof part & { dataRendererUI?: unknown }).dataRendererUI as ReactNode ?? null;
               default:
                 return null;
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} />
+        ) : nl2a?.content.subtype === "agent_draft" ? (
+          <AgentDraftCard draft={nl2a.content} />
+        ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}

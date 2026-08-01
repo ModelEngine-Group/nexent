@@ -244,6 +244,7 @@ class TestMessageObserver:
         observer_en = MessageObserver(lang="en")
         assert observer_en.lang == "en"
         assert observer_en.current_mode == ProcessType.MODEL_OUTPUT_THINKING
+        assert observer_en.enable_nl2a_wrapper is False
 
         # Test Chinese
         observer_zh = MessageObserver(lang="zh")
@@ -356,6 +357,92 @@ class TestMessageObserver:
         messages = [json.loads(message) for message in observer.get_cached_message()]
         assert all(message["depth"] == 1 for message in messages)
         assert observer._current_depth.get() == 0
+
+    def test_execution_logs_extract_nl2a_before_visible_content(self):
+        """Extract NL2Agent JSON from wrapper tool execution logs."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        payload = {
+            "status": "success",
+            "recommendation_count": 0,
+            "recommendations": [],
+        }
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a>\n{json.dumps(payload)}\n</nl2a>\nNL2A payload generated.",
+        )
+
+        messages = [
+            json.loads(message)
+            for message in observer.get_cached_message()
+        ]
+        assert [message["type"] for message in messages] == [
+            ProcessType.NL2A.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == payload
+        assert messages[1]["content"] == "NL2A payload generated."
+
+    def test_final_answer_never_extracts_nl2a(self):
+        """Do not retain final-answer wrapper extraction as a fallback."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = '<nl2a>{"status":"success"}</nl2a>\nVisible answer.'
+
+        observer.add_message("agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
+        }
+
+    def test_execution_logs_drop_invalid_nl2a_without_emitting_chunk(self):
+        """Hide an invalid tool wrapper without emitting malformed data."""
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            "<nl2a>{invalid json}</nl2a>\nWrapper failed.",
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper failed.",
+        }
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            {"status": "success"},
+            "Ordinary execution output without a wrapper.",
+        ],
+    )
+    def test_nl2a_extractor_preserves_content_without_a_string_wrapper(
+        self,
+        content,
+    ):
+        payload, visible_content = MessageObserver._extract_nl2a_wrapper(content)
+
+        assert payload is None
+        assert visible_content == content
+
+    def test_execution_logs_reject_nl2a_json_that_is_not_an_object(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            '<nl2a>["not", "an", "object"]</nl2a>\nWrapper rejected.',
+        )
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.EXECUTION_LOGS.value,
+            "content": "Wrapper rejected.",
+        }
 
     def test_add_model_reasoning_content(self):
         """Test add_model_reasoning_content method"""
@@ -1085,6 +1172,7 @@ class TestProcessTypeEnum:
             "PICTURE_WEB",
             "CARD",
             "TOOL",
+            "NL2A",
             "MEMORY_SEARCH",
             "MAX_STEPS_REACHED",
             "VERIFICATION",

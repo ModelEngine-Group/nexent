@@ -83,7 +83,7 @@ export const restoreHistoricalChatMode = (conversationId?: string): void => {
   );
 };
 
-const cacheHistoricalChatMode = (
+export const cacheHistoricalChatMode = (
   conversationId: string,
   chatMode: HistoricalChatMode | undefined,
 ): void => {

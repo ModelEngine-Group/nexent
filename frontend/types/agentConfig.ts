@@ -136,6 +136,8 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
+  /** Nexent user_id of the agent creator (owner). */
+  created_by?: string | null;
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];

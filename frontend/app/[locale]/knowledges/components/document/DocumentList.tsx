@@ -49,7 +49,7 @@ import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
-import { useGroupList } from "@/hooks/group/useGroupList";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
@@ -177,15 +177,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const uploadAreaRef = useRef<any>(null);
     const { state: docState } = useDocumentContext();
     const { modelConfig } = useConfig();
-    const { user } = useAuthorizationContext();
+    const { user, groupIds } = useAuthorizationContext();
     const tenantId = user?.tenantId || null;
     const storageQuota = useStorageQuotaBlocked(tenantId);
 
-    // Fetch groups for group selection
+    // Fetch tenant groups and limit selections to current user's groups.
     const { data: groupData } = useGroupList(tenantId);
-    const groups = groupData?.groups || [];
+    const { groups } = useGroupDetails(groupData?.groups ?? [], groupIds);
 
-    // Create group name mapping
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
       value: group.group_id,
@@ -332,7 +331,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         const initDefaultGroup = async () => {
           try {
             const defaultGroupId = await getTenantDefaultGroupId(tenantId);
-            if (defaultGroupId) {
+            if (defaultGroupId && groupIds.includes(defaultGroupId)) {
               onSelectedGroupIdsChange([defaultGroupId]);
             }
           } catch (error) {
@@ -341,7 +340,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId]);
+    }, [isCreatingMode, tenantId, groupIds, onSelectedGroupIdsChange]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -378,7 +377,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       const loadFrequencyOptions = async () => {
         if (showDetail && frequencyOptions.length === 0) {
           try {
-            const options = await knowledgeBaseService.fetchSummaryFrequencyOptions();
+            const options =
+              await knowledgeBaseService.fetchSummaryFrequencyOptions();
             setFrequencyOptions(options);
           } catch (error) {
             log.error("Failed to load frequency options:", error);

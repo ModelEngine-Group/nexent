@@ -119,6 +119,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    NL2A = "nl2a"
 
 
 @dataclass
@@ -2239,7 +2240,6 @@ class TestCreateMcpTool:
 
         with pytest.raises(ValueError, match="test_tool not found in MCP server"):
             nexent_agent_instance.create_mcp_tool("test_tool")
-
 
 class TestCreateBuiltinTool:
     """Tests for create_builtin_tool method."""
