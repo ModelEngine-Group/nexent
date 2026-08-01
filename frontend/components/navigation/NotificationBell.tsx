@@ -155,6 +155,15 @@ export function NotificationBell({
             color="#ff4d4f"
             overflowCount={99}
             offset={[-2, 2]}
+            styles={{
+              root: {
+                display: "inline-flex",
+                alignItems: "center",
+                height: 32, // match Button h-8
+                lineHeight: 1,
+                verticalAlign: "middle",
+              },
+            }}
           >
             <Button
               type="text"
