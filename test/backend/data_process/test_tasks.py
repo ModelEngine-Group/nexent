@@ -290,8 +290,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     # Provide a Celery task shim that allows direct calls and supports .s for chaining
 
     class _SignatureShim:
-        def __init__(self):
-            pass
+        def __init__(self, kwargs=None):
+            self.kwargs = kwargs or {}
 
         def set(self, **_kw):
             return self
@@ -306,8 +306,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
                 args, kwargs = self._preprocess(args, kwargs)
             return self._run_func(*args, **kwargs)
 
-        def s(self, **_kw):
-            return _SignatureShim()
+        def s(self, **kwargs):
+            return _SignatureShim(kwargs)
 
     # Helper to get unbound run
     def _unbound_run(task_obj):
@@ -2502,9 +2502,10 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
         def json():
             return {"status": "success"}
 
-    def _delete(url, params=None, timeout=None):
+    def _delete(url, params=None, headers=None, timeout=None):
         captured["url"] = url
         captured["params"] = params
+        captured["headers"] = headers
         captured["timeout"] = timeout
         return FakeResponse()
 
@@ -2514,11 +2515,47 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
     out = tasks.cleanup_source(
         self,
         {"task_id": "t1", "index_name": "idx", "source": "/a.txt"},
+        authorization="Bearer test-token",
     )
     assert captured["url"] == "http://api/indices/idx/documents"
     assert captured["params"]["path_or_url"] == "/a.txt"
     assert captured["params"]["scope"] == "source_only"
+    assert captured["headers"]["Authorization"] == "Bearer test-token"
     assert out["source_cleanup"]["attempted"] is True
+    assert out["source_cleanup"]["success"] is True
+    # Authorization must not leak into the task result payload
+    assert "authorization" not in out
+    assert "Authorization" not in json.dumps(out)
+
+
+def test_cleanup_source_omits_auth_header_when_authorization_missing(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+    monkeypatch.setattr(tasks, "get_knowledge_record",
+                        lambda query=None: {"preserve_source_file": False})
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"status": "success"}
+
+    def _delete(url, params=None, headers=None, timeout=None):
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(tasks.requests, "delete", _delete, raising=True)
+
+    self = FakeSelf("cleanup-no-auth-1")
+    out = tasks.cleanup_source(
+        self,
+        {"task_id": "t1", "index_name": "idx", "source": "/a.txt"},
+    )
+    assert captured["headers"] == {}
     assert out["source_cleanup"]["success"] is True
 
 
@@ -2541,3 +2578,42 @@ def test_cleanup_source_failure_is_warning_only(monkeypatch):
     assert out["source_cleanup"]["attempted"] is True
     assert out["source_cleanup"]["success"] is False
     assert "boom" in (out["source_cleanup"]["error"] or "")
+
+
+def test_submit_process_forward_chain_binds_authorization_to_cleanup(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    captured = {"args": None}
+
+    class FakeResult:
+        def __init__(self, id):
+            self.id = id
+
+    class FakeChain:
+        def apply_async(self):
+            return FakeResult("auth-chain-1")
+
+    def _capture_chain(*args, **_kwargs):
+        captured["args"] = args
+        return FakeChain()
+
+    monkeypatch.setattr(tasks, "chain", _capture_chain)
+    import backend.data_process.tasks as tasks_module
+    tasks_module.process = tasks.process
+    tasks_module.forward = tasks.forward
+    tasks_module.cleanup_source = tasks.cleanup_source
+
+    chain_id = tasks.submit_process_forward_chain(
+        source="/a.txt",
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="idx",
+        authorization="Bearer chain-token",
+    )
+    assert chain_id == "auth-chain-1"
+    assert captured["args"] is not None
+    assert len(captured["args"]) == 3
+    cleanup_sig = captured["args"][2]
+    assert cleanup_sig.kwargs.get("authorization") == "Bearer chain-token"
+    forward_sig = captured["args"][1]
+    assert forward_sig.kwargs.get("authorization") == "Bearer chain-token"
