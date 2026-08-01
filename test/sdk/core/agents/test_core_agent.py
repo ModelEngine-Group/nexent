@@ -324,6 +324,7 @@ def test_final_verification_skips_llm_for_greeting():
     )
 
     assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
     assert result.phase == "final_pass"
     model.assert_not_called()
 
@@ -368,7 +369,80 @@ Verification feedback:
     )
 
     assert result.passed is True
-    assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_success_counters_do_not_count_as_tool_errors():
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action="result = run_datamate_pipeline(wait_for_completion=True)",
+        observation='{"status":"COMPLETED","failedFileNum":0,"planner_error":null}',
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert "tool_error_handled" not in result.failed_criteria
+
+
+def test_nonempty_json_error_counts_as_tool_error():
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action="result = run_datamate_pipeline(wait_for_completion=True)",
+        observation='{"status":"FAILED","error":"operator crashed"}',
+        step_number=1,
+    )
+
+    assert result.severity == "warning"
+    assert "tool_error_handled" in result.failed_criteria
+
+
+def test_structured_handoff_is_substantive_even_with_a_limited_answer():
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action="report = medical_kg_qa_agent(task='查询并列出证据')",
+        observation='{"answer":"无法列出更多结论","evidence_used":1,"citations":[{"id":1}]}',
+        step_number=1,
+    )
+
+    assert "handoff_has_substance" not in result.failed_criteria
+
+
+def test_execution_task_requires_a_real_observation_before_final_answer():
+    controller, model = _make_verification_controller()
+    controller.config.llm_verification_enabled = False
+
+    result = controller.verify_final_answer(
+        task="从 data/corpus 构建医疗知识图谱",
+        candidate="图谱已经构建完成。",
+        memory_summary="Task: build graph\n\nStep 1:\nCode: \nObservation: \nOutput: 图谱已经构建完成。",
+        round_number=1,
+    )
+
+    assert result.passed is False
+    assert result.failed_criteria == ["observed_tool_result"]
+    model.assert_not_called()
+
+
+def test_execution_task_accepts_a_real_observation_without_llm_verifier():
+    controller, model = _make_verification_controller()
+    controller.config.llm_verification_enabled = False
+
+    result = controller.verify_final_answer(
+        task="从 data/corpus 构建医疗知识图谱",
+        candidate="图谱已经构建完成。",
+        memory_summary=(
+            "Task: build graph\n\nStep 1:\n"
+            "Code: result = build_medical_kg(source_path='data/corpus')\n"
+            "Observation: {\"graph_file\":\"outputs/nexent_demo_graph.json\"}\n"
+            "Output: {\"graph_file\":\"outputs/nexent_demo_graph.json\"}"
+        ),
+        round_number=1,
+    )
+
+    assert result.passed is True
+    model.assert_not_called()
 
 
 def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():

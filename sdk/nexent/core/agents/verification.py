@@ -68,7 +68,11 @@ class VerificationController:
     """Layered verification for critical ReAct events and final answers."""
 
     _ERROR_RE = re.compile(
-        r"(traceback|exception|error:|failed|timeout|unauthorized|permission denied)",
+        r"(traceback|\bexception\b|\berror\s*:|\bfailed\b|\btimeout\b|\bunauthorized\b|permission denied)",
+        re.IGNORECASE,
+    )
+    _JSON_ERROR_RE = re.compile(
+        r"""["']error["']\s*:\s*(?!null\b|none\b|false\b|0\b|["']{2})""",
         re.IGNORECASE,
     )
     _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
@@ -84,6 +88,11 @@ class VerificationController:
         r"(搜索|检索|查询|查找|分析|调研|根据|基于|引用|证据|来源|文档|文件|代码|项目|数据库|"
         r"最新|今天|昨天|现在|当前|执行|运行|部署|修复|报错|日志|search|retrieve|cite|source|"
         r"evidence|file|code|database|latest|today|run|execute|deploy|error|log)",
+        re.IGNORECASE,
+    )
+    _TOOL_RESULT_DEMAND_RE = re.compile(
+        r"(执行|运行|处理.+文件|构建|建图|画|图表|关系图|可视化|生成.+(?:图|报告|文件)|查询|调用|部署|修复|"
+        r"\bexecute\b|\brun\b|\bbuild\b|\bgenerate\b|\bquery\b|\bdeploy\b|\bfix\b)",
         re.IGNORECASE,
     )
 
@@ -281,6 +290,7 @@ class VerificationController:
             return self._pass(event)
 
         observation_text = observation or ""
+        has_error_signal = self._contains_error_signal(observation_text)
         checks = [
             VerificationCheck(
                 name="observation_present",
@@ -290,8 +300,8 @@ class VerificationController:
             ),
             VerificationCheck(
                 name="tool_error_handled",
-                passed=not self._ERROR_RE.search(observation_text),
-                reason="The observation contains an error signal." if self._ERROR_RE.search(observation_text) else "",
+                passed=not has_error_signal,
+                reason="The observation contains an error signal." if has_error_signal else "",
                 fix_hint="Do not ignore this tool error. Diagnose it, retry safely, or state the limitation.",
             ),
         ]
@@ -388,12 +398,29 @@ class VerificationController:
             self.emit(deterministic, round_number)
             return deterministic
 
+        policy = self._build_final_verification_policy(task, memory_summary)
+        if policy["tool_result_required"] and not self._has_observed_result(memory_summary):
+            missing_result = VerificationResult(
+                passed=False,
+                severity="blocking",
+                event="final_answer",
+                phase="final_fail",
+                score=0.5,
+                failed_criteria=["observed_tool_result"],
+                repair_instruction=(
+                    "Call the configured tool or managed agent, print its real observation, "
+                    "and answer only from that result."
+                ),
+                user_visible_note="The task requires execution evidence, but no real observation was recorded.",
+            )
+            self.emit(missing_result, round_number)
+            return missing_result
+
         if not self.config.llm_verification_enabled:
             deterministic.phase = "final_pass"
             self.emit(deterministic, round_number)
             return deterministic
 
-        policy = self._build_final_verification_policy(task, memory_summary)
         if policy["task_profile"] == "lightweight_conversation":
             deterministic.phase = "final_pass"
             deterministic.user_visible_note = "Lightweight conversational task; deterministic checks passed."
@@ -676,6 +703,9 @@ class VerificationController:
             "task_profile": "lightweight_conversation" if lightweight else "task_oriented",
             "evidence_required": evidence_required,
             "tool_error_check_required": self._has_recent_error_signal(clean_memory_summary),
+            "tool_result_required": (not lightweight) and bool(
+                self._TOOL_RESULT_DEMAND_RE.search(task or "")
+            ),
         }
 
     def _is_lightweight_conversation_task(self, task: str) -> bool:
@@ -703,7 +733,21 @@ class VerificationController:
 
     def _has_recent_error_signal(self, text: str) -> bool:
         clean_text = self._strip_internal_verification_feedback(text or "")
-        return bool(self._ERROR_RE.search(clean_text))
+        return self._contains_error_signal(clean_text)
+
+    def _has_observed_result(self, memory_summary: str) -> bool:
+        clean_text = self._strip_internal_verification_feedback(memory_summary or "")
+        observations = re.findall(
+            r"Observation:\s*(.*?)\nOutput:",
+            clean_text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        return any(observation.strip() for observation in observations)
+
+    @classmethod
+    def _contains_error_signal(cls, text: str) -> bool:
+        clean_text = text or ""
+        return bool(cls._ERROR_RE.search(clean_text) or cls._JSON_ERROR_RE.search(clean_text))
 
     def _classify_step_event(self, code_action: str, is_final_answer: bool) -> str:
         if is_final_answer:
@@ -725,6 +769,17 @@ class VerificationController:
 
     def _looks_empty_handoff(self, text: str) -> bool:
         lowered = (text or "").lower()
+        substantive_markers = [
+            '"evidence_used"',
+            '"citations"',
+            '"task_id"',
+            '"graph_file"',
+            '"report_html"',
+            "成功率",
+            "三元组",
+        ]
+        if any(marker in lowered for marker in substantive_markers):
+            return False
         return any(marker in lowered for marker in ["cannot help", "unable", "no answer", "无法", "不能", "空"])
 
     def _mentions_limitation(self, answer: str) -> bool:
