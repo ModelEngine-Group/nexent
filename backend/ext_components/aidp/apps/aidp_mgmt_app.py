@@ -352,6 +352,7 @@ async def create_knowledge_base(
     try:
         perms.create_permission(
             kb_id=kds_id,
+            kds_name=aidp_result.get("kds_name") or aidp_result.get("name") or "",
             owner_user_id=user_id,
             tenant_id=tenant_id,
             ingroup_permission=ingroup,
@@ -433,6 +434,20 @@ async def update_knowledge_base(
         )
     server_url, api_key = _credentials()
     result = update_aidp_kb_impl(server_url, api_key, kds_id, payload)
+
+    # Sync kds_name to permission table so the LLM name-to-id map stays current.
+    new_kds_name = (
+        (result.get("kds_name") if isinstance(result, dict) else None)
+        or body.name
+    )
+    if new_kds_name:
+        perms.update_permission(
+            kb_id=kds_id,
+            tenant_id=tenant_id,
+            kds_name=new_kds_name,
+            updated_by=user_id,
+        )
+
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 

@@ -2,7 +2,6 @@
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.
 Supports hybrid, vector, and full-text search with optional reranking.
-Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_WEB.
 """
 import json
 import logging
@@ -69,13 +68,13 @@ class AidpSearchTool(Tool):
     name = "aidp_search"
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
-        "Returns text, table, and image chunks with dual-channel delivery: "
-        "all chunks as SEARCH_CONTENT and image file_urls as PICTURE_WEB. "
+        "Returns text, table, and image chunks. Each chunk includes title, text, "
+        "source file_url, and score. Image chunks carry a fetchable file_url. "
         "Use when users ask about domain-specific knowledge stored in AIDP knowledge bases."
     )
     description_zh = (
         "通过 AIDP FusionSearch 对知识库进行多模态检索，返回文本、表格和图片块。"
-        "双通道输出：所有块通过 SEARCH_CONTENT 发送，图片通过 PICTURE_WEB 发送。"
+        "每个块包含标题、文本、来源文件链接和相关性分数，图片块还包含可访问的文件链接。"
         "适用于询问 AIDP 知识库中存储的领域专业知识。"
     )
 
@@ -157,6 +156,11 @@ class AidpSearchTool(Tool):
         server_url: str = Field(exclude=True, description="AIDP API base URL"),
         api_key: str = Field(exclude=True, description="AIDP API key"),
         tenant_id: str = Field(exclude=True, description="AIDP tenant identifier"),
+        kds_name_to_id_map: dict = Field(
+            default_factory=dict,
+            exclude=True,
+            description="Mapping from kds_name to kds_id for LLM parameter conversion",
+        ),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
         search_method: str = Field(default="hybrid_search", description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
@@ -174,6 +178,7 @@ class AidpSearchTool(Tool):
         self.base_url = server_url.rstrip("/") if isinstance(server_url, str) else ""
         self.api_key = api_key if isinstance(api_key, str) else ""
         self.tenant_id = tenant_id.strip() if isinstance(tenant_id, str) else ""
+        self.kds_name_to_id_map = kds_name_to_id_map
 
         if not self.base_url:
             raise ValueError("server_url is required and must be a non-empty string")
@@ -302,14 +307,17 @@ class AidpSearchTool(Tool):
         for idx, chunk in enumerate(records[: self.top_k]):
             msg = self._build_chunk_message(chunk, idx)
             search_results_json.append(msg.to_dict())
-            search_results_return.append(msg.to_model_dict())
+            result = msg.to_model_dict()
             chunk_type = str(chunk.get("chunk_type", "text") or "text")
             file_url = str(chunk.get("file_url") or "")
             # Images require a fully-qualified URL that the image proxy can
             # fetch with a Bearer token; text/table chunks keep their raw
             # value because they aren't rendered as <img> tags.
             if chunk_type == "image" and file_url:
-                images_url.append(self._build_image_url(file_url))
+                full_url = self._build_image_url(file_url)
+                result["image_url"] = full_url
+                images_url.append(full_url)
+            search_results_return.append(result)
 
         return search_results_json, search_results_return, images_url
 
@@ -464,6 +472,36 @@ class AidpSearchTool(Tool):
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
+    def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
+        """Convert kds_name (display name) to kds_id if a mapping exists.
+
+        When the LLM passes a kds_name instead of the actual kds_id in the
+        ``kds_list`` parameter, this method resolves it to the real ID so
+        that downstream API calls receive valid identifiers.
+
+        Args:
+            names: List of values that could be either kds_name or kds_id.
+
+        Returns:
+            List of resolved kds_id values. Unknown names pass through unchanged.
+        """
+        kds_map = self.kds_name_to_id_map
+        if isinstance(kds_map, FieldInfo):
+            if kds_map.default_factory is not None:
+                kds_map = kds_map.default_factory()
+            else:
+                kds_map = kds_map.default
+        if not kds_map:
+            return names
+
+        converted_names = []
+        for name in names:
+            if name in kds_map:
+                converted_names.append(kds_map[name])
+            else:
+                converted_names.append(name)
+        return converted_names
+
     def forward(
         self,
         query: str,
@@ -482,6 +520,9 @@ class AidpSearchTool(Tool):
             if kds_list is not None and len(kds_list) > 0
             else self.kds_list
         )
+        # Resolve kds_name (display name) to kds_id before permission
+        # filtering so the whitelist operates on the real ID namespace.
+        base_kds = self._convert_to_kds_ids(list(base_kds))
         search_kds_list = self._filter_by_whitelist(list(base_kds))
 
         self._emit_running_prompt(query)

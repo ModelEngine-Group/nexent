@@ -15,7 +15,7 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
-import { resolveS3UrlToDataUrl } from "@/services/storageService";
+import { resolveS3UrlToDataUrl, fetchImageBlob } from "@/services/storageService";
 import {
   Tooltip,
   TooltipContent,
@@ -283,11 +283,7 @@ const resolveMediaToObjectUrl = async (
       src.startsWith("/attachments/") ||
       src.startsWith("/")
     ) {
-      const response = await fetch(src);
-      if (!response.ok) {
-        return null;
-      }
-      const blob = await response.blob();
+      const blob = await fetchImageBlob(src);
       return URL.createObjectURL(blob);
     }
 
