@@ -761,13 +761,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "execution_logs") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             attachExecutionLogsToTool(content, part);
             continue;
           }
 
           if (part.type === "error") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const errorPart: any = {
                 type: "text",
@@ -797,7 +797,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "final_answer") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const textPart: any = { type: "text", text: part.content };
               const meta = buildMetadata(part.invocation_id);
