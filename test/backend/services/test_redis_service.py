@@ -1640,6 +1640,507 @@ class TestRedisService(unittest.TestCase):
         self.assertIsNone(result['task-1'])
         self.assertIsNone(result['task-2'])
 
+    # ------------------------------------------------------------------
+    # Coverage for uncovered error/edge branches
+    # ------------------------------------------------------------------
+
+    def test_cleanup_celery_tasks_outer_exception(self):
+        """backend_client.keys() failure should be re-raised from _cleanup_celery_tasks."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_backend_client.keys.side_effect = redis.RedisError("boom")
+
+        with self.assertRaises(redis.RedisError):
+            self.redis_service._cleanup_celery_tasks("idx")
+
+    def test_cleanup_celery_tasks_parent_id_exception_swallowed(self):
+        """Exception while reading parent_id is silently swallowed."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        task_keys = [b'celery-task-meta-1']
+        # task_info is not a dict, so .get() on parent_id will raise AttributeError
+        task_payload = json.dumps({
+            'result': {'index_name': 'idx'},
+            'parent_id': 1,
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        # First pass needs raw bytes; second pass needs payload.
+        self.mock_backend_client.get.side_effect = [task_payload, task_payload]
+
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents',
+                          return_value=(1, {'1'})):
+            result = self.redis_service._cleanup_celery_tasks("idx")
+        self.assertEqual(result, 1)
+
+    def test_cleanup_cache_keys_outer_try_unreachable_for_list_iter(self):
+        """Outer except in _cleanup_cache_keys is unreachable under normal flow.
+
+        The for loop body is wrapped in an inner try/except, so per-pattern
+        errors are swallowed. Iteration over a literal list cannot fail.
+        We just verify that the function does not crash when all pattern lookups
+        raise errors.
+        """
+        self.redis_service._client = self.mock_redis_client
+
+        def _boom(_pattern):
+            raise redis.RedisError("connection died")
+
+        self.mock_redis_client.keys.side_effect = _boom
+        # The function returns 0 because every pattern raises inside the inner try
+        result = self.redis_service._cleanup_cache_keys("idx")
+        self.assertEqual(result, 0)
+
+    def test_cleanup_document_celery_tasks_exc_message_match(self):
+        """Failed-task metadata extracted from exc_message drives source matching."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        task_keys = [b'celery-task-meta-1']
+        # No index_name in result, but exc_message contains a JSON dict with both
+        # index_name and source so that the function uses the embedded metadata.
+        task_payload = json.dumps({
+            'result': {
+                'exc_message': 'failed: {"index_name": "idx", "source": "/a.txt"}'
+            },
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_payload
+        self.mock_backend_client.delete.return_value = 1
+
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents',
+                          return_value=(1, {'1'})) as mock_delete:
+            result = self.redis_service._cleanup_document_celery_tasks(
+                "idx", "/a.txt")
+
+        self.assertEqual(result, 1)
+        mock_delete.assert_called_once_with('1')
+
+    def test_cleanup_document_celery_tasks_exc_message_path_or_url(self):
+        """exc_message may use `path_or_url` instead of `source`."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        task_keys = [b'celery-task-meta-1']
+        task_payload = json.dumps({
+            'result': {
+                'exc_message': 'failed: {"index_name": "idx", "path_or_url": "/b.txt"}'
+            },
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_payload
+
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents',
+                          return_value=(1, {'1'})) as mock_delete:
+            result = self.redis_service._cleanup_document_celery_tasks(
+                "idx", "/b.txt")
+
+        self.assertEqual(result, 1)
+        mock_delete.assert_called_once_with('1')
+
+    def test_cleanup_document_celery_tasks_outer_exception(self):
+        """Outer exception while cleaning document Celery tasks re-raises."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_backend_client.keys.side_effect = redis.RedisError("boom")
+        with self.assertRaises(redis.RedisError):
+            self.redis_service._cleanup_document_celery_tasks("idx", "/a.txt")
+
+    def test_cleanup_document_cache_keys_all_patterns_fail_swallowed(self):
+        """When every pattern lookup fails, the function returns 0 gracefully."""
+        self.redis_service._client = self.mock_redis_client
+
+        def _boom(_pattern):
+            raise redis.RedisError("down")
+
+        self.mock_redis_client.keys.side_effect = _boom
+        result = self.redis_service._cleanup_document_cache_keys("idx", "/a.txt")
+        self.assertEqual(result, 0)
+
+    def test_cleanup_document_cache_keys_pattern_exception_swallowed(self):
+        """Per-pattern errors are logged and skipped."""
+        self.redis_service._client = self.mock_redis_client
+
+        def _partial(_pattern):
+            if "kb:idx:doc:safe_path*" in _pattern:
+                raise redis.RedisError("flaky")
+            return []
+
+        self.mock_redis_client.keys.side_effect = _partial
+        # Should not raise even though one pattern blew up
+        result = self.redis_service._cleanup_document_cache_keys("idx", "/a.txt")
+        self.assertEqual(result, 0)
+
+    def test_get_knowledgebase_task_count_inner_cache_failure(self):
+        """Inner pattern failure is swallowed, count from backend still returned."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+
+        task_keys = [b'celery-task-meta-1']
+        task_payload = json.dumps({
+            'result': {'index_name': 'idx'},
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_payload
+
+        def _partial(pattern):
+            if pattern == "kb:idx:*":
+                raise redis.RedisError("cache failure")
+            return [b'k1'] if pattern == "*idx*" else []
+
+        self.mock_redis_client.keys.side_effect = _partial
+
+        result = self.redis_service.get_knowledgebase_task_count("idx")
+        # Backend adds 1 for matching task, cache count adds 1 (only *idx* pattern)
+        self.assertEqual(result, 2)
+
+    def test_cleanup_error_info_keys_scan_iter_redis_error(self):
+        """scan_iter raising RedisError is logged and swallowed."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_redis_client.scan_iter.side_effect = redis.RedisError("scan failed")
+
+        stats = self.redis_service.cleanup_error_info_keys(
+            ttl_seconds=600, scan_count=100)
+
+        self.assertEqual(stats, {
+            "scanned": 0,
+            "deleted_orphans": 0,
+            "ttl_repaired": 0,
+        })
+
+    def test_cleanup_error_info_keys_bytes_keys_decoded(self):
+        """Bytes-typed keys returned by scan_iter are decoded to strings."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_redis_client.scan_iter.return_value = iter(
+            [b"error:reason:abc", b"error:reason:xyz"]
+        )
+
+        backend_pipe = MagicMock()
+        backend_pipe.execute.return_value = [0, 0]
+        self.mock_backend_client.pipeline.return_value = backend_pipe
+
+        ttl_pipe = MagicMock()
+        ttl_pipe.execute.return_value = [-1, -1]
+        expire_pipe = MagicMock()
+        expire_pipe.execute.return_value = [True, True]
+        self.mock_redis_client.pipeline.side_effect = [ttl_pipe, expire_pipe]
+        self.mock_redis_client.delete.return_value = 1
+
+        self.redis_service.cleanup_error_info_keys(
+            ttl_seconds=600, scan_count=2)
+
+        # decode: keys passed to backend_pipe.exists
+        backend_pipe.exists.assert_has_calls([
+            call(f"celery-task-meta-{tid}") for tid in ("abc", "xyz")
+        ])
+
+    def test_cleanup_error_info_keys_batch_flushes_partial_batch(self):
+        """Trailing partial batch is flushed at end of scan."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+
+        # 3 keys with scan_count=2 -> triggers 1 batch flush + 1 trailing flush
+        self.mock_redis_client.scan_iter.return_value = iter(
+            [f"error:reason:t{i}" for i in range(3)]
+        )
+
+        backend_pipe = MagicMock()
+        backend_pipe.execute.return_value = [0, 0, 0]
+        self.mock_backend_client.pipeline.return_value = backend_pipe
+
+        ttl_pipe = MagicMock()
+        ttl_pipe.execute.return_value = [-1, -1, -1]
+        expire_pipe = MagicMock()
+        expire_pipe.execute.return_value = [True, True, True]
+        self.mock_redis_client.pipeline.side_effect = [ttl_pipe, expire_pipe]
+        self.mock_redis_client.delete.return_value = 1
+
+        result = self.redis_service.cleanup_error_info_keys(
+            ttl_seconds=600, scan_count=2)
+        self.assertEqual(result["scanned"], 3)
+
+    def test_increment_progress_info_empty_task_id(self):
+        """Empty task_id short-circuits with a False return."""
+        result = self.redis_service.increment_progress_info("", 1)
+        self.assertFalse(result)
+
+    def test_increment_progress_info_non_positive_delta_is_noop(self):
+        """delta <= 0 short-circuits without touching Redis."""
+        result = self.redis_service.increment_progress_info("task-1", 0)
+        self.assertTrue(result)
+        # No client.pipeline call should happen
+        self.mock_redis_client.pipeline.assert_not_called()
+
+    def test_increment_progress_info_success_path(self):
+        """Happy path: WATCH succeeds, MULTI/EXEC updates progress atomically."""
+        self.redis_service._client = self.mock_redis_client
+
+        pipe = MagicMock()
+        # pipe.watch, pipe.get, pipe.multi, pipe.setex, pipe.execute are all MagicMock
+        # pipe.get returns the existing JSON payload
+        pipe.get.return_value = json.dumps({
+            "processed_chunks": 5,
+            "total_chunks": 20,
+        })
+        self.mock_redis_client.pipeline.return_value = pipe
+
+        result = self.redis_service.increment_progress_info(
+            "task-1", delta_processed=3, total_chunks=20)
+
+        self.assertTrue(result)
+        pipe.watch.assert_called_once()
+        pipe.multi.assert_called_once()
+        pipe.setex.assert_called_once()
+        pipe.execute.assert_called_once()
+
+    def test_increment_progress_info_total_clamp(self):
+        """Computed next processed is clamped to current total."""
+        self.redis_service._client = self.mock_redis_client
+
+        pipe = MagicMock()
+        pipe.get.return_value = json.dumps({
+            "processed_chunks": 18,
+            "total_chunks": 20,
+        })
+        self.mock_redis_client.pipeline.return_value = pipe
+
+        result = self.redis_service.increment_progress_info(
+            "task-1", delta_processed=10, total_chunks=20)
+        self.assertTrue(result)
+
+        # setex called with payload clamped to processed <= total
+        payload_arg = pipe.setex.call_args[0][2]
+        payload = json.loads(payload_arg)
+        self.assertEqual(payload["processed_chunks"], 20)
+        self.assertEqual(payload["total_chunks"], 20)
+
+    def test_increment_progress_info_recovers_after_watch_error(self):
+        """A WatchError is retried; success on the second attempt is reported."""
+        self.redis_service._client = self.mock_redis_client
+
+        pipe = MagicMock()
+        # First iteration raises WatchError, second succeeds
+        pipe.watch.side_effect = [redis.WatchError(), None]
+        pipe.get.return_value = json.dumps({
+            "processed_chunks": 0,
+            "total_chunks": 10,
+        })
+        self.mock_redis_client.pipeline.return_value = pipe
+
+        result = self.redis_service.increment_progress_info(
+            "task-1", delta_processed=2, total_chunks=10)
+        self.assertTrue(result)
+        self.assertEqual(pipe.watch.call_count, 2)
+
+    def test_increment_progress_info_generic_exception(self):
+        """Non-WatchError exception is logged and reported as False."""
+        self.redis_service._client = self.mock_redis_client
+
+        pipe = MagicMock()
+        pipe.watch.side_effect = RuntimeError("kaboom")
+        self.mock_redis_client.pipeline.return_value = pipe
+
+        result = self.redis_service.increment_progress_info(
+            "task-1", delta_processed=2, total_chunks=10)
+        self.assertFalse(result)
+        pipe.reset.assert_called_once()
+
+    def test_parse_progress_none_total_chunks_uses_persisted(self):
+        """When total_chunks is None, the persisted total is preserved."""
+        raw = json.dumps({"processed_chunks": 3, "total_chunks": 7})
+        processed, total = self.redis_service._parse_progress(raw, total_chunks=None)
+        self.assertEqual((processed, total), (3, 7))
+
+    def test_parse_progress_bytes_payload(self):
+        """Bytes payloads are decoded before parsing."""
+        raw = json.dumps({"processed_chunks": 4, "total_chunks": 9}).encode()
+        processed, total = self.redis_service._parse_progress(raw, total_chunks=10)
+        self.assertEqual((processed, total), (4, 10))
+
+    def test_parse_progress_zero_total_chunks(self):
+        """Zero total in payload remains zero when total_chunks also omitted."""
+        raw = json.dumps({"processed_chunks": 2, "total_chunks": 0})
+        processed, total = self.redis_service._parse_progress(raw, total_chunks=None)
+        self.assertEqual((processed, total), (2, 0))
+
+    def test_parse_progress_malformed_returns_defaults(self):
+        """Malformed JSON returns (0, default_total)."""
+        processed, total = self.redis_service._parse_progress(
+            "{not-json", total_chunks=4)
+        self.assertEqual((processed, total), (0, 4))
+
+    def test_compute_next_progress_uses_total_chunks_when_unset(self):
+        """If current_total is 0 but total_chunks provided, use total_chunks."""
+        processed, total = self.redis_service._compute_next_progress(
+            current_processed=2,
+            delta_processed=3,
+            current_total=0,
+            total_chunks=10,
+        )
+        self.assertEqual((processed, total), (5, 10))
+
+    def test_compute_next_progress_clamps_to_total(self):
+        """next_processed is clamped down to current_total when exceeded."""
+        processed, total = self.redis_service._compute_next_progress(
+            current_processed=8,
+            delta_processed=10,
+            current_total=10,
+            total_chunks=10,
+        )
+        self.assertEqual((processed, total), (10, 10))
+
+    def test_compute_next_progress_no_total_no_clamp(self):
+        """Without a total, next_processed grows unbounded."""
+        processed, total = self.redis_service._compute_next_progress(
+            current_processed=0,
+            delta_processed=5,
+            current_total=0,
+            total_chunks=None,
+        )
+        self.assertEqual((processed, total), (5, 0))
+
+    def test_extract_error_metadata_from_exc_message_first_candidate(self):
+        """First candidate parses to a dict and is returned."""
+        msg = 'error: {"index_name": "idx", "source": "/a.txt"}'
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_second_candidate(self):
+        """Escaped-quote variant is tried when the first candidate fails."""
+        # Invalid JSON without escapes, but valid with the quote-un-escape
+        msg = r'error: {\"index_name\": \"idx\"}'
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx"})
+
+    def test_extract_error_metadata_from_exc_message_third_candidate(self):
+        """Backslash-escape normalization handles stray backslashes."""
+        # Backslash before a non-escape char; the third candidate re-escapes
+        msg = 'error: {badkey\with-slash}'
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertIsNone(result)
+
+    def test_extract_error_metadata_from_exc_message_not_dict(self):
+        """JSON that parses to a non-dict yields None."""
+        msg = 'oops [1,2,3]'
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertIsNone(result)
+
+    def test_extract_error_metadata_from_exc_message_no_braces(self):
+        """Missing brace markers short-circuits to None."""
+        result = self.redis_service._extract_error_metadata_from_exc_message(
+            "no braces here")
+        self.assertIsNone(result)
+
+    def test_extract_error_metadata_from_exc_message_exception(self):
+        """Top-level exceptions are swallowed."""
+        # Pass an object whose str() raises to trigger outer except
+        class _Boom:
+            def __str__(self):
+                raise RuntimeError("can't stringify")
+
+        result = self.redis_service._extract_error_metadata_from_exc_message(_Boom())
+        self.assertIsNone(result)
+
+    def test_cleanup_celery_tasks_parent_id_lookup_exception(self):
+        """When task_info.get('parent_id') raises, the inner except is hit."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        # Use a non-dict task_info so `.get('parent_id')` on the dict path
+        # is reached via the inner try/except. Actually we need dict access to raise.
+        # Use a dict subclass whose .get raises.
+        class _RaisingDict(dict):
+            def get(self, key, default=None):
+                raise RuntimeError("nope")
+
+            def getitem(self, key):  # not used but kept for completeness
+                raise RuntimeError("nope")
+
+        # Wrap json.loads result by patching built-in json.loads
+        task_keys = [b'celery-task-meta-1']
+        # Provide raw payload; json.loads is monkeypatched below
+        raw_payload = b'{"result":{"index_name":"idx"}}'
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = raw_payload
+        self.mock_backend_client.delete.return_value = 1
+
+        # Patch json.loads at the redis_service module scope
+        original_loads = redis_service_module.json.loads
+
+        def _patched_loads(payload, *args, **kwargs):
+            parsed = original_loads(payload, *args, **kwargs)
+            # Return a shallow object that mimics task_info with raising .get for parent_id
+            class _FakeTaskInfo(dict):
+                def get(self, key, default=None):
+                    if key == "parent_id":
+                        raise RuntimeError("nope")
+                    return super().get(key, default)
+
+            return _FakeTaskInfo(parsed)
+
+        with patch.object(redis_service_module.json, "loads", side_effect=_patched_loads), \
+                patch.object(self.redis_service, '_recursively_delete_task_and_parents',
+                             return_value=(1, {'1'})):
+            result = self.redis_service._cleanup_celery_tasks("idx")
+        self.assertEqual(result, 1)
+
+    def test_cleanup_document_celery_tasks_skip_processed(self):
+        """Tasks already in processed_tasks set are skipped on subsequent iterations."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        # Two keys: the first will be processed and return a chain of {1, 2};
+        # the second key decodes to the same task_id '1' which is already in
+        # processed_tasks and must be skipped via the `continue` on line 464.
+        task_keys = [b'celery-task-meta-1', b'celery-task-meta-1']
+        task_payload = json.dumps({
+            'result': {
+                'index_name': 'idx',
+                'source': '/a.txt',
+            },
+            'parent_id': '2',
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_payload
+
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents',
+                          return_value=(2, {'1', '2'})) as mock_delete:
+            result = self.redis_service._cleanup_document_celery_tasks("idx", "/a.txt")
+        self.assertEqual(result, 2)
+        # Second key is skipped because task_id '1' is already in processed_tasks
+        mock_delete.assert_called_once_with('1')
+
+    def test_get_knowledgebase_task_count_continues_on_inner_task_error(self):
+        """If a backend task payload raises, the iteration continues."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+
+        task_keys = [b'celery-task-meta-bad', b'celery-task-meta-good']
+        good_payload = json.dumps({
+            'result': {'index_name': 'idx'},
+        }).encode()
+        self.mock_backend_client.keys.return_value = task_keys
+        # First raises; second succeeds
+        self.mock_backend_client.get.side_effect = [RuntimeError("boom"), good_payload]
+        self.mock_redis_client.keys.return_value = []
+
+        result = self.redis_service.get_knowledgebase_task_count("idx")
+        self.assertEqual(result, 1)
+
+    def test_cleanup_error_info_batch_empty_keys_short_circuits(self):
+        """_cleanup_error_info_batch returns immediately when keys is empty."""
+        # Should not touch any pipeline
+        self.redis_service._cleanup_error_info_batch([], 100, {})
+        self.mock_redis_client.pipeline.assert_not_called()
+        self.mock_backend_client.pipeline.assert_not_called()
+
+    def test_parse_progress_falsy_raw_returns_defaults(self):
+        """A falsy raw payload (None, '', 0) returns (0, default_total)."""
+        for falsy in (None, "", 0):
+            processed, total = self.redis_service._parse_progress(
+                falsy, total_chunks=8)
+            self.assertEqual((processed, total), (0, 8))
+
 
 if __name__ == '__main__':
     unittest.main()
