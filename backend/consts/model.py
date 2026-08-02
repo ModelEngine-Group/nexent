@@ -341,6 +341,14 @@ class AgentRequest(BaseModel):
     )
 
 
+class NL2AgentRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Agent turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
 class MessageUnit(BaseModel):
     type: str
     content: str

@@ -1003,7 +1003,7 @@ async def create_agent_config(
             if fixed_search_result.startswith("Found "):
                 memory_list.append({
                     "memory": fixed_search_result,
-                    "memory_level": "retrieved",
+                    "memory_level": "agent",
                 })
 
             loaded_memory_tools = [store_tool_config.name]
@@ -1104,7 +1104,9 @@ async def create_agent_config(
         "knowledge_base_summary": knowledge_base_summary,
         "user_id": user_id,
     }
-    model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
+    agent_model_ids = agent_info.get("model_ids")
+    model_id_to_use = override_model_id if override_model_id else (agent_model_ids[0] if agent_model_ids else None)
     model_info = None
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)

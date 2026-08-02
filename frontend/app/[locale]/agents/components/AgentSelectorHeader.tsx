@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -38,12 +39,16 @@ interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
+  onOpenGenerationAssistant: () => void;
+  isGenerationAssistantOpen?: boolean;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
+  onOpenGenerationAssistant,
+  isGenerationAssistantOpen = false,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -688,7 +693,7 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex justify-end"
           >
-          <Flex align="center" gap={12} wrap="nowrap" justify="flex-end" className="w-full mr-6">
+          <Flex align="center" gap={12} wrap="wrap" justify="flex-end" className="w-full mr-6">
             {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
               <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
                 <History size={16} />
@@ -700,8 +705,8 @@ export default function AgentSelectorHeader({
                 </span>
               </div>
             )}
-            <Flex align="center" gap={12} wrap="nowrap">
-              <Flex align="center" gap={8} className="ml-4">
+            <Flex align="center" gap={12} wrap="wrap">
+              <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                 <Button
                   size="middle"
                   onClick={enterCreateMode}
@@ -718,12 +723,24 @@ export default function AgentSelectorHeader({
                   <FileInput className="w-4 h-4" />
                   <span>{t("agentConfig.button.import")}</span>
                 </Button>
+                <Button
+                  size="middle"
+                  onClick={onOpenGenerationAssistant}
+                  disabled={isGenerationAssistantOpen}
+                  className="flex shrink-0 items-center gap-1 whitespace-nowrap"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span className="whitespace-nowrap">
+                    {t("agentConfig.button.generationAssistant")}
+                  </span>
+                </Button>
               </Flex>
 
               <Button
                 icon={<GitBranch size={16} />}
                 onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
                 type={isShowVersionManagePanel ? "primary" : "default"}
+                disabled={isGenerationAssistantOpen}
               >
                 {t("agent.version.manage")}
               </Button>

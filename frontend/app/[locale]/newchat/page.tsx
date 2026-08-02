@@ -12,6 +12,7 @@ import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
 import {
+  cacheHistoricalChatMode,
   conversationThreadListAdapter,
   generateConversationTitle,
   restoreHistoricalChatMode,
@@ -39,6 +40,10 @@ function useLocalChatRuntime(): AssistantRuntime {
 }
 
 export default function Home() {
+  return <PersistentChatHome />;
+}
+
+const PersistentChatHome: FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -87,7 +92,7 @@ export default function Home() {
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-}
+};
 
 /**
  * Inner component that has access to the AuiState via useAuiState hook.
@@ -152,6 +157,7 @@ const HomeContent: FC<{
       const numericId = String(Number(serverId));
       if (previous !== numericId) {
         map.set(threadId, numericId);
+        cacheHistoricalChatMode(numericId, chatMode);
         // Trigger a re-render so the `setRunConfig` effect below picks up the
         // new id. We don't store the map in state because we never need to
         // diff/render it directly — only react when an entry changes.
@@ -172,7 +178,7 @@ const HomeContent: FC<{
           });
       }
     },
-    [],
+    [chatMode],
   );
 
   const activeThread = (threadItems as ReadonlyArray<{

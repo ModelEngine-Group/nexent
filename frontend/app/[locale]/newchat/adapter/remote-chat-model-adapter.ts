@@ -5,8 +5,8 @@ import type {
   ChatModelRunOptions,
   ChatModelRunResult,
   CompleteAttachment,
+  ThreadMessage,
 } from "@assistant-ui/react";
-import type { ThreadMessage } from "@assistant-ui/core";
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
@@ -27,6 +27,78 @@ interface SseChunk {
   agent_id?: number | string;
   agent_name?: string;
   depth?: number;
+}
+
+export interface Nl2aToolRecommendation {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  inputs: Record<string, unknown>;
+  score: number;
+}
+
+export interface Nl2AgentSelectedTool {
+  tool_id: number;
+  name: string;
+  origin_name?: string | null;
+  description: string;
+  source: "mcp";
+  usage: string;
+  labels: string[];
+  inputs: string;
+}
+
+export interface Nl2AgentToolSelection {
+  type: "nl2agent_tool_selection";
+  tools: Nl2AgentSelectedTool[];
+}
+
+export type Nl2aLocalMcpRecommendationPayload =
+  | {
+      subtype: "local_mcp_recommendation";
+      status: "success";
+      recommendation_count: number;
+      recommendations: Nl2aToolRecommendation[];
+    }
+  | {
+      subtype: "local_mcp_recommendation";
+      status: "error";
+      code: "invalid_keywords" | "tool_search_failed";
+      retryable: true;
+    };
+
+export interface Nl2aAgentDraftPayload {
+  subtype: "agent_draft";
+  name: string;
+  display_name: string;
+  description: string;
+  duty_prompt: string;
+  constraint_prompt: string;
+  few_shots_prompt: string | null;
+  greeting_message: string;
+  example_questions: string[];
+}
+
+export type Nl2aPayload =
+  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
+
+export interface Nl2aMessage {
+  type: "nl2a";
+  tool_name?: string;
+  content: Nl2aPayload;
+}
+
+interface NexentRunConfig {
+  threadId?: string;
+  onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
+  resume?: boolean;
+  agentId?: number | string;
+  enablePlan?: boolean;
+  runtimeMode?: "nl2agent";
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -93,6 +165,29 @@ export interface StepTokenCount {
   estimatedContextTokens: number;
   tokenThreshold: number | null;
   contextWindowTokens: number | null;
+}
+
+/**
+ * Parsed ReAct self-verification payload from a backend `verification` SSE chunk.
+ * All fields mirror the backend VerificationResult.to_payload() shape.
+ */
+export interface VerificationContent {
+  phase: string;
+  event: string;
+  round: number;
+  severity: string;
+  score: number;
+  failed_criteria: string[];
+  repair_instruction: string;
+  user_visible_note: string;
+  message: string;
+  passed: boolean;
+}
+
+export interface VerificationPanelPart {
+  type: "verification-panel";
+  results: VerificationContent[];
+  completed: boolean;
 }
 
 // Accumulated total duration across all steps
@@ -224,7 +319,9 @@ function extractTextContent(messages: readonly ThreadMessage[]): string {
  * successful MinIO upload, so we can read it back here without an extra
  * upload round-trip.
  */
-function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload[] {
+function extractMinioFiles(
+  message: ThreadMessage | undefined
+): MinioFilePayload[] {
   if (!message) return [];
   // Attachments are attached by the AttachmentAdapter via the message content
   // pipeline; the public ThreadMessage type does not declare them but they are
@@ -249,7 +346,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
     if (!objectName || !url) {
       log.warn(
         "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-        att.name,
+        att.name
       );
       continue;
     }
@@ -267,7 +364,7 @@ function extractMinioFiles(message: ThreadMessage | undefined): MinioFilePayload
 
 function parseSkillFileAttachments(
   content: string,
-  messageId: string,
+  messageId: string
 ): CompleteAttachment[] {
   try {
     const payload = JSON.parse(content) as {
@@ -280,8 +377,7 @@ function parseSkillFileAttachments(
         const name = file.file_name || file.name || "Generated file";
         const contentType =
           file.mime_type || file.type || "application/octet-stream";
-        const url =
-          file.preview_url || file.presigned_url || file.url;
+        const url = file.preview_url || file.presigned_url || file.url;
 
         return {
           id: `${messageId}-skill-file-${index}`,
@@ -306,7 +402,7 @@ function parseSkillFileAttachments(
           presigned_url: file.presigned_url,
           size: file.file_size ?? file.size,
         } as unknown as CompleteAttachment;
-      },
+      }
     );
 
     return attachments;
@@ -366,6 +462,7 @@ function extractAgentRunTime(content: string): string | undefined {
  * | step_count                   | text         | Current execution step number       |
  * | parse                         | tool-call    | Code parsing result                |
  * | execution_logs                | (attach)     | Attached to preceding tool result  |
+ * | nl2a                          | (metadata)   | NL2Agent structured output         |
  * | agent_new_run                 | text         | Agent basic information            |
  * | agent_finish                 | text         | Sub-agent run completion marker    |
  * | subagent_start               | subagent     | Opens a nested sub-agent card      |
@@ -424,6 +521,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "step_count":
     case "parse":
     case "card":
+    case "nl2a":
     case "skill_files":
     case "memory_search":
     case "plan":
@@ -431,7 +529,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "execution_logs":
       return null;
     default:
-      return "text";
+      return null;
   }
 }
 
@@ -485,12 +583,25 @@ function formatToolArguments(raw: unknown): string {
  * shared `ToolGroupRoot` / `ToolGroupTrigger` / `ToolGroupContent`
  * rendering defined in `thread.tsx`.
  */
-function appendToolCallPart(
-  contentParts: any[],
-  toolCallPart: any
-): any {
+function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
   contentParts.push(toolCallPart);
   return toolCallPart;
+}
+
+/**
+ * Parses an NL2Agent SSE chunk into frontend message metadata.
+ */
+function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
+  try {
+    return {
+      type: "nl2a",
+      tool_name: chunk.tool_name,
+      content: JSON.parse(chunk.content) as Nl2aPayload,
+    };
+  } catch (error) {
+    log.warn("[ChatModelAdapter] Failed to parse nl2a content:", error);
+    return null;
+  }
 }
 
 /**
@@ -538,7 +649,7 @@ export function attachSearchContentToTool(
   if (
     item.url &&
     !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url,
+      (source: { url: string }) => source.url === item.url
     )
   ) {
     targetToolCall.searchContent.push(item);
@@ -698,6 +809,31 @@ export function parsePlanStepUpdate(content: string): { stepId: string; status: 
 }
 
 /**
+ * Parses the inner JSON payload of a backend `verification` SSE chunk.
+ * Returns null for unparseable content so callers skip silently.
+ */
+export function parseVerification(chunk: { content: string }): VerificationContent | null {
+  try {
+    const data = JSON.parse(chunk.content);
+    return {
+      phase: String(data.phase || "start"),
+      event: String(data.event || "unknown"),
+      round: Number(data.round || 0),
+      severity: String(data.severity || "info"),
+      score: Number(data.score ?? 1.0),
+      failed_criteria: Array.isArray(data.failed_criteria) ? data.failed_criteria.map(String) : [],
+      repair_instruction: String(data.repair_instruction ?? ""),
+      user_visible_note: String(data.user_visible_note ?? ""),
+      message: String(data.message ?? ""),
+      passed: Boolean(data.passed ?? false),
+    };
+  } catch {
+    log.warn("[ChatModelAdapter] Failed to parse verification content:", chunk.content);
+    return null;
+  }
+}
+
+/**
  * Mutates ``metadata.isRunning = false`` on every message part carrying the
  * given ``runId``. Called from the ``subagent_end`` handler so the rendered
  * collapsible card flips from its running indicator to a finished state
@@ -769,7 +905,9 @@ export function clearStepTokenCounts(): void {
  * Parse and build timing metadata from backend token_count chunk.
  * Also stores step data in the global registry for SingleTurnTokenUsage.
  */
-function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimingResult> | null {
+function buildTimingFromTokenCount(
+  content: string
+): ReturnType<typeof buildTimingResult> | null {
   const parsed = parseStepTokenCount(content);
   if (!parsed) {
     log.warn("[ChatModelAdapter] Failed to parse token_count:", content);
@@ -789,10 +927,10 @@ function buildTimingFromTokenCount(content: string): ReturnType<typeof buildTimi
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
-    undefined,  // firstTokenTime - not available
-    0,         // toolCallCount - tracked separately
+    undefined, // firstTokenTime - not available
+    0, // toolCallCount - tracked separately
     parsed.totalOutputTokens,
-    totalDuration,
+    totalDuration
   );
 }
 
@@ -825,19 +963,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // It also injects `onServerConversationId` so we can report back the id
     // the backend auto-creates (via the `conversation_id` response header)
     // when this is the first message in a brand-new thread.
-    const customThreadId = runConfig?.custom as
-      | {
-          threadId?: string;
-          onServerConversationId?: (
-            serverId: string,
-            initialQuestion?: string,
-          ) => void;
-          resume?: boolean;
-        }
-      | undefined;
-    const serverThreadId = customThreadId?.threadId;
-    const onServerConversationId = customThreadId?.onServerConversationId;
-    const isResume = customThreadId?.resume === true;
+    const custom = runConfig?.custom as NexentRunConfig | undefined;
+    const isNl2Agent = custom?.runtimeMode === "nl2agent";
+    const serverThreadId = custom?.threadId;
+    const onServerConversationId = custom?.onServerConversationId;
+    const isResume = !isNl2Agent && custom?.resume === true;
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -848,10 +978,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
 
-    const query =
-      lastUserIndex >= 0
-        ? extractTextContent([messages[lastUserIndex]])
-        : "";
+    const visibleQuery =
+      lastUserIndex >= 0 ? extractTextContent([messages[lastUserIndex]]) : "";
+    const selectionMetadata =
+      isNl2Agent && lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+          )?.nl2agentToolSelection
+        : undefined;
+    const query = selectionMetadata
+      ? JSON.stringify(selectionMetadata)
+      : visibleQuery;
 
     if (!isResume && !query) {
       log.warn("[ChatModelAdapter] No user query found in messages");
@@ -891,15 +1029,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (hasServerConversationId) {
+    if (!isNl2Agent && hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
-    const custom = runConfig?.custom as
-      | { agentId?: number | string; enablePlan?: boolean; resume?: boolean }
-      | undefined;
-    if (custom?.agentId !== undefined && custom.agentId !== null) {
+    if (
+      !isNl2Agent &&
+      custom?.agentId !== undefined &&
+      custom.agentId !== null
+    ) {
       const numericAgentId =
         typeof custom.agentId === "string"
           ? Number(custom.agentId)
@@ -912,7 +1051,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (modelName) {
+    if (!isNl2Agent && modelName) {
       requestBody.model_id = Number(modelName);
     }
 
@@ -932,6 +1071,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
+          runtime_mode: isNl2Agent ? "nl2agent" : undefined,
         },
         abortSignal,
         (conversationId) => {
@@ -965,7 +1105,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null = null;
+    let currentReasoningPart: ReturnType<typeof makeReasoningPart> | null =
+      null;
 
     const contentParts: any[] = [];
 
@@ -1024,11 +1165,34 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: string[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
+    let nl2a: Nl2aMessage | undefined;
+    let verificationPanel: VerificationPanelPart | null = null;
+
+    const updateVerificationPanel = (result: VerificationContent): boolean => {
+      if (!verificationPanel) {
+        // The final-answer verifier emits `start` before evaluating the answer.
+        // Earlier step-level checks must not create a final verification panel.
+        if (result.phase !== "start") return false;
+        verificationPanel = {
+          type: "verification-panel",
+          results: [],
+          completed: false,
+        };
+        contentParts.push(verificationPanel);
+      }
+      verificationPanel.results.push(result);
+      return true;
+    };
+
+    const completeVerificationPanel = () => {
+      if (verificationPanel) verificationPanel.completed = true;
+    };
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
       content,
+      metadata: nl2a ? { custom: { nl2a } } : undefined,
     });
 
     const streamStartTime = Date.now();
@@ -1132,6 +1296,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
+            continue;
+          }
+
           // Handle picture_web: accumulate image URLs and attach them to the
           // most recent tool call (matched by unit_index when available) so the
           // ToolFallback can render them inline.
@@ -1158,6 +1331,30 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // Do NOT yield image parts inline — they are emitted globally after
             // final_answer below.
             continue;
+          }
+
+          // Aggregate all verification events into one live panel. The first
+          // `start` event creates the panel; subsequent events update its results.
+          if (chunk.type === "verification") {
+            const parsed = parseVerification(chunk);
+            if (parsed) {
+              flushOpenReasoning();
+              if (updateVerificationPanel(parsed)) {
+                yield buildStreamResult(contentParts);
+              }
+            }
+            continue;
+          }
+
+          // The final answer (or other terminal events) terminates the self-check lifecycle.
+          // Mark the existing panel complete before exposing terminal output.
+          if (
+            chunk.type === "final_answer" ||
+            chunk.type === "error" ||
+            chunk.type === "agent_finish" ||
+            chunk.type === "max_steps_reached"
+          ) {
+            completeVerificationPanel();
           }
 
           // Sub-agent boundary handling. ``subagent_start`` pushes a new
@@ -1261,7 +1458,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // the most recent tool call so the ToolFallback UI can render them.
             try {
               const searchResults = JSON.parse(chunk.content);
-              const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+              const results = Array.isArray(searchResults)
+                ? searchResults
+                : [searchResults];
               for (const result of results) {
                 const url = result.url || "";
                 const filename = result.filename || "";
@@ -1273,7 +1472,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   !searchSourcesAccumulator.some(
                     (source) =>
                       `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                      sourceKey,
+                      sourceKey
                   )
                 ) {
                   searchSourcesAccumulator.push({
@@ -1317,6 +1516,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
+          } else if (chunk.type === "nl2a") {
+            const parsedNl2a = parseNl2aMessage(chunk);
+            if (parsedNl2a) {
+              nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
           } else if (chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
@@ -1350,14 +1555,32 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
+          } else if (chunk.type === "verification") {
+            const parsed = parseVerification(chunk);
+            if (parsed) {
+              if (currentReasoningPart) {
+                currentReasoningPart.status = { type: "done" };
+                contentParts.push(currentReasoningPart);
+                currentReasoningPart = null;
+              }
+              if (updateVerificationPanel(parsed)) {
+                yield buildStreamResult(contentParts);
+              }
+            }
           } else {
+            if (chunk.type === "final_answer") {
+              completeVerificationPanel();
+            }
             const partType = mapChunkType(chunk.type);
             if (partType === "reasoning") {
               currentReasoningPart = makeReasoningPart(
                 (currentReasoningPart?.text ?? "") + chunk.content,
-                true,
+                true
               );
-              yield buildStreamResult([...contentParts, currentReasoningPart] as any);
+              yield buildStreamResult([
+                ...contentParts,
+                currentReasoningPart,
+              ] as any);
             } else if (partType === "tool-call") {
               if (currentReasoningPart) {
                 currentReasoningPart.status = { type: "done" };
@@ -1394,7 +1617,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               try {
                 const searchResults = JSON.parse(chunk.content);
-                const results = Array.isArray(searchResults) ? searchResults : [searchResults];
+                const results = Array.isArray(searchResults)
+                  ? searchResults
+                  : [searchResults];
                 for (const result of results) {
                   const url = result.url || "";
                   const filename = result.filename || "";
@@ -1406,7 +1631,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     !searchSourcesAccumulator.some(
                       (source) =>
                         `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                        sourceKey,
+                        sourceKey
                     )
                   ) {
                     searchSourcesAccumulator.push({
@@ -1429,7 +1654,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 );
                 }
               } catch (e) {
-                log.warn("[ChatModelAdapter] Failed to parse search_content:", e);
+                log.warn(
+                  "[ChatModelAdapter] Failed to parse search_content:",
+                  e
+                );
               }
             }
           }
@@ -1486,15 +1714,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
 
       const finalResult = buildStreamResult(contentParts);
-      if (storedTiming) {
-        yield { ...finalResult, messageId, ...storedTiming } as any;
-      } else {
-        yield {
-          ...finalResult,
-          messageId,
-          ...buildTimingResult(streamStartTime, firstTokenTime, toolCallCount),
-        } as any;
-      }
+      const timingResult =
+        storedTiming ??
+        buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
+      yield {
+        ...finalResult,
+        messageId,
+        metadata: {
+          ...finalResult.metadata,
+          ...timingResult.metadata,
+        },
+      } as any;
     } finally {
       reader.releaseLock();
     }
@@ -1511,7 +1741,8 @@ function buildTimingResult(
   tokenCount: number = 0,
   duration: number = 0
 ) {
-  const totalStreamTime = duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
+  const totalStreamTime =
+    duration > 0 ? duration * 1000 : Date.now() - streamStartTime;
 
   return {
     metadata: {
@@ -1520,7 +1751,8 @@ function buildTimingResult(
         firstTokenTime,
         totalStreamTime,
         tokenCount,
-        tokensPerSecond: duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
+        tokensPerSecond:
+          duration > 0 && tokenCount > 0 ? tokenCount / duration : undefined,
         totalChunks: 1,
         toolCallCount,
       },

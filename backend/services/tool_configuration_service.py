@@ -444,6 +444,9 @@ async def get_tool_from_remote_mcp_server(
             tools = await client.list_tools()
 
             for tool in tools:
+                if isinstance(tool.meta, dict) and tool.meta.get("nexent_internal") is True:
+                    continue
+
                 input_schema = {
                     k: v
                     for k, v in jsonref.replace_refs(tool.inputSchema).items()

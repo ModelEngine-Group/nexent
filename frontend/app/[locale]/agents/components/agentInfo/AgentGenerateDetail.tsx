@@ -37,6 +37,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
 import { canManageModels } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
@@ -50,6 +51,14 @@ import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
+
+/** Roles that can edit group settings for any agent (mirrors backend CAN_EDIT_ALL_USER_ROLES). */
+const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
 
 export default function AgentGenerateDetail({}) {
   const { t } = useTranslation("common");
@@ -75,6 +84,15 @@ export default function AgentGenerateDetail({}) {
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
   const editable = !isReadOnly;
+
+  // Group settings (用户组 / 组内权限) are editable only by creator or admin roles
+  const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
+  const isCreator =
+    isCreatingMode ||
+    (!!editedAgent.created_by &&
+      !!user?.id &&
+      String(editedAgent.created_by) === String(user.id));
+  const canEditGroupSettings = isAdmin || isCreator;
 
   const { defaultLlmModelConfig } = useConfig();
   const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
@@ -184,6 +202,18 @@ export default function AgentGenerateDetail({}) {
     );
   }, [availableLlmModels, editedAgent.model, editedAgent.model_ids]);
 
+  // The output reserve cap must be safe for every configured model — the user
+  // can switch models at chat time, so use the minimum max_output_tokens across
+  // all selected models as the upper bound.
+  const minModelMaxOutputTokens = useMemo(() => {
+    const ids = editedAgent.model_ids || [];
+    const tokens = availableLlmModels
+      .filter((m) => ids.includes(m.id))
+      .map((m) => m.maxOutputTokens)
+      .filter((t): t is number => t != null && t > 0);
+    return tokens.length > 0 ? Math.min(...tokens) : undefined;
+  }, [availableLlmModels, editedAgent.model_ids]);
+
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
@@ -264,7 +294,7 @@ export default function AgentGenerateDetail({}) {
         form.validateFields(["requestedOutputTokens"]).catch(() => {});
       }
     });
-  }, [form, selectedMainAgentModel?.maxOutputTokens]);
+  }, [form, minModelMaxOutputTokens]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -1230,6 +1260,7 @@ export default function AgentGenerateDetail({}) {
                     placeholder={t("agent.userGroup")}
                     options={groupSelectOptions}
                     allowClear
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>
@@ -1245,6 +1276,7 @@ export default function AgentGenerateDetail({}) {
                       { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
                       { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
                     ]}
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>
@@ -1286,12 +1318,12 @@ export default function AgentGenerateDetail({}) {
                 tooltip={t("agent.requestedOutputTokens.tooltip")}
                 rules={[
                   { type: "number", min: 1, message: t("agent.requestedOutputTokens.error") },
-                  ...(selectedMainAgentModel?.maxOutputTokens
+                  ...(minModelMaxOutputTokens
                     ? [{
                         type: "number" as const,
-                        max: selectedMainAgentModel.maxOutputTokens,
+                        max: minModelMaxOutputTokens,
                         message: t("agent.requestedOutputTokens.maxError", {
-                          max: selectedMainAgentModel.maxOutputTokens,
+                          max: minModelMaxOutputTokens,
                         }),
                       }]
                     : []),
@@ -1299,7 +1331,7 @@ export default function AgentGenerateDetail({}) {
               >
                 <InputNumber
                   min={1}
-                  max={selectedMainAgentModel?.maxOutputTokens}
+                  max={minModelMaxOutputTokens}
                   precision={0}
                   placeholder={selectedMainAgentModel?.defaultOutputReserveTokens
                     ? String(selectedMainAgentModel.defaultOutputReserveTokens)
