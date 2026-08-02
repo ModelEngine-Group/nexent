@@ -2912,10 +2912,11 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
         def json():
             return {"status": "success"}
 
-    def _delete(url, params=None, timeout=None):
+    def _delete(url, params=None, timeout=None, headers=None, **_extra):
         captured["url"] = url
         captured["params"] = params
         captured["timeout"] = timeout
+        captured["headers"] = headers
         return FakeResponse()
 
     monkeypatch.setattr(tasks.requests, "delete", _delete, raising=True)
