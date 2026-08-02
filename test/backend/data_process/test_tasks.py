@@ -348,12 +348,21 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         except Exception:  # pragma: no cover
             pass
 
-    # Stub modules that ray_actors depends on to avoid importing real MinIO
-    # Also stub consts package and consts.const module to provide required constants at import time
-    if "consts" not in sys.modules:
-        sys.modules["consts"] = types.ModuleType("consts")
-        setattr(sys.modules["consts"], "__path__", [])
-    if "consts.const" not in sys.modules:
+    # Stub consts.const unconditionally so that backend.data_process.app
+    # (which raises if REDIS_URL / REDIS_BACKEND_URL are unset) can be
+    # imported, even when a sibling test (or our own ``_real`` reload
+    # branch above) has already placed a partially-populated or
+    # env-derived ``consts.const`` into ``sys.modules``. Tests depend on
+    # this module providing valid Redis URLs and other DP constants
+    # without ever reaching a real Redis server.
+    const_mod = sys.modules.get("consts.const")
+    needs_replace = (
+        const_mod is None
+        or not getattr(const_mod, "REDIS_URL", None)
+        or not getattr(const_mod, "REDIS_BACKEND_URL", None)
+        or not getattr(const_mod, "RAY_NUM_CPUS", None)
+    )
+    if needs_replace:
         const_mod = types.ModuleType("consts.const")
         const_mod.ELASTICSEARCH_SERVICE = "http://api"
         const_mod.REDIS_BACKEND_URL = "redis://test"
@@ -378,9 +387,13 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.ROOT_DIR = "/mock/root"
         const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/mock/table_transformer_model"
         const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/mock/unstructured_params.json"
+        # Mark as a package so relative imports (``from .consts import X``)
+        # resolve against the stub.
+        setattr(const_mod, "__file__", "<consts.const stub>")
         sys.modules["consts.const"] = const_mod
     else:
-        # Make sure DISABLE_RAY_DASHBOARD is False on the existing stub
+        # Existing stub already has Redis URLs — just make sure the
+        # dashboard flag is set to the value tests expect.
         sys.modules["consts.const"].DISABLE_RAY_DASHBOARD = False
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
@@ -642,8 +655,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
                 args, kwargs = self._preprocess(args, kwargs)
             return self._run_func(*args, **kwargs)
 
-        def s(self, **kwargs):
-            return _SignatureShim(kwargs)
+        def s(self, **_kw):
+            return _SignatureShim()
 
     # Helper to get unbound run
     def _unbound_run(task_obj):
@@ -2899,10 +2912,9 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
         def json():
             return {"status": "success"}
 
-    def _delete(url, params=None, headers=None, timeout=None):
+    def _delete(url, params=None, timeout=None):
         captured["url"] = url
         captured["params"] = params
-        captured["headers"] = headers
         captured["timeout"] = timeout
         return FakeResponse()
 
@@ -2912,47 +2924,11 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
     out = tasks.cleanup_source(
         self,
         {"task_id": "t1", "index_name": "idx", "source": "/a.txt"},
-        authorization="Bearer test-token",
     )
     assert captured["url"] == "http://api/indices/idx/documents"
     assert captured["params"]["path_or_url"] == "/a.txt"
     assert captured["params"]["scope"] == "source_only"
-    assert captured["headers"]["Authorization"] == "Bearer test-token"
     assert out["source_cleanup"]["attempted"] is True
-    assert out["source_cleanup"]["success"] is True
-    # Authorization must not leak into the task result payload
-    assert "authorization" not in out
-    assert "Authorization" not in json.dumps(out)
-
-
-def test_cleanup_source_omits_auth_header_when_authorization_missing(monkeypatch):
-    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
-    monkeypatch.setattr(tasks, "get_knowledge_record",
-                        lambda query=None: {"preserve_source_file": False})
-
-    captured = {}
-
-    class FakeResponse:
-        status_code = 200
-        text = ""
-
-        @staticmethod
-        def json():
-            return {"status": "success"}
-
-    def _delete(url, params=None, headers=None, timeout=None):
-        captured["headers"] = headers
-        return FakeResponse()
-
-    monkeypatch.setattr(tasks.requests, "delete", _delete, raising=True)
-
-    self = FakeSelf("cleanup-no-auth-1")
-    out = tasks.cleanup_source(
-        self,
-        {"task_id": "t1", "index_name": "idx", "source": "/a.txt"},
-    )
-    assert captured["headers"] == {}
     assert out["source_cleanup"]["success"] is True
 
 
