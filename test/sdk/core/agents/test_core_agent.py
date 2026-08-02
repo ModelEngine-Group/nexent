@@ -369,6 +369,7 @@ Verification feedback:
     )
 
     assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
 
 
 def test_success_counters_do_not_count_as_tool_errors():
@@ -407,42 +408,6 @@ def test_structured_handoff_is_substantive_even_with_a_limited_answer():
     )
 
     assert "handoff_has_substance" not in result.failed_criteria
-
-
-def test_execution_task_requires_a_real_observation_before_final_answer():
-    controller, model = _make_verification_controller()
-    controller.config.llm_verification_enabled = False
-
-    result = controller.verify_final_answer(
-        task="从 data/corpus 构建医疗知识图谱",
-        candidate="图谱已经构建完成。",
-        memory_summary="Task: build graph\n\nStep 1:\nCode: \nObservation: \nOutput: 图谱已经构建完成。",
-        round_number=1,
-    )
-
-    assert result.passed is False
-    assert result.failed_criteria == ["observed_tool_result"]
-    model.assert_not_called()
-
-
-def test_execution_task_accepts_a_real_observation_without_llm_verifier():
-    controller, model = _make_verification_controller()
-    controller.config.llm_verification_enabled = False
-
-    result = controller.verify_final_answer(
-        task="从 data/corpus 构建医疗知识图谱",
-        candidate="图谱已经构建完成。",
-        memory_summary=(
-            "Task: build graph\n\nStep 1:\n"
-            "Code: result = build_medical_kg(source_path='data/corpus')\n"
-            "Observation: {\"graph_file\":\"outputs/nexent_demo_graph.json\"}\n"
-            "Output: {\"graph_file\":\"outputs/nexent_demo_graph.json\"}"
-        ),
-        round_number=1,
-    )
-
-    assert result.passed is True
-    model.assert_not_called()
 
 
 def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():

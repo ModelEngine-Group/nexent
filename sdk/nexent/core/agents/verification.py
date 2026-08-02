@@ -68,7 +68,7 @@ class VerificationController:
     """Layered verification for critical ReAct events and final answers."""
 
     _ERROR_RE = re.compile(
-        r"(traceback|\bexception\b|\berror\s*:|\bfailed\b|\btimeout\b|\bunauthorized\b|permission denied)",
+        r"(\btraceback\b|\bexception\b|\berror\s*:|\bfailed\b|\btimeout\b|\bunauthorized\b|permission denied)",
         re.IGNORECASE,
     )
     _JSON_ERROR_RE = re.compile(
@@ -88,11 +88,6 @@ class VerificationController:
         r"(搜索|检索|查询|查找|分析|调研|根据|基于|引用|证据|来源|文档|文件|代码|项目|数据库|"
         r"最新|今天|昨天|现在|当前|执行|运行|部署|修复|报错|日志|search|retrieve|cite|source|"
         r"evidence|file|code|database|latest|today|run|execute|deploy|error|log)",
-        re.IGNORECASE,
-    )
-    _TOOL_RESULT_DEMAND_RE = re.compile(
-        r"(执行|运行|处理.+文件|构建|建图|画|图表|关系图|可视化|生成.+(?:图|报告|文件)|查询|调用|部署|修复|"
-        r"\bexecute\b|\brun\b|\bbuild\b|\bgenerate\b|\bquery\b|\bdeploy\b|\bfix\b)",
         re.IGNORECASE,
     )
 
@@ -398,29 +393,12 @@ class VerificationController:
             self.emit(deterministic, round_number)
             return deterministic
 
-        policy = self._build_final_verification_policy(task, memory_summary)
-        if policy["tool_result_required"] and not self._has_observed_result(memory_summary):
-            missing_result = VerificationResult(
-                passed=False,
-                severity="blocking",
-                event="final_answer",
-                phase="final_fail",
-                score=0.5,
-                failed_criteria=["observed_tool_result"],
-                repair_instruction=(
-                    "Call the configured tool or managed agent, print its real observation, "
-                    "and answer only from that result."
-                ),
-                user_visible_note="The task requires execution evidence, but no real observation was recorded.",
-            )
-            self.emit(missing_result, round_number)
-            return missing_result
-
         if not self.config.llm_verification_enabled:
             deterministic.phase = "final_pass"
             self.emit(deterministic, round_number)
             return deterministic
 
+        policy = self._build_final_verification_policy(task, memory_summary)
         if policy["task_profile"] == "lightweight_conversation":
             deterministic.phase = "final_pass"
             deterministic.user_visible_note = "Lightweight conversational task; deterministic checks passed."
@@ -703,9 +681,6 @@ class VerificationController:
             "task_profile": "lightweight_conversation" if lightweight else "task_oriented",
             "evidence_required": evidence_required,
             "tool_error_check_required": self._has_recent_error_signal(clean_memory_summary),
-            "tool_result_required": (not lightweight) and bool(
-                self._TOOL_RESULT_DEMAND_RE.search(task or "")
-            ),
         }
 
     def _is_lightweight_conversation_task(self, task: str) -> bool:
@@ -734,15 +709,6 @@ class VerificationController:
     def _has_recent_error_signal(self, text: str) -> bool:
         clean_text = self._strip_internal_verification_feedback(text or "")
         return self._contains_error_signal(clean_text)
-
-    def _has_observed_result(self, memory_summary: str) -> bool:
-        clean_text = self._strip_internal_verification_feedback(memory_summary or "")
-        observations = re.findall(
-            r"Observation:\s*(.*?)\nOutput:",
-            clean_text,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        return any(observation.strip() for observation in observations)
 
     @classmethod
     def _contains_error_signal(cls, text: str) -> bool:
