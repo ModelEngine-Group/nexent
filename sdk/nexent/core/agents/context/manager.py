@@ -408,16 +408,37 @@ class ContextManager:
         return sorted(list(tools), key=lambda tool: json.dumps(ContextManager._normalize(tool), sort_keys=True, default=str))
 
     @staticmethod
-    def _normalize(value):
-        if isinstance(value, dict):
-            return {str(k): ContextManager._normalize(v) for k, v in sorted(value.items(), key=lambda pair: str(pair[0]))}
-        if isinstance(value, (list, tuple)):
-            return [ContextManager._normalize(v) for v in value]
-        if hasattr(value, "model_dump"):
-            return ContextManager._normalize(value.model_dump())
+    def _normalize(value, _active_ids=None, _depth=0):
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
-        return {"name": getattr(value, "name", value.__class__.__name__)}
+        class_name = f"{value.__class__.__module__}.{value.__class__.__qualname__}"
+        if _depth >= 32:
+            return {"__max_depth__": class_name}
+
+        active_ids = _active_ids if _active_ids is not None else set()
+        value_id = id(value)
+        if value_id in active_ids:
+            return {"__cycle__": class_name}
+        active_ids.add(value_id)
+        try:
+            if isinstance(value, dict):
+                return {
+                    str(key): ContextManager._normalize(item, active_ids, _depth + 1)
+                    for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+                }
+            if isinstance(value, (list, tuple)):
+                return [
+                    ContextManager._normalize(item, active_ids, _depth + 1)
+                    for item in value
+                ]
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                return ContextManager._normalize(
+                    model_dump(), active_ids, _depth + 1
+                )
+            return {"name": getattr(value, "name", value.__class__.__name__)}
+        finally:
+            active_ids.remove(value_id)
 
     @staticmethod
     def _message_to_dict(message):
@@ -444,7 +465,21 @@ class ContextManager:
         return str(value)
 
     def _fingerprint(self, value):
-        encoded = json.dumps(self._normalize(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        try:
+            normalized = self._normalize(value)
+        except Exception as error:
+            normalized = {
+                "__normalization_error__": type(error).__name__,
+                "__class__": (
+                    f"{value.__class__.__module__}.{value.__class__.__qualname__}"
+                ),
+            }
+        encoded = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return hashlib.sha256(encoded.encode()).hexdigest()
 
     def _stable_item_fingerprints(self, items, purpose, tools):

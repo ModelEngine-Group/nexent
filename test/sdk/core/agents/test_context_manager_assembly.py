@@ -90,6 +90,34 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
+def test_context_fingerprint_bounds_cycles_and_excessive_depth():
+    manager = ContextManager()
+    cyclic = {}
+    cyclic["self"] = cyclic
+    deeply_nested = current = {}
+    for _ in range(40):
+        child = {}
+        current["child"] = child
+        current = child
+
+    normalized_cycle = manager._normalize(cyclic)
+    normalized_depth = manager._normalize(deeply_nested)
+
+    assert normalized_cycle["self"]["__cycle__"] == "builtins.dict"
+    assert "__max_depth__" in str(normalized_depth)
+    assert len(manager._fingerprint(cyclic)) == 64
+
+
+def test_context_fingerprint_degrades_when_normalization_fails():
+    class BrokenDump:
+        def model_dump(self):
+            raise RuntimeError("broken observational payload")
+
+    fingerprint = ContextManager()._fingerprint([BrokenDump()])
+
+    assert len(fingerprint) == 64
+
+
 def test_prepare_run_projects_fallback_system_prompt_without_mutating_memory():
     manager = ContextManager(ContextManagerConfig(token_threshold=10000))
     memory = _Memory()
