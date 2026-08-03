@@ -237,7 +237,7 @@ export default function CollaborativeAgent() {
         key: "no-agents",
         disabled: true,
         label: (
-          <span className="text-gray-400 italic">{t("collaborativeAgent.noAgents")}</span>
+          <span className="text-gray-400">{t("collaborativeAgent.noAgents")}</span>
         ),
       }];
     }
@@ -271,6 +271,7 @@ export default function CollaborativeAgent() {
             menu={{ items: dropdownMenuItems }}
             disabled={isReadOnly}
             trigger={["click"]}
+            styles={{ list: { maxHeight: '400px', overflowY: 'auto' } }}
           >
             <div className="flex items-center shrink-0">
               <Button
