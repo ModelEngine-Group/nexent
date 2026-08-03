@@ -1194,6 +1194,7 @@ async def _stream_agent_chunks(
                                 user_id=user_id,
                                 unit_status="completed",
                                 tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(
@@ -1270,6 +1271,7 @@ async def _stream_agent_chunks(
                                 user_id=user_id,
                                 unit_status="streaming",
                                 tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(

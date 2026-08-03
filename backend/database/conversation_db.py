@@ -233,6 +233,7 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "unit_type": unit['type'],
                 "unit_content": _serialize_unit_content(unit['content']),
                 "tool_call_id": unit.get("tool_call_id"),
+                "invocation_id": unit.get("invocation_id"),
                 "delete_flag": 'N'
             }
 
@@ -254,7 +255,8 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
                         unit_type: str, unit_content: Any,
                         user_id: Optional[str] = None,
                         unit_status: str = 'completed',
-                        tool_call_id: Optional[str] = None) -> int:
+                        tool_call_id: Optional[str] = None,
+                        invocation_id: Optional[str] = None) -> int:
     """
     Insert a single ConversationMessageUnit row.
 
@@ -269,6 +271,9 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
         tool_call_id: Unique ID of the originating tool invocation. None for
             units that are not tied to a specific tool call. The frontend uses
             this field to attribute side-channel output in parallel execution.
+        invocation_id: Identifies which sub-agent invocation produced this unit.
+            Used by the frontend history adapter to route deep-thinking /
+            reasoning chunks into the correct nested sub-agent card.
 
     Returns:
         int: Newly created unit ID (auto-increment ID)
@@ -285,6 +290,7 @@ def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
             "unit_content": _serialize_unit_content(unit_content),
             "unit_status": unit_status,
             "tool_call_id": tool_call_id,
+            "invocation_id": invocation_id,
             "delete_flag": 'N',
         }
         if user_id:
@@ -861,7 +867,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                     'unit_content', ConversationMessageUnit.unit_content,
                     'unit_status', ConversationMessageUnit.unit_status,
                     'unit_index', ConversationMessageUnit.unit_index,
-                    'tool_call_id', ConversationMessageUnit.tool_call_id
+                    'tool_call_id', ConversationMessageUnit.tool_call_id,
+                    'invocation_id', ConversationMessageUnit.invocation_id
                 )
             )
         ).select_from(
