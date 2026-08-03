@@ -298,7 +298,7 @@ export default function AgentConfigComp() {
                       icon={<RefreshCw size={16} />}
                       onClick={handleRefreshSkills}
                       loading={isRefreshingSkill}
-                      className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
+                      className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
                       title={t("skillManagement.refresh.title")}
                     >
                       {t("skillManagement.refresh.button")}
@@ -311,7 +311,7 @@ export default function AgentConfigComp() {
                         setEditingSkill(null);
                         setIsSkillModalOpen(true);
                       }}
-                      className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
+                      className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
                       title={t("skillManagement.build.title")}
                     >
                       {t("skillManagement.build.button")}

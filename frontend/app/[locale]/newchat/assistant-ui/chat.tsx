@@ -17,6 +17,7 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -41,6 +42,7 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -68,6 +70,7 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      isDictationConfigured={isDictationConfigured}
     />
   );
 };
