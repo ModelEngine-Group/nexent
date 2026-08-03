@@ -678,8 +678,9 @@ function handleAllApiProxy(pathname, req, res) {
   const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
 
   // 4. skills 特殊接口
-  const skillsPaths = ["/api/skills/create", "/api/skills/stop/"];
-  const isSkillApi = skillsPaths.some(path => pathname.startsWith(path) || pathname === path);
+  const skillsPathsStartWith = ["/api/skills/stop/"];
+  const skillsPathsEquals = ["/api/skills/create"];
+  const isSkillApi = skillsPathsStartWith.some(path => pathname.startsWith(path)) || skillsPathsEquals.some(path => pathname === path);
 
   // 分发代理目标
   if (isRuntime) {
