@@ -525,6 +525,17 @@ proxy.on("proxyReq", (proxyReq, req) => {
   }
 });
 
+// Swallow proxy errors (ECONNRESET/EPIPE/etc.) so a flaky backend (remote
+// market, runtime) returns 502 instead of crashing the dev server via
+// uncaughtException.
+proxy.on("error", (err, _req, res) => {
+  console.error("[Proxy] error:", err.message);
+  if (res && !res.headersSent && typeof res.writeHead === "function") {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ detail: "Backend unavailable" }));
+  }
+});
+
 // ============================================================================
 // Server setup
 // ============================================================================

@@ -92,7 +92,6 @@ export function SolutionMarketCard({
   solution,
   onChat,
   onInstall,
-  onConfig,
   onViewDetails,
   index = 0,
 }: SolutionCardProps) {
@@ -101,15 +100,11 @@ export function SolutionMarketCard({
 
   const isTeam = solution.solution_type === "team";
   const isResolved = solution.resolved || !!solution.agent_id;
-  const isAvailable = solution.is_available !== false;
-  const reasons = solution.unavailable_reasons || [];
 
   const handleInstall = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isResolved && isAvailable && onChat) {
+    if (isResolved && onChat) {
       onChat(solution);
-    } else if (isResolved && !isAvailable && onConfig) {
-      onConfig(solution);
     } else if (onInstall) {
       onInstall(solution);
     }
@@ -262,29 +257,17 @@ export function SolutionMarketCard({
       {/* Footer */}
       <div className="absolute left-0 right-0 bottom-0 px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center gap-2">
         {isResolved || isTeam ? (
-          isAvailable ? (
-            <button
-              onClick={handleInstall}
-              className="flex-1 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
-            >
-              {isTeam ? (
-                <Users className="h-4 w-4" />
-              ) : (
-                <MessageCircle className="h-4 w-4" />
-              )}
-              {isZh ? "开始对话" : "Start chat"}
-            </button>
-          ) : (
-            <button
-              onClick={handleInstall}
-              className="flex-1 px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
-            >
-              <Settings className="h-4 w-4" />
-              {isZh
-                ? `去配置${reasons.includes("model_unavailable") ? " · LLM" : ""}`
-                : "Configure"}
-            </button>
-          )
+          <button
+            onClick={handleInstall}
+            className="flex-1 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
+          >
+            {isTeam ? (
+              <Users className="h-4 w-4" />
+            ) : (
+              <MessageCircle className="h-4 w-4" />
+            )}
+            {isZh ? "开始对话" : "Start chat"}
+          </button>
         ) : (
           <div className="flex-1 px-4 py-2 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 text-sm font-medium flex items-center justify-center gap-2 cursor-not-allowed">
             {isZh ? "即将上线" : "Coming soon"}

@@ -16,8 +16,6 @@ import {
   Bot,
   Wrench,
   Puzzle,
-  CheckCircle2,
-  AlertTriangle,
   Settings2,
   ArrowRight,
   BookOpen,
@@ -265,6 +263,17 @@ export function SolutionConfigDrawer({
     return agentDetail.tools.filter((t) => t.source !== "mcp");
   }, [agentDetail]);
 
+  // Tools that actually have user-configurable params (the ones rendered in
+  // the Tool Configuration list). Kept in sync with the badge count.
+  const toolsWithParams = useMemo(() => {
+    return localTools.filter(
+      (t) =>
+        t.initParams &&
+        t.initParams.length > 0 &&
+        t.origin_name !== "knowledge_base_search"
+    );
+  }, [localTools]);
+
   const mcpToolsFromAgent = useMemo(() => {
     if (!agentDetail?.tools) return [];
     return agentDetail.tools.filter((t) => t.source === "mcp");
@@ -283,18 +292,6 @@ export function SolutionConfigDrawer({
       })
     );
   }, [mcpToolsFromAgent, mcpServers]);
-
-  const readiness = useMemo(() => {
-    if (!agentDetail) return { ready: false, reasons: [] as string[] };
-    const reasons: string[] = [];
-    const hasModel = selectedModelIds.length > 0 || !!agentDetail.model;
-    if (!hasModel) reasons.push("model_unavailable");
-    const unavailableTools = (agentDetail.tools || []).filter(
-      (t) => t.is_available === false
-    );
-    if (unavailableTools.length > 0) reasons.push("tool_unavailable");
-    return { ready: reasons.length === 0, reasons };
-  }, [agentDetail, selectedModelIds]);
 
   const handleSave = useCallback(async () => {
     if (!agentDetail || !agentId) return;
@@ -429,60 +426,6 @@ export function SolutionConfigDrawer({
     );
   };
 
-  const renderReadiness = () => {
-    if (!agentDetail) return null;
-    const { ready, reasons } = readiness;
-    const needLLM = reasons.includes("model_unavailable");
-    const needTool = reasons.includes("tool_unavailable");
-
-    return (
-      <div
-        className={`p-3 rounded-md border flex items-start gap-2 ${
-          ready
-            ? "bg-slate-50 dark:bg-slate-700/30 border-slate-200 dark:border-slate-600"
-            : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700"
-        }`}
-      >
-        {ready ? (
-          <CheckCircle2 className="h-4 w-4 text-slate-600 dark:text-slate-300 shrink-0 mt-0.5" />
-        ) : (
-          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-        )}
-        <div className="flex-1">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {ready
-              ? isZh
-                ? "就绪 — 可以开始对话"
-                : "Ready — start chatting"
-              : isZh
-                ? "需要配置才能使用"
-                : "Configuration needed"}
-          </p>
-          {!ready && (
-            <ul className="mt-1 space-y-0.5">
-              {needLLM && (
-                <li className="text-xs text-amber-600 dark:text-amber-400">
-                  ·{" "}
-                  {isZh
-                    ? "LLM 不可用，请在下方选择模型"
-                    : "LLM unavailable, select a model below"}
-                </li>
-              )}
-              {needTool && (
-                <li className="text-xs text-amber-600 dark:text-amber-400">
-                  ·{" "}
-                  {isZh
-                    ? "部分工具不可用，请在下方配置工具参数"
-                    : "Some tools unavailable, configure tool params below"}
-                </li>
-              )}
-            </ul>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   // ---- LLM Config Panel ----
 
   const renderLlmConfig = () => {
@@ -575,13 +518,8 @@ export function SolutionConfigDrawer({
         </p>
       );
     }
-    const toolsWithParams = localTools.filter(
-      (t) =>
-        t.initParams &&
-        t.initParams.length > 0 &&
-        t.origin_name !== "knowledge_base_search"
-    );
-    if (toolsWithParams.length === 0) {
+    const toolsWithParamsList = toolsWithParams;
+    if (toolsWithParamsList.length === 0) {
       return (
         <p className="text-xs text-slate-400 px-1">
           {isZh ? "无可配置的工具参数" : "No tool parameters to configure"}
@@ -592,7 +530,7 @@ export function SolutionConfigDrawer({
     return (
       <Collapse
         ghost
-        items={toolsWithParams.map((tool) => {
+        items={toolsWithParamsList.map((tool) => {
           const tid = Number(tool.id);
           const cfg = toolConfigs[tid];
           return {
@@ -831,8 +769,8 @@ export function SolutionConfigDrawer({
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
             {isZh ? "工具配置" : "Tool Configuration"}
           </span>
-          {localTools.length > 0 && (
-            <Tag className="text-xs">{localTools.length}</Tag>
+          {toolsWithParams.length > 0 && (
+            <Tag className="text-xs">{toolsWithParams.length}</Tag>
           )}
         </div>
       ),
@@ -893,7 +831,6 @@ export function SolutionConfigDrawer({
           </Button>
           <Button
             onClick={handleStartChat}
-            disabled={!readiness.ready}
             type="primary"
             className="flex-1"
             icon={<ArrowRight className="h-3.5 w-3.5" />}
@@ -918,7 +855,6 @@ export function SolutionConfigDrawer({
       ) : solution ? (
         <div className="space-y-5">
           {renderOverview()}
-          {renderReadiness()}
           <Collapse
             items={collapseItems}
             defaultActiveKey={["llm"]}
