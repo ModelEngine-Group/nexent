@@ -102,7 +102,8 @@ from backend.database.agent_db import (
     insert_related_agent,
     delete_related_agent,
     delete_agent_relationship,
-    update_related_agents
+    update_related_agents,
+    batch_search_agent_display_names,
 )
 
 class MockAgent:
@@ -986,3 +987,192 @@ def test_clear_agent_new_mark_database_connection_error(monkeypatch):
     # Execute and expect exception
     with pytest.raises(Exception):
         clear_agent_new_mark(1, "tenant1", "user1")
+
+
+# ===================== batch_search_agent_display_names tests =====================
+
+
+def test_batch_search_agent_display_names_empty_list(monkeypatch):
+    """Test batch_search_agent_display_names with empty agent_ids returns empty dict."""
+    result = batch_search_agent_display_names(agent_ids=[], tenant_id="tenant1")
+    assert result == {}
+
+
+def test_batch_search_agent_display_names_success(monkeypatch, mock_session):
+    """Test batch_search_agent_display_names returns mapping of agent_id -> display_name."""
+    session, query = mock_session
+
+    mock_agent1 = MagicMock()
+    mock_agent1.agent_id = 1
+    mock_agent1.display_name = "Agent One"
+    mock_agent1.name = "agent_one"
+
+    mock_agent2 = MagicMock()
+    mock_agent2.agent_id = 2
+    mock_agent2.display_name = None
+    mock_agent2.name = "agent_two"
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_agent1, mock_agent2]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    result = batch_search_agent_display_names(agent_ids=[1, 2], tenant_id="tenant1")
+
+    assert result == {1: "Agent One", 2: "agent_two"}
+
+
+# ===================== insert_related_agent with selected_agent_version_no tests =====================
+
+
+def test_insert_related_agent_with_selected_agent_version_no(monkeypatch, mock_session):
+    """Test insert_related_agent passes selected_agent_version_no to the relation."""
+    session, query = mock_session
+    session.add = MagicMock()
+    session.flush = MagicMock()
+
+    captured_kwargs = {}
+    def mock_agent_relation_init(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("backend.database.agent_db.AgentRelation", mock_agent_relation_init)
+
+    result = insert_related_agent(1, 2, "tenant1", "user1", selected_agent_version_no=5)
+
+    assert result is True
+    assert captured_kwargs["selected_agent_version_no"] == 5
+    session.add.assert_called_once()
+
+
+def test_insert_related_agent_without_selected_agent_version_no(monkeypatch, mock_session):
+    """Test insert_related_agent defaults selected_agent_version_no to None."""
+    session, query = mock_session
+    session.add = MagicMock()
+    session.flush = MagicMock()
+
+    captured_kwargs = {}
+    def mock_agent_relation_init(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("backend.database.agent_db.AgentRelation", mock_agent_relation_init)
+
+    result = insert_related_agent(1, 2, "tenant1", "user1")
+
+    assert result is True
+    assert captured_kwargs["selected_agent_version_no"] is None
+
+
+# ===================== update_related_agents version update tests =====================
+
+
+def test_update_related_agents_updates_version_no(monkeypatch, mock_session):
+    """Test update_related_agents updates selected_agent_version_no for existing relations."""
+    session, query = mock_session
+
+    # Mock existing relation with old version
+    mock_relation = MockAgentRelation()
+    mock_relation.selected_agent_id = 2
+    mock_relation.selected_agent_version_no = 1
+    mock_relation.relation_id = 10
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_relation]
+    mock_filter1 = MagicMock()
+    mock_filter1.all = mock_all
+    query.filter.return_value = mock_filter1
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+
+    # Execute - update relation for agent 2 with new version_no=3
+    update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2, "version_no": 3}])
+
+    # Verify: no deletions, no additions, version_no updated
+    session.add.assert_not_called()
+    assert mock_relation.selected_agent_version_no == 3
+    assert mock_relation.updated_by == "user1"
+
+
+def test_update_related_agents_no_version_no_keeps_existing(monkeypatch, mock_session):
+    """Test update_related_agents does not update when version_no is None in related_agents."""
+    session, query = mock_session
+
+    mock_relation = MockAgentRelation()
+    mock_relation.selected_agent_id = 2
+    mock_relation.selected_agent_version_no = 5
+    mock_relation.relation_id = 10
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_relation]
+    mock_filter1 = MagicMock()
+    mock_filter1.all = mock_all
+    query.filter.return_value = mock_filter1
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute - related_agents has agent_id=2 but version_no=None
+    update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2, "version_no": None}])
+
+    # Verify: version_no should remain unchanged
+    assert mock_relation.selected_agent_version_no == 5
+
+
+def test_update_related_agents_with_none_related_agents(monkeypatch, mock_session):
+    """Test update_related_agents with related_agents=None deletes all existing relations."""
+    session, query = mock_session
+
+    mock_relation = MockAgentRelation()
+    mock_relation.selected_agent_id = 2
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_relation]
+    mock_filter1 = MagicMock()
+    mock_filter1.all = mock_all
+
+    mock_update = MagicMock()
+    mock_filter2 = MagicMock()
+    mock_filter2.update = mock_update
+
+    query.filter.side_effect = [mock_filter1, mock_filter2]
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute - related_agents=None means no new relations
+    update_related_agents(1, "tenant1", "user1", related_agents=None)
+
+    # Verify: should soft delete the existing relation
+    mock_update.assert_called_once()
+    session.add.assert_not_called()
