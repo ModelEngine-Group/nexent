@@ -25,6 +25,7 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
+import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -511,8 +512,12 @@ function DataConfig({ isActive }: DataConfigProps) {
 
     if (isCreatingMode || kbState.activeKnowledgeBase) {
       const files = Array.from(e.dataTransfer.files);
-      if (files.length > 0) {
-        setUploadFiles(files);
+      const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
+      if (validFiles.length !== files.length) {
+        message.error(t("knowledgeBase.upload.fileTooLarge"));
+      }
+      if (validFiles.length > 0) {
+        setUploadFiles(validFiles);
         handleFileUpload();
       }
     } else {

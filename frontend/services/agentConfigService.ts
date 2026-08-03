@@ -826,6 +826,7 @@ export const searchAgentInfo = async (
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
+      created_by: data.created_by ?? null,
       prompts_hidden: data.prompts_hidden === true,
       tools: data.tools
         ? data.tools.map((tool: any) => {

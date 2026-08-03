@@ -1219,9 +1219,16 @@ export default function UserManageComp() {
           </div>
         </div>
         {isSuperAdmin && (
-          <>
-            <Button type="primary" onClick={showModal}>
+          <div className="flex items-center gap-3">
+            <Button type="default" onClick={showModal}>
               {t("project.config")}
+            </Button>
+            <Button
+              type="default"
+              icon={<HardDrive className="h-4 w-4" />}
+              onClick={() => setShowPlatformQuota(true)}
+            >
+              {t("quota.platformOverview", "Platform Quota Overview")}
             </Button>
             <Modal
               title={t("project.config")}
@@ -1233,7 +1240,7 @@ export default function UserManageComp() {
             >
               <ProjectConfigTab />
             </Modal>
-          </>
+          </div>
         )}
       </div>
       <div className="flex-1 min-h-0 h-full">
@@ -1307,15 +1314,6 @@ export default function UserManageComp() {
                     </h2>
                     <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                )}
-                {isSuperAdmin && (
-                  <Button
-                    type={showPlatformQuota ? "primary" : "default"}
-                    icon={<HardDrive className="h-4 w-4" />}
-                    onClick={() => setShowPlatformQuota(true)}
-                  >
-                    {t("quota.platformOverview", "Platform Quota Overview")}
-                  </Button>
                 )}
               </div>
 

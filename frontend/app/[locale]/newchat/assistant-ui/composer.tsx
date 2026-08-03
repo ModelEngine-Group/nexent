@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
   Mic,
+  MicOff,
   Square,
   Lightbulb,
   Play,
@@ -15,19 +16,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  AuiIf,
-  ComposerPrimitive,
-} from "@assistant-ui/react";
+import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  ModelSelector,
-  type ModelOption,
-} from "../ui/model-selector";
+import { ModelSelector, type ModelOption } from "../ui/model-selector";
 import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
 import {
   Collapsible,
@@ -48,6 +43,7 @@ export interface ComposerProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -69,14 +65,17 @@ const PlanView: FC = () => {
   const plan = useSyncExternalStore<PlanData | null>(
     planRegistry.subscribe,
     () => planRegistry.data,
-    () => null,
+    () => null
   );
 
   if (!plan || plan.steps.length === 0) return null;
 
   return (
     <Collapsible asChild defaultOpen>
-      <section className="border-b border-border" aria-label={t("chat.composer.plan")}>
+      <section
+        className="border-b border-border"
+        aria-label={t("chat.composer.plan")}
+      >
         <CollapsibleTrigger asChild>
           <button
             type="button"
@@ -99,18 +98,21 @@ const PlanView: FC = () => {
                   key={step.id}
                   className={cn(
                     "flex min-w-0 items-center gap-3 text-xs leading-5 text-muted-foreground",
-                    completed && "text-muted-foreground/60",
+                    completed && "text-muted-foreground/60"
                   )}
                 >
                   {completed ? (
-                    <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
+                    <Check
+                      className="size-4 shrink-0 text-emerald-600"
+                      aria-hidden
+                    />
                   ) : (
                     <Circle className="size-4 shrink-0" aria-hidden />
                   )}
                   <span
                     className={cn(
                       "min-w-0 max-w-[40%] shrink-0 truncate font-medium text-foreground",
-                      completed && "text-muted-foreground/60 line-through",
+                      completed && "text-muted-foreground/60 line-through"
                     )}
                     title={step.title}
                   >
@@ -120,7 +122,7 @@ const PlanView: FC = () => {
                     <span
                       className={cn(
                         "min-w-0 flex-1 truncate text-left",
-                        completed && "line-through",
+                        completed && "line-through"
                       )}
                       title={step.description}
                     >
@@ -144,6 +146,7 @@ export const Composer: FC<ComposerProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
   const { t } = useTranslation();
 
@@ -160,11 +163,17 @@ export const Composer: FC<ComposerProps> = ({
             size="sm"
             className={cn(
               "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "planning" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              chatMode === "planning" &&
+                "bg-blue-50 text-blue-600 hover:bg-blue-50"
             )}
             onClick={() => onChatModeChange("planning")}
           >
-            <Lightbulb className={cn("size-3", chatMode === "planning" ? "text-blue-600" : "")} />
+            <Lightbulb
+              className={cn(
+                "size-3",
+                chatMode === "planning" ? "text-blue-600" : ""
+              )}
+            />
             {t("chat.composer.planning")}
           </Button>
           <Button
@@ -172,7 +181,8 @@ export const Composer: FC<ComposerProps> = ({
             size="sm"
             className={cn(
               "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "execution" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              chatMode === "execution" &&
+                "bg-blue-50 text-blue-600 hover:bg-blue-50"
             )}
             onClick={() => onChatModeChange("execution")}
           >
@@ -186,9 +196,7 @@ export const Composer: FC<ComposerProps> = ({
       </div>
 
       {/* Composer Primitive Root */}
-      <ComposerPrimitive.Root
-        className="flex w-full flex-col px-1 py-1 outline-none"
-      >
+      <ComposerPrimitive.Root className="flex w-full flex-col px-1 py-1 outline-none">
         <ComposerAttachments />
         <ComposerPrimitive.Input
           placeholder={t("chat.composer.placeholder")}
@@ -210,13 +218,49 @@ export const Composer: FC<ComposerProps> = ({
           )}
           <div className="ml-auto flex items-center gap-1">
             <ComposerAddAttachment />
-            <ComposerPrimitive.Dictate asChild>
-              <TooltipWrapper tooltip={t("chat.composer.voiceInput")}>
-                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground">
-                  <Mic className="size-4" />
-                </Button>
-              </TooltipWrapper>
-            </ComposerPrimitive.Dictate>
+            <AuiIf condition={(s) => !s.composer.dictation}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <ComposerPrimitive.Dictate asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={!isDictationConfigured}
+                        className="size-8 text-muted-foreground"
+                      >
+                        <Mic className="size-4" />
+                      </Button>
+                    </ComposerPrimitive.Dictate>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isDictationConfigured
+                    ? t("chat.composer.voiceInput")
+                    : t("chat.composer.voiceInputDisabled")}
+                </TooltipContent>
+              </Tooltip>
+            </AuiIf>
+            <AuiIf condition={(s) => !!s.composer.dictation}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ComposerPrimitive.StopDictation asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-destructive hover:text-destructive"
+                    >
+                      <MicOff className="size-4" />
+                    </Button>
+                  </ComposerPrimitive.StopDictation>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t("chat.composer.stopVoiceInput")}
+                </TooltipContent>
+              </Tooltip>
+            </AuiIf>
             <ComposerSendOrCancel />
           </div>
         </div>

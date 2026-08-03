@@ -143,6 +143,12 @@ export const useSaveGuard = () => {
   // Shared save logic
   const save = useCallback(async (): Promise<boolean> => {
     try {
+      await useAgentConfigStore.getState().validateBeforeSave();
+    } catch {
+      return false;
+    }
+
+    try {
       const currentEditedAgent = useAgentConfigStore.getState().editedAgent;
       const currentAgentId = useAgentConfigStore.getState().currentAgentId;
 

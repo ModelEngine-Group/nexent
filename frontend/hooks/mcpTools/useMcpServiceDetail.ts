@@ -193,10 +193,10 @@ export function useMcpServiceDetail({
     );
   }, [draft, selectedService]);
 
-  const save = useCallback(async (draftOverride?: McpServiceItem | null) => {
+  const save = useCallback(async (draftOverride?: McpServiceItem | null): Promise<boolean> => {
     const currentDraft = draftOverride ?? draftRef.current;
     const currentSelected = selectedService;
-    if (!currentDraft || !currentSelected) return;
+    if (!currentDraft || !currentSelected) return false;
     const nextName = currentDraft.name.trim();
     const nextUrl = (currentDraft.serverUrl || "").trim();
     const nextToken = (currentDraft.authorizationToken ?? "").trim();
@@ -204,12 +204,12 @@ export function useMcpServiceDetail({
 
     if (!nextName) {
       message.warning(t("mcpTools.add.validate.nameRequired"));
-      return;
+      return false;
     }
     if (currentDraft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
     ) {
       message.warning(t("mcpTools.add.validate.httpUrlFormat"));
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -230,6 +230,7 @@ export function useMcpServiceDetail({
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
+      return true;
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
       // Show user-friendly message for known errors
@@ -239,6 +240,7 @@ export function useMcpServiceDetail({
       } else {
         message.error(msg || t("mcpTools.service.saveFailed"));
       }
+      return false;
     } finally {
       setSaving(false);
     }

@@ -34,6 +34,7 @@ interface SkillDraftPanelProps {
   onTextareaScroll?: (tabPath: string) => void;
   groupSelectOptions?: Array<{ label: string; value: number }>;
   groupNamesById?: Map<number, string>;
+  canEditGroupSettings?: boolean;
   className?: string;
 }
 
@@ -51,6 +52,7 @@ export default function SkillDraftPanel({
   onTextareaScroll,
   groupSelectOptions = [],
   groupNamesById = new Map(),
+  canEditGroupSettings = true,
   className,
 }: SkillDraftPanelProps) {
   const { t } = useTranslation("common");
@@ -243,6 +245,8 @@ export default function SkillDraftPanel({
                       placeholder={t("agent.userGroup")}
                       options={groupSelectOptions}
                       allowClear
+                      disabled={!canEditGroupSettings}
+                      showSearch={canEditGroupSettings}
                       labelRender={({ label, value }) =>
                         groupNamesById.get(Number(value)) ?? label
                       }
@@ -257,6 +261,7 @@ export default function SkillDraftPanel({
                   >
                     <Select
                       placeholder={t("tenantResources.knowledgeBase.permission")}
+                      disabled={!canEditGroupSettings}
                       options={[
                         {
                           value: "EDIT",

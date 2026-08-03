@@ -1,7 +1,11 @@
 import { TFunction } from 'i18next';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
-import { AIDP_ALLOWED_EXTENSIONS, AIDP_ALLOWED_MIME_TYPES } from '@/const/knowledgeBase';
+import {
+  AIDP_ALLOWED_EXTENSIONS,
+  AIDP_ALLOWED_MIME_TYPES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from '@/const/knowledgeBase';
 import knowledgeBaseService from '@/services/knowledgeBaseService';
 import { AbortableError } from '@/types/knowledgeBase';
 import log from "@/lib/logger";
@@ -91,6 +95,22 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
   }
 
   return true;
+};
+
+export const isKnowledgeBaseFileSizeValid = (file: File): boolean =>
+  file.size <= KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES;
+
+export const validateKnowledgeBaseFileSize = (
+  file: File,
+  t: TFunction,
+  message: any
+): boolean => {
+  if (isKnowledgeBaseFileSizeValid(file)) {
+    return true;
+  }
+
+  message.error(t('knowledgeBase.upload.fileTooLarge'));
+  return false;
 };
 
 /**

@@ -93,7 +93,49 @@ def test_call_reports_extracted_task_and_balances_observer_events(observer: Mock
     assert wrapper(task="Review the report") == "completed"
 
     assert inner.calls == [((), {"task": "Review the report"})]
-    observer.add_subagent_start.assert_called_once_with(
-        agent_id="agent-1", agent_name="Research agent", task="Review the report"
-    )
-    observer.add_subagent_end.assert_called_once_with(agent_id="agent-1", agent_name="Research agent")
+    start_kwargs = observer.add_subagent_start.call_args.kwargs
+    end_kwargs = observer.add_subagent_end.call_args.kwargs
+    # A stable invocation_id must be generated per call and reused for the
+    # matching end so downstream consumers can group every nested chunk.
+    assert "invocation_id" in start_kwargs
+    assert start_kwargs["invocation_id"] == end_kwargs["invocation_id"]
+    assert start_kwargs == {
+        "agent_id": "agent-1",
+        "agent_name": "Research agent",
+        "task": "Review the report",
+        "invocation_id": start_kwargs["invocation_id"],
+    }
+    assert end_kwargs == {
+        "agent_id": "agent-1",
+        "agent_name": "Research agent",
+        "invocation_id": start_kwargs["invocation_id"],
+    }
+
+
+def test_call_generates_distinct_invocation_ids_per_call(observer: Mock) -> None:
+    """Each invocation must get a fresh invocation_id so parallel siblings don't collide."""
+    inner = InnerAgent(result="ok")
+    wrapper = SubAgentToolWrapper(inner, observer, agent_id="agent-1", agent_name="Research")
+
+    wrapper(task="first")
+    wrapper(task="second")
+
+    assert observer.add_subagent_start.call_count == 2
+    first_invocation = observer.add_subagent_start.call_args_list[0].kwargs["invocation_id"]
+    second_invocation = observer.add_subagent_start.call_args_list[1].kwargs["invocation_id"]
+    assert first_invocation != second_invocation
+    assert observer.add_subagent_end.call_args_list[0].kwargs["invocation_id"] == first_invocation
+    assert observer.add_subagent_end.call_args_list[1].kwargs["invocation_id"] == second_invocation
+
+
+def test_call_still_balances_observer_events_when_inner_raises(observer: Mock) -> None:
+    """A failing inner agent must still emit subagent_end so the stack stays balanced."""
+    inner = Mock(side_effect=RuntimeError("boom"))
+    wrapper = SubAgentToolWrapper(inner, observer, agent_id="agent-1", agent_name="Research")
+
+    with pytest.raises(RuntimeError):
+        wrapper(task="x")
+
+    start_kwargs = observer.add_subagent_start.call_args.kwargs
+    end_kwargs = observer.add_subagent_end.call_args.kwargs
+    assert start_kwargs["invocation_id"] == end_kwargs["invocation_id"]

@@ -129,6 +129,7 @@ class ConversationMessageUnit:
     unit_type = MagicMock(name="ConversationMessageUnit.unit_type")
     unit_content = MagicMock(name="ConversationMessageUnit.unit_content")
     tool_call_id = MagicMock(name="ConversationMessageUnit.tool_call_id")
+    invocation_id = MagicMock(name="ConversationMessageUnit.invocation_id")
     message_id = MagicMock(name="ConversationMessageUnit.message_id")
     conversation_id = MagicMock(name="ConversationMessageUnit.conversation_id")
     delete_flag = MagicMock(name="ConversationMessageUnit.delete_flag")

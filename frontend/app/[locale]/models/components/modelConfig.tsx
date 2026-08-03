@@ -918,8 +918,10 @@ export const ModelConfigSection = forwardRef<
             justifyContent: "flex-start",
             gap: 8,
             paddingRight: 12,
+            paddingTop: "16px",
             marginLeft: "4px",
             minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
+            marginBottom: "16px",
           }}
         >
           {modelEngineEnable && (

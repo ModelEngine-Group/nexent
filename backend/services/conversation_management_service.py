@@ -109,7 +109,8 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
                       unit_type: str, unit_content: Any,
                       user_id: Optional[str] = None,
                       unit_status: str = 'completed',
-                      tool_call_id: Optional[str] = None) -> int:
+                      tool_call_id: Optional[str] = None,
+                      invocation_id: Optional[str] = None) -> int:
     """
     Insert exactly one ConversationMessageUnit row.
 
@@ -123,6 +124,9 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_status: Lifecycle status (streaming / completed)
         tool_call_id: Unique ID of the originating tool invocation. None for
             units that are not tied to a specific tool call.
+        invocation_id: Identifies which sub-agent invocation produced this unit.
+            Used by the frontend history adapter to route deep-thinking /
+            reasoning chunks into the correct nested sub-agent card.
 
     Returns:
         int: Newly created unit_id
@@ -136,6 +140,7 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         user_id=user_id,
         unit_status=unit_status,
         tool_call_id=tool_call_id,
+        invocation_id=invocation_id,
     )
 
 
@@ -656,6 +661,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'unit_index': unit.get('unit_index'),
                             'unit_status': unit.get('unit_status'),
                             'tool_call_id': unit.get('tool_call_id'),
+                            'invocation_id': unit.get('invocation_id'),
                         })
                     else:
                         processed_unit = {
@@ -664,6 +670,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'unit_index': unit.get('unit_index'),
                             'unit_status': unit.get('unit_status'),
                             'tool_call_id': unit.get('tool_call_id'),
+                            'invocation_id': unit.get('invocation_id'),
                         }
                         if unit_type in ('tool', 'tool-call') and isinstance(unit_content, str):
                             try:

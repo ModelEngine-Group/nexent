@@ -422,7 +422,7 @@ Content-Type: application/json
 ```
 
 > 💡 **提示**：
-> - 本地开发时，请将路径前面的 `/nb/a2a` 部分替换为 `http://localhost:5013/nb/a2a`
+> - 本地开发时，如果使用 docker 启动：请将路径前面的 `/nb/a2a` 部分替换为 `http://localhost:5013/nb/a2a`；如果通过 k8s 启动，请使用 `http://localhost:30013/nb/a2a`
 > - 生产环境请将路径替换为您的服务器域名或公网 IP 地址
 
 > ⚠️ **注意事项**：
