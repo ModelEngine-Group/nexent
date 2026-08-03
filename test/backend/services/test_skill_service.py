@@ -1203,6 +1203,35 @@ class TestSkillServiceUpdateSkill:
                 user_id="viewer",
             )
 
+    def test_update_skill_rejects_access_change_from_group_editor(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "skill_id": 1,
+                "name": "existing",
+                "created_by": "owner",
+                "group_ids": [1, 2],
+                "ingroup_permission": "EDIT",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill", return_value=True
+        )
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update skill access",
+        ):
+            SkillService(tenant_id="test-tenant").update_skill(
+                "existing",
+                {"description": "updated", "group_ids": [1]},
+                user_id="group-editor",
+            )
+
     def test_update_skill_with_params(self, mocker):
         mocker.patch(
             'backend.services.skill_service.skill_db.get_skill_by_name',
@@ -5498,6 +5527,30 @@ class TestInitSkillListForTenantAsync:
 
 
 class TestSkillServiceUpdateById:
+    def test_rejects_access_change_from_group_editor(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "owner",
+                "group_ids": [1, 2],
+                "ingroup_permission": "EDIT",
+            },
+        )
+        mocker.patch("backend.services.skill_service._can_edit_skill", return_value=True)
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update skill access",
+        ):
+            service.update_skill_by_id(1, {"group_ids": [1]}, user_id="group-editor")
+
     def test_rejects_non_creator(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
