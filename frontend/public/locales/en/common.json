@@ -1,4 +1,4 @@
-{
+﻿{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | AI Agents",
   "mainPage.layout.titleTemplate": "%s | {productName} AI Agents",
@@ -795,7 +795,7 @@
   "knowledgeBase.upload.dragHint": "Click or drag files to this area to upload and add knowledge to the knowledge base",
   "knowledgeBase.upload.supportedFormats": "Supports PDF, Word, PPT, Excel, MD, TXT, EPUB, CSV, JSON, HTML, XML file formats",
   "knowledgeBase.upload.fileSizeLimit": "Each file must not exceed 20 MB",
-  "knowledgeBase.upload.fileTooLarge": "The file is too large and is not currently supported by the knowledge base",
+  "knowledgeBase.upload.fileTooLarge": "The file is over 20M and is not currently supported by the knowledge base",
   "knowledgeBase.upload.completed": "Upload completed",
   "knowledgeBase.upload.fileCount": "{{count}} files",
   "knowledgeBase.upload.status.uploading": "Uploading",
