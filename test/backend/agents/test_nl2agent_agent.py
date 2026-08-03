@@ -157,6 +157,57 @@ def test_build_nl2agent_system_prompt_is_runtime_specific(
     assert "```" not in prompt
 
 
+@pytest.mark.parametrize(
+    (
+        "language",
+        "protocol_heading",
+        "pre_submission_heading",
+        "exclusive_rule",
+        "markdown_rule",
+        "rewrite_rule",
+        "fallback_warning",
+    ),
+    [
+        (
+            "zh",
+            "### 输出协议（最高优先级）",
+            "### 最终输出前静默自检",
+            "先选择且只能选择以下一种响应类型",
+            "不得使用 Markdown 围栏代码块",
+            "先在内部重写整个回复",
+            "未能生成有效的工具调用格式，请手动重新生成回复。",
+        ),
+        (
+            "en",
+            "### Output Protocol (Highest Priority)",
+            "### Silent Pre-Submission Check",
+            "choose exactly one of these mutually exclusive response types",
+            "must not use a Markdown fenced code block",
+            "rewrite the entire response internally",
+            "Failed to generate a valid tool-call format. Please manually regenerate the response.",
+        ),
+    ],
+)
+def test_build_nl2agent_system_prompt_defines_action_failure_fallback(
+    language,
+    protocol_heading,
+    pre_submission_heading,
+    exclusive_rule,
+    markdown_rule,
+    rewrite_rule,
+    fallback_warning,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert protocol_heading in prompt
+    assert pre_submission_heading in prompt
+    assert exclusive_rule in prompt
+    assert markdown_rule in prompt
+    assert rewrite_rule in prompt
+    assert prompt.count(fallback_warning) == 2
+    assert "```" not in prompt
+
+
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 

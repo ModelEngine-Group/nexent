@@ -67,7 +67,7 @@ does not contain a persisted agent or conversation ID.
 
 Every request constructs an in-memory `AgentConfig` named
 `__nl2agent_runtime__` with the current tenant's default model. It binds only
-the internal `search_installed_mcp_tools` Local MCP tool.
+the internal `search_installed_mcp_tools` and `nl2a_wrapper` Local MCP tools.
 
 The search tool:
 
@@ -79,6 +79,31 @@ The search tool:
 
 The Local MCP tool only searches the catalog. Agent draft editing is performed
 by the frontend configuration store.
+
+### 3.1 Executable Action Output Contract
+
+The localized NL2Agent prompts define three mutually exclusive response types:
+
+1. A direct-text clarification question or post-wrapper completion message.
+2. A search or wrapper action containing exactly one complete `<code>...</code>`
+   block and ending immediately after `</code>`.
+3. A localized direct-text generation warning when the model cannot guarantee
+   a valid executable action.
+
+Before emitting an action, the model silently verifies that the response has
+one paired set of literal code tags, contains no Markdown code fence, contains
+valid Python with the exact tool and keyword argument names, assigns the tool
+result, prints it, and has no content after the closing tag. The model repairs
+the response before submission when possible. If it still cannot guarantee the
+contract, it stops the loop and returns only one of these warnings:
+
+- Chinese: `未能生成有效的工具调用格式，请手动重新生成回复。`
+- English: `Failed to generate a valid tool-call format. Please manually regenerate the response.`
+
+Clarification, a real tool error Observation, and the completion message after
+a successful wrapper call are not generation failures. Markdown fenced code
+and bare Python remain non-executable; the runtime parser is intentionally not
+relaxed because display-only code must never be executed as an action.
 
 ## 4. Structured NL2A Payloads
 
@@ -173,7 +198,10 @@ Raw MCP `execution_logs` remain attached to their tool call.
 ## 7. Verification
 
 Backend tests cover the bilingual prompt contract, both subtype values, and
-the reduced `GeneratedAgentDraft` schema.
+the reduced `GeneratedAgentDraft` schema. The prompt contract tests also verify
+the mutually exclusive response types, pre-submission action validation,
+localized fallback warnings, and the continued prohibition of Markdown code
+fences.
 
 Frontend verification covers:
 
