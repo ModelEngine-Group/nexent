@@ -72,6 +72,7 @@ interface AgentConfigStoreState {
   defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
 
   forceRefreshKey: number;
+  saveValidation: (() => Promise<void>) | null;
 
   /**
    * Check if the current agent should be read-only.
@@ -124,6 +125,16 @@ interface AgentConfigStoreState {
    * Used for both generation and manual editing.
    */
   updateAgentConfig: (payload: AgentConfigUpdate) => void;
+
+  /**
+   * Register the active agent form's validation callback for all save entry points.
+   */
+  setSaveValidation: (validation: (() => Promise<void>) | null) => void;
+
+  /**
+   * Run the active agent form validation before persisting changes.
+   */
+  validateBeforeSave: () => Promise<void>;
 
   /**
    * Mark changes as saved: move edited -> baseline, clear hasUnsavedChanges.
@@ -403,6 +414,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   isGenerating: false,
   defaultLlmConfig: null,
   forceRefreshKey: 0,
+  saveValidation: null,
 
   isReadOnly: () => {
     const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
@@ -509,6 +521,14 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
       return { editedAgent, hasUnsavedChanges };
     });
+  },
+
+  setSaveValidation: (saveValidation) => {
+    set({ saveValidation });
+  },
+
+  validateBeforeSave: async () => {
+    await get().saveValidation?.();
   },
 
   markAsSaved: () => {

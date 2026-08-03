@@ -202,6 +202,7 @@
   "chat.sidebar.expand": "展开",
   "chat.sidebar.newConversation": "新对话",
   "chat.sidebar.switchToLegacy": "切换旧版",
+  "chat.sidebar.switchToNew": "切换新版",
   "chat.modelSelector.selectModel": "选择模型",
   "chat.modelSelector.searchModels": "搜索模型...",
   "chat.modelSelector.noModels": "未找到模型。",

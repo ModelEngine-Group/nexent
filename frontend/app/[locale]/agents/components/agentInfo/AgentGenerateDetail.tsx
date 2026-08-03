@@ -80,6 +80,7 @@ export default function AgentGenerateDetail({}) {
   const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
   const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
   const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
+  const setSaveValidation = useAgentConfigStore((state) => state.setSaveValidation);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
@@ -149,6 +150,13 @@ export default function AgentGenerateDetail({}) {
   useEffect(() => {
     clearExpiredGenerationCaches();
   }, []);
+
+  useEffect(() => {
+    setSaveValidation(async () => {
+      await form.validateFields();
+    });
+    return () => setSaveValidation(null);
+  }, [form, setSaveValidation]);
 
   // (e.g. business_description from a previously edited agent)
   useEffect(() => {
@@ -968,7 +976,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.displayNamePlaceholder")}
-                          onBlur={(e) =>
+                          onChange={(e) =>
                             updateAgentConfig({ display_name: e.target.value })
                           }
                         />
