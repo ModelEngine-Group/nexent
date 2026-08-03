@@ -2,6 +2,7 @@ import asyncio
 import base64
 import concurrent.futures
 import io
+import json
 import logging
 import os
 import shutil
@@ -9,7 +10,7 @@ import tempfile
 import threading
 import time
 import warnings
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import aiohttp
 import redis
@@ -19,10 +20,10 @@ from celery import states
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
+from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET, REDIS_BACKEND_URL, REDIS_URL, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
 from consts.exceptions import OfficeConversionException
 from consts.model import BatchTaskRequest
-from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
+from database.attachment_db import build_s3_url, delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file, upload_fileobj
 from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
@@ -584,6 +585,94 @@ class DataProcessService:
         content_type = f"image/{image.format.lower() if image.format else 'jpeg'}"
         return image_data, content_type
 
+    def _extract_text_chunks(self, text_chunks: List[Dict]) -> Tuple[str, List[str]]:
+        """Extract complete text and block text lists from text blocks."""
+        full_text = ""
+        chunk_texts: List[str] = []
+        for chunk in text_chunks:
+            if 'content' in chunk:
+                chunk_content = chunk['content']
+                full_text += chunk_content + "\n"
+                chunk_texts.append(chunk_content)
+        return full_text, chunk_texts
+    
+    async def _process_images(self, images_chunks: List[Any], filename: str) -> Tuple[List[str], List[str], List[Dict]]:
+        """Processing image blocks: verifying, uploading, and generating descriptive information"""
+        # process images if any
+        image_descriptions: List[str] = []
+        images_list_urls = []
+        image_info = []
+        
+        for idx, img_data in enumerate(images_chunks):
+            if not isinstance(img_data, dict):
+                logger.warning(f"Skipping image entry at index {idx}: unexpected type {type(img_data)}")
+                continue
+            
+            if "image_bytes" not in img_data:
+                logger.warning(f"Skipping image entry at index {idx}: missing image_bytes")
+                continue
+            
+            try:
+                # verify image size or dimension
+                base64_str = base64.b64encode(img_data["image_bytes"]).decode('utf-8')
+                img = await self.load_image(f"data:image/jpeg;base64,{base64_str}")
+
+                if img is None or not self.check_image_size(img.width, img.height):
+                    logger.info(
+                        f"Image extracted from {filename} not loaded or does not meet minimum size requirements (200x200 pixels)")
+                    continue
+                
+                # upload image to MinIO
+                img_obj = io.BytesIO(img_data["image_bytes"])
+
+                result = upload_fileobj(
+                    file_obj=img_obj,
+                    file_name=f"{idx}.{img_data['image_format']}",
+                    prefix=MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET
+                )
+                
+                if not result.get("success"):
+                    error_message = result.get("error") or "Upload failed"
+                    logger.warning(
+                        "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                        f"{idx}.{img_data['image_format']}",
+                        filename,
+                        error_message,
+                    )
+                    continue
+                
+                # build image information
+                image_url = build_s3_url(result.get("object_name", ""))
+                position = img_data["position"]
+                coords = position["coordinates"]
+                
+                image_descriptions.append(
+                    f"——————Image {idx+1}——————\n"
+                    f"Page {position.get('page_number', 'unknown')} | "
+                    f"Box: ({coords.get('x1', '')}, {coords.get('y1', '')}) -> ({coords.get('x2', '')}, {coords.get('y2', '')})\n"
+                    f"URL: {image_url}"
+                )
+                images_list_urls.append(image_url)  
+                image_info.append({
+                    "content": json.dumps({
+                        "source_file": filename, 
+                        "position": position, 
+                        "image_url": image_url}),
+                    "source_type": "minio",
+                    "image_url": image_url,
+                    "filename": filename,
+                    "page": position["page_number"]
+                })                              
+            except Exception as exc:
+                logger.exception(
+                    "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                    f"{idx}.{img_data['image_format']}",
+                    filename,
+                    exc,
+                )       
+        
+        return image_descriptions, images_list_urls, image_info
+    
     async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str = "basic") -> Dict[str, Any]:
         """Process uploaded file bytes into text/chunks using SDK DataProcessCore.
 
@@ -600,20 +689,25 @@ class DataProcessService:
             f"Processing uploaded file: {filename} using SDK DataProcessCore")
 
         data_processor = DataProcessCore()
-        chunks, _ = data_processor.file_process(
+        text_chunks, images_chunks  = data_processor.file_process(
             file_data=file_content,
             filename=filename,
-            chunking_strategy=chunking_strategy
+            chunking_strategy=chunking_strategy,
+            model_type = "vlm",
+            table_transformer_model_path=TABLE_TRANSFORMER_MODEL_PATH,
+            unstructured_default_model_initialize_params_json_path=UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
         )
 
-        full_text = ""
-        chunk_texts: List[str] = []
-        for chunk in chunks:
-            if 'content' in chunk:
-                chunk_content = chunk['content']
-                full_text += chunk_content + "\n"
-                chunk_texts.append(chunk_content)
-
+        full_text, chunk_texts = self._extract_text_chunks(text_chunks)
+        
+        image_descriptions, images_list_urls, image_info = await self._process_images(images_chunks, filename)
+    
+        # Append image descriptions to the chunk list and full text
+        if image_descriptions:
+            separator = f"\n\n=== Image information for {filename} ===\n\n"
+            full_text += separator + "\n\n".join(image_descriptions)
+            chunk_texts.extend(image_descriptions)    
+            
         processing_time = time.time() - start_time
         logger.info(
             f"Successfully processed uploaded file: {filename}, extracted {len(full_text)} characters in {processing_time:.2f}s"
@@ -624,8 +718,10 @@ class DataProcessService:
             "task_id": None,
             "filename": filename,
             "text": full_text.strip(),
+            "images_info": [images_list_urls, image_info],
             "chunks": chunk_texts,
-            "chunks_count": len(chunks),
+            "text_chunks_count": len(chunk_texts),
+            "image_chunks_count": len(images_chunks),
             "text_length": len(full_text.strip()),
             "processing_time": processing_time,
             "chunking_strategy": chunking_strategy

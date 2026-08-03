@@ -69,6 +69,7 @@ def stub_consts(monkeypatch):
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
     fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
     fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
+    fake_consts_const.MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET = "mock-extracted-images-bucket"
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
     return fake_consts_const
@@ -573,6 +574,13 @@ def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
 
 def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
     ray_actors = import_module(monkeypatch)
+    from PIL import Image
+    import io
+
+    img = Image.new('RGB', (200, 200), color='red')
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    valid_png_bytes = img_bytes.getvalue()
 
     class CoreWithImages:
         def file_process(self, *a, **k):
@@ -580,7 +588,7 @@ def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
                 [{"content": "text", "metadata": {}}],
                 [
                     {
-                        "image_bytes": b"img",
+                        "image_bytes": valid_png_bytes,
                         "image_format": "png",
                         "position": {"page_number": 1},
                     }
@@ -588,11 +596,11 @@ def test_process_file_appends_image_chunks(monkeypatch, tmp_path):
             )
 
     monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithImages)
-    monkeypatch.setattr(
-        ray_actors,
-        "upload_fileobj",
-        lambda file_obj, file_name, prefix=None: {"object_name": f"{prefix}/{file_name}"},
-    )
+    
+    def mock_upload_fileobj(file_obj, file_name, prefix=None, bucket=None):
+        return {"success": True, "object_name": f"{prefix}/{file_name}"}
+    
+    monkeypatch.setattr(ray_actors, "upload_fileobj", mock_upload_fileobj)
     monkeypatch.setattr(
         ray_actors,
         "build_s3_url",
@@ -715,4 +723,144 @@ def test_split_file_returns_empty_when_no_parts(monkeypatch):
     monkeypatch.setattr(ray_actors, "DataProcessCore", CoreNoParts)
     actor = ray_actors.DataProcessorRayActor()
     assert actor.split_file("x.txt", "local", file_data=b"abc") == []
+
+def test_ping_returns_true(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+    assert actor.ping() is True
+
+
+def test_apply_model_chunk_sizes_without_model_type(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 50,
+            "maximum_chunk_size": 100,
+            "display_name": "plain",
+            "model_type": None,
+        },
+    )
+    params = {}
+    actor._apply_model_chunk_sizes(1, "t1", params)
+    assert params["new_after_n_chars"] == 50
+    assert params["max_characters"] == 100
+    assert "model_type" not in params
+
+
+def test_convert_to_rgb_handles_rgba_and_other_modes(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    from PIL import Image
+
+    actor = ray_actors.DataProcessorRayActor()
+    rgba = Image.new("RGBA", (10, 10), (255, 0, 0, 128))
+    assert actor._convert_to_rgb(rgba).mode == "RGB"
+
+    gray = Image.new("L", (10, 10), 128)
+    assert actor._convert_to_rgb(gray).mode == "RGB"
+
+    already_rgb = Image.new("RGB", (10, 10), (1, 2, 3))
+    assert actor._convert_to_rgb(already_rgb).mode == "RGB"
+
+
+def test_append_image_chunks_edge_cases(monkeypatch, tmp_path):
+    ray_actors = import_module(monkeypatch)
+    from PIL import Image
+    import io
+
+    def png_bytes(size, mode="RGB", color=(255, 0, 0)):
+        if mode == "RGBA":
+            img = Image.new(mode, size, color + (200,))
+        else:
+            img = Image.new(mode, size, color)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    class CoreWithMixedImages:
+        def file_process(self, *a, **k):
+            return (
+                [{"content": "text", "metadata": {}}],
+                [
+                    "not-a-dict",
+                    {
+                        "image_bytes": png_bytes((50, 50)),
+                        "image_format": "png",
+                        "position": {"page_number": 1},
+                    },
+                    {
+                        "image_bytes": png_bytes((220, 220), mode="RGBA"),
+                        "image_format": "png",
+                        "position": {"page_number": 2},
+                    },
+                    {
+                        "image_bytes": png_bytes((210, 210)),
+                        "image_format": "png",
+                        "position": {"page_number": 3},
+                    },
+                    {
+                        "image_bytes": b"not-an-image",
+                        "image_format": "png",
+                        "position": {"page_number": 4},
+                    },
+                    {
+                        "image_bytes": png_bytes((230, 230)),
+                        "image_format": "png",
+                        "position": {"page_number": 5},
+                    },
+                ],
+            )
+
+    def mock_upload_fileobj(file_obj, file_name, prefix=None, bucket=None):
+        if file_name.startswith("2."):
+            return {"success": False, "error": "denied"}
+        if file_name.startswith("3.") or file_name.startswith("5."):
+            return {"success": False}
+        return {"success": True, "object_name": f"{prefix}/{file_name}"}
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithMixedImages)
+    monkeypatch.setattr(ray_actors, "upload_fileobj", mock_upload_fileobj)
+    monkeypatch.setattr(
+        ray_actors,
+        "build_s3_url",
+        lambda object_name: f"s3://bucket/{object_name}",
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    source_path = make_temp_file(tmp_path, "mixed.pdf", content=b"%PDF-1.4")
+    chunks = actor.process_file(source_path, "basic", destination="local")
+
+    assert len(chunks) == 1
+    assert chunks[0]["content"] == "text"
+    image_chunks = [
+        c for c in chunks
+        if c.get("metadata", {}).get("process_source") == "UniversalImageExtractor"
+    ]
+    assert image_chunks == []
+
+
+def test_validate_chunks_none_returns_empty(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+    assert actor._validate_chunks(None, "src.pdf") == []
+
+
+def test_split_file_fetches_bytes_when_file_data_missing(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class CoreWithSplit(FakeDataProcessCore):
+        def file_split(self, file_data, filename, max_size, **params):
+            class Part:
+                def getvalue(self_inner):
+                    return file_data
+
+            return [Part()]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithSplit)
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: io.BytesIO(b"fetched"))
+    actor = ray_actors.DataProcessorRayActor()
+    parts = actor.split_file("remote.txt", "minio", file_data=None)
+    assert parts == [b"fetched"]
 

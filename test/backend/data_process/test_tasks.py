@@ -150,6 +150,7 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.ROOT_DIR = "/mock/root"
         const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/mock/table_transformer_model"
         const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/mock/unstructured_params.json"
+        const_mod.MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET = "mock-extracted-images-bucket"
         sys.modules["consts.const"] = const_mod
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
