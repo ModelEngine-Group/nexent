@@ -282,14 +282,30 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.type"),
       dataIndex: "type",
       key: "type",
-      width: 100,
-      render: (type: ModelType) => <Tag>{getModelTypeName(type)}</Tag>,
+      width: 220,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (type: ModelType) => {
+        const typeName = getModelTypeName(type);
+        return (
+          <Tooltip title={typeName} placement="topLeft">
+            <Tag
+              color="default"
+              className="max-w-full"
+              style={{ display: "inline-flex", verticalAlign: "middle" }}
+            >
+              <span className="truncate">{typeName}</span>
+            </Tag>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("common.status"),
       dataIndex: "connect_status",
       key: "connect_status",
-      width: 110,
+      width: 120,
       render: (status: string) => {
         const color =
           status === "available"
@@ -317,11 +333,18 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         return (
           <Tag
             color={color}
-            className="inline-flex items-center"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
             variant="solid"
           >
             {icon}
-            {t(`tenantResources.models.status.${status}`)}
+            <span>{t(`tenantResources.models.status.${status}`)}</span>
           </Tag>
         );
       },
@@ -330,14 +353,27 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.source"),
       dataIndex: "source",
       key: "source",
-      width: 90,
-      render: (source: string) => <Tag color="default">{source}</Tag>,
+      width: 180,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (source: string) => (
+        <Tooltip title={source} placement="topLeft">
+          <Tag
+            color="default"
+            className="max-w-full"
+            style={{ display: "inline-flex", verticalAlign: "middle" }}
+          >
+            <span className="truncate">{source}</span>
+          </Tag>
+        </Tooltip>
+      ),
     },
     {
       title: t("monitoring.table.requests"),
       dataIndex: "request_count",
       key: "request_count",
-      width: 100,
+      width: 120,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.request_count ?? 0) - (b.request_count ?? 0),
       render: (v: number | undefined) =>
@@ -347,7 +383,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.errorRate"),
       dataIndex: "error_rate",
       key: "error_rate",
-      width: 100,
+      width: 130,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.error_rate ?? 0) - (b.error_rate ?? 0),
       render: (v: number | undefined) =>
@@ -361,7 +397,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.avgDuration"),
       dataIndex: "avg_duration",
       key: "avg_duration",
-      width: 110,
+      width: 150,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.avg_duration ?? 0) - (b.avg_duration ?? 0),
       render: (v: number | undefined) =>
@@ -371,7 +407,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.avgTTFT"),
       dataIndex: "avg_ttft",
       key: "avg_ttft",
-      width: 110,
+      width: 170,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.avg_ttft ?? 0) - (b.avg_ttft ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
@@ -385,7 +421,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.tokens"),
       dataIndex: "total_tokens",
       key: "total_tokens",
-      width: 100,
+      width: 110,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
@@ -395,7 +431,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("monitoring.table.tokenGenerationRate"),
       dataIndex: "token_generation_rate",
       key: "token_generation_rate",
-      width: 120,
+      width: 150,
       sorter: (a: UnifiedModelRow, b: UnifiedModelRow) =>
         (a.token_generation_rate ?? 0) - (b.token_generation_rate ?? 0),
       render: (v: number | undefined, record: UnifiedModelRow) =>
@@ -407,7 +443,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     },
     {
       key: "actions",
-      width: 200,
+      width: 120,
       render: (_, record: UnifiedModelRow) => (
         <div className="flex items-center space-x-2">
           <Tooltip title={t("tenantResources.models.checkConnectivity")}>
@@ -496,7 +532,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         }}
         onChange={handlePageChange}
         scroll={{ y: "calc(100vh - 580px)" }}
-        className="flex-1 [&_.ant-table]:h-full"
+        className="flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
       />
 
       <ModelAddDialog

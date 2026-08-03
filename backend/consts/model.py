@@ -802,7 +802,11 @@ class SkillRepositoryListingCreateRequest(BaseModel):
 
 class SkillRepositoryInstallRequest(BaseModel):
     """Request body for installing a repository skill into current tenant."""
-    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+    target_name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Target skill name in current tenant",
+    )
 
 
 class SkillRepositoryListingDetailResponse(BaseModel):

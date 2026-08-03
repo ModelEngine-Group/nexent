@@ -1,6 +1,6 @@
 import re
 import json
-from typing import List
+from typing import List, Optional
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
@@ -251,11 +251,27 @@ def check_tool_list_initialized(tenant_id: str) -> bool:
         return count > 0
 
 
-def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
+def update_tool_table_from_scan_tool_list(
+    tenant_id: str,
+    user_id: str,
+    tool_list: List[ToolInfo],
+    enabled_mcp_names: Optional[set] = None,
+):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools
     For MCP tools, use name&source&usage as unique key to allow same tool name from different MCP servers
+
+    Args:
+        tenant_id: Tenant ID
+        user_id: User ID who triggered the scan
+        tool_list: Tools successfully gathered during this scan
+        enabled_mcp_names: Names of MCP services that are enabled. Tools belonging
+            to these MCPs keep their previous availability when the MCP was
+            unreachable during this scan — a single transient connection failure
+            (e.g. a container still warming up) should not hide a healthy MCP's
+            tools from the tool list. Only disabled/deleted MCPs get downgraded.
     """
+    enabled_mcp_names = enabled_mcp_names or set()
     with get_db_session() as session:
         # get all existing tools (including complete information)
         existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y',
@@ -271,8 +287,15 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 key = f"{tool.name}&{tool.source}"
             existing_tool_dict[key] = tool
 
-        # set all tools to unavailable
+        # Set tools to unavailable. Tools belonging to enabled MCPs keep their
+        # previous availability so a transient fetch failure this scan does not
+        # remove a healthy MCP's tools from the tool list.
         for tool in existing_tools:
+            if (
+                tool.source == ToolSourceEnum.MCP.value
+                and (tool.usage or "") in enabled_mcp_names
+            ):
+                continue
             tool.is_available = False
 
         for tool in tool_list:

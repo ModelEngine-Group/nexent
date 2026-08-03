@@ -1,4 +1,4 @@
-{
+﻿{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | 智能问答",
   "mainPage.layout.titleTemplate": "%s | {productName} 智能问答",
@@ -767,6 +767,8 @@
   "knowledgeBase.hint.changeName": "请修改知识库名称后继续",
   "knowledgeBase.upload.dragHint": "点击或拖拽文件到此区域上传，为知识库添加知识",
   "knowledgeBase.upload.supportedFormats": "支持 PDF、Word、Excel、PPT、纯文本、CSV、TSV、Markdown、JSON、EPUB、HTML、XML 文件格式",
+  "knowledgeBase.upload.fileSizeLimit": "单个文件不得超过20M",
+  "knowledgeBase.upload.fileTooLarge": "上传失败，知识库暂不支持处理超过20M的文件",
   "knowledgeBase.upload.completed": "上传完成",
   "knowledgeBase.upload.fileCount": "{{count}} 个文件",
   "knowledgeBase.upload.status.uploading": "上传中",
@@ -2097,7 +2099,7 @@
   "repository.listingStatus.pendingDescription": "已提交上架申请，正在等待管理员审核。",
   "repository.listingStatus.pendingLabel": "审核中",
   "repository.listingStatus.pendingNote": "上架说明：{{content}}",
-  "repository.listingStatus.rejectedDescription": "未通过审核，可以修改后重新提交。",
+  "repository.listingStatus.rejectedDescription": "未通过审核。请先取消上架申请，修改后再重新提交。",
   "repository.listingStatus.rejectedLabel": "已驳回",
   "repository.listingStatus.reviewOpinion": "审核意见：{{content}}",
   "repository.listingStatus.submittedAt": "提交时间",
@@ -2897,6 +2899,7 @@
   "notifications.events.mcp_repository_review_pending": "MCP「{{name}}」待审核，上架说明：{{content}}",
   "notifications.events.emptyContent": "无",
   "notifications.deepLink.agentNotFound": "无法打开该智能体的审核状态。",
+  "notifications.deepLink.skillNotFound": "无法打开该 Skill 的审核状态。",
   "monitoring.dashboard.timeRange.24h": "最近 24 小时",
   "monitoring.dashboard.timeRange.7d": "最近 7 天",
   "monitoring.dashboard.timeRange.30d": "最近 30 天",

@@ -5,7 +5,11 @@ import i18n from "i18next";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
+import {
+  FILE_TYPES,
+  EXTENSION_TO_TYPE_MAP,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from "@/const/knowledgeBase";
 import {
   Document,
   KnowledgeBase,
@@ -1159,6 +1163,14 @@ class KnowledgeBaseService {
     modelId?: number
   ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
+      if (
+        files.some(
+          (file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES
+        )
+      ) {
+        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+      }
+
       // Create FormData object
       const formData = new FormData();
       formData.append("index_name", kbId);
