@@ -123,12 +123,12 @@ export default function McpCommunityDetailModal({
               <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-4">
                   <Wrench className="h-4 w-4 text-slate-400" />
-                  服务配置
+                  {t("mcpTools.detail.serviceConfigTitle")}
                 </h3>
                 <div className="space-y-4">
                   {!service.configJson ? (
                     <div>
-                      <label className="mb-1 block text-sm font-normal text-slate-500">服务地址</label>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">{t("mcpTools.addModal.serverUrl")}</label>
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg break-all flex-1 mr-3">
                           {service.serverUrl || "-"}
@@ -138,7 +138,29 @@ export default function McpCommunityDetailModal({
                             ? "bg-green-50 text-green-700"
                             : "bg-slate-100 text-slate-400"
                         }`}>
-                          {service.sharedFields?.serverUrl ? "已共享" : "未共享"}
+                          {service.sharedFields?.serverUrl ? t("mcpTools.detail.shared") : t("mcpTools.detail.notShared")}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {service.configJson && typeof service.configJson === "object" && "mcpServers" in service.configJson ? (
+                    <div>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">{t("mcpTools.detail.containerConfig")}</label>
+                      <div className="flex items-center justify-between">
+                        <Button
+                          size="small"
+                          onClick={() => setShowConfigJsonModal(true)}
+                          icon={<FileText className="h-3.5 w-3.5" />}
+                        >
+                          {t("mcpTools.detail.viewConfigJson")}
+                        </Button>
+                        <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          service.sharedFields?.containerConfigJson
+                            ? "bg-green-50 text-green-700"
+                            : "bg-slate-100 text-slate-400"
+                        }`}>
+                          {service.sharedFields?.containerConfigJson ? t("mcpTools.detail.shared") : t("mcpTools.detail.notShared")}
                         </span>
                       </div>
                     </div>
@@ -178,7 +200,7 @@ export default function McpCommunityDetailModal({
                             ? "bg-green-50 text-green-700"
                             : "bg-slate-100 text-slate-400"
                         }`}>
-                          {service.sharedFields?.authorizationToken ? "已共享" : "未共享"}
+                          {service.sharedFields?.authorizationToken ? t("mcpTools.detail.shared") : t("mcpTools.detail.notShared")}
                         </span>
                       </div>
                     </div>
@@ -186,7 +208,7 @@ export default function McpCommunityDetailModal({
 
                   {service.customHeaders ? (
                     <div>
-                      <label className="mb-1 block text-sm font-normal text-slate-500">自定义请求头</label>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">{t("mcpTools.detail.customHeaders")}</label>
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg break-all whitespace-pre-wrap flex-1 mr-3">
                           {typeof service.customHeaders === "string"
@@ -198,7 +220,7 @@ export default function McpCommunityDetailModal({
                             ? "bg-green-50 text-green-700"
                             : "bg-slate-100 text-slate-400"
                         }`}>
-                          {service.sharedFields?.customHeaders ? "已共享" : "未共享"}
+                          {service.sharedFields?.customHeaders ? t("mcpTools.detail.shared") : t("mcpTools.detail.notShared")}
                         </span>
                       </div>
                     </div>

@@ -77,7 +77,9 @@ import {
   getAgentRunTime,
   skillFileUploadsRegistry,
   type Nl2aMessage,
+  type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 
 export interface ThreadProps {
@@ -89,6 +91,7 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 /**
@@ -134,6 +137,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -197,6 +201,7 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        isDictationConfigured={isDictationConfigured}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -216,6 +221,7 @@ interface ThreadViewProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  isDictationConfigured: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -232,6 +238,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  isDictationConfigured,
   hasMessages,
   displayName,
   conversationTitle,
@@ -278,6 +285,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
             showModelSelector={showModelSelector}
+            isDictationConfigured={isDictationConfigured}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -549,8 +557,6 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               typeof partType === "string" &&
               partType.startsWith("group-subagent-")
             ) {
-              // `GroupPart` always carries `indices`; the runtime check
-              // above narrows the union so this cast is safe.
               const groupPart = part as unknown as {
                 type: string;
                 indices: readonly number[];
@@ -558,6 +564,20 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               };
               return renderSubAgentGroup(groupPart, children);
             }
+
+            if (partType === "verification-panel") {
+              const verificationPanel = part as typeof part & {
+                results?: VerificationContent[];
+                completed?: boolean;
+              };
+              return (
+                <VerificationPanel
+                  results={verificationPanel.results ?? []}
+                  completed={verificationPanel.completed === true}
+                />
+              );
+            }
+
             switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
@@ -565,14 +585,22 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return (
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
+                      count={
+                        (part as typeof part & { indices?: unknown[] }).indices
+                          ?.length ?? 0
+                      }
+                      active={
+                        (part as typeof part & { status?: { type?: string } })
+                          .status?.type === "running"
+                      }
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
               case "group-reasoning": {
-                const running = part.status.type === "running";
+                const running =
+                  (part as typeof part & { status?: { type?: string } }).status
+                    ?.type === "running";
                 return (
                   <Reasoning.Root defaultOpen={running}>
                     <GroupReasoningTrigger active={running} />
@@ -583,11 +611,21 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 );
               }
               case "group-source":
-                return <SourceGroupButton indices={part.indices} />;
+                return (
+                  <SourceGroupButton
+                    indices={
+                      (part as typeof part & { indices?: unknown[] }).indices ??
+                      []
+                    }
+                  />
+                );
               case "group-default":
                 return <>{children}</>;
               case "text": {
-                const textPart = part as typeof part & { isError?: boolean };
+                const textPart = part as typeof part & {
+                  isError?: boolean;
+                  text?: string;
+                };
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -601,7 +639,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
-                return part.toolUI ?? <ToolFallback {...part} />;
+                return (
+                  (part as typeof part & { toolUI?: unknown }).toolUI ?? (
+                    <ToolFallback {...part} />
+                  )
+                );
               case "indicator":
                 return <AssistantWorkingIndicator />;
               case "source":
@@ -610,19 +652,25 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
-                if (part.name === "automation-proposal") {
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "automation-proposal"
+                ) {
                   return (
                     <AutomationProposalMessage
-                      proposal={part.data as AgentAutomationProposalData}
+                      proposal={
+                        (part as typeof part & { data?: unknown })
+                          .data as AgentAutomationProposalData
+                      }
                     />
                   );
                 }
-                // The `subagent-boundary` stamp part is the seat of the
-                // group's header information. We let the header renderer
-                // paint it instead of returning it inside the body, so
-                // suppress here when it lands as a leaf of the chain.
-                if (part.name === "a2ui-surface") {
-                  const data = part.data as {
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "a2ui-surface"
+                ) {
+                  const data = (part as typeof part & { data?: unknown })
+                    .data as {
                     surfaceId?: unknown;
                     messages?: unknown;
                     error?: unknown;
@@ -644,7 +692,10 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                     );
                   }
                 }
-                return null;
+                return (
+                  ((part as typeof part & { dataRendererUI?: unknown })
+                    .dataRendererUI as ReactNode) ?? null
+                );
               default:
                 return null;
             }

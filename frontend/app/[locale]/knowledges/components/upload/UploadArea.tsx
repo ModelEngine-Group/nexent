@@ -2,13 +2,14 @@ import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallbac
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
-import { App } from 'antd';
+import { App, Upload } from 'antd';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
 import log from "@/lib/logger";
 import { 
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
+  validateKnowledgeBaseFileSize,
   validateFileType,
 } from '@/services/uploadService';
 
@@ -64,6 +65,8 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const currentKnowledgeBaseRef = useRef<string>("");
     const pendingRequestRef = useRef<AbortController | null>(null);
     const prevFileListRef = useRef<UploadFile[]>([]);
+    // UIDs already handed off to the parent upload; kept in the visible list but not re-sent.
+    const uploadedUidsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
       prevFileListRef.current = fileList;
@@ -76,7 +79,9 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
 
     // Function to reset all states
     const resetAllStates = useCallback(() => {
+      uploadedUidsRef.current = new Set();
       setFileList([]);
+      prevFileListRef.current = [];
       updateNameStatus("available");
       setIsLoading(true);
       setIsKnowledgeBaseReady(false);
@@ -176,54 +181,58 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const handleChange = useCallback(
       ({ fileList: newFileList }: { fileList: UploadFile[] }) => {
         // Ensure only updating current knowledge base's file list
-        if (isCreatingMode || indexName === currentKnowledgeBaseRef.current) {
-          // Deduplicate by name + size + lastModified to avoid duplicates within and across selections
-          const seen = new Set<string>();
-          const deduped: UploadFile[] = [];
-          for (const f of newFileList) {
-            const origin = f.originFileObj as RcFile | undefined;
-            const key = origin
-              ? `${origin.name.toLowerCase()}|${origin.size}|${
-                  origin.lastModified
-                }`
-              : f.name.toLowerCase();
-            if (!seen.has(key)) {
-              seen.add(key);
-              deduped.push(f);
-            }
-          }
-          setFileList(deduped);
-
-          // Trigger file selection callback with deduplicated files
-          const files = deduped
-            .map((file) => file.originFileObj)
-            .filter((file): file is RcFile => !!file);
-          if (files.length > 0) {
-            onFileSelect(files as unknown as File[]);
-          }
-        } else {
+        if (!(isCreatingMode || indexName === currentKnowledgeBaseRef.current)) {
           return;
         }
 
-        // Check if upload just completed
+        // Deduplicate by name + size + lastModified to avoid duplicates within and across selections
+        const seen = new Set<string>();
+        const deduped: UploadFile[] = [];
+        for (const f of newFileList) {
+          const origin = f.originFileObj as RcFile | undefined;
+          const key = origin
+            ? `${origin.name.toLowerCase()}|${origin.size}|${
+                origin.lastModified
+              }`
+            : f.name.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(f);
+          }
+        }
+        // Keep completed history visible; accumulate across successive uploads
+        setFileList(deduped);
+
+        // Only pass files not yet uploaded so the API request is the current batch only
+        const pendingFiles = deduped
+          .filter((file) => !uploadedUidsRef.current.has(file.uid))
+          .map((file) => file.originFileObj)
+          .filter((file): file is RcFile => !!file);
+        if (pendingFiles.length > 0) {
+          onFileSelect(pendingFiles as unknown as File[]);
+        }
+
+        // Check if a batch that was uploading has just finished
         const prevFileList = prevFileListRef.current;
         const uploadWasInProgress = prevFileList.some(
           (f) => f.status === "uploading"
         );
         const uploadIsNowFinished =
-          newFileList.length > 0 &&
-          !newFileList.some((f) => f.status === "uploading");
+          deduped.length > 0 &&
+          !deduped.some((f) => f.status === "uploading");
 
         if (uploadWasInProgress && uploadIsNowFinished) {
-          // After upload completion only call external upload completion callback, let KnowledgeBaseManager manage polling uniformly
+          // Parent reads uploadFiles set via onFileSelect (pending only); mark all
+          // currently listed files as uploaded so they are not re-sent next time.
           if (onUpload) {
             onUpload();
           }
+          for (const f of deduped) {
+            uploadedUidsRef.current.add(f.uid);
+          }
         }
-
-        // Note: file selection callback already handled above when list is deduplicated
       },
-      [indexName, onFileSelect, isCreatingMode, newKnowledgeBaseName, onUpload]
+      [indexName, onFileSelect, isCreatingMode, onUpload]
     );
 
     // Handle custom upload request
@@ -254,20 +263,21 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         format: (percent?: number) =>
           percent ? `${parseFloat(percent.toFixed(2))}%` : "0%",
       },
-      beforeUpload: (file) => validateFileType(file, t, message),
+      beforeUpload: (file) => {
+        if (
+          !validateKnowledgeBaseFileSize(file, t, message) ||
+          !validateFileType(file, t, message)
+        ) {
+          return Upload.LIST_IGNORE;
+        }
+        return true;
+      },
     };
-
-    // Clear previous selection when user starts a new selection via click
-    const handleStartNewSelection = useCallback(() => {
-      setFileList([]);
-      prevFileListRef.current = [];
-    }, []);
 
     return (
       <UploadAreaUI
         fileList={fileList}
         uploadProps={uploadProps}
-        onStartNewSelection={handleStartNewSelection}
         isLoading={isLoading}
         isKnowledgeBaseReady={isKnowledgeBaseReady}
         isCreatingMode={isCreatingMode}

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
@@ -29,7 +29,7 @@ class _SkillRepositoryListingCreateRequest(BaseModel):
 
 
 class _SkillRepositoryInstallRequest(BaseModel):
-    target_name: Optional[str] = None
+    target_name: Optional[str] = Field(None, max_length=100)
 
 
 consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreateRequest
@@ -219,6 +219,41 @@ def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
     )
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "service_name"),
+    [
+        ("get", "/repository/skill?status=pending_review", None, "list_skill_repository_listings_impl"),
+        ("get", "/repository/skill/7", None, "get_skill_repository_listing_detail_impl"),
+        ("patch", "/repository/skill/7/status", {"status": "rejected"}, "update_skill_repository_status_impl"),
+    ],
+)
+def test_user_is_forbidden_from_skill_repository_api(
+    mocker,
+    mock_auth_header,
+    method,
+    path,
+    payload,
+    service_name,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.ensure_skill_repository_access",
+        side_effect=ForbiddenError("User role USER is not authorized"),
+    )
+    service = mocker.patch(f"apps.skill_repository_app.{service_name}")
+
+    request_kwargs = {"headers": mock_auth_header}
+    if payload is not None:
+        request_kwargs["json"] = payload
+    response = getattr(client, method)(path, **request_kwargs)
+
+    assert response.status_code == 403
+    service.assert_not_called()
+
+
 def test_install_skill_from_repository_api_duplicate_returns_conflict(
     mocker,
     mock_auth_header,
@@ -402,6 +437,7 @@ def test_create_listing_api_maps_errors(
     [
         (app_module.UnauthorizedError("expired"), 401),
         (ValueError("not found"), 404),
+        (ValueError("Skill name must be at most 100 characters"), 400),
     ],
 )
 def test_install_api_maps_errors(
@@ -426,3 +462,25 @@ def test_install_api_maps_errors(
     )
 
     assert response.status_code == expected_status
+
+
+def test_install_api_rejects_target_name_over_100_characters(
+    mocker,
+    mock_auth_header,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    install = mocker.patch(
+        "apps.skill_repository_app.install_skill_from_repository_impl"
+    )
+
+    response = client.post(
+        "/repository/skill/7/install",
+        json={"target_name": "x" * 101},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 422
+    install.assert_not_called()

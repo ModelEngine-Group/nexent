@@ -27,6 +27,7 @@ import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
 import {
   attachExecutionLogsToTool,
+  collapseSubAgentParts,
   attachSearchContentToTool,
   attachSearchImageToTool,
   buildToolCallPart,
@@ -411,28 +412,45 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
       } else {
         let reasoningText = "";
-        // Stack of currently-open sub-agent invocations reconstructed from
-        // persisted ``subagent_start`` / ``subagent_end`` units. We do not
-        // route inner parts into a separate ``subagent-group`` array;
+        // Per-invocation map of currently-open sub-agent runs reconstructed
+        // from persisted ``subagent_start`` / ``subagent_end`` units. We do
+        // not route inner parts into a separate ``subagent-group`` array;
         // instead we stamp a ``metadata`` block on every reasoning / tool /
         // source part so ``MessagePrimitive.GroupedParts`` in ``thread.tsx``
         // can cluster them under the matching ``group-subagent-<id>-<runId>``
         // header.
+        //
+        // Parallel siblings must not collapse onto one LIFO stack: two
+        // siblings persisted with overlapping units would otherwise swap
+        // ``runId`` for any interleaved chunk. Each ``subagent_start``
+        // carries a stable ``invocation_id`` so we open a fresh slot per
+        // id, and the matching ``subagent_end`` closes exactly that slot
+        // (instead of popping the most-recently-opened entry).
         type ActiveSubAgent = {
           runId: string;
           agentId: number | string;
           agentName: string;
           task?: string;
           depth: number;
+          invocationId: string;
+          reasoningText: string;
         };
-        const subAgentStack: ActiveSubAgent[] = [];
         const a2uiPartIndexes = new Map<string, number>();
+        const activeSubAgents = new Map<string, ActiveSubAgent>();
         let historicalRunCounter = 0;
-        const currentSubAgent = (): ActiveSubAgent | null =>
-          subAgentStack.length > 0
-            ? subAgentStack[subAgentStack.length - 1]
-            : null;
-        const buildMetadata = ():
+        // For history replay we keep a deterministic ordering of "active"
+        // scopes by tracking insertion order explicitly. Map iteration is
+        // already insertion-ordered, so the first remaining entry is the
+        // best "default" attribution when a chunk lacks its own id.
+        const currentSubAgent = (
+          invocationId?: string
+        ): ActiveSubAgent | null => {
+          if (invocationId) return activeSubAgents.get(invocationId) ?? null;
+          return null;
+        };
+        const buildMetadata = (
+          invocationId?: string
+        ):
           | {
               subagentId: number | string;
               runId: string;
@@ -442,7 +460,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               isRunning: boolean;
             }
           | undefined => {
-          const top = currentSubAgent();
+          const top = currentSubAgent(invocationId);
           if (!top) return undefined;
           return {
             subagentId: top.agentId,
@@ -454,17 +472,32 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           };
         };
 
-        const flushReasoning = () => {
-          if (!reasoningText) return;
-          const reasoningPart: Record<string, unknown> = {
-            type: "reasoning",
-            text: reasoningText,
-            status: { type: "done" },
-          };
-          const meta = buildMetadata();
-          if (meta) reasoningPart.metadata = meta;
-          content.push(reasoningPart);
-          reasoningText = "";
+        const flushReasoning = (invocationId?: string) => {
+          const entry = invocationId ? activeSubAgents.get(invocationId) : null;
+          if (entry?.reasoningText) {
+            content.push({
+              type: "reasoning",
+              text: entry.reasoningText,
+              status: { type: "done" },
+              metadata: {
+                subagentId: entry.agentId,
+                runId: entry.runId,
+                agentName: entry.agentName,
+                depth: entry.depth,
+                task: entry.task,
+                isRunning: false,
+              },
+            });
+            entry.reasoningText = "";
+          }
+          if (!invocationId && reasoningText) {
+            content.push({
+              type: "reasoning",
+              text: reasoningText,
+              status: { type: "done" },
+            });
+            reasoningText = "";
+          }
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -626,18 +659,21 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          // ``subagent_start`` allocates a fresh ``runId`` and pushes the
-          // descriptor so subsequent reasoning / tool / source parts inherit
-          // its ``metadata``. We also push a ``data`` boundary stamp (same
-          // shape as the streaming adapter emits) so the
+          // ``subagent_start`` allocates a fresh ``runId`` and opens a new
+          // per-invocation slot so subsequent reasoning / tool / source parts
+          // inherit its ``metadata``. We also push a ``data`` boundary stamp
+          // (same shape as the streaming adapter emits) so the
           // ``group-subagent-*`` cluster appears immediately when the
-          // conversation is reloaded.
+          // conversation is reloaded. Parallel siblings are stored in a map
+          // keyed by the stable ``invocation_id`` so they never collide on
+          // the same ``runId`` or share reasoning text.
           if (part.type === "subagent_start") {
             flushReasoning();
             let payload: {
               agent_id?: number | string;
               agent_name?: string;
               task?: string;
+              invocation_id?: string;
             } = {};
             try {
               const parsed = JSON.parse(part.content || "{}");
@@ -649,15 +685,19 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             }
             historicalRunCounter += 1;
             const runId = `run-${historicalRunCounter}`;
+            const invocationId =
+              payload.invocation_id ?? part.invocation_id ?? runId;
             const descriptor: ActiveSubAgent = {
               runId,
               agentId: payload.agent_id ?? "unknown",
               agentName: payload.agent_name || "subagent",
               task: payload.task,
-              depth: subAgentStack.length + 1,
+              depth: activeSubAgents.size + 1,
+              invocationId,
+              reasoningText: "",
             };
-            subAgentStack.push(descriptor);
-            const stampMeta = buildMetadata();
+            activeSubAgents.set(invocationId, descriptor);
+            const stampMeta = buildMetadata(invocationId);
             content.push({
               type: "data",
               name: "subagent-boundary",
@@ -669,6 +709,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 task: descriptor.task,
                 depth: descriptor.depth,
                 isRunning: false,
+                invocationId,
               },
               metadata: stampMeta,
             });
@@ -676,23 +717,79 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "subagent_end") {
-            flushReasoning();
-            subAgentStack.pop();
+            const endInvocationId = (() => {
+              try {
+                const parsed = JSON.parse(part.content || "{}");
+                return parsed && typeof parsed === "object"
+                  ? (parsed as { invocation_id?: string }).invocation_id
+                  : undefined;
+              } catch {
+                return part.invocation_id;
+              }
+            })();
+            flushReasoning(endInvocationId ?? part.invocation_id);
+            let payload: {
+              invocation_id?: string;
+            } = {};
+            try {
+              const parsed = JSON.parse(part.content || "{}");
+              if (parsed && typeof parsed === "object") {
+                payload = parsed as typeof payload;
+              }
+            } catch {
+              // Legacy subagent_end payloads may not be JSON; fall through.
+            }
+            const invocationId = payload.invocation_id ?? part.invocation_id;
+            if (invocationId && activeSubAgents.has(invocationId)) {
+              const closing = activeSubAgents.get(invocationId)!;
+              if (closing.reasoningText) {
+                content.push({
+                  type: "reasoning",
+                  text: closing.reasoningText,
+                  status: { type: "done" },
+                  metadata: {
+                    subagentId: closing.agentId,
+                    runId: closing.runId,
+                    agentName: closing.agentName,
+                    depth: closing.depth,
+                    task: closing.task,
+                    isRunning: false,
+                  },
+                });
+                closing.reasoningText = "";
+              }
+              activeSubAgents.delete(invocationId);
+            } else if (activeSubAgents.size > 0) {
+              // No id supplied (very old payload): fall back to closing the
+              // first active invocation so we stay balanced.
+              const firstKey = activeSubAgents.keys().next().value;
+              if (firstKey) {
+                activeSubAgents.delete(firstKey);
+              }
+            }
             continue;
           }
 
           if (part.type === "step_count") {
-            if (part.content) reasoningText += part.content;
+            if (part.content) {
+              const top = currentSubAgent(part.invocation_id);
+              if (top) top.reasoningText += part.content;
+              else reasoningText += part.content;
+            }
             continue;
           }
 
           if (isReasoningChunkType(part.type)) {
-            if (part.content) reasoningText += part.content;
+            if (part.content) {
+              const top = currentSubAgent(part.invocation_id);
+              if (top) top.reasoningText += part.content;
+              else reasoningText += part.content;
+            }
             continue;
           }
 
           if (part.type === "tool" || part.type === "tool-call") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             const toolCallPart = buildToolCallPart({
               type: part.type,
               content: part.content,
@@ -703,27 +800,27 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               tool_arguments: part.tool_arguments,
             });
             toolCallPart.status = { type: "complete" };
-            const meta = buildMetadata();
+            const meta = buildMetadata(part.invocation_id);
             if (meta) toolCallPart.metadata = meta;
             content.push(toolCallPart);
             continue;
           }
 
           if (part.type === "execution_logs") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             attachExecutionLogsToTool(content, part);
             continue;
           }
 
           if (part.type === "error") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const errorPart: Record<string, unknown> = {
                 type: "text",
                 text: part.content,
                 isError: true,
               };
-              const meta = buildMetadata();
+              const meta = buildMetadata(part.invocation_id);
               if (meta) errorPart.metadata = meta;
               content.push(errorPart);
             }
@@ -746,13 +843,13 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "final_answer") {
-            flushReasoning();
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const textPart: Record<string, unknown> = {
                 type: "text",
                 text: part.content,
               };
-              const meta = buildMetadata();
+              const meta = buildMetadata(part.invocation_id);
               if (meta) textPart.metadata = meta;
               content.push(textPart);
             }
@@ -761,11 +858,12 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         flushReasoning();
 
-        // Defensive: pop any unclosed sub-agent stack entries so the
-        // reconstruction state stays balanced even when the historical
-        // stream was truncated (e.g. resumed mid-run, agent run stopped
-        // early, etc.).
-        subAgentStack.length = 0;
+        // Flush any incomplete sub-agent reasoning without changing the
+        // order in which persisted units were reconstructed.
+        for (const entry of activeSubAgents.values()) {
+          flushReasoning(entry.invocationId);
+        }
+        activeSubAgents.clear();
 
         // Some older records only persist the message-level image list. When
         // no picture_web unit restored images inline, associate that list with
@@ -842,6 +940,9 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
         }
       }
+
+      const orderedContent = collapseSubAgentParts(content);
+      content.splice(0, content.length, ...orderedContent);
 
       const attachments = restoreAttachments(msg, messageId);
       if (msg.role === "assistant" && attachments.length > 0) {

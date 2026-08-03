@@ -90,10 +90,11 @@ export default function ProjectConfigTab() {
     try {
       await saveConfig(values, file as File, file2 as File);
       message.success(t('project.config.update.success'));
+      setLoading(false);
+      location.reload();
     } catch (error) {
       console.log(`Failed to update:`, error);
       message.error(t('errorCode.990202'));
-    } finally {
       setLoading(false);
     }
   }
@@ -190,8 +191,7 @@ export default function ProjectConfigTab() {
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
               <span>{t('project.config.page.simple.log')}</span>
-              <img className="h-7" src={publicAsset("/modelengine-logo.png")} alt={"old logo2"}></img>
-              { previewUrl2 && <img className="h-7" src={previewUrl2} alt={"new logo2"}></img>}
+              <img className="h-7" src={previewUrl2 ? previewUrl2 : publicAsset("/modelengine-logo.png")} alt={"old logo2"}></img>
             </div>
             <Upload
                 beforeUpload={(fileRaw) => beforeUpload(fileRaw, true)}

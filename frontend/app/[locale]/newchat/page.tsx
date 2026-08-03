@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FC } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+} from "react";
 import {
   AssistantRuntimeProvider,
   useAuiState,
@@ -27,14 +34,32 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useConfig } from "@/hooks/useConfig";
+import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
+import type { STTModelConfig } from "@/types/modelConfig";
 
 function useLocalChatRuntime(): AssistantRuntime {
+  const { modelConfig } = useConfig();
+  const dictationAdapter = useMemo(
+    () => new ServerDictationAdapter(() => modelConfig?.stt),
+    [modelConfig?.stt]
+  );
+
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
       attachments: compositeAttachmentAdapter,
+      dictation: dictationAdapter,
     },
   });
 }
+
+const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
+  if (!config?.modelName) return false;
+  if (config.modelFactory === "volcengine") {
+    return Boolean(config.modelAppid && config.accessToken);
+  }
+  return Boolean(config.apiConfig?.apiKey);
+};
 
 export default function Home() {
   return <PersistentChatHome />;
@@ -45,6 +70,7 @@ const PersistentChatHome: FC = () => {
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
+  const { modelConfig } = useConfig();
 
   useEffect(() => {
     const conversationId = new URLSearchParams(window.location.search).get(
@@ -82,6 +108,7 @@ const PersistentChatHome: FC = () => {
           agents={agents}
           onAgentSelected={handleAgentSelected}
           onBack={handleBack}
+          isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
         />
       </TooltipProvider>
     </AssistantRuntimeProvider>
@@ -100,6 +127,7 @@ const HomeContent: FC<{
   agents: Agent[];
   onAgentSelected: (agent: Agent) => void;
   onBack: () => void;
+  isDictationConfigured: boolean;
 }> = ({
   runtime,
   selectedAgent,
@@ -108,6 +136,7 @@ const HomeContent: FC<{
   agents,
   onAgentSelected,
   onBack,
+  isDictationConfigured,
 }) => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
 
@@ -379,6 +408,7 @@ const HomeContent: FC<{
           onBack={handleThreadBack}
           chatMode={chatMode}
           onChatModeChange={handleChatModeChange}
+          isDictationConfigured={isDictationConfigured}
         />
       </div>
     </div>
