@@ -271,11 +271,17 @@ async def install_skill_from_repository_api(
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
-        logger.warning(
-            f"Skill repository listing not found for install "
-            f"(id={skill_repository_id}): {str(e)}"
+        message = str(e)
+        status_code = (
+            HTTPStatus.NOT_FOUND
+            if "not found" in message.lower()
+            else HTTPStatus.BAD_REQUEST
         )
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+        logger.warning(
+            f"Invalid skill repository install request "
+            f"(id={skill_repository_id}): {message}"
+        )
+        raise HTTPException(status_code=status_code, detail=message)
     except SkillDuplicateError as e:
         logger.warning(
             f"Duplicate skill repository install attempt "

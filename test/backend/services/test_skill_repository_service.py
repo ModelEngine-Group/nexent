@@ -322,6 +322,26 @@ def test_create_skill_repository_listing_updates_existing_record():
 
     assert result["is_updated"] is True
     _skill_repo_db_mock.update_skill_repository_by_id.assert_called_once()
+    srs.create_repository_pending_review_notification.assert_called_once()
+
+
+def test_create_skill_repository_listing_does_not_repeat_pending_notification():
+    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = (
+        _repository_record(status="pending_review")
+    )
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
+        _repository_record(status="pending_review")
+    )
+
+    result = srs.create_skill_repository_listing_impl(
+        skill_id=10,
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+
+    assert result["is_updated"] is True
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_called_once()
+    srs.create_repository_pending_review_notification.assert_not_called()
 
 
 def test_create_skill_repository_listing_does_not_overwrite_shared_record():
@@ -816,6 +836,24 @@ def test_install_rejects_unavailable_payloads(record, message):
             tenant_id="tenant-1",
             user_id="user-1",
         )
+
+
+def test_install_rejects_target_name_over_100_characters():
+    encoded_zip = base64.b64encode(b"zip").decode("ascii")
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = {
+        **_repository_record(status="shared"),
+        "skill_zip_base64": encoded_zip,
+    }
+
+    with pytest.raises(ValueError, match="at most 100"):
+        srs.install_skill_from_repository_impl(
+            skill_repository_id=1,
+            tenant_id="tenant-1",
+            user_id="user-1",
+            target_name="x" * 101,
+        )
+
+    _skill_repo_db_mock.increment_skill_repository_downloads.assert_not_called()
 
 
 def test_install_generates_copy_name_and_tolerates_download_count_failure():
