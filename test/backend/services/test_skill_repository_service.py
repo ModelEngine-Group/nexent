@@ -791,6 +791,25 @@ def test_update_status_validates_input_and_missing_records():
         )
 
 
+@pytest.mark.parametrize("user_role", ["USER", "user", ""])
+def test_skill_repository_access_rejects_ordinary_users(user_role):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": user_role,
+    }
+
+    with pytest.raises(ForbiddenError, match="not authorized"):
+        srs.ensure_skill_repository_access("user-1")
+
+
+@pytest.mark.parametrize("user_role", ["ADMIN", "DEV", "SU"])
+def test_skill_repository_access_allows_non_user_roles(user_role):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
+        "user_role": user_role,
+    }
+
+    srs.ensure_skill_repository_access("user-1")
+
+
 def test_update_status_rejects_unknown_role_and_invalid_su_transition():
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
         "user_role": "USER",

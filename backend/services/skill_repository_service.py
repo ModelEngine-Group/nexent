@@ -260,6 +260,13 @@ def _get_user_role(user_id: str) -> str:
     return str(user_tenant.get("user_role") or "USER")
 
 
+def ensure_skill_repository_access(user_id: str) -> None:
+    """Reject ordinary users from the Skill Repository API surface."""
+    user_role = _get_user_role(user_id).upper()
+    if user_role == "USER":
+        raise ForbiddenError("User role USER is not authorized to access Skill Repository")
+
+
 def _can_publish_skill(
     *,
     skill: Dict[str, Any],

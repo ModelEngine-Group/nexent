@@ -219,6 +219,41 @@ def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
     )
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "service_name"),
+    [
+        ("get", "/repository/skill?status=pending_review", None, "list_skill_repository_listings_impl"),
+        ("get", "/repository/skill/7", None, "get_skill_repository_listing_detail_impl"),
+        ("patch", "/repository/skill/7/status", {"status": "rejected"}, "update_skill_repository_status_impl"),
+    ],
+)
+def test_user_is_forbidden_from_skill_repository_api(
+    mocker,
+    mock_auth_header,
+    method,
+    path,
+    payload,
+    service_name,
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch(
+        "apps.skill_repository_app.ensure_skill_repository_access",
+        side_effect=ForbiddenError("User role USER is not authorized"),
+    )
+    service = mocker.patch(f"apps.skill_repository_app.{service_name}")
+
+    request_kwargs = {"headers": mock_auth_header}
+    if payload is not None:
+        request_kwargs["json"] = payload
+    response = getattr(client, method)(path, **request_kwargs)
+
+    assert response.status_code == 403
+    service.assert_not_called()
+
+
 def test_install_skill_from_repository_api_duplicate_returns_conflict(
     mocker,
     mock_auth_header,
