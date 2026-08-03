@@ -2338,12 +2338,13 @@ async def import_agent_impl(
             mapping_agent_id[need_import_agent_id] = new_agent_id
 
             agent_id_set.add(need_import_agent_id)
-            # Establish relationships with sub-agents
+            # Establish relationships with sub-agents - new sub-agents always use version 1
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
                                      tenant_id=tenant_id,
-                                     user_id=user_id)
+                                     user_id=user_id,
+                                     selected_agent_version_no=1)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)

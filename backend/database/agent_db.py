@@ -364,7 +364,7 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
         return {a.agent_id: (a.display_name or a.name) for a in agents}
 
 
-def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0) -> bool:
+def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0, selected_agent_version_no: Optional[int] = None) -> bool:
     """
     Insert a related agent.
     Default version_no=0 creates the draft version.
@@ -374,7 +374,8 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         child_agent_id: Child agent ID
         tenant_id: Tenant ID
         user_id: User ID
-        version_no: Version number. Default 0 = draft/editing state
+        version_no: Parent agent version number. Default 0 = draft/editing state
+        selected_agent_version_no: Pinned version of child agent. None = runtime fallback to child current_version_no
     """
     try:
         relation_info = {
@@ -382,6 +383,7 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
             "selected_agent_id": child_agent_id,
             "tenant_id": tenant_id,
             "version_no": version_no,
+            "selected_agent_version_no": selected_agent_version_no,
             "created_by": user_id,
             "updated_by": user_id
         }
