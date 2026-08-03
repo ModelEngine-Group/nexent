@@ -177,9 +177,13 @@ class ContextManager:
         reasons = self._change_reasons(stable_fp, self._stable_item_fingerprints(final_items, purpose_stable, canonical_tools))
         self._previous_stable_fingerprint = stable_fp
         selected_ids = tuple(item.id for item in final_items)
+        message_roles = tuple(message_role(message) for message in messages)
+        system_messages = [message for message in messages if message_role(message) in {"system", "developer"}]
+        history_messages = [message for message in messages if message_role(message) not in {"system", "developer"}]
         return FinalContext(
             messages=messages, tools=canonical_tools,
             evidence=ContextEvidence(
+                purpose=purpose,
                 selected_item_ids=selected_ids,
                 selected_item_types=tuple(item.type.value for item in final_items),
                 stable_message_count=len(stable) + len(purpose_stable),
@@ -203,6 +207,18 @@ class ContextManager:
                 ),
                 representation_cache_hits=hits, representation_cache_misses=misses,
                 compact_exhausted=compact_exhausted, over_hard_budget=over_hard,
+                messages_fingerprint=self._fingerprint(messages),
+                tools_fingerprint=self._fingerprint(canonical_tools),
+                system_messages_fingerprint=self._fingerprint(system_messages),
+                history_messages_fingerprint=self._fingerprint(history_messages),
+                final_answer_prompt_fingerprint=(
+                    self._fingerprint(purpose_dynamic)
+                    if purpose == "final_answer" else None
+                ),
+                message_roles=message_roles,
+                history_message_roles=tuple(message_role(message) for message in history_messages),
+                compression_attempted=bool(self._step_local_log),
+                fallback_compaction_used=any(representation != "raw" for _, representation in representations),
             ),
         )
 
