@@ -1289,7 +1289,7 @@ export default function SkillBuildModal({
       centered
       width="min(1180px, calc(100vw - 32px))"
       styles={{
-        content: {
+        container: {
           display: "flex",
           flexDirection: "column",
           maxHeight: modalViewportFrame,
