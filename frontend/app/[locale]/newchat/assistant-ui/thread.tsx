@@ -90,6 +90,7 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 /**
@@ -127,6 +128,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -185,6 +187,7 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        isDictationConfigured={isDictationConfigured}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -204,6 +207,7 @@ interface ThreadViewProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  isDictationConfigured: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -220,6 +224,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  isDictationConfigured,
   hasMessages,
   displayName,
   conversationTitle,
@@ -264,6 +269,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
             showModelSelector={showModelSelector}
+            isDictationConfigured={isDictationConfigured}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
