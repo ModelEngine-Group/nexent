@@ -452,7 +452,7 @@ class TestMessageObserver:
         assert messages[-1]["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
         assert messages[-1]["agent_id"] == "agent-1"
 
-    def test_subagent_end_clears_message_identity_context(self, observer):
+    def test_subagent_end_clears_message_identity_context_without_invocation_id(self, observer):
         """Do not attribute parent output to a sub-agent after it finishes."""
         observer.add_subagent_start("agent-1", "Researcher")
         observer.add_subagent_end("agent-1", "Researcher")
