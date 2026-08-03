@@ -473,7 +473,7 @@ def create_index_documents(
     # #region debug logging for ES indexing issue
     try:
         import time as _debug_ts
-        with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+        with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
             _f.write(json.dumps({
                 "sessionId": "c7009d",
                 "runId": "debug-run-v3",

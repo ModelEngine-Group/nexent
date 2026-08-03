@@ -5966,6 +5966,42 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
     @patch('backend.services.vectordatabase_service.DashScopeMultimodalEmbedding')
     @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_embedding_model_by_id_dashscope_native_endpoint_embedding_type(
+        self, mock_get_model_name, mock_dashscope_class, mock_get_model
+    ):
+        """DashScope native multimodal endpoint uses its native client for text embeddings."""
+        from backend.services.vectordatabase_service import get_embedding_model_by_id
+
+        mock_get_model.return_value = {
+            "model_id": 61,
+            "model_type": "embedding",
+            "model_factory": "dashscope",
+            "model_name": "qwen3-vl-embedding",
+            "model_repo": "dashscope",
+            "api_key": "dashscope-key",
+            "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            "max_tokens": 2560,
+            "ssl_verify": True,
+        }
+        mock_get_model_name.return_value = "qwen3-vl-embedding"
+        mock_instance = MagicMock()
+        mock_dashscope_class.return_value = mock_instance
+
+        model, model_id = get_embedding_model_by_id("tenant-1", 61)
+
+        self.assertIs(model, mock_instance)
+        self.assertEqual(model_id, 61)
+        mock_dashscope_class.assert_called_once_with(
+            api_key="dashscope-key",
+            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            model_name="qwen3-vl-embedding",
+            embedding_dim=2560,
+            ssl_verify=True,
+        )
+
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.DashScopeMultimodalEmbedding')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
     def test_get_embedding_model_by_id_dashscope_multi_embedding(
         self, mock_get_model_name, mock_dashscope_class, mock_get_model
     ):

@@ -346,6 +346,14 @@ def _build_model_config(model: dict) -> dict:
         "ssl_verify": model.get("ssl_verify", True),
     }
 
+def _is_dashscope_multimodal_endpoint(base_url: str) -> bool:
+    normalized_url = (base_url or "").lower()
+    return (
+        "dashscope.aliyuncs.com" in normalized_url
+        and "multimodal-embedding/multimodal-embedding" in normalized_url
+    )
+
+
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
     model_type = model.get("model_type", "embedding")
@@ -371,6 +379,30 @@ def _create_embedding_model(model: dict) -> Any:
             f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
             f"Please check the model configuration in the model management page."
         )
+
+    if _is_dashscope_multimodal_endpoint(common_kwargs["base_url"]):
+        # #region debug logging for ES indexing issue
+        try:
+            import time as _debug_ts
+            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
+                _f.write(json.dumps({
+                    "sessionId": "c7009d",
+                    "runId": "debug-run-v4",
+                    "hypothesisId": "dashscope-native-route",
+                    "location": "vectordatabase_service.py:_create_embedding_model",
+                    "message": "embedding record routed to DashScope native multimodal client",
+                    "data": {
+                        "model_type": model_type,
+                        "model_name": common_kwargs["model_name"],
+                        "base_url": common_kwargs["base_url"],
+                        "client": "DashScopeMultimodalEmbedding",
+                    },
+                    "timestamp": int(_debug_ts.time() * 1000)
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        return DashScopeMultimodalEmbedding(**common_kwargs)
 
     return OpenAICompatibleEmbedding(**common_kwargs)
 
@@ -444,7 +476,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     # #region debug logging for ES indexing issue
     try:
         import time as _debug_ts
-        with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+        with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
             _f.write(json.dumps({
                 "sessionId": "c7009d",
                 "runId": "debug-run-v3",
@@ -462,7 +494,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
         model = get_model_by_model_id(model_id, tenant_id)
         # #region debug logging for ES indexing issue
         try:
-            with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
                 _f.write(json.dumps({
                     "sessionId": "c7009d",
                     "runId": "debug-run-v3",
@@ -489,7 +521,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
         else:
             # #region debug logging for ES indexing issue
             try:
-                with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+                with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
                     _f.write(json.dumps({
                         "sessionId": "c7009d",
                         "runId": "debug-run-v3",
@@ -510,7 +542,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     except Exception as e:
         # #region debug logging for ES indexing issue
         try:
-            with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
                 _f.write(json.dumps({
                     "sessionId": "c7009d",
                     "runId": "debug-run-v3",
