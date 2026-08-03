@@ -914,6 +914,7 @@ export default function SkillBuildModal({
   }, [chatMessages]);
 
   const modalBodyFrame = "min(92vh, 760px)";
+  const modalViewportFrame = "calc(100vh - 32px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
   const isEditContentReady =
@@ -1270,13 +1271,21 @@ export default function SkillBuildModal({
       open={isOpen}
       onCancel={handleModalClose}
       centered
-      width={1180}
+      width="min(1180px, calc(100vw - 32px))"
       styles={{
+        content: {
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: modalViewportFrame,
+          overflow: "hidden",
+        },
         body: {
           display: "flex",
+          flex: "1 1 auto",
           flexDirection: "column",
           height: modalBodyFrame,
           maxHeight: modalBodyFrame,
+          minHeight: 0,
           overflow: "hidden",
         },
       }}
