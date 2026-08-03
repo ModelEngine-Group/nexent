@@ -183,6 +183,9 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                     <p className="ant-upload-hint text-gray-500">
                       {t("knowledgeBase.upload.supportedFormats")}
                     </p>
+                    <p className="ant-upload-hint !mt-1 text-gray-500">
+                      {t("knowledgeBase.upload.fileSizeLimit")}
+                    </p>
                   </div>
                 </Dragger>
               </div>
