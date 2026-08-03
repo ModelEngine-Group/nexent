@@ -43,28 +43,57 @@ export default function CollaborativeAgent() {
 
   // Map of agent_id -> saved version info (from snapshot)
   const savedVersionMap = (() => {
-    const map: Record<number, { version_no: number; version_name?: string }> = {};
+    const map: Record<number, { agent_name?: string | null; version_no: number | null; version_name?: string | null }> = {};
     (editedAgent?.sub_agent_relations || []).forEach((rel) => {
-      if (rel.version_no !== null && rel.version_no !== undefined) {
-        map[rel.agent_id] = {
-          version_no: rel.version_no,
-          version_name: rel.version_name,
-        };
-      }
+      map[rel.agent_id] = {
+        agent_name: rel.agent_name,
+        version_no: rel.version_no,
+        version_name: rel.version_name,
+      };
     });
     return map;
   })();
 
-  // Related internal agents (from published list) with saved version info
-  const relatedInternalAgents = (Array.isArray(internalAgents) ? internalAgents : []).filter(
-    (agent: Agent) => relatedAgentIds.includes(Number(agent.id))
-  ).map((agent: Agent) => {
-    const savedVersion = savedVersionMap[Number(agent.id)];
+  // Related internal agents - display all agents from sub_agent_id_list
+  // For agents found in internalAgents, use full info (name, version)
+  // For legacy agents not found, still display with fallback info
+  const publishedAgentMap = new Map(
+    (Array.isArray(internalAgents) ? internalAgents : []).map((a: Agent) => [Number(a.id), a])
+  );
+
+  const relatedInternalAgents = relatedAgentIds.map((agentId: number) => {
+    const publishedAgent = publishedAgentMap.get(Number(agentId));
+    const savedVersion = savedVersionMap[Number(agentId)];
+    const hasSavedVersion = savedVersion && savedVersion.version_no != null;
+
+    if (publishedAgent) {
+      return {
+        ...publishedAgent,
+        // Use saved version_name if exists, otherwise fallback to latest published version_name
+        version_name: hasSavedVersion
+          ? (savedVersion?.version_name || publishedAgent.version_name || null)
+          : (publishedAgent.version_name || null),
+        // Use saved version_no if exists, otherwise fallback to current_version_no
+        version_no: hasSavedVersion
+          ? savedVersion?.version_no
+          : (publishedAgent as any).current_version_no ?? null,
+      };
+    }
+
+    // Legacy agent not found in published list - use name from sub_agent_relations
     return {
-      ...agent,
-      // Override version_name with saved version from sub_agent_relations
-      version_name: savedVersion?.version_name || agent.version_name || null,
-    };
+      id: String(agentId),
+      name: savedVersion?.agent_name || `Agent #${agentId}`,
+      display_name: savedVersion?.agent_name || `Agent #${agentId}`,
+      description: "",
+      model: "",
+      max_step: 0,
+      provide_run_summary: false,
+      tools: [],
+      skills: [],
+      version_name: savedVersion?.version_name || null,
+      version_no: savedVersion?.version_no ?? null,
+    } as Agent;
   });
 
   // Available internal agents (exclude already related ones and current agent)
@@ -170,47 +199,67 @@ export default function CollaborativeAgent() {
   };
 
   // Unified dropdown menu items
-  const dropdownMenuItems = [
-    // Internal agents group
-    {
-      key: "internal",
-      type: "group" as const,
-      label: t("collaborativeAgent.internalAgents"),
-      children: availableInternalAgents.map((agent: Agent) => ({
-        key: `internal-${agent.id}`,
+  const internalMenuItems = availableInternalAgents.map((agent: Agent) => ({
+    key: `internal-${agent.id}`,
+    label: (
+      <div className="flex items-center justify-between w-full">
+        <span>{agent.display_name || agent.name}</span>
+        {agent.version_name && (
+          <span className="text-xs text-gray-400 ml-2">{agent.version_name}</span>
+        )}
+      </div>
+    ),
+    onClick: () => handleSelectInternalAgent(Number(agent.id)),
+  }));
+
+  const externalMenuItems = availableExternalForSelection.map((agent: A2AExternalAgent) => ({
+    key: `external-${agent.id}`,
+    label: (
+      <div className="flex items-center justify-between w-full">
+        <span className="flex items-center gap-2">
+          <Globe size={12} />
+          {agent.name}
+        </span>
+        {agent.version && (
+          <span className="text-xs text-gray-400 ml-2">v{agent.version}</span>
+        )}
+      </div>
+    ),
+    onClick: () => handleSelectExternalAgent(agent.id),
+  }));
+
+  const hasInternal = internalMenuItems.length > 0;
+  const hasExternal = externalMenuItems.length > 0;
+
+  const dropdownMenuItems = (() => {
+    if (!hasInternal && !hasExternal) {
+      return [{
+        key: "no-agents",
+        disabled: true,
         label: (
-          <div className="flex items-center justify-between w-full">
-            <span>{agent.display_name || agent.name}</span>
-            {agent.version_name && (
-              <span className="text-xs text-gray-400 ml-2">{agent.version_name}</span>
-            )}
-          </div>
+          <span className="text-gray-400 italic">{t("collaborativeAgent.noAgents")}</span>
         ),
-        onClick: () => handleSelectInternalAgent(Number(agent.id)),
-      })),
-    },
-    // External A2A agents group
-    {
-      key: "external",
-      type: "group" as const,
-      label: t("collaborativeAgent.externalAgents"),
-      children: availableExternalForSelection.map((agent: A2AExternalAgent) => ({
-        key: `external-${agent.id}`,
-        label: (
-          <div className="flex items-center justify-between w-full">
-            <span className="flex items-center gap-2">
-              <Globe size={12} />
-              {agent.name}
-            </span>
-            {agent.version && (
-              <span className="text-xs text-gray-400 ml-2">v{agent.version}</span>
-            )}
-          </div>
-        ),
-        onClick: () => handleSelectExternalAgent(agent.id),
-      })),
-    },
-  ];
+      }];
+    }
+    const items: any[] = [];
+    if (hasInternal) {
+      items.push({
+        key: "internal",
+        type: "group" as const,
+        label: t("collaborativeAgent.internalAgents"),
+        children: internalMenuItems,
+      });
+    }
+    if (hasExternal) {
+      items.push({
+        key: "external",
+        type: "group" as const,
+        label: t("collaborativeAgent.externalAgents"),
+        children: externalMenuItems,
+      });
+    }
+    return items;
+  })();
 
   return (
     <>

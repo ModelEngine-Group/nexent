@@ -339,6 +339,31 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
         return [as_dict(agent) for agent in agents]
 
 
+def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> dict:
+    """
+    Batch query agent display names by agent IDs.
+    Returns a dict mapping agent_id -> display_name (falls back to name).
+
+    Args:
+        agent_ids: List of agent IDs to query
+        tenant_id: Tenant ID
+    """
+    if not agent_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.display_name,
+            AgentInfo.name
+        ).filter(
+            AgentInfo.agent_id.in_(agent_ids),
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag != 'Y'
+        ).all()
+        return {a.agent_id: (a.display_name or a.name) for a in agents}
+
+
 def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0) -> bool:
     """
     Insert a related agent.

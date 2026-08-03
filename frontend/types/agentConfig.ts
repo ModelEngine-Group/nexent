@@ -159,7 +159,7 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
-  sub_agent_relations?: Array<{ agent_id: number; version_no: number | null; version_name?: string }>;
+  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string; version_no: number | null; version_name?: string }>;
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";

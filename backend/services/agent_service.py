@@ -42,6 +42,7 @@ from consts.model import (
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
+    batch_search_agent_display_names,
     create_agent,
     delete_agent_by_id,
     delete_agent_relationship,
@@ -1490,11 +1491,14 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         relations = query_sub_agent_relations(agent_id, tenant_id, version_no)
         enriched_relations = []
 
-        # Collect all (agent_id, version_no) pairs for batch lookup
+        # Collect all agent_ids and (agent_id, version_no) pairs for batch lookup
+        all_agent_ids = set()
         lookup_agent_ids = set()
         lookup_version_nos = set()
         for rel in relations:
             aid = rel.get("selected_agent_id")
+            if aid:
+                all_agent_ids.add(aid)
             vno = rel.get("selected_agent_version_no")
             if aid and vno is not None:
                 lookup_agent_ids.add(aid)
@@ -1512,6 +1516,12 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
                 key = (item["agent_id"], item["version_no"])
                 version_name_map[key] = item["version_name"]
 
+        # Batch query all agent display names at once
+        agent_name_map = batch_search_agent_display_names(
+            agent_ids=list(all_agent_ids),
+            tenant_id=tenant_id,
+        )
+
         for rel in relations:
             selected_agent_id = rel.get("selected_agent_id")
             selected_version_no = rel.get("selected_agent_version_no")
@@ -1520,6 +1530,7 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
                 version_name = version_name_map.get((selected_agent_id, selected_version_no))
             enriched_relations.append({
                 "agent_id": selected_agent_id,
+                "agent_name": agent_name_map.get(selected_agent_id) if selected_agent_id else None,
                 "version_no": selected_version_no,
                 "version_name": version_name,
             })

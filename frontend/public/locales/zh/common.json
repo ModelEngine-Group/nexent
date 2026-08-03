@@ -3600,6 +3600,7 @@
   "a2a.service.chatFailed": "发送聊天消息失败",
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",
+  "collaborativeAgent.noAgents": "暂无智能体",
   "collaborativeAgent.addExternal": "添加外部 Agent",
   "systemPrompt.button.optimize": "优化",
   "systemPrompt.optimize.feedbackLabel": "评价反馈",
