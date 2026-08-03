@@ -67,16 +67,16 @@ export default function CollaborativeAgent() {
     const hasSavedVersion = savedVersion && savedVersion.version_no != null;
 
     if (publishedAgent) {
+      const version_name = (hasSavedVersion
+        ? (savedVersion?.version_name ?? publishedAgent.version_name)
+        : publishedAgent.version_name) ?? undefined;
+      const version_no = (hasSavedVersion
+        ? savedVersion?.version_no
+        : (publishedAgent as any).current_version_no) ?? undefined;
       return {
         ...publishedAgent,
-        // Use saved version_name if exists, otherwise fallback to latest published version_name
-        version_name: hasSavedVersion
-          ? (savedVersion?.version_name || publishedAgent.version_name || null)
-          : (publishedAgent.version_name || null),
-        // Use saved version_no if exists, otherwise fallback to current_version_no
-        version_no: hasSavedVersion
-          ? savedVersion?.version_no
-          : (publishedAgent as any).current_version_no ?? null,
+        version_name,
+        version_no,
       };
     }
 
@@ -91,7 +91,7 @@ export default function CollaborativeAgent() {
       provide_run_summary: false,
       tools: [],
       skills: [],
-      version_name: savedVersion?.version_name || undefined,
+      version_name: savedVersion?.version_name ?? undefined,
       version_no: savedVersion?.version_no ?? undefined,
     } as Agent;
   });

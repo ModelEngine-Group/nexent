@@ -588,6 +588,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [{"skill_id": 1, "enabled": True}],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -667,6 +668,7 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -1794,6 +1796,7 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
@@ -1900,6 +1903,7 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -1970,6 +1974,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -2064,6 +2069,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2155,6 +2161,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2253,6 +2260,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -4066,6 +4074,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         child_agent_id=101,
         tenant_id="test_tenant",
         user_id="test_user",
+        selected_agent_version_no=1,
     )
 
 
@@ -7555,8 +7564,8 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
     relationships = []
 
-    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id):
-        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id))
+    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no=None):
+        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no))
 
     async def fake_update_tool_list(tenant_id, user_id):
         return None
@@ -7583,7 +7592,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Child (2) must be imported before parent (1)
     assert imported_ids == [2, 1]
     # Relationship should be created between new IDs 101 (child) and 100 (parent)
-    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1")]
+    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1", 1)]
 
 
 # =====================================================================
