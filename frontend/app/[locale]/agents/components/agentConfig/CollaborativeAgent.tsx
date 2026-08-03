@@ -91,8 +91,8 @@ export default function CollaborativeAgent() {
       provide_run_summary: false,
       tools: [],
       skills: [],
-      version_name: savedVersion?.version_name || null,
-      version_no: savedVersion?.version_no ?? null,
+      version_name: savedVersion?.version_name || undefined,
+      version_no: savedVersion?.version_no ?? undefined,
     } as Agent;
   });
 
