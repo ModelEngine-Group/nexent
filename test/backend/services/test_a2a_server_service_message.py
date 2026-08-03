@@ -238,7 +238,7 @@ class TestCollectStreamText:
 
     @pytest.mark.asyncio
     async def test_collect_stream_text_skips_empty_data(self):
-        """Test collecting text skips empty data."""
+        """Test collecting stream text skips empty data."""
         from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
@@ -256,6 +256,94 @@ class TestCollectStreamText:
             result = await service._collect_stream_text(mock_stream)
 
             assert result == "StartEnd"
+
+    @pytest.mark.asyncio
+    async def test_collect_stream_events_preserves_raw_event_objects(self):
+        """Test collecting stream events preserves event fields and order."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        first_event = {"type": "model_output_thinking", "content": "internal"}
+        second_event = {"type": "final_answer", "content": "answer"}
+        mock_stream = MagicMock()
+        mock_stream.body_iterator = AsyncMockIterator([
+            f"data: {json.dumps(first_event)}\n\n",
+            f"data: {json.dumps(second_event)}\n\n",
+        ])
+
+        result = await service._collect_stream_events(mock_stream)
+
+        assert result == [first_event, second_event]
+
+    def test_build_agent_run_event_parts_keeps_each_event_separate(self):
+        """Test each raw event becomes a separate JSON data part."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_thinking", "content": "internal"},
+            {"type": "final_answer", "content": "answer"},
+        ]
+
+        result = service._build_agent_run_event_parts(events)
+
+        assert [part["data"] for part in result] == events
+        assert all(part["mediaType"] == "application/json" for part in result)
+
+    def test_coalesce_consecutive_events_with_same_type(self):
+        """Test adjacent same-type string events are combined."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_deep_thinking", "content": "我们"},
+            {"type": "model_output_deep_thinking", "content": "需要"},
+            {"type": "step_count", "content": "\\n**步骤 1** \\n"},
+            {"type": "model_output_deep_thinking", "content": "搜索"},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == [
+            {"type": "model_output_deep_thinking", "content": "我们需要"},
+            {"type": "step_count", "content": "\\n**步骤 1** \\n"},
+            {"type": "model_output_deep_thinking", "content": "搜索"},
+        ]
+
+    def test_coalesce_does_not_merge_events_with_different_metadata(self):
+        """Test same-type events with different metadata stay separate."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_deep_thinking", "step": 1, "content": "a"},
+            {"type": "model_output_deep_thinking", "step": 2, "content": "b"},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == events
+
+    def test_coalesce_does_not_merge_non_string_content(self):
+        """Test events with structured content stay separate."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "tool", "content": {"name": "search"}},
+            {"type": "tool", "content": {"name": "search"}},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == events
+
+    def test_extract_final_answer_ignores_non_final_events(self):
+        """Test only final_answer events are used for persistence text."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_thinking", "content": "internal"},
+            {"type": "final_answer", "content": "first"},
+            {"type": "final_answer", "content": "second"},
+        ]
+
+        assert service._extract_final_answer(events) == "firstsecond"
 
 
 class TestHandleMessageSendValidation:
