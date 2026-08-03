@@ -64,7 +64,7 @@ export default function CollaborativeAgent() {
   const relatedInternalAgents = relatedAgentIds.map((agentId: number) => {
     const publishedAgent = publishedAgentMap.get(Number(agentId));
     const savedVersion = savedVersionMap[Number(agentId)];
-    const hasSavedVersion = savedVersion && savedVersion.version_no != null;
+    const hasSavedVersion = savedVersion?.version_no != null;
 
     if (publishedAgent) {
       const version_name = (hasSavedVersion
