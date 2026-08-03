@@ -41,6 +41,7 @@ from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
+_SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 
 _skill_manager: Optional[SkillManager] = None
 
@@ -134,6 +135,41 @@ def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
         user_role=user_role,
         user_group_ids=user_group_ids,
     ) == PERMISSION_EDIT
+
+
+def _can_manage_skill_access(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
+    if not user_id:
+        return False
+    return (
+        _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES
+        or str(skill.get("created_by")) == str(user_id)
+    )
+
+
+def _has_skill_access_changes(
+    existing: Dict[str, Any], skill_data: Dict[str, Any]
+) -> bool:
+    if (
+        "group_ids" in skill_data
+        and _to_group_id_set(skill_data.get("group_ids"))
+        != _to_group_id_set(existing.get("group_ids"))
+    ):
+        return True
+    return (
+        "ingroup_permission" in skill_data
+        and skill_data.get("ingroup_permission") != existing.get("ingroup_permission")
+    )
+
+
+def _validate_skill_access_update(
+    existing: Dict[str, Any], skill_data: Dict[str, Any], user_id: Optional[str]
+) -> None:
+    if (
+        user_id
+        and _has_skill_access_changes(existing, skill_data)
+        and not _can_manage_skill_access(existing, user_id)
+    ):
+        raise ForbiddenError(_SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE)
 
 
 def _normalize_zip_entry_path(name: str) -> str:
@@ -1785,6 +1821,7 @@ class SkillService:
                 raise SkillException(f"Skill not found: {skill_name}")
             if user_id is not None and not _can_edit_skill(existing, user_id):
                 raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
+            _validate_skill_access_update(existing, skill_data, user_id)
 
             result = skill_db.update_skill(
                 skill_name, skill_data, effective_tenant_id, updated_by=user_id or None
@@ -1860,6 +1897,7 @@ class SkillService:
                 raise SkillException(f"Skill not found: {skill_id}")
             if not _can_edit_skill(existing, user_id):
                 raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
+            _validate_skill_access_update(existing, skill_data, user_id)
 
             local_dir = self._resolve_local_skills_dir_for_overlay()
             if local_dir and "name" in skill_data:
