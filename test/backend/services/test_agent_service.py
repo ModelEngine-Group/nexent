@@ -429,6 +429,8 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
     request.enabled_skill_ids = None
     if not hasattr(request, "related_agent_ids"):
         request.related_agent_ids = None
+    if not hasattr(request, "related_agents"):
+        request.related_agents = None
     if not hasattr(request, "enabled_tool_ids"):
         request.enabled_tool_ids = None
     if not hasattr(request, "example_questions"):
@@ -1066,6 +1068,7 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456, 789]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1076,9 +1079,9 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     mock_update_agent.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456, 789],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}, {"agent_id": 789, "version_no": None}],
     )
 
 
@@ -1151,6 +1154,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     request.agent_id = 123
     request.enabled_tool_ids = [1]
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1162,9 +1166,9 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_create_or_update_tool.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}],
     )
 
 
@@ -1227,6 +1231,7 @@ async def test_update_agent_info_impl_related_agent_update_exception(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
