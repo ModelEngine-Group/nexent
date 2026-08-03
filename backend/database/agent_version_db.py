@@ -117,6 +117,42 @@ def query_current_version_no(
         return agent.current_version_no if agent else None
 
 
+def batch_query_current_version_nos(
+    agent_ids: List[int],
+    tenant_id: str,
+) -> dict:
+    """
+    Batch query current published version_no for multiple agents.
+
+    Returns a dict mapping agent_id -> current_version_no (only includes agents
+    that have a non-null current_version_no).
+
+    Args:
+        agent_ids: List of agent IDs to query
+        tenant_id: Tenant ID
+    """
+    if not agent_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.current_version_no,
+        ).filter(
+            AgentInfo.agent_id.in_(agent_ids),
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag == 'N',
+        ).all()
+        return {
+            a.agent_id: a.current_version_no
+            for a in agents
+            if a.current_version_no is not None
+        }
+
+
 def query_agent_snapshot(
     agent_id: int,
     tenant_id: str,

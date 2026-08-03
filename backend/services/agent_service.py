@@ -81,7 +81,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names
+from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -1495,14 +1495,31 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         all_agent_ids = set()
         lookup_agent_ids = set()
         lookup_version_nos = set()
+        # Track agents whose pinned version_no is null -> need to resolve latest published version
+        missing_version_agent_ids = set()
         for rel in relations:
             aid = rel.get("selected_agent_id")
             if aid:
                 all_agent_ids.add(aid)
             vno = rel.get("selected_agent_version_no")
-            if aid and vno is not None:
+            if aid and vno is not None and vno != 0:
                 lookup_agent_ids.add(aid)
                 lookup_version_nos.add(vno)
+            elif aid:
+                # Historical data: pinned version_no is null or 0 (draft), resolve from child's current published version
+                missing_version_agent_ids.add(aid)
+
+        # Batch query current published version_no for agents with missing pinned version
+        resolved_version_no_map: dict = {}
+        if missing_version_agent_ids:
+            resolved_version_no_map = batch_query_current_version_nos(
+                agent_ids=list(missing_version_agent_ids),
+                tenant_id=tenant_id,
+            )
+            # Merge resolved version_nos into the version name lookup set
+            for aid, resolved_vno in resolved_version_no_map.items():
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(resolved_vno)
 
         # Batch query all version names at once
         version_name_map: dict = {}
@@ -1525,6 +1542,9 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         for rel in relations:
             selected_agent_id = rel.get("selected_agent_id")
             selected_version_no = rel.get("selected_agent_version_no")
+            # Fallback to resolved latest published version_no when pinned version is null or 0 (draft)
+            if (selected_version_no is None or selected_version_no == 0) and selected_agent_id in resolved_version_no_map:
+                selected_version_no = resolved_version_no_map[selected_agent_id]
             version_name = None
             if selected_agent_id and selected_version_no is not None:
                 version_name = version_name_map.get((selected_agent_id, selected_version_no))
