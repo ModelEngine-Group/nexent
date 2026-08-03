@@ -1283,7 +1283,7 @@ class TestSkillServiceDeleteSkill:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('os.path.join', return_value="/tmp/skills/del_skill"):
                 with patch('shutil.rmtree'):
                     result = service.delete_skill("del_skill", tenant_id="test-tenant", user_id="user123")
@@ -1327,11 +1327,12 @@ class TestSkillServiceGetSkillFileContent:
     def test_get_file_content_success(self, mocker):
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', mock_open(read_data="file content")):
                 result = service.get_skill_file_content("test_skill", "README.md")
 
@@ -1340,11 +1341,12 @@ class TestSkillServiceGetSkillFileContent:
     def test_get_file_content_not_found(self, mocker):
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=False):
+        with patch('os.path.isfile', return_value=False):
             result = service.get_skill_file_content("test_skill", "nonexistent.md")
 
         assert result is None
@@ -2527,7 +2529,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service.skill_manager = mock_manager
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             from consts.exceptions import SkillException
             try:
                 service.create_skill({"name": "local_conflict"})
@@ -2551,6 +2553,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2568,6 +2571,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2585,6 +2589,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3923,7 +3928,7 @@ class TestSkillServiceDeleteWithNoLocalDir:
 
         # The service joins local_skills_dir with skill_name, so os.path.join(None, x) would fail
         # We need to patch os.path.exists to handle the joined path check
-        with patch('os.path.exists', return_value=False):
+        with patch('os.path.isfile', return_value=False):
             with patch('os.path.join', return_value="/nonexistent/path/to_delete"):
                 result = service.delete_skill("to_delete", tenant_id="test-tenant", user_id="user123")
 
@@ -4357,11 +4362,12 @@ class TestSkillServiceGetSkillFileContentWithNestedPath:
         """Test getting file content with nested path."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', mock_open(read_data="nested content")):
                 result = service.get_skill_file_content("test_skill", "scripts/run.sh")
 
@@ -4375,11 +4381,12 @@ class TestSkillServiceGetSkillFileContentError:
         """Test getting file content with read error."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
                 from consts.exceptions import SkillException
                 try:
@@ -4612,12 +4619,13 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        service._upload_zip_files(
-            zip_buffer.getvalue(),
-            "new-skill copy",
-            "old-skill",
-            tenant_id=None,
-        )
+        with patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path)):
+            service._upload_zip_files(
+                zip_buffer.getvalue(),
+                "new-skill copy",
+                "old-skill",
+                tenant_id=None,
+            )
 
         assert (tmp_path / "new-skill copy" / "SKILL.md").is_file()
         assert (tmp_path / "new-skill copy" / "references" / "info.md").is_file()
@@ -4632,6 +4640,7 @@ class TestUploadZipFilesWithZipError:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -5873,7 +5882,7 @@ class TestSkillServiceUpdateById:
             "os.path.realpath",
             side_effect=lambda p: outside if "escaped" in p else str(tmp_path) if str(tmp_path) in p else p,
         )
-        with pytest.raises(skill_service.SkillException, match="Unsafe local skill path"):
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
             skill_service._resolve_local_skill_path(str(tmp_path), "escaped_skill")
 
     def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
@@ -6202,3 +6211,49 @@ class TestTooltipForCommentedMapKey:
         """Test with non-dict/cm value."""
         result = skill_service._tooltip_for_commented_map_key("not a map", [], 0, "key")
         assert result is None
+
+
+class TestLocalSkillPathSecurity:
+    """Regression tests for ZIP Slip and local file traversal."""
+
+    @staticmethod
+    def _service_for_path(tmp_path):
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path)
+        return SkillService(skill_manager=manager, tenant_id="tenant-1")
+
+    def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+
+        for unsafe_path in ("../secret.txt", "/tmp/secret.txt", "C:\\temp\\secret.txt", "\\\\host\\share\\x"):
+            with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+                skill_service._resolve_local_skill_path(str(tmp_path), "safe-skill", unsafe_path)
+
+    def test_zip_slip_is_rejected_before_any_file_is_written(self, mocker, tmp_path):
+        import zipfile
+
+        service = self._service_for_path(tmp_path)
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("SKILL.md", "---\nname: poczip\ndescription: poc\n---\n")
+            zf.writestr("../../../../escape.txt", "escaped")
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service._upload_zip_files(
+                archive.getvalue(),
+                "poczip",
+                tenant_id="tenant-1",
+            )
+
+        assert not (tmp_path / "poczip" / "SKILL.md").exists()
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_file_read_traversal_is_rejected(self, mocker, tmp_path):
+        service = self._service_for_path(tmp_path)
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        outside_file = tmp_path.parent / "secret.txt"
+        outside_file.write_text("secret", encoding="utf-8")
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service.get_skill_file_content("safe-skill", "../../secret.txt")

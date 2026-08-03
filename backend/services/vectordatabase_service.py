@@ -348,6 +348,7 @@ def _build_model_config(model: dict) -> dict:
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
+    model_type = model.get("model_type", "embedding")
     common_kwargs = {
         "api_key": model_config.get("api_key", ""),
         "base_url": model_config.get("base_url", ""),
@@ -355,13 +356,22 @@ def _create_embedding_model(model: dict) -> Any:
         "embedding_dim": model_config.get("max_tokens", 1024),
         "ssl_verify": model_config.get("ssl_verify", True),
     }
-    if model.get("model_type", "embedding") == "multi_embedding":
+
+    if model_type == "multi_embedding":
         model_factory = model.get("model_factory", "").lower()
         if model_factory == "dashscope":
             return DashScopeMultimodalEmbedding(**common_kwargs)
         if model_factory == "silicon":
             return SiliconflowMultimodalEmbedding(**common_kwargs)
         return JinaEmbedding(**common_kwargs)
+
+    if model_type != "embedding":
+        raise ValueError(
+            f"Invalid model_type '{model_type}' for model '{common_kwargs['model_name']}'. "
+            f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
+            f"Please check the model configuration in the model management page."
+        )
+
     return OpenAICompatibleEmbedding(**common_kwargs)
 
 def get_embedding_model(
@@ -431,13 +441,92 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
+    # #region debug logging for ES indexing issue
+    try:
+        import time as _debug_ts
+        with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+            _f.write(json.dumps({
+                "sessionId": "c7009d",
+                "runId": "debug-run-v3",
+                "hypothesisId": "by-id-enter",
+                "location": "vectordatabase_service.py:get_embedding_model_by_id",
+                "message": "get_embedding_model_by_id entered",
+                "data": {"tenant_id": tenant_id, "model_id": model_id},
+                "timestamp": int(_debug_ts.time() * 1000)
+            }) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
     try:
         model = get_model_by_model_id(model_id, tenant_id)
+        # #region debug logging for ES indexing issue
+        try:
+            with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+                _f.write(json.dumps({
+                    "sessionId": "c7009d",
+                    "runId": "debug-run-v3",
+                    "hypothesisId": "by-id-loaded",
+                    "location": "vectordatabase_service.py:get_embedding_model_by_id",
+                    "message": "model loaded by id",
+                    "data": {
+                        "tenant_id": tenant_id,
+                        "model_id": model_id,
+                        "model_found": model is not None,
+                        "model_keys": list(model.keys()) if model else None,
+                        "model_type": model.get("model_type") if model else None,
+                        "model_factory": model.get("model_factory") if model else None,
+                        "model_name": model.get("model_name") if model else None,
+                        "base_url": model.get("base_url") if model else None,
+                    },
+                    "timestamp": int(__import__('time').time() * 1000)
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
         if model and model.get("model_type") in ["embedding", "multi_embedding"]:
             return _create_embedding_model(model), model.get("model_id")
         else:
+            # #region debug logging for ES indexing issue
+            try:
+                with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "c7009d",
+                        "runId": "debug-run-v3",
+                        "hypothesisId": "by-id-rejected",
+                        "location": "vectordatabase_service.py:get_embedding_model_by_id",
+                        "message": "model rejected by type filter",
+                        "data": {
+                            "model_id": model_id,
+                            "model_type": model.get("model_type") if model else None,
+                            "allowed_types": ["embedding", "multi_embedding"],
+                        },
+                        "timestamp": int(__import__('time').time() * 1000)
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
             logger.warning(f"Model with id {model_id} not found or is not an embedding model")
     except Exception as e:
+        # #region debug logging for ES indexing issue
+        try:
+            with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+                _f.write(json.dumps({
+                    "sessionId": "c7009d",
+                    "runId": "debug-run-v3",
+                    "hypothesisId": "by-id-exception",
+                    "location": "vectordatabase_service.py:get_embedding_model_by_id",
+                    "message": "exception in by-id",
+                    "data": {
+                        "model_id": model_id,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e)[:500],
+                    },
+                    "timestamp": int(__import__('time').time() * 1000)
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
         logger.warning(f"Failed to get embedding model by id {model_id}: {e}")
     return None, None
 
@@ -1419,7 +1508,7 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
-                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "embedding" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
                     key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)

@@ -63,7 +63,7 @@ export interface AuthContextType {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
@@ -138,7 +138,7 @@ export interface AuthenticationContextType {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
@@ -179,7 +179,7 @@ export interface AuthenticationStateReturn {
   register: (
     email: string,
     password: string,
-    inviteCode?: string
+    inviteCode: string
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;

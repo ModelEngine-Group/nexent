@@ -742,8 +742,8 @@ export default function ToolConfigModal({
     try {
       const modelConfig = configData?.models;
       return (
-        modelConfig?.embedding?.modelName ||
         modelConfig?.embedding?.displayName ||
+        modelConfig?.embedding?.modelName ||
         null
       );
     } catch {
@@ -755,8 +755,8 @@ export default function ToolConfigModal({
     try {
       const modelConfig = configData?.models;
       return (
-        modelConfig?.multiEmbedding?.modelName ||
         modelConfig?.multiEmbedding?.displayName ||
+        modelConfig?.multiEmbedding?.modelName ||
         null
       );
     } catch {

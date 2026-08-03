@@ -55,7 +55,100 @@ patch('database.group_db.remove_user_from_all_groups').start()
 patch('database.group_db.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
-from backend.services.user_service import get_users, update_user, delete_user_and_cleanup
+from consts.exceptions import ForbiddenError, NotFoundException
+from backend.services.user_service import (
+    delete_user_and_cleanup,
+    get_users,
+    get_users_for_requester,
+    update_user,
+    update_user_for_requester,
+)
+
+
+class TestUserAuthorization:
+    """Test role and tenant enforcement for user management."""
+
+    def test_admin_can_list_own_tenant(self, mocker):
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        result = get_users_for_requester(
+            "tenant-1",
+            requester_tenant_id="tenant-1",
+            requester_role="ADMIN",
+        )
+
+        assert result == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with("tenant-1", 1, 20, "created_at", "desc")
+
+    @pytest.mark.parametrize(
+        "role,target_tenant",
+        [("ADMIN", "tenant-2"), ("DEV", "tenant-1"), ("USER", "tenant-1")],
+    )
+    def test_disallowed_user_listing_is_rejected(self, role, target_tenant):
+        with pytest.raises(ForbiddenError, match="list users"):
+            get_users_for_requester(
+                target_tenant,
+                requester_tenant_id="tenant-1",
+                requester_role=role,
+            )
+
+    @pytest.mark.asyncio
+    async def test_admin_can_update_non_su_in_own_tenant(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"tenant_id": "tenant-1", "user_role": "USER"},
+        )
+        mock_update = mocker.patch(
+            "backend.services.user_service.update_user",
+            return_value={"id": "user-2", "role": "DEV"},
+        )
+
+        result = await update_user_for_requester(
+            "user-2",
+            {"role": "DEV"},
+            updated_by="admin-1",
+            requester_tenant_id="tenant-1",
+            requester_role="ADMIN",
+        )
+
+        assert result["role"] == "DEV"
+        mock_update.assert_awaited_once_with("user-2", {"role": "DEV"}, "admin-1")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {"tenant_id": "tenant-2", "user_role": "USER"},
+            {"tenant_id": "tenant-1", "user_role": "SU"},
+        ],
+    )
+    async def test_admin_cannot_update_cross_tenant_or_su(self, mocker, target):
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=target)
+
+        with pytest.raises(ForbiddenError, match="update this user"):
+            await update_user_for_requester(
+                "user-2",
+                {"role": "DEV"},
+                updated_by="admin-1",
+                requester_tenant_id="tenant-1",
+                requester_role="ADMIN",
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_missing_user_returns_not_found(self, mocker):
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=None)
+
+        with pytest.raises(NotFoundException, match="not found"):
+            await update_user_for_requester(
+                "missing",
+                {"role": "USER"},
+                updated_by="su-1",
+                requester_tenant_id="tenant-1",
+                requester_role="SU",
+            )
 
 
 @pytest.fixture(autouse=True)

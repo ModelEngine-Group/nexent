@@ -5,7 +5,9 @@ import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 # Import the modules we need
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -44,7 +46,9 @@ services_module = types.ModuleType("services")
 tenant_service_module = types.ModuleType("services.tenant_service")
 tenant_service_module.create_tenant = MagicMock()
 tenant_service_module.get_tenant_info = MagicMock()
+tenant_service_module.get_tenant_info_for_user = MagicMock()
 tenant_service_module.get_tenants_paginated = MagicMock()
+tenant_service_module.get_tenants_paginated_for_user = MagicMock()
 tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
@@ -52,12 +56,66 @@ services_module.tenant_service = tenant_service_module
 utils_module = types.ModuleType("utils")
 auth_utils_module = types.ModuleType("utils.auth_utils")
 auth_utils_module.get_current_user_id = MagicMock()
+auth_utils_module.get_current_user_context = MagicMock()
 utils_module.auth_utils = auth_utils_module
 
 sys.modules["services"] = services_module
 sys.modules["services.tenant_service"] = tenant_service_module
 sys.modules["utils"] = utils_module
 sys.modules["utils.auth_utils"] = auth_utils_module
+
+from apps.tenant_app import router
+
+app = FastAPI()
+app.include_router(router)
+client = TestClient(app)
+
+
+class TestTenantAuthorizationEndpoints:
+    """Test authentication and authorization mapping at the HTTP boundary."""
+
+    def setup_method(self):
+        auth_utils_module.get_current_user_context.reset_mock(side_effect=True)
+        tenant_service_module.get_tenant_info_for_user.reset_mock(side_effect=True)
+        tenant_service_module.get_tenants_paginated_for_user.reset_mock(side_effect=True)
+
+    def test_tenant_list_requires_authentication(self):
+        auth_utils_module.get_current_user_context.side_effect = UnauthorizedError("Authentication required")
+
+        response = client.post("/tenants/tenant-list", json={"page": 1, "page_size": 20})
+
+        assert response.status_code == 401
+
+    def test_tenant_list_forbidden_role_returns_403(self):
+        auth_utils_module.get_current_user_context.return_value = ("admin-1", "tenant-1", "ADMIN")
+        tenant_service_module.get_tenants_paginated_for_user.side_effect = ForbiddenError("SU required")
+
+        response = client.post(
+            "/tenants/tenant-list",
+            json={"page": 1, "page_size": 20},
+            headers={"Authorization": "Bearer token"},
+        )
+
+        assert response.status_code == 403
+
+    def test_tenant_detail_passes_requester_scope(self):
+        auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "USER")
+        tenant_service_module.get_tenant_info_for_user.return_value = {
+            "tenant_id": "tenant-1",
+            "tenant_name": "Tenant 1",
+        }
+
+        response = client.get(
+            "/tenants/tenant-1",
+            headers={"Authorization": "Bearer token"},
+        )
+
+        assert response.status_code == 200
+        tenant_service_module.get_tenant_info_for_user.assert_called_once_with(
+            "tenant-1",
+            requester_tenant_id="tenant-1",
+            requester_role="USER",
+        )
 
 
 class TestTenantExceptions:

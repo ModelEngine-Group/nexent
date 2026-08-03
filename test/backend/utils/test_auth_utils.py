@@ -831,3 +831,32 @@ class TestResolveTenantIdFromUserTenantRecord:
     def test_empty_tenant_other_role_falls_back_to_default(self):
         record = {"tenant_id": None, "user_role": "USER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID
+
+
+class TestGetCurrentUserContext:
+    """Tests for authenticated tenant and role resolution."""
+
+    def test_returns_normalized_role_and_tenant(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        monkeypatch.setattr(
+            au,
+            "get_user_tenant_by_user_id",
+            lambda user_id: {"tenant_id": "tenant-1", "user_role": "admin"},
+        )
+
+        assert au.get_current_user_context("Bearer token") == ("user-1", "tenant-1", "ADMIN")
+
+    def test_rejects_user_without_tenant_record(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda user_id: None)
+
+        with pytest.raises(UnauthorizedError, match="relationship not found"):
+            au.get_current_user_context("Bearer token")
+
+    def test_speed_mode_does_not_require_tenant_record(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", True)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
+
+        assert au.get_current_user_context(None) == ("speed-user", "speed-tenant", "SPEED")

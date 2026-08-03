@@ -470,6 +470,28 @@ def create_index_documents(
     Index documents with embeddings, creating the index if it doesn't exist.
     Accepts a document list from data processing.
     """
+    # #region debug logging for ES indexing issue
+    try:
+        import time as _debug_ts
+        with open("c:/Project/nexent/debug-c7009d.log", "a") as _f:
+            _f.write(json.dumps({
+                "sessionId": "c7009d",
+                "runId": "debug-run-v3",
+                "hypothesisId": "entry-v3",
+                "location": "vectordatabase_app.py:create_index_documents",
+                "message": "create_index_documents entered",
+                "data": {
+                    "index_name": index_name,
+                    "data_count": len(data) if data else 0,
+                    "has_task_id": bool(task_id),
+                    "has_large_mode": large_mode,
+                },
+                "timestamp": int(_debug_ts.time() * 1000)
+            }) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)

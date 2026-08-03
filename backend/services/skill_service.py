@@ -8,6 +8,7 @@ import inspect
 import io
 import json
 import logging
+import ntpath
 import os
 import uuid
 import zipfile
@@ -895,28 +896,48 @@ def _resolve_local_skill_path(
         or "\\" in name
         or "\x00" in name
         or os.path.basename(name) != name
+        or os.path.isabs(name)
+        or ntpath.isabs(name)
+        or bool(ntpath.splitdrive(name)[0])
     ):
         raise SkillException("Invalid skill name for local file access")
 
-    allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
-    local_root = os.path.realpath(local_skills_dir)
-    if (
-        local_root != allowed_root
-        and not local_root.startswith(allowed_root + os.sep)
-    ):
-        raise SkillException("Unsafe local skills directory")
+    normalized_parts: List[str] = []
+    for part in parts:
+        raw_part = str(part or "")
+        if "\x00" in raw_part:
+            raise ForbiddenError("Unsafe local skill path")
+        if (
+            os.path.isabs(raw_part)
+            or ntpath.isabs(raw_part)
+            or bool(ntpath.splitdrive(raw_part)[0])
+        ):
+            raise ForbiddenError("Unsafe local skill path")
 
-    candidate = os.path.realpath(os.path.join(local_root, name, *parts))
-    if (
-        candidate != allowed_root
-        and not candidate.startswith(allowed_root + os.sep)
-    ):
-        raise SkillException("Unsafe local skill path")
-    if (
-        candidate != local_root
-        and not candidate.startswith(local_root + os.sep)
-    ):
-        raise SkillException("Unsafe local skill path")
+        path_segments = raw_part.replace("\\", "/").split("/")
+        if any(segment == ".." for segment in path_segments):
+            raise ForbiddenError("Unsafe local skill path")
+        normalized_parts.extend(
+            segment for segment in path_segments if segment not in {"", "."}
+        )
+
+    local_root = os.path.realpath(local_skills_dir)
+    skill_root = os.path.realpath(os.path.join(local_root, name))
+    candidate = os.path.realpath(os.path.join(skill_root, *normalized_parts))
+
+    def _is_within(root: str, path: str) -> bool:
+        try:
+            return os.path.normcase(os.path.commonpath([root, path])) == os.path.normcase(root)
+        except ValueError:
+            return False
+
+    if CONTAINER_SKILLS_PATH:
+        allowed_root = os.path.realpath(CONTAINER_SKILLS_PATH)
+        if not _is_within(allowed_root, local_root):
+            raise SkillException("Unsafe local skills directory")
+
+    if not _is_within(local_root, skill_root) or not _is_within(skill_root, candidate):
+        raise ForbiddenError("Unsafe local skill path")
     return candidate
 
 
@@ -1542,7 +1563,7 @@ class SkillService:
             with zipfile.ZipFile(zip_stream, "r") as zf:
                 logger.info("ZIP contains %d entries for skill '%s'", len(file_list), skill_name)
 
-                extracted_count = 0
+                validated_files: List[Tuple[str, str]] = []
                 for file_path in file_list:
                     if file_path.endswith("/"):
                         continue
@@ -1564,11 +1585,16 @@ class SkillService:
                     if not relative_path:
                         continue
 
-                    file_data = zf.read(file_path)
+                    local_path = _resolve_local_skill_path(
+                        self._local_skills_dir(tenant_id),
+                        skill_name,
+                        relative_path,
+                    )
+                    validated_files.append((file_path, local_path))
 
-                    local_dir = os.path.join(self._local_skills_dir(tenant_id), skill_name)
-                    normalized_relative = relative_path.replace("/", os.sep).replace("\\", os.sep)
-                    local_path = os.path.normpath(os.path.join(local_dir, normalized_relative))
+                extracted_count = 0
+                for file_path, local_path in validated_files:
+                    file_data = zf.read(file_path)
                     os.makedirs(os.path.dirname(local_path), exist_ok=True)
                     with open(local_path, "wb") as f:
                         f.write(file_data)
@@ -1579,6 +1605,9 @@ class SkillService:
                 "Completed ZIP extraction for skill '%s': %d files extracted to '%s'",
                 skill_name, extracted_count, self._local_skills_dir(tenant_id)
             )
+        except ForbiddenError:
+            logger.warning("Rejected unsafe ZIP path for skill '%s'", skill_name)
+            raise
         except Exception as e:
             logger.error("Failed to extract ZIP files for skill '%s': %s", skill_name, e)
             raise
@@ -2009,6 +2038,8 @@ class SkillService:
                 skill_id = skill_instance.get("skill_id")
                 skill = skill_db.get_skill_by_id(skill_id, tenant_id)
                 if skill:
+                    effective_config_values = dict(skill.get("config_values") or {})
+                    effective_config_values.update(skill_instance.get("config_values") or {})
                     # Get skill info from ag_skill_info_t (repository returns keys: name, description, content)
                     merged = {
                         "skill_id": skill_id,
@@ -2017,6 +2048,8 @@ class SkillService:
                         "content": skill.get("content", ""),
                         "enabled": skill_instance.get("enabled", True),
                         "tool_ids": skill.get("tool_ids", []),
+                        "config_schemas": skill.get("config_schemas") or [],
+                        "config_values": effective_config_values,
                     }
                     result.append(merged)
 
@@ -2194,16 +2227,21 @@ class SkillService:
         """
         try:
             effective_tenant_id = tenant_id or self.tenant_id
-            local_dir = os.path.join(self._local_skills_dir(effective_tenant_id), skill_name)
-            normalized_file_path = file_path.replace("/", os.sep).replace("\\", os.sep)
-            full_path = os.path.normpath(os.path.join(local_dir, normalized_file_path))
+            full_path = _resolve_local_skill_path(
+                self._local_skills_dir(effective_tenant_id),
+                skill_name,
+                file_path,
+            )
 
-            if not os.path.exists(full_path):
-                logger.warning(f"File not found: {full_path}")
+            if not os.path.isfile(full_path):
+                logger.warning("Skill file not found: %s/%s", skill_name, file_path)
                 return None
 
             with open(full_path, "r", encoding="utf-8") as f:
                 return f.read()
+        except ForbiddenError:
+            logger.warning("Rejected unsafe file read for skill '%s'", skill_name)
+            raise
         except Exception as e:
             logger.error(f"Error reading skill file {skill_name}/{file_path}: {e}")
             raise SkillException(f"Failed to read skill file: {str(e)}") from e

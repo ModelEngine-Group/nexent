@@ -1370,10 +1370,11 @@ class TestGetSkillInstanceEndpointExtended:
                 assert data.get("skill_description") == "Test description"
                 assert data.get("skill_content") == "# Test content"
                 assert data.get("config_schemas") == [{"name": "key", "type": "string"}]
-                # Endpoint uses template config_values as base, then merges instance params
-                # Since instance_params comes from instance's config_values (which was overwritten by template),
-                # the result is the template values
-                assert data.get("config_values") == {"template_key": "template_value"}
+                # Template defaults are returned together with saved per-agent values.
+                assert data.get("config_values") == {
+                    "template_key": "template_value",
+                    "instance_key": "instance_value",
+                }
 
     def test_get_instance_unauthorized(self, mocker):
         """Test instance retrieval without authorization."""
@@ -1818,6 +1819,24 @@ class TestGetSkillFileContentEndpointExtended:
             response = client.get("/skills/test_skill/files/README.md")
 
             assert response.status_code == 500
+
+    def test_get_file_content_traversal_returns_forbidden(self):
+        """Unsafe file paths should map to HTTP 403 without leaking local paths."""
+        from backend.apps.skill_app import ForbiddenError
+
+        with patch("backend.apps.skill_app.get_current_user_id", return_value=("user-1", "tenant-1")), \
+                patch("backend.apps.skill_app.SkillService") as mock_service_class:
+            mock_service = MagicMock()
+            mock_service_class.return_value = mock_service
+            mock_service.get_skill.return_value = {"name": "test_skill", "tenant_id": "tenant-1"}
+            mock_service.get_skill_file_content.side_effect = ForbiddenError("Unsafe local skill path")
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            response = TestClient(app).get("/skills/test_skill/files/scripts/secret.txt")
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Unsafe local skill path"
 
 
 # ===== Update Skill From File Endpoint Additional Tests =====
@@ -2621,6 +2640,10 @@ class TestUpdateSkillInstanceWithConfigMerge:
                 assert response.status_code == 200
                 data = response.json()
                 assert "instance" in data
+                assert data["instance"]["config_values"] == {
+                    "template_key": "template_value",
+                    "instance_key": "instance_value",
+                }
 
 
 # ===== Update Skill with config_schemas tests =====

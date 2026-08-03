@@ -2470,6 +2470,7 @@ class TestCreateBuiltinTool:
             agent_id=31,
             tenant_id="tenant_config",
             version_no=9,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -2506,6 +2507,7 @@ class TestCreateBuiltinTool:
             agent_id=None,
             tenant_id=None,
             version_no=0,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -4260,6 +4262,7 @@ class TestCreateBuiltinTool:
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 version_no=1,
+                config_overrides=None,
             )
 
     def test_create_builtin_tool_unknown_tool(self, nexent_agent_instance):

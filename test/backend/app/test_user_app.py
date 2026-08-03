@@ -49,7 +49,7 @@ patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 
 # Import exception classes
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -67,9 +67,17 @@ client = TestClient(app)
 class TestGetUsersEndpoint:
     """Test get_users_endpoint (POST /users/list)"""
 
+    @pytest.fixture(autouse=True)
+    def mock_requester_context(self):
+        with patch(
+            "apps.user_app.get_current_user_context",
+            return_value=("admin-1", "tenant1", "ADMIN"),
+        ):
+            yield
+
     def test_get_users_success_with_pagination(self):
         """Test successful user list retrieval with pagination"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"},
@@ -95,11 +103,14 @@ class TestGetUsersEndpoint:
             assert data["pagination"]["page"] == 1
             assert data["pagination"]["page_size"] == 20
             assert data["pagination"]["total_pages"] == 1
-            mock_get_users.assert_called_once_with("tenant1", 1, 20, "created_at", "desc")
+            mock_get_users.assert_called_once_with(
+                "tenant1", 1, 20, "created_at", "desc",
+                requester_tenant_id="tenant1", requester_role="ADMIN",
+            )
 
     def test_get_users_success_without_pagination(self):
         """Test successful user list retrieval without pagination (returns all data)"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"},
@@ -120,11 +131,14 @@ class TestGetUsersEndpoint:
             assert len(data["data"]) == 3
             assert data["total"] == 3
             assert "pagination" not in data
-            mock_get_users.assert_called_once_with("tenant1", None, None, "created_at", "desc")
+            mock_get_users.assert_called_once_with(
+                "tenant1", None, None, "created_at", "desc",
+                requester_tenant_id="tenant1", requester_role="ADMIN",
+            )
 
     def test_get_users_success_with_only_page(self):
         """Test user list retrieval with only page parameter (no pagination info in response)"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -144,7 +158,7 @@ class TestGetUsersEndpoint:
 
     def test_get_users_success_with_only_page_size(self):
         """Test user list retrieval with only page_size parameter (no pagination info in response)"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -164,7 +178,7 @@ class TestGetUsersEndpoint:
 
     def test_get_users_success_with_asc_sort(self):
         """Test successful user list retrieval with ascending sort order"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -183,11 +197,14 @@ class TestGetUsersEndpoint:
             assert response.status_code == HTTPStatus.OK
             data = response.json()
             assert data["message"] == "Users retrieved successfully"
-            mock_get_users.assert_called_once_with("tenant1", 1, 20, "created_at", "asc")
+            mock_get_users.assert_called_once_with(
+                "tenant1", 1, 20, "created_at", "asc",
+                requester_tenant_id="tenant1", requester_role="ADMIN",
+            )
 
     def test_get_users_empty_list(self):
         """Test user list retrieval with no users"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [],
                 "total": 0,
@@ -209,7 +226,7 @@ class TestGetUsersEndpoint:
 
     def test_get_users_with_custom_pagination(self):
         """Test user list retrieval with custom pagination (multiple pages)"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -231,11 +248,14 @@ class TestGetUsersEndpoint:
             assert data["pagination"]["page_size"] == 10
             assert data["pagination"]["total"] == 25
             assert data["pagination"]["total_pages"] == 3
-            mock_get_users.assert_called_once_with("tenant1", 2, 10, "created_at", "desc")
+            mock_get_users.assert_called_once_with(
+                "tenant1", 2, 10, "created_at", "desc",
+                requester_tenant_id="tenant1", requester_role="ADMIN",
+            )
 
     def test_get_users_with_missing_total_pages(self):
         """Test user list retrieval when total_pages is missing (should calculate it)"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
@@ -257,7 +277,7 @@ class TestGetUsersEndpoint:
 
     def test_get_users_unexpected_error(self):
         """Test user list retrieval with unexpected error"""
-        with patch('apps.user_app.get_users') as mock_get_users:
+        with patch('apps.user_app.get_users_for_requester') as mock_get_users:
             mock_get_users.side_effect = Exception("Database connection failed")
 
             response = client.post(
@@ -270,16 +290,34 @@ class TestGetUsersEndpoint:
             assert "Failed to retrieve users" in data["detail"]
             assert "Database connection failed" in data["detail"]
 
+    def test_get_users_requires_authentication(self):
+        with patch(
+            "apps.user_app.get_current_user_context",
+            side_effect=UnauthorizedError("Authentication required"),
+        ):
+            response = client.post("/users/list", json={"tenant_id": "tenant1"})
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    def test_get_users_forbidden_scope_returns_403(self):
+        with patch(
+            "apps.user_app.get_users_for_requester",
+            side_effect=ForbiddenError("Not authorized to list users for this tenant"),
+        ):
+            response = client.post("/users/list", json={"tenant_id": "tenant2"})
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+
 
 class TestUpdateUserEndpoint:
     """Test update_user_endpoint (PUT /users/{user_id})"""
 
     def test_update_user_success(self):
         """Test successful user update"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.update_user') as mock_update_user:
+        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
+             patch('apps.user_app.update_user_for_requester') as mock_update_user:
 
-            mock_get_user_id.return_value = ("updater123", "tenant1")
+            mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.return_value = {
                 "id": "user1",
                 "username": "user1@example.com",
@@ -299,14 +337,20 @@ class TestUpdateUserEndpoint:
             assert data["data"]["role"] == "ADMIN"
             mock_get_user_id.assert_called_once_with("Bearer token123")
             # Pydantic model includes all fields with None defaults
-            mock_update_user.assert_called_once_with("user1", {"username": None, "email": None, "role": "ADMIN"}, "updater123")
+            mock_update_user.assert_called_once_with(
+                "user1",
+                {"username": None, "email": None, "role": "ADMIN"},
+                updated_by="updater123",
+                requester_tenant_id="tenant1",
+                requester_role="ADMIN",
+            )
 
     def test_update_user_validation_error(self):
         """Test user update with validation error"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.update_user') as mock_update_user:
+        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
+             patch('apps.user_app.update_user_for_requester') as mock_update_user:
 
-            mock_get_user_id.return_value = ("updater123", "tenant1")
+            mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.side_effect = ValueError("Invalid role. Must be one of: ADMIN, DEV, USER")
 
             response = client.put(
@@ -323,10 +367,10 @@ class TestUpdateUserEndpoint:
 
     def test_update_user_unexpected_error(self):
         """Test user update with unexpected error"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.update_user') as mock_update_user:
+        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
+             patch('apps.user_app.update_user_for_requester') as mock_update_user:
 
-            mock_get_user_id.return_value = ("updater123", "tenant1")
+            mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.side_effect = Exception("Database connection failed")
 
             response = client.put(
@@ -339,6 +383,22 @@ class TestUpdateUserEndpoint:
             data = response.json()
             assert "Failed to update user" in data["detail"]
             assert "Database connection failed" in data["detail"]
+
+    def test_update_user_forbidden_scope_returns_403(self):
+        with patch(
+            "apps.user_app.get_current_user_context",
+            return_value=("admin-1", "tenant1", "ADMIN"),
+        ), patch(
+            "apps.user_app.update_user_for_requester",
+            side_effect=ForbiddenError("Not authorized to update this user"),
+        ):
+            response = client.put(
+                "/users/user2",
+                json={"role": "USER"},
+                headers={"Authorization": "Bearer token123"},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
 
 
 class TestDeleteUserEndpoint:
@@ -450,10 +510,10 @@ class TestDataValidation:
 
     def test_update_user_empty_update_data(self):
         """Test update user with empty update data"""
-        with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.update_user') as mock_update_user:
+        with patch('apps.user_app.get_current_user_context') as mock_get_user_id, \
+             patch('apps.user_app.update_user_for_requester') as mock_update_user:
 
-            mock_get_user_id.return_value = ("updater123", "tenant1")
+            mock_get_user_id.return_value = ("updater123", "tenant1", "ADMIN")
             mock_update_user.return_value = {
                 "id": "user1",
                 "username": "user1@example.com",
@@ -468,7 +528,13 @@ class TestDataValidation:
 
             assert response.status_code == HTTPStatus.OK
             # Pydantic model converts empty dict to dict with None values for all optional fields
-            mock_update_user.assert_called_once_with("user1", {"username": None, "email": None, "role": None}, "updater123")
+            mock_update_user.assert_called_once_with(
+                "user1",
+                {"username": None, "email": None, "role": None},
+                updated_by="updater123",
+                requester_tenant_id="tenant1",
+                requester_role="ADMIN",
+            )
 
 
 if __name__ == "__main__":

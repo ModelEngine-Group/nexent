@@ -13,6 +13,10 @@ import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../SkillDetailModal";
 import SkillConfigModal from "./SkillConfigModal";
 import SkillRowContent from "./SkillRowContent";
+import {
+  hasMissingRequiredSkillConfig,
+  withEffectiveSkillConfig,
+} from "./utils";
 
 interface SelectSkillsDialogProps {
   readonly open: boolean;
@@ -106,14 +110,24 @@ export default function SelectSkillsDialog({
     () => filteredGroups.find((group) => group.key === activeTab),
     [activeTab, filteredGroups]
   );
+  const selectableSkillsInActiveGroup = useMemo(
+    () =>
+      activeGroup?.skills.filter((skill) => {
+        const configuredSkill = withEffectiveSkillConfig(
+          skill,
+          skillInstanceMap[skill.skill_id]
+        );
+        return !hasMissingRequiredSkillConfig(configuredSkill);
+      }) || [],
+    [activeGroup, skillInstanceMap]
+  );
   const allVisibleSkillsSelected = useMemo(
     () =>
-      activeGroup !== undefined &&
-      activeGroup.skills.length > 0 &&
-      activeGroup.skills.every((skill) =>
+      selectableSkillsInActiveGroup.length > 0 &&
+      selectableSkillsInActiveGroup.every((skill) =>
         selectedSkillIds.has(Number(skill.skill_id))
       ),
-    [activeGroup, selectedSkillIds]
+    [selectableSkillsInActiveGroup, selectedSkillIds]
   );
 
   const skillMetadataModifiable = useMemo(
@@ -188,37 +202,43 @@ export default function SelectSkillsDialog({
         return;
       }
 
-      updateSkills([
-        ...currentSkills,
-        {
-          ...skill,
-          config_values:
-            skillInstanceMap[skill.skill_id] || skill.config_values || {},
-        },
-      ]);
+      const configuredSkill = withEffectiveSkillConfig(
+        skill,
+        skillInstanceMap[skill.skill_id]
+      );
+
+      if (hasMissingRequiredSkillConfig(configuredSkill)) {
+        setConfigSkill(configuredSkill);
+        return;
+      }
+
+      updateSkills([...currentSkills, configuredSkill]);
     },
     [isReadOnly, skillInstanceMap, updateSkills]
   );
 
   const selectAllVisibleSkills = useCallback(() => {
-    if (isReadOnly || !activeGroup) return;
+    if (isReadOnly || selectableSkillsInActiveGroup.length === 0) return;
 
     const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
     const currentSkillIds = new Set(
       currentSkills.map((skill) => Number(skill.skill_id))
     );
-    const skillsToAdd = activeGroup.skills
+    const skillsToAdd = selectableSkillsInActiveGroup
       .filter((skill) => !currentSkillIds.has(Number(skill.skill_id)))
-      .map((skill) => ({
-        ...skill,
-        config_values:
-          skillInstanceMap[skill.skill_id] || skill.config_values || {},
-      }));
+      .map((skill) =>
+        withEffectiveSkillConfig(skill, skillInstanceMap[skill.skill_id])
+      );
 
     if (skillsToAdd.length > 0) {
       updateSkills([...currentSkills, ...skillsToAdd]);
     }
-  }, [activeGroup, isReadOnly, skillInstanceMap, updateSkills]);
+  }, [
+    isReadOnly,
+    selectableSkillsInActiveGroup,
+    skillInstanceMap,
+    updateSkills,
+  ]);
 
   const deselectAllVisibleSkills = useCallback(() => {
     if (isReadOnly || !activeGroup) return;
@@ -249,11 +269,9 @@ export default function SelectSkillsDialog({
   const openSkillConfig = useCallback(
     (skill: Skill, event: React.MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
-      setConfigSkill({
-        ...skill,
-        config_values:
-          skillInstanceMap[skill.skill_id] || skill.config_values || {},
-      });
+      setConfigSkill(
+        withEffectiveSkillConfig(skill, skillInstanceMap[skill.skill_id])
+      );
     },
     [skillInstanceMap]
   );
@@ -359,9 +377,7 @@ export default function SelectSkillsDialog({
               ? deselectAllVisibleSkills
               : selectAllVisibleSkills
           }
-          disabled={
-            isReadOnly || !activeGroup || activeGroup.skills.length === 0
-          }
+          disabled={isReadOnly || selectableSkillsInActiveGroup.length === 0}
         >
           {t(
             allVisibleSkillsSelected ? "common.deselectAll" : "common.selectAll"

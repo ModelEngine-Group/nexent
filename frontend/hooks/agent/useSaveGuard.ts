@@ -4,7 +4,12 @@ import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { updateAgentInfo, updateToolConfig, searchToolConfig, searchAgentInfo } from "@/services/agentConfigService";
+import {
+  updateAgentInfo,
+  updateToolConfig,
+  searchToolConfig,
+  searchAgentInfo,
+} from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 
@@ -18,7 +23,10 @@ import log from "@/lib/logger";
  * to the database, so the next "Test" execution uses the backend default
  * instead of the polluted value.
  */
-function isValueCompatibleWithType(value: unknown, type: string | undefined): boolean {
+function isValueCompatibleWithType(
+  value: unknown,
+  type: string | undefined
+): boolean {
   if (type === undefined) return true;
   switch (type) {
     case "number":
@@ -32,11 +40,15 @@ function isValueCompatibleWithType(value: unknown, type: string | undefined): bo
       }
       return false;
     case "boolean":
-      return typeof value === "boolean" || value === "true" || value === "false";
+      return (
+        typeof value === "boolean" || value === "true" || value === "false"
+      );
     case "array":
       return Array.isArray(value);
     case "object":
-      return typeof value === "object" && value !== null && !Array.isArray(value);
+      return (
+        typeof value === "object" && value !== null && !Array.isArray(value)
+      );
     case "string":
     default:
       // For string-like params, anything other than null/undefined is acceptable;
@@ -64,9 +76,7 @@ async function batchUpdateToolConfigs(
   baselineTools: any[]
 ) {
   // Get the set of currently selected tool IDs
-  const currentToolIds = new Set(
-    currentTools.map((tool) => parseInt(tool.id))
-  );
+  const currentToolIds = new Set(currentTools.map((tool) => parseInt(tool.id)));
 
   // Get the set of baseline (original) tool IDs
   const baselineToolIds = new Set(
@@ -83,16 +93,23 @@ async function batchUpdateToolConfigs(
     // — e.g. when a knowledge_base_search top_k slot was previously polluted
     // with a KB id string, we want to drop it so the backend default kicks in
     // instead of saving the wrong value again.
-    const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-      if (param.value === undefined || param.value === null) {
-        return acc;
-      }
-      if (param.type && !isValueCompatibleWithType(param.value, param.type)) {
-        return acc;
-      }
-      acc[param.name] = param.value;
-      return acc;
-    }, {} as Record<string, any>) || {};
+    const params =
+      tool.initParams?.reduce(
+        (acc: Record<string, any>, param: any) => {
+          if (param.value === undefined || param.value === null) {
+            return acc;
+          }
+          if (
+            param.type &&
+            !isValueCompatibleWithType(param.value, param.type)
+          ) {
+            return acc;
+          }
+          acc[param.name] = param.value;
+          return acc;
+        },
+        {} as Record<string, any>
+      ) || {};
 
     try {
       // Update or create tool instance with current params and enabled status
@@ -112,9 +129,10 @@ async function batchUpdateToolConfigs(
     try {
       // Fetch existing params to preserve them when disabling
       const toolInstance = await searchToolConfig(toolId, agentId);
-      const existingParams = toolInstance.success && toolInstance.data?.params
-        ? toolInstance.data.params
-        : {};
+      const existingParams =
+        toolInstance.success && toolInstance.data?.params
+          ? toolInstance.data.params
+          : {};
 
       // Disable the tool while preserving its params
       await updateToolConfig(toolId, agentId, existingParams, false);
@@ -167,7 +185,9 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
-      const relatedExternalAgentIds = (currentEditedAgent.external_sub_agent_id_list || [])
+      const relatedExternalAgentIds = (
+        currentEditedAgent.external_sub_agent_id_list || []
+      )
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
@@ -179,10 +199,26 @@ export const useSaveGuard = () => {
         .map((skill: any) => Number(skill.skill_id))
         .filter((id: number) => Number.isFinite(id));
 
+      const skillInstances = (currentEditedAgent.skills || [])
+        .map((skill: any) => ({
+          skill_id: Number(skill.skill_id),
+          enabled: true,
+          config_values:
+            skill.config_values && typeof skill.config_values === "object"
+              ? skill.config_values
+              : {},
+        }))
+        .filter((skill: { skill_id: number }) =>
+          Number.isFinite(skill.skill_id)
+        );
+
       // Ensure model_ids always has a value - fall back to a single-element array
       // using the first element from model_names when model_ids is empty
       const modelIdsToSave = (() => {
-        if (currentEditedAgent.model_ids && currentEditedAgent.model_ids.length > 0) {
+        if (
+          currentEditedAgent.model_ids &&
+          currentEditedAgent.model_ids.length > 0
+        ) {
           return currentEditedAgent.model_ids;
         }
         // Fallback: when only model name is available, map it to model_ids via available LLM list
@@ -203,7 +239,8 @@ export const useSaveGuard = () => {
         model_ids: modelIdsToSave,
         max_steps: currentEditedAgent.max_step,
         is_main_agent: currentEditedAgent.is_main_agent ?? true,
-        requested_output_tokens: currentEditedAgent.requested_output_tokens ?? null,
+        requested_output_tokens:
+          currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
@@ -211,15 +248,20 @@ export const useSaveGuard = () => {
         duty_prompt: currentEditedAgent.duty_prompt,
         constraint_prompt: currentEditedAgent.constraint_prompt,
         few_shots_prompt: currentEditedAgent.few_shots_prompt,
-        business_logic_model_name: currentEditedAgent.business_logic_model_name ?? undefined,
-        business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
+        business_logic_model_name:
+          currentEditedAgent.business_logic_model_name ?? undefined,
+        business_logic_model_id:
+          currentEditedAgent.business_logic_model_id ?? undefined,
         prompt_template_id: currentEditedAgent.prompt_template_id ?? 0,
-        prompt_template_name: currentEditedAgent.prompt_template_name ?? "system_default",
+        prompt_template_name:
+          currentEditedAgent.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         enabled_skill_ids: enabledSkillIds,
+        skill_instances: skillInstances,
         related_agent_ids: relatedAgentIds,
         related_external_agent_ids: relatedExternalAgentIds,
-        ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
+        ingroup_permission:
+          currentEditedAgent.ingroup_permission ?? "READ_ONLY",
         greeting_message: currentEditedAgent.greeting_message,
         example_questions: currentEditedAgent.example_questions,
       });
@@ -227,9 +269,7 @@ export const useSaveGuard = () => {
       if (result.success) {
         // Mark as saved
         useAgentConfigStore.getState().markAsSaved();
-        message.success(
-            t("businessLogic.config.message.agentSaveSuccess")
-        );
+        message.success(t("businessLogic.config.message.agentSaveSuccess"));
 
         // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
         const finalAgentId = result.data?.agent_id || currentAgentId;
@@ -242,7 +282,9 @@ export const useSaveGuard = () => {
         if (isCreatingMode) {
           try {
             // Load the full agent details
-            const agentDetailResult = await searchAgentInfo(Number(finalAgentId));
+            const agentDetailResult = await searchAgentInfo(
+              Number(finalAgentId)
+            );
             if (agentDetailResult.success && agentDetailResult.data) {
               // Exit create mode and set the newly created agent as current
               useAgentConfigStore.getState().setCurrentAgent({
@@ -258,22 +300,34 @@ export const useSaveGuard = () => {
         }
 
         // Batch process tool configurations for both create and update modes
-        const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
-        await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
+        const baselineTools =
+          useAgentConfigStore.getState().baselineAgent?.tools || [];
+        await batchUpdateToolConfigs(
+          finalAgentId,
+          currentEditedAgent.tools || [],
+          baselineTools
+        );
 
         // Refresh cache
         await queryClient.invalidateQueries({
-          queryKey: ["agentInfo", finalAgentId]
+          queryKey: ["agentInfo", finalAgentId],
         });
         await queryClient.refetchQueries({
-          queryKey: ["agentInfo", finalAgentId]
+          queryKey: ["agentInfo", finalAgentId],
         });
 
         // CRITICAL: Update store with the latest data from cache after saving tool configs
         // This ensures that on subsequent saves, the tool initParams reflect the latest
         // values that were saved (including any defaults merged by the backend)
-        const latestAgentData = queryClient.getQueryData(["agentInfo", finalAgentId]);
-        if (latestAgentData && typeof latestAgentData === 'object' && 'tools' in latestAgentData) {
+        const latestAgentData = queryClient.getQueryData([
+          "agentInfo",
+          finalAgentId,
+        ]);
+        if (
+          latestAgentData &&
+          typeof latestAgentData === "object" &&
+          "tools" in latestAgentData
+        ) {
           const latestTools = (latestAgentData as any).tools || [];
           // Update editedAgent with the latest tools from cache
           useAgentConfigStore.getState().updateTools(latestTools);
@@ -281,7 +335,7 @@ export const useSaveGuard = () => {
 
         // Refresh skill instances after save
         await queryClient.invalidateQueries({
-          queryKey: ["agentSkillInstances", finalAgentId]
+          queryKey: ["agentSkillInstances", finalAgentId],
         });
 
         // Also invalidate the agents list cache to ensure the list reflects any changes
@@ -291,62 +345,60 @@ export const useSaveGuard = () => {
         useAgentConfigStore.getState().markAsSaved();
         return true;
       } else {
-        message.error(result.message || t("businessLogic.config.error.saveFailed") );
+        message.error(
+          result.message || t("businessLogic.config.error.saveFailed")
+        );
         return false;
       }
     } catch (error) {
-      message.error(t("businessLogic.config.error.saveFailed") );
+      message.error(t("businessLogic.config.error.saveFailed"));
       return false;
     }
   }, [t, message, queryClient]);
 
   // Function with confirmation dialog - prompts user to save/discard
-  const saveWithModal = useCallback(
-    async (): Promise<boolean> => {
-      // Get the latest hasUnsavedChanges from store at call time
-      const currentHasUnsavedChanges = useAgentConfigStore.getState().hasUnsavedChanges;
+  const saveWithModal = useCallback(async (): Promise<boolean> => {
+    // Get the latest hasUnsavedChanges from store at call time
+    const currentHasUnsavedChanges =
+      useAgentConfigStore.getState().hasUnsavedChanges;
 
-      if (!currentHasUnsavedChanges) {
-        return true; // No unsaved changes, proceed
-      }
+    if (!currentHasUnsavedChanges) {
+      return true; // No unsaved changes, proceed
+    }
 
-      // Show confirmation dialog
-      return new Promise((resolve) => {
-        confirm({
-          title: t("agentConfig.modals.saveConfirm.title"),
-          content: t("agentConfig.modals.saveConfirm.content"),
-          okText: t("agentConfig.modals.saveConfirm.save"),
-          cancelText: t("agentConfig.modals.saveConfirm.discard"),
-          onOk: async () => {
-            const success = await save();
-            resolve(success);
-          },
-          onCancel: () => {
-            // Discard changes
-            useAgentConfigStore.getState().discardChanges();
-            resolve(true);
-          },
-        });
+    // Show confirmation dialog
+    return new Promise((resolve) => {
+      confirm({
+        title: t("agentConfig.modals.saveConfirm.title"),
+        content: t("agentConfig.modals.saveConfirm.content"),
+        okText: t("agentConfig.modals.saveConfirm.save"),
+        cancelText: t("agentConfig.modals.saveConfirm.discard"),
+        onOk: async () => {
+          const success = await save();
+          resolve(success);
+        },
+        onCancel: () => {
+          // Discard changes
+          useAgentConfigStore.getState().discardChanges();
+          resolve(true);
+        },
       });
-    },
-    []
-  );
+    });
+  }, []);
 
   // Function for direct save - saves without confirmation dialog
-  const saveDirectly = useCallback(
-    async (): Promise<boolean> => {
-      // Get the latest hasUnsavedChanges from store at call time
-      const currentHasUnsavedChanges = useAgentConfigStore.getState().hasUnsavedChanges;
+  const saveDirectly = useCallback(async (): Promise<boolean> => {
+    // Get the latest hasUnsavedChanges from store at call time
+    const currentHasUnsavedChanges =
+      useAgentConfigStore.getState().hasUnsavedChanges;
 
-      if (!currentHasUnsavedChanges) {
-        return true; // No unsaved changes, nothing to save
-      }
+    if (!currentHasUnsavedChanges) {
+      return true; // No unsaved changes, nothing to save
+    }
 
-      // Save directly without confirmation
-      return await save();
-    },
-    []
-  );
+    // Save directly without confirmation
+    return await save();
+  }, []);
 
   return { save, saveWithModal };
 };

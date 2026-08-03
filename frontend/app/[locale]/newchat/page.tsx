@@ -69,10 +69,10 @@ const PersistentChatHome: FC = () => {
   );
 
   useEffect(() => {
-    const conversationId = new URLSearchParams(window.location.search).get(
-      "conversation_id",
-    );
-    setRequestedThreadId(conversationId || undefined);
+    const searchParams = new URLSearchParams(window.location.search);
+    const threadId =
+      searchParams.get("thread_id") ?? searchParams.get("conversation_id");
+    setRequestedThreadId(threadId || undefined);
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({

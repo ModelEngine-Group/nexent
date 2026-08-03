@@ -1781,13 +1781,45 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
 
-    # Handle enabled skills saving when provided
+    # Handle enabled skills and their per-agent configuration.
     try:
-        if request.enabled_skill_ids is not None and agent_id is not None:
-            enabled_set = set(request.enabled_skill_ids)
+        requested_skill_instances = getattr(request, "skill_instances", None)
+        has_structured_skill_instances = isinstance(requested_skill_instances, list)
+        if (
+            (has_structured_skill_instances or request.enabled_skill_ids is not None)
+            and agent_id is not None
+        ):
+            raw_version_no = getattr(request, "version_no", 0)
+            request_version_no = raw_version_no if isinstance(raw_version_no, int) else 0
+            requested_by_id = {}
+            if has_structured_skill_instances:
+                for requested_instance in requested_skill_instances:
+                    skill_id = requested_instance.skill_id
+                    if skill_id in requested_by_id:
+                        raise ValueError(f"Duplicate skill_id in skill_instances: {skill_id}")
+                    requested_by_id[skill_id] = requested_instance
+                enabled_set = {
+                    skill_id
+                    for skill_id, requested_instance in requested_by_id.items()
+                    if requested_instance.enabled
+                }
+            else:
+                enabled_set = set(request.enabled_skill_ids or [])
+
+            if has_structured_skill_instances:
+                valid_skill_ids = skill_db.get_valid_skill_ids(
+                    tenant_id=tenant_id,
+                    skill_ids=list(enabled_set),
+                )
+                missing_skill_ids = enabled_set - valid_skill_ids
+                if missing_skill_ids:
+                    raise ValueError(
+                        f"Invalid or unavailable skill IDs: {sorted(missing_skill_ids)}"
+                    )
+
             # Query existing skill instances for this agent
             existing_instances = skill_db.query_skill_instances_by_agent_id(
-                agent_id, tenant_id)
+                agent_id, tenant_id, version_no=request_version_no)
 
             # Handle unselected skill (already exist instance) -> enabled=False
             for instance in existing_instances:
@@ -1797,39 +1829,37 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_info=SkillInstanceInfoRequest(
                             skill_id=inst_skill_id,
                             agent_id=agent_id,
-                            skill_description=instance.get(
-                                "skill_description"),
-                            skill_content=instance.get("skill_content"),
                             enabled=False,
                             config_values=instance.get("config_values"),
+                            version_no=request_version_no,
                         ),
                         tenant_id=tenant_id,
-                        user_id=user_id
+                        user_id=user_id,
+                        version_no=request_version_no,
                     )
 
             # Handle selected skill -> enabled=True (create or update)
             for skill_id in enabled_set:
-                # Keep existing skill_description and skill_content if any
                 existing_instance = next(
                     (inst for inst in existing_instances
                      if inst.get("skill_id") == skill_id),
                     None
                 )
-                skill_description = (existing_instance or {}).get(
-                    "skill_description")
-                skill_content = (existing_instance or {}).get("skill_content")
+                if has_structured_skill_instances:
+                    config_values = requested_by_id[skill_id].config_values
+                else:
+                    config_values = (existing_instance or {}).get("config_values")
                 skill_db.create_or_update_skill_by_skill_info(
                     skill_info=SkillInstanceInfoRequest(
                         skill_id=skill_id,
                         agent_id=agent_id,
-                        skill_description=skill_description,
-                        skill_content=skill_content,
                         enabled=True,
-                        config_values=(existing_instance or {}
-                                       ).get("config_values"),
+                        config_values=config_values,
+                        version_no=request_version_no,
                     ),
                     tenant_id=tenant_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    version_no=request_version_no,
                 )
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")

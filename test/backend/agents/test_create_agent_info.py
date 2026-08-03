@@ -215,6 +215,9 @@ sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
 database_module = _create_stub_module("database")
 sys.modules['database'] = database_module
+skill_db_stub = MagicMock()
+sys.modules['database.skill_db'] = skill_db_stub
+database_module.skill_db = skill_db_stub
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
@@ -498,6 +501,7 @@ from backend.agents.create_agent_info import (
     _normalize_tool_params_request,
     _get_agent_tool_overrides,
     _merge_tool_params,
+    _resolve_runtime_tool_records,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
@@ -897,6 +901,83 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
                    side_effect=lambda index_names, **kwargs: index_names):
             yield
+
+    def test_resolve_runtime_tools_adds_skill_dependencies_with_saved_config(self):
+        """An enabled skill makes its declared tool available without explicit selection."""
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[{"skill_id": 10, "config_values": {"api_key": "saved-key"}}],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 10,
+                "name": "search-web-linkup",
+                "tool_ids": [20],
+                "config_values": {"depth": "standard"},
+            },
+        ), patch(
+            "backend.agents.create_agent_info.query_tools_by_ids",
+            return_value=[{
+                "tool_id": 20,
+                "name": "linkup_search",
+                "is_available": True,
+                "params": [
+                    {"name": "api_key", "default": ""},
+                    {"name": "depth", "default": "deep"},
+                ],
+            }],
+        ):
+            result = _resolve_runtime_tool_records(1, "tenant-1")
+
+        assert [tool["name"] for tool in result] == ["linkup_search"]
+        assert result[0]["params"] == [
+            {"name": "api_key", "default": "saved-key"},
+            {"name": "depth", "default": "standard"},
+        ]
+
+    def test_resolve_runtime_tools_does_not_duplicate_explicit_tool(self):
+        """Explicit tool configuration remains authoritative for a skill dependency."""
+        explicit_tool = {"tool_id": 20, "name": "linkup_search", "params": []}
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[explicit_tool],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[{"skill_id": 10, "config_values": {"api_key": "skill-key"}}],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            return_value={"skill_id": 10, "name": "search-web-linkup", "tool_ids": [20]},
+        ), patch("backend.agents.create_agent_info.query_tools_by_ids") as mock_query:
+            result = _resolve_runtime_tool_records(1, "tenant-1")
+
+        assert result == [explicit_tool]
+        mock_query.assert_not_called()
+
+    def test_resolve_runtime_tools_rejects_conflicting_skill_config(self):
+        """Two skills cannot silently assign different values to the same tool parameter."""
+        skill_instances = [
+            {"skill_id": 10, "config_values": {"api_key": "first"}},
+            {"skill_id": 11, "config_values": {"api_key": "second"}},
+        ]
+        skills = {
+            10: {"skill_id": 10, "name": "first-skill", "tool_ids": [20]},
+            11: {"skill_id": 11, "name": "second-skill", "tool_ids": [20]},
+        }
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=skill_instances,
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            side_effect=lambda skill_id, tenant_id: skills[skill_id],
+        ):
+            with pytest.raises(ValidationError, match="different values"):
+                _resolve_runtime_tool_records(1, "tenant-1")
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_basic(self):

@@ -1231,7 +1231,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       conversationService.getList(),
     ]);
     const conversation = conversations.find(
-      (item) => item.conversation_id === detail.conversation_id
+      (item) => String(item.conversation_id) === String(detail.conversation_id)
     );
 
     return toRemoteThreadMetadata(
