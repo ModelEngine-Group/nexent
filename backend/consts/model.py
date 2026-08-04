@@ -841,6 +841,27 @@ class AgentImportRequest(BaseModel):
     skills: Optional[List[SkillZipEntry]] = None
 
 
+class AgentBatchExportRequest(BaseModel):
+    """Request body for batch agent export. Returns a ZIP archive."""
+    agent_ids: List[int]
+
+
+class AgentBatchImportResultItem(BaseModel):
+    """Single agent result entry inside a batch import summary."""
+    name: str
+    display_name: Optional[str] = None
+    success: bool
+    error: Optional[str] = None
+
+
+class AgentBatchImportResult(BaseModel):
+    """Summary returned after importing a batch agent ZIP archive."""
+    total: int
+    success_count: int
+    failed_count: int
+    items: List[AgentBatchImportResultItem]
+
+
 class AgentNameBatchRegenerateItem(BaseModel):
     name: str
     display_name: Optional[str] = None

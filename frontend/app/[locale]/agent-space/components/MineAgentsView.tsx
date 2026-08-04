@@ -3,12 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Input, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
+import { App, Button, Empty, Input, Modal, Spin, Tag } from "antd";
+import { ChevronLeft, ChevronRight, Download, Plus, Search, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import { deleteAgent } from "@/services/agentConfigService";
+import {
+  deleteAgent,
+  exportAgentsBatch,
+  importAgentsBatch,
+  type AgentBatchImportResult,
+} from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
@@ -16,7 +21,8 @@ import {
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
-  openImportWizardWithFile,
+  parseAgentImportFile,
+  selectImportFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
@@ -119,6 +125,18 @@ export function MineAgentsView({
     useState<MyEditableAgentItem | null>(null);
   const consumedDeepLinkRef = useRef<number | null>(null);
 
+  // Batch export / import state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<number>>(
+    new Set()
+  );
+  const [isBatchExporting, setIsBatchExporting] = useState(false);
+  const [isBatchImporting, setIsBatchImporting] = useState(false);
+  const [batchImportResult, setBatchImportResult] =
+    useState<AgentBatchImportResult | null>(null);
+  const [batchImportResultVisible, setBatchImportResultVisible] =
+    useState(false);
+
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
   const deleteAgentMutation = useMutation({
@@ -132,15 +150,103 @@ export function MineAgentsView({
   };
 
   const handleImportAgent = async () => {
-    await openImportWizardWithFile({
-      onSuccess: (agentData) => {
-        setImportWizardData(agentData);
-        setImportWizardVisible(true);
+    const selection = await selectImportFile();
+
+    if (selection.type === "cancelled") {
+      return;
+    }
+
+    if (selection.type === "batch") {
+      setIsBatchImporting(true);
+      try {
+        const result = await importAgentsBatch(selection.file);
+        if (result.success && result.data) {
+          const data = result.data;
+          if (data.failed_count > 0) {
+            setBatchImportResult(data);
+            setBatchImportResultVisible(true);
+          } else {
+            message.success(
+              t("agentRepository.mine.batchImport.success", {
+                success: data.success_count,
+                failed: data.failed_count,
+              })
+            );
+          }
+          await Promise.all([
+            invalidateAgentRepositoryCaches(queryClient),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
+          ]);
+        } else {
+          message.error(result.message || t("agentRepository.mine.batchImport.failed"));
+        }
+      } finally {
+        setIsBatchImporting(false);
+      }
+      return;
+    }
+
+    // Single agent path: parse the file and open the wizard.
+    const data = await parseAgentImportFile(selection.file, {
+      onParseError: (msgKey) => {
+        message.error(t(msgKey) || msgKey);
       },
-      message: message,
-      t: t,
-      log: log,
+      onValidationError: (msgKey) => {
+        message.error(t(msgKey) || msgKey);
+      },
+      onGenericError: (error) => {
+        log.error("Failed to read import file:", error);
+        message.error(t("businessLogic.config.error.agentImportFailed") || "Failed to import agent");
+      },
     });
+
+    if (data) {
+      setImportWizardData(data);
+      setImportWizardVisible(true);
+    }
+  };
+
+  const handleToggleSelect = (agentId: number) => {
+    setSelectedAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  };
+
+  const handleEnterSelectMode = () => {
+    setSelectionMode(true);
+    setSelectedAgentIds(new Set());
+  };
+
+  const handleExitSelectMode = () => {
+    setSelectionMode(false);
+    setSelectedAgentIds(new Set());
+  };
+
+  const handleBatchExport = async () => {
+    if (selectedAgentIds.size === 0) {
+      message.warning(t("agentRepository.mine.batchExport.empty"));
+      return;
+    }
+    setIsBatchExporting(true);
+    try {
+      const result = await exportAgentsBatch(Array.from(selectedAgentIds));
+      if (result.success) {
+        message.success(t("agentRepository.mine.batchExport.success"));
+        handleExitSelectMode();
+      } else {
+        message.error(result.message || t("agentRepository.mine.batchExport.failed"));
+      }
+    } finally {
+      setIsBatchExporting(false);
+    }
   };
 
   const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
@@ -384,21 +490,57 @@ export function MineAgentsView({
           />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            className="flex h-11 items-center gap-1.5"
-            onClick={handleImportAgent}
-          >
-            <Upload className="size-4" aria-hidden />
-            {t("agentConfig.button.import")}
-          </Button>
-          <Button
-            type="primary"
-            className="flex h-11 items-center gap-1.5"
-            onClick={handleCreateAgent}
-          >
-            <Plus className="size-4" aria-hidden />
-            {t("agentRepository.mine.newAgentButton")}
-          </Button>
+          {selectionMode ? (
+            <>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {t("agentRepository.mine.batchExport.selected", {
+                  count: selectedAgentIds.size,
+                })}
+              </span>
+              <Button
+                className="flex h-11 items-center gap-1.5"
+                onClick={handleExitSelectMode}
+              >
+                {t("agentRepository.mine.batchExport.cancelSelect")}
+              </Button>
+              <Button
+                type="primary"
+                className="flex h-11 items-center gap-1.5"
+                onClick={handleBatchExport}
+                loading={isBatchExporting}
+                disabled={selectedAgentIds.size === 0}
+              >
+                <Download className="size-4" aria-hidden />
+                {t("agentRepository.mine.exportButton")}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                className="flex h-11 items-center gap-1.5"
+                onClick={handleEnterSelectMode}
+              >
+                <Download className="size-4" aria-hidden />
+                {t("agentRepository.mine.exportButton")}
+              </Button>
+              <Button
+                className="flex h-11 items-center gap-1.5"
+                onClick={handleImportAgent}
+                loading={isBatchImporting}
+              >
+                <Upload className="size-4" aria-hidden />
+                {t("agentConfig.button.import")}
+              </Button>
+              <Button
+                type="primary"
+                className="flex h-11 items-center gap-1.5"
+                onClick={handleCreateAgent}
+              >
+                <Plus className="size-4" aria-hidden />
+                {t("agentRepository.mine.newAgentButton")}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -481,6 +623,9 @@ export function MineAgentsView({
                       deleteAgentMutation.isPending &&
                       deleteAgentMutation.variables === agent.agent_id
                     }
+                    selectionMode={selectionMode}
+                    isSelected={selectedAgentIds.has(agent.agent_id)}
+                    onToggleSelect={() => handleToggleSelect(agent.agent_id)}
                   />
                 </div>
               )
@@ -562,6 +707,60 @@ export function MineAgentsView({
           ]);
         }}
       />
+
+      <Modal
+        open={batchImportResultVisible}
+        title={t("agentRepository.mine.batchImport.resultTitle")}
+        onCancel={() => setBatchImportResultVisible(false)}
+        onOk={() => setBatchImportResultVisible(false)}
+        okText={t("common.ok", "OK")}
+        cancelButtonProps={{ style: { display: "none" } }}
+      >
+        {batchImportResult ? (
+          <div className="space-y-3 py-2">
+            <div className="flex items-center gap-3">
+              <Tag color="green">
+                {t("agentRepository.mine.batchImport.successLabel")}:{" "}
+                {batchImportResult.success_count}
+              </Tag>
+              <Tag color="red">
+                {t("agentRepository.mine.batchImport.failedLabel")}:{" "}
+                {batchImportResult.failed_count}
+              </Tag>
+            </div>
+            {batchImportResult.items.length > 0 ? (
+              <div className="max-h-60 space-y-2 overflow-y-auto">
+                {batchImportResult.items.map((item, idx) => (
+                  <div
+                    key={`${item.name}-${idx}`}
+                    className={`rounded-md border p-2 text-sm ${
+                      item.success
+                        ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20"
+                        : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {item.display_name || item.name}
+                      </span>
+                      <Tag color={item.success ? "success" : "error"}>
+                        {item.success
+                          ? t("agentRepository.mine.batchImport.successLabel")
+                          : t("agentRepository.mine.batchImport.failedLabel")}
+                      </Tag>
+                    </div>
+                    {!item.success && item.error ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-all">
+                        {item.error}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

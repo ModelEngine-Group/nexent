@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Card, Dropdown } from "antd";
+import { Button, Card, Checkbox, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
   Bot,
@@ -32,6 +32,12 @@ interface MyAgentCardProps {
   onEvaluate: () => void;
   isApplying?: boolean;
   isDeleting?: boolean;
+  /** When true the card renders a selection checkbox and toggles selection on click. */
+  selectionMode?: boolean;
+  /** Whether this card is currently selected (only used in selection mode). */
+  isSelected?: boolean;
+  /** Toggle selection for this card. */
+  onToggleSelect?: () => void;
 }
 
 const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
@@ -62,6 +68,9 @@ export function MyAgentCard({
   onEvaluate,
   isApplying = false,
   isDeleting = false,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
 
@@ -118,7 +127,11 @@ export function MyAgentCard({
 
   return (
     <Card
-      className="h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700"
+      className={`h-full rounded-2xl border shadow-sm transition-colors dark:border-slate-700 ${
+        selectionMode && isSelected
+          ? "border-primary ring-1 ring-primary/40"
+          : "border-slate-200"
+      } ${selectionMode ? "cursor-pointer" : ""}`}
       styles={{
         body: {
           height: "100%",
@@ -127,12 +140,32 @@ export function MyAgentCard({
           padding: 20,
         },
       }}
+      onClick={selectionMode ? (e) => {
+        // Avoid toggling when the user clicks on interactive elements inside the card.
+        const target = e.target as HTMLElement;
+        if (target.closest("button, a, .ant-checkbox-wrapper")) {
+          return;
+        }
+        onToggleSelect?.();
+      } : undefined}
     >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
-          </div>
+          {selectionMode ? (
+            <Checkbox
+              checked={isSelected}
+              onChange={(e) => {
+                e.stopPropagation();
+                onToggleSelect?.();
+              }}
+              className="mt-1 shrink-0"
+              aria-label={t("agentRepository.mine.batchExport.selectMode")}
+            />
+          ) : (
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Bot className="size-5" aria-hidden />
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">

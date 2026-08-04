@@ -3747,6 +3747,255 @@ async def import_agent_with_skills_impl(
 
 
 # =============================================================================
+# Batch Export / Import
+# =============================================================================
+
+
+_BATCH_MANIFEST_FILENAME = "manifest.json"
+_BATCH_AGENTS_PREFIX = "agents/"
+
+
+def _sanitize_agent_folder_name(name: str, agent_id: int, used: set) -> str:
+    """Build a unique, filesystem-safe folder name for one agent in a batch ZIP."""
+    import re
+
+    base = re.sub(r"[^A-Za-z0-9_\-]", "_", name or "").strip("_") or f"agent_{agent_id}"
+    candidate = base
+    index = 1
+    while candidate in used:
+        index += 1
+        candidate = f"{base}_{index}"
+    used.add(candidate)
+    return candidate
+
+
+async def export_agents_batch_impl(
+    agent_ids: List[int],
+    authorization: str,
+) -> dict:
+    """Export multiple independent agent trees into a single ZIP archive.
+
+    Archive layout::
+
+        manifest.json
+        agents/<folder>/agent.json
+        agents/<folder>/skills/<skill_name>.zip
+
+    Each ``agent.json`` is the standard ``ExportAndImportDataFormat`` payload
+    produced by :func:`export_agent_with_skills_impl`, so a batch archive is a
+    collection of independent single-agent exports.
+
+    Returns a dict ``{"_zip": True, "data": bytes, "filename": str}`` mirroring
+    the single-agent export contract so the app layer can stream it unchanged.
+    """
+    user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    manifest = {
+        "version": "1.0",
+        "exported_at": "",  # filled below without extra imports
+        "agents": [],
+    }
+
+    zip_buffer = io.BytesIO()
+    used_folders: set = set()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for agent_id in agent_ids:
+            agent_row = search_agent_info_by_agent_id(
+                agent_id=agent_id, tenant_id=tenant_id, version_no=0
+            )
+            if not agent_row:
+                logger.warning(
+                    f"Batch export: agent {agent_id} not found, skipping")
+                continue
+
+            agent_name = agent_row.get("name") or f"agent_{agent_id}"
+            folder_name = _sanitize_agent_folder_name(
+                agent_name, agent_id, used_folders)
+            folder_prefix = f"{_BATCH_AGENTS_PREFIX}{folder_name}"
+
+            result = await export_agent_with_skills_impl(
+                agent_id, authorization
+            )
+
+            if isinstance(result, dict) and result.get("_zip"):
+                inner_zip_bytes = result["data"]
+                with zipfile.ZipFile(io.BytesIO(inner_zip_bytes), "r") as inner_zip:
+                    agent_json_content = inner_zip.read("agent.json")
+                    zf.writestr(
+                        f"{folder_prefix}/agent.json", agent_json_content)
+                    for inner_name in inner_zip.namelist():
+                        if inner_name.startswith("skills/") and inner_name.lower().endswith(".zip"):
+                            zf.writestr(
+                                f"{folder_prefix}/{inner_name}",
+                                inner_zip.read(inner_name),
+                            )
+            else:
+                zf.writestr(
+                    f"{folder_prefix}/agent.json", json.dumps(result))
+
+            manifest["agents"].append({
+                "folder": folder_prefix,
+                "agent_id": agent_id,
+                "name": agent_name,
+                "display_name": agent_row.get("display_name"),
+            })
+
+        zf.writestr(
+            _BATCH_MANIFEST_FILENAME,
+            json.dumps(manifest, ensure_ascii=False),
+        )
+
+    zip_buffer.seek(0)
+    return {
+        "_zip": True,
+        "data": zip_buffer.read(),
+        "filename": "agents_batch_export.zip",
+    }
+
+
+async def import_agents_batch_impl(
+    zip_bytes: bytes,
+    authorization: str,
+) -> Dict[str, Any]:
+    """Import every agent tree contained in a batch export ZIP archive.
+
+    Each ``agents/<folder>/agent.json`` is imported independently via the
+    existing :func:`import_agent_with_skills_impl` /
+    :func:`import_agent_impl` flow. Per-agent failures are captured and do not
+    abort the remaining imports.
+
+    Returns a summary dict matching :class:`AgentBatchImportResult`.
+    """
+    summary: Dict[str, Any] = {
+        "total": 0,
+        "success_count": 0,
+        "failed_count": 0,
+        "items": [],
+    }
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
+    except Exception as e:
+        raise ValueError(f"Invalid batch export ZIP file: {e}")
+
+    with zf:
+        names = zf.namelist()
+
+        # Discover agent folders: prefer manifest, otherwise scan the archive.
+        agent_folders: List[str] = []
+        if _BATCH_MANIFEST_FILENAME in names:
+            try:
+                manifest = json.loads(zf.read(_BATCH_MANIFEST_FILENAME))
+                agent_folders = [
+                    entry["folder"] for entry in manifest.get("agents", [])
+                    if isinstance(entry, dict) and entry.get("folder")
+                ]
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to parse batch manifest: {e}")
+
+        if not agent_folders:
+            seen = set()
+            for name in names:
+                if not name.startswith(_BATCH_AGENTS_PREFIX):
+                    continue
+                # agents/<folder>/agent.json
+                remainder = name[len(_BATCH_AGENTS_PREFIX):]
+                parts = remainder.split("/")
+                if len(parts) >= 2 and parts[1] == "agent.json":
+                    folder = f"{_BATCH_AGENTS_PREFIX}{parts[0]}"
+                    if folder not in seen:
+                        seen.add(folder)
+                        agent_folders.append(folder)
+
+        summary["total"] = len(agent_folders)
+
+        for folder in agent_folders:
+            agent_json_path = f"{folder}/agent.json"
+            if agent_json_path not in names:
+                summary["failed_count"] += 1
+                summary["items"].append({
+                    "name": folder,
+                    "display_name": None,
+                    "success": False,
+                    "error": "agent.json not found in folder",
+                })
+                continue
+
+            try:
+                agent_json_str = zf.read(agent_json_path).decode("utf-8")
+                agent_payload = json.loads(agent_json_str)
+                agent_info = ExportAndImportDataFormat.model_validate(
+                    agent_payload)
+
+                # Collect optional skills bundled alongside this agent.
+                skill_entries: List[SkillZipEntry] = []
+                skills_prefix = f"{folder}/skills/"
+                for name in names:
+                    if name.startswith(skills_prefix) and name.lower().endswith(".zip"):
+                        skill_bytes = zf.read(name)
+                        skill_name = name[len(skills_prefix):][:-4]
+                        skill_entries.append(SkillZipEntry(
+                            skill_name=skill_name,
+                            skill_zip_base64=base64.b64encode(
+                                skill_bytes).decode("ascii"),
+                        ))
+
+                main_agent_info = agent_payload.get("agent_info", {}).get(
+                    str(agent_payload.get("agent_id")), {})
+                display_name = main_agent_info.get("display_name") or \
+                    main_agent_info.get("name") or folder
+                agent_name = main_agent_info.get("name") or folder
+
+                if skill_entries:
+                    await import_agent_with_skills_impl(
+                        agent_info=agent_info,
+                        skills=skill_entries,
+                        authorization=authorization,
+                        force_import=False,
+                    )
+                else:
+                    await import_agent_impl(
+                        agent_info=agent_info,
+                        authorization=authorization,
+                        force_import=False,
+                    )
+
+                summary["success_count"] += 1
+                summary["items"].append({
+                    "name": agent_name,
+                    "display_name": display_name,
+                    "success": True,
+                    "error": None,
+                })
+            except Exception as e:
+                logger.exception(
+                    f"Batch import failed for folder {folder}: {e}")
+                # Try to extract a friendly name for the failure entry.
+                try:
+                    payload = json.loads(
+                        zf.read(agent_json_path).decode("utf-8"))
+                    main_info = payload.get("agent_info", {}).get(
+                        str(payload.get("agent_id")), {})
+                    failed_name = main_info.get("name") or folder
+                    failed_display = main_info.get("display_name")
+                except Exception:
+                    failed_name = folder
+                    failed_display = None
+
+                summary["failed_count"] += 1
+                summary["items"].append({
+                    "name": failed_name,
+                    "display_name": failed_display,
+                    "success": False,
+                    "error": str(e),
+                })
+
+    return summary
+
+
+# =============================================================================
 # Sandbox Policy Builder
 # =============================================================================
 
