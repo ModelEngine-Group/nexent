@@ -32,6 +32,7 @@ def _load_runner_with_stubs(monkeypatch):
     conversation_service.get_conversation_history_service = lambda conversation_id, user_id: [{"message": []}]
     conversation_service.save_message = lambda request, user_id, tenant_id: 1
     conversation_service.save_message_unit = lambda **kwargs: None
+    conversation_service.update_unit_content = lambda *args, **kwargs: None
 
     monkeypatch.setitem(sys.modules, "consts.model", consts_model)
     monkeypatch.setitem(sys.modules, "services.agent_service", agent_service)
