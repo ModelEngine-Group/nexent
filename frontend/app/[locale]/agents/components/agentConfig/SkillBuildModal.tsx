@@ -537,10 +537,7 @@ export default function SkillBuildModal({
       setIsSubmitting(true);
 
       const skillTab = skillTabs.find((t) => t.path === "SKILL.md");
-      const rawContent = skillTab?.content || "";
-      const content = isEditMode
-        ? stripLeadingSkillFrontmatter(rawContent)
-        : rawContent;
+      const content = skillTab?.content || "";
 
       const extraFiles = skillTabs
         .filter((t) => t.path !== "SKILL.md")
