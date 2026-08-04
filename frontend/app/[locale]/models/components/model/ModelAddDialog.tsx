@@ -34,6 +34,7 @@ import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
 import { useTokenPonyModelList } from "@/hooks/model/useTokenponyModelList";
 import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
 import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -1418,6 +1419,7 @@ export const ModelAddDialog = ({
             <Switch
               checked={form.isBatchImport}
               onChange={(checked) => handleFormChange("isBatchImport", checked)}
+              disabled={verifyingConnectivity}
             />
           </div>
           <div className="text-xs text-gray-500 mt-1">
@@ -1438,6 +1440,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="modelengine">
                 {t("model.provider.modelengine")}
@@ -1458,6 +1461,7 @@ export const ModelAddDialog = ({
                   onChange={(e) =>
                     handleFormChange("modelEngineUrl", e.target.value)
                   }
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1476,6 +1480,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1490,6 +1495,7 @@ export const ModelAddDialog = ({
             style={{ width: "100%" }}
             value={form.type}
             onChange={(value) => handleFormChange("type", value)}
+            disabled={verifyingConnectivity}
           >
             <Option value={MODEL_TYPES.LLM}>{t("model.type.llm")}</Option>
             <Option value={MODEL_TYPES.EMBEDDING}>
@@ -1520,6 +1526,7 @@ export const ModelAddDialog = ({
                 onChange={(checked) =>
                   handleFormChange("isMultimodal", checked)
                 }
+                disabled={verifyingConnectivity}
               />
             </div>
             <div className="text-xs text-gray-500 mt-1">
@@ -1545,6 +1552,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.name")}
               value={form.name}
               onChange={handleModelNameChange}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1563,6 +1571,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.displayName")}
               value={form.displayName}
               onChange={(e) => handleFormChange("displayName", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1590,6 +1599,7 @@ export const ModelAddDialog = ({
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1605,6 +1615,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.sttProvider}
               onChange={(value) => handleFormChange("sttProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1635,6 +1646,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1653,6 +1665,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1676,6 +1689,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1691,6 +1705,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.ttsProvider}
               onChange={(value) => handleFormChange("ttsProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1721,6 +1736,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1739,6 +1755,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1762,6 +1779,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1782,6 +1800,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1800,6 +1819,7 @@ export const ModelAddDialog = ({
                   chunkSizeRange: value,
                 }));
               }}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1822,6 +1842,7 @@ export const ModelAddDialog = ({
               onChange={(e) =>
                 handleFormChange("chunkingBatchSize", e.target.value)
               }
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1862,6 +1883,7 @@ export const ModelAddDialog = ({
                   size="small"
                   checked={capacitySuggestionEnabled}
                   onChange={setCapacitySuggestionEnabled}
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1881,6 +1903,7 @@ export const ModelAddDialog = ({
               suggestionLoading={topChecking}
               onUseSuggestion={() => applyCapacitySuggestion(topSuggestion)}
               acceptedSuggestion={topAccepted}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1900,6 +1923,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
               onChange={(value) => handleFormChange("maxTokens", value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -2069,6 +2093,7 @@ export const ModelAddDialog = ({
                             size="small"
                             checked={checked}
                             onChange={toggleSelect}
+                            disabled={verifyingConnectivity}
                           />
                         </div>
                       </div>
@@ -2160,7 +2185,7 @@ export const ModelAddDialog = ({
                   rel="noopener noreferrer"
                 >
                   <img
-                    src="/modelengine-logo.png"
+                    src={publicAsset("/modelengine.png")}
                     alt="ModelEngine"
                     className="h-4 ml-1.5 cursor-pointer"
                   />
@@ -2175,7 +2200,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/siliconflow.png"
+                        src={publicAsset("/siliconflow.png")}
                         alt="SiliconFlow"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2188,7 +2213,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="DashScope"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2201,7 +2226,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/tokenpony.png"
+                        src={publicAsset("/tokenpony.png")}
                         alt="TokenPony"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2218,7 +2243,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/volcengine.png"
+                        src={publicAsset("/volcengine.png")}
                         alt="VolcEngine"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2231,7 +2256,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2248,7 +2273,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/volcengine.png"
+                        src={publicAsset("/volcengine.png")}
                         alt="VolcEngine"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2261,7 +2286,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/aliyuncs.png"
+                        src={publicAsset("/aliyuncs.png")}
                         alt="AlibabaCloud"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2278,7 +2303,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/openai.png"
+                        src={publicAsset("/openai.png")}
                         alt="OpenAI"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2291,7 +2316,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/kimi.png"
+                        src={publicAsset("/kimi.png")}
                         alt="Kimi"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2304,7 +2329,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/deepseek.png"
+                        src={publicAsset("/deepseek.png")}
                         alt="Deepseek"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2317,7 +2342,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2335,7 +2360,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/openai.png"
+                        src={publicAsset("/openai.png")}
                         alt="OpenAI"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2348,7 +2373,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2361,7 +2386,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/jina.png"
+                        src={publicAsset("/jina.png")}
                         alt="Jina"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2374,7 +2399,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/baai.png"
+                        src={publicAsset("/baai.png")}
                         alt="Baai"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2392,7 +2417,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/qwen.png"
+                        src={publicAsset("/qwen.png")}
                         alt="Qwen"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2405,7 +2430,7 @@ export const ModelAddDialog = ({
                       rel="noopener noreferrer"
                     >
                       <img
-                        src="/deepseek.png"
+                        src={publicAsset("/deepseek.png")}
                         alt="Deepseek"
                         className="h-4 ml-1.5 cursor-pointer"
                       />
@@ -2428,7 +2453,7 @@ export const ModelAddDialog = ({
               !isFormValid() ||
               (!form.isBatchImport && connectivityStatus.status !== "available")
             }
-            loading={loading}
+            loading={loading || verifyingConnectivity}
           >
             {t("model.dialog.button.add")}
           </Button>
@@ -2468,6 +2493,7 @@ export const ModelAddDialog = ({
                       size="small"
                       checked={gearCapacitySuggestionEnabled}
                       onChange={setGearCapacitySuggestionEnabled}
+                      disabled={verifyingConnectivity}
                     />
                     <Button
                       size="small"

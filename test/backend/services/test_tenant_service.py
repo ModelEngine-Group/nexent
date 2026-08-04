@@ -26,16 +26,59 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import ValidationError, NotFoundException
+from consts.exceptions import ForbiddenError, ValidationError, NotFoundException
 from backend.services.tenant_service import (
     get_tenant_info,
+    get_tenant_info_for_user,
     get_tenants_paginated,
+    get_tenants_paginated_for_user,
     create_tenant,
     update_tenant_info,
     delete_tenant,
     _create_default_group_for_tenant,
     check_tenant_name_exists
 )
+
+
+class TestTenantAuthorization:
+    """Test tenant role and scope enforcement."""
+
+    def test_su_can_list_all_tenants(self):
+        with patch(
+            "backend.services.tenant_service.get_tenants_paginated",
+            return_value={"data": [], "total": 0},
+        ) as mock_list:
+            result = get_tenants_paginated_for_user(requester_role="SU")
+
+        assert result == {"data": [], "total": 0}
+        mock_list.assert_called_once_with(page=1, page_size=20)
+
+    @pytest.mark.parametrize("role", ["ADMIN", "DEV", "USER"])
+    def test_non_su_cannot_list_tenants(self, role):
+        with pytest.raises(ForbiddenError, match="super administrators"):
+            get_tenants_paginated_for_user(requester_role=role)
+
+    def test_non_su_can_only_read_own_tenant(self):
+        with patch(
+            "backend.services.tenant_service.get_tenant_info",
+            return_value={"tenant_id": "tenant-1"},
+        ) as mock_get:
+            result = get_tenant_info_for_user(
+                "tenant-1",
+                requester_tenant_id="tenant-1",
+                requester_role="USER",
+            )
+
+        assert result == {"tenant_id": "tenant-1"}
+        mock_get.assert_called_once_with("tenant-1")
+
+    def test_non_su_cannot_read_other_tenant(self):
+        with pytest.raises(ForbiddenError, match="access this tenant"):
+            get_tenant_info_for_user(
+                "tenant-2",
+                requester_tenant_id="tenant-1",
+                requester_role="ADMIN",
+            )
 
 
 @pytest.fixture
@@ -85,6 +128,16 @@ class TestGetTenantInfo:
             tenant_id, "TENANT_NAME")
         service_mocks['get_single_config_info'].assert_any_call(
             tenant_id, "DEFAULT_GROUP_ID")
+
+    def test_get_tenant_info_ignores_virtual_default_tenant(self, service_mocks):
+        """Virtual default tenant should not be materialized as a managed tenant."""
+        from consts.const import DEFAULT_TENANT_ID
+
+        result = get_tenant_info(DEFAULT_TENANT_ID)
+
+        assert result == {}
+        service_mocks['get_single_config_info'].assert_not_called()
+        service_mocks['insert_config'].assert_not_called()
 
     def test_get_tenant_info_name_not_found(self, service_mocks):
         """Test get_tenant_info when tenant name is not found - should auto-create config"""
@@ -202,11 +255,11 @@ class TestGetTenantsPaginated:
             assert len(result["data"]) == 3
             assert result["data"] == tenant_infos
 
-    def test_get_tenants_paginated_excludes_asset_owner_virtual_tenant(self, service_mocks):
-        """Virtual ASSET_OWNER tenant must not appear in admin tenant listings."""
-        from consts.const import ASSET_OWNER_TENANT_ID
+    def test_get_tenants_paginated_excludes_virtual_tenants(self, service_mocks):
+        """Virtual/system tenants must not appear in admin tenant listings."""
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
-        tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, "tenant2"]
+        tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, "", "tenant2"]
         tenant_infos = [
             {"tenant_id": "tenant1", "tenant_name": "Tenant 1", "default_group_id": "g1"},
             {"tenant_id": "tenant2", "tenant_name": "Tenant 2", "default_group_id": "g2"},
@@ -219,6 +272,8 @@ class TestGetTenantsPaginated:
         assert result["total"] == 2
         returned_ids = [t["tenant_id"] for t in result["data"]]
         assert ASSET_OWNER_TENANT_ID not in returned_ids
+        assert DEFAULT_TENANT_ID not in returned_ids
+        assert "" not in returned_ids
         assert returned_ids == ["tenant1", "tenant2"]
 
     def test_get_tenants_paginated_with_missing_configs(self, service_mocks):
@@ -1228,4 +1283,3 @@ class TestCheckTenantNameExists:
 
             # Assert
             assert result is False
-

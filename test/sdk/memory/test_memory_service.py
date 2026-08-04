@@ -1,744 +1,797 @@
-import sys
-import types
-from contextlib import contextmanager
-from typing import Any, Dict, List
+"""Unit tests for ``sdk.nexent.memory.service`` (MemoryService facade).
+
+These tests focus on memory_service.store_memory / search_memory and the
+helper classmethods. They run without any database or network access; the
+embedding model and backend hooks are replaced with lightweight fakes so we
+can exercise the policy-enforcement branches and payload translation paths.
+"""
+
+import hashlib
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Install lightweight stubs before importing the module under test to avoid
-# importing real heavy dependencies from memory_core/memory_utils.
-# ---------------------------------------------------------------------------
-
-dummy_memory_core = types.ModuleType("sdk.nexent.memory.memory_core")
-
-
-async def _default_get_memory_instance(_: Dict[str, Any]):
-    class _Noop:
-        async def add(self, *args, **kwargs):
-            return {"results": []}
-
-        async def search(self, *args, **kwargs):
-            return {"results": []}
-
-        async def get_all(self, *args, **kwargs):
-            return {"results": []}
-
-        async def delete(self, *args, **kwargs):
-            return {"ok": True}
-
-        async def reset(self, *args, **kwargs):
-            return None
-
-    return _Noop()
-
-
-setattr(dummy_memory_core, "get_memory_instance", _default_get_memory_instance)
-
-dummy_memory_utils = types.ModuleType("sdk.nexent.memory.memory_utils")
-
-
-def _build_memory_identifiers(*, memory_level: str, user_id: str, tenant_id: str) -> str:  # noqa: ARG001
-    # Keep it simple for tests; only shape matters for callers.
-    return f"mem:{tenant_id}/{user_id}:{memory_level}"
-
-
-setattr(dummy_memory_utils, "build_memory_identifiers", _build_memory_identifiers)
-
-sys.modules.setdefault("sdk.nexent.memory.memory_core", dummy_memory_core)
-sys.modules.setdefault("sdk.nexent.memory.memory_utils", dummy_memory_utils)
-
-
-from sdk.nexent.memory import memory_service  # noqa: E402  (import after stubs)
+from nexent.memory.embedding_model import EmbeddingModelInfo
+from nexent.memory.models import (
+    MemoryLayer,
+    MemorySearchRequest,
+    MemorySearchResult,
+    MemoryType,
+)
+from nexent.memory.service import (
+    MemoryService,
+    get_memory_service,
+    reset_memory_service,
+)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers / fakes
 # ---------------------------------------------------------------------------
 
 
-class DummyMemory:
-    def __init__(self, config: Dict[str, Any] | None = None):
-        self.config = config or {}
-        self.calls: Dict[str, List[Dict[str, Any]]] = {
-            "add": [],
-            "search": [],
-            "get_all": [],
-            "delete": [],
-            "reset": [],
+class _FakeEmbedding:
+    """Minimal fake of OpenAICompatibleEmbedding used by MemoryService."""
+
+    def __init__(self, vector=None, error=None):
+        self._vector = vector if vector is not None else [0.1, 0.2, 0.3]
+        self._error = error
+        self.calls = []
+
+    def get_embeddings(self, text):
+        self.calls.append(text)
+        if self._error is not None:
+            raise self._error
+        return [self._vector]
+
+
+def _embedding_model_info(name="text-embedding-3-small", dim=3, repo="openai"):
+    return EmbeddingModelInfo(
+        model_name=name,
+        dimension=dim,
+        base_url="http://example.com",
+        api_key="x",
+        model_repo=repo,
+    )
+
+
+# ---------------------------------------------------------------------------
+# store_memory: policy / permission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_store_memory_rejects_disallowed_layer():
+    """Policy forbids agents from writing to user/tenant layers."""
+    service = MemoryService()
+
+    with pytest.raises(PermissionError):
+        await service.store_memory(
+            content="x",
+            tenant_id="t",
+            user_id="u",
+            agent_id="a",
+            layer=MemoryLayer.USER,
+            memory_type=MemoryType.LONG_TERM,
+        )
+
+
+@pytest.mark.asyncio
+async def test_store_memory_rejects_long_term_for_agent():
+    """Even at the agent layer, long-term writes are forbidden for agents."""
+    service = MemoryService()
+
+    with pytest.raises(PermissionError):
+        await service.store_memory(
+            content="x",
+            tenant_id="t",
+            user_id="u",
+            agent_id="a",
+            layer=MemoryLayer.AGENT,
+            memory_type=MemoryType.LONG_TERM,
+        )
+
+
+# ---------------------------------------------------------------------------
+# store_memory: default behavior (no embedding model, no backend hook)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_store_memory_uses_generated_uuid_without_backend():
+    """Without a backend hook, the SDK still produces a stable result."""
+    service = MemoryService()
+
+    result = await service.store_memory(
+        content="hello",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+    assert result.event == "ADD"
+    assert result.content == "hello"
+    assert result.layer == MemoryLayer.AGENT
+    assert result.memory_type == MemoryType.SHORT_TERM
+    # memory_id is uuid-generated when no backend overrides it
+    assert result.memory_id
+
+
+@pytest.mark.asyncio
+async def test_store_memory_uses_caller_provided_idempotency_key():
+    captured = {}
+
+    async def backend_store(payload):
+        captured.update(payload)
+        return {}
+
+    service = MemoryService(backend_store=backend_store)
+    await service.store_memory(
+        content="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+        idempotency_key="custom-key",
+    )
+
+    assert captured["idempotency_key"] == "custom-key"
+
+
+@pytest.mark.asyncio
+async def test_store_memory_generates_default_idempotency_key():
+    """When no key is provided, hash(tenant:user:agent:content) is used."""
+    captured = {}
+
+    async def backend_store(payload):
+        captured.update(payload)
+        return {}
+
+    service = MemoryService(backend_store=backend_store)
+    await service.store_memory(
+        content="unique-content",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+    expected = hashlib.sha256(b"t:u:a:unique-content").hexdigest()
+    assert captured["idempotency_key"] == expected
+
+
+@pytest.mark.asyncio
+async def test_store_memory_uses_provided_embedding_without_calling_model():
+    captured = {}
+
+    async def backend_store(payload):
+        captured.update(payload)
+        return {}
+
+    fake_emb = _FakeEmbedding(vector=[9.0, 8.0])
+
+    service = MemoryService(
+        embedding_model=fake_emb, backend_store=backend_store,
+    )
+    await service.store_memory(
+        content="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+        embedding=[1.0, 2.0],
+    )
+
+    # Provided embedding should win; the fake should never have been called.
+    assert captured["embedding"] == [1.0, 2.0]
+    assert fake_emb.calls == []
+
+
+@pytest.mark.asyncio
+async def test_store_memory_invokes_embedding_model_when_missing(caplog):
+    captured = {}
+
+    async def backend_store(payload):
+        captured.update(payload)
+        return {}
+
+    fake_emb = _FakeEmbedding(vector=[0.5, 0.6, 0.7])
+    service = MemoryService(
+        embedding_model=fake_emb, backend_store=backend_store,
+    )
+
+    await service.store_memory(
+        content="hello world",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+    assert captured["embedding"] == [0.5, 0.6, 0.7]
+    assert fake_emb.calls == ["hello world"]
+
+
+@pytest.mark.asyncio
+async def test_store_memory_tolerates_embedding_failure(caplog):
+    """If embedding generation fails, store_memory proceeds without it."""
+    captured = {}
+
+    async def backend_store(payload):
+        captured.update(payload)
+        return {}
+
+    fake_emb = _FakeEmbedding(error=RuntimeError("down"))
+    service = MemoryService(
+        embedding_model=fake_emb, backend_store=backend_store,
+    )
+
+    result = await service.store_memory(
+        content="hello",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+    assert result.event == "ADD"
+    assert captured["embedding"] is None
+
+
+@pytest.mark.asyncio
+async def test_store_memory_propagates_backend_hook_exception():
+    """backend_store errors should bubble up after being logged."""
+
+    async def backend_store(payload):
+        raise RuntimeError("boom")
+
+    service = MemoryService(backend_store=backend_store)
+    with pytest.raises(RuntimeError, match="boom"):
+        await service.store_memory(
+            content="x",
+            tenant_id="t",
+            user_id="u",
+            agent_id="a",
+            layer=MemoryLayer.AGENT,
+            memory_type=MemoryType.SHORT_TERM,
+        )
+
+
+@pytest.mark.asyncio
+async def test_store_memory_normalizes_backend_result_with_defaults():
+    """When the backend returns only memory_id, other fields come from inputs."""
+
+    async def backend_store(_payload):
+        return {"memory_id": 99}
+
+    service = MemoryService(backend_store=backend_store)
+    result = await service.store_memory(
+        content="hello",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+    assert result.memory_id == "99"
+    assert result.event == "ADD"
+    assert result.content == "hello"
+    assert result.layer == MemoryLayer.AGENT
+    assert result.memory_type == MemoryType.SHORT_TERM
+
+
+@pytest.mark.asyncio
+async def test_store_memory_uses_backend_returned_event_and_content():
+    """Backend may override event and content."""
+
+    async def backend_store(_payload):
+        return {
+            "memory_id": 5,
+            "event": "UNCHANGED",
+            "content": "backend-overridden",
         }
 
-    async def add(self, messages, *, user_id=None, agent_id=None, infer=True):  # noqa: ANN001
-        self.calls["add"].append({
-            "messages": messages,
-            "user_id": user_id,
-            "agent_id": agent_id,
-            "infer": infer,
-        })
-        results = self.config.get("add_results", [
-            {"id": "1", "memory": "m1", "event": "ADD"},
-        ])
-        return {"results": results}
+    service = MemoryService(backend_store=backend_store)
+    result = await service.store_memory(
+        content="input content",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+    )
 
-    async def search(self, *, query, limit, threshold, user_id, agent_id=None):  # noqa: ANN001
-        self.calls["search"].append({
-            "query": query,
-            "limit": limit,
-            "threshold": threshold,
-            "user_id": user_id,
-            "agent_id": agent_id,
-        })
-        results: Any = self.config.get("search_results", [
-            {"id": "1", "memory": "m1", "score": 0.9, "agent_id": agent_id},
-            {"id": "2", "memory": "m2", "score": 0.7},
-        ])
-        if self.config.get("search_results_are_coroutine"):
-            async def _coro():
-                return results
+    assert result.event == "UNCHANGED"
+    assert result.content == "backend-overridden"
 
-            return {"results": _coro()}
-        return {"results": results}
 
-    async def get_all(self, *, user_id, agent_id=None):  # noqa: ANN001
-        self.calls["get_all"].append({"user_id": user_id, "agent_id": agent_id})
-        results: Any = self.config.get("all_results", [
-            {"id": "1", "memory": "m1"},
-            {"id": "2", "memory": "m2", "agent_id": agent_id or "a"},
-        ])
-        if self.config.get("all_results_are_coroutine"):
-            async def _coro():
-                return results
+@pytest.mark.asyncio
+async def test_store_memory_handles_none_backend_result():
+    """If backend returns None, defaults are used."""
 
-            return {"results": _coro()}
-        return {"results": results}
-
-    async def delete(self, *, memory_id):  # noqa: ANN001
-        self.calls["delete"].append({"memory_id": memory_id})
-        fail_ids = set(self.config.get("delete_fail_ids", []))
-        if memory_id in fail_ids:
-            raise RuntimeError("delete failed")
-        return {"ok": True}
-
-    async def reset(self):  # noqa: D401
-        """Simulate reset operation."""
-        self.calls["reset"].append({})
-        if self.config.get("reset_raises"):
-            raise RuntimeError("boom")
+    async def backend_store(_payload):
         return None
 
-
-async def _return_dummy_memory(config: Dict[str, Any] | None = None):
-    return DummyMemory(config)
-
-
-# ---------------------------------------------------------------------------
-# Tests for add_memory
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_add_memory_user_and_agent_paths(monkeypatch):
-    mem = DummyMemory()
-
-    async def _gm(_: Dict[str, Any]):
-        return mem
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    # user level (no agent_id)
-    res_user = await memory_service.add_memory(
-        messages=[{"role": "user", "content": "hi"}],
-        memory_level="user",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id=None,
-        infer=True,
+    service = MemoryService(backend_store=backend_store)
+    result = await service.store_memory(
+        content="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
     )
-    assert res_user["results"][0]["event"] == "ADD"
-    assert mem.calls["add"][0]["agent_id"] is None
-
-    # agent level (agent_id included)
-    res_agent = await memory_service.add_memory(
-        messages="hello",
-        memory_level="agent",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        infer=True,
-    )
-    assert res_agent["results"][0]["event"] == "ADD"
-    assert mem.calls["add"][1]["agent_id"] == "a1"
-
-
-@pytest.mark.asyncio
-async def test_add_memory_invalid_level(monkeypatch):
-    monkeypatch.setattr(memory_service, "get_memory_instance", _return_dummy_memory)
-    with pytest.raises(ValueError):
-        await memory_service.add_memory(
-            messages="hi",
-            memory_level="wrong",
-            memory_config={},
-            tenant_id="t1",
-            user_id="u1",
-        )
+    assert result.event == "ADD"
 
 
 # ---------------------------------------------------------------------------
-# Tests for add_memory_in_levels
+# search_memory: layer handling
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_add_memory_in_levels_merge_priority(monkeypatch):
-    # Simulate overlapping ids across levels; higher priority event should win.
-    # Priority: DELETE > ADD > UPDATE > NONE
-    async def _fake_add(messages, memory_level, memory_config, tenant_id, user_id, agent_id, infer):  # noqa: ARG001
-        mapping = {
-            "agent": [{"id": "X", "memory": "m", "event": "ADD"}],
-            "user_agent": [{"id": "X", "memory": "m", "event": "DELETE"}],
-            "user": [{"id": "Y", "memory": "m2", "event": "UPDATE"}],
-            "tenant": [{"id": "Y", "memory": "m2", "event": "NONE"}],
-        }
-        return {"results": mapping.get(memory_level, [])}
-
-    monkeypatch.setattr(memory_service, "add_memory", _fake_add)
-
-    out = await memory_service.add_memory_in_levels(
-        messages="hi",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        memory_levels=["agent", "user_agent", "tenant", "user"],
+async def test_search_memory_returns_empty_when_agent_layer_not_requested():
+    """Only the agent layer uses vector retrieval; full-context layers return []."""
+    service = MemoryService()
+    results = await service.search_memory(
+        query="anything",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.USER, MemoryLayer.TENANT],
     )
-
-    results = {item["id"]: item["event"] for item in out["results"]}
-    # For id X, DELETE should override ADD
-    assert results["X"] == "DELETE"
-    # For id Y, UPDATE should override NONE
-    assert results["Y"] == "UPDATE"
-
-
-# ---------------------------------------------------------------------------
-# Tests for search_memory and search_memory_in_levels
-# ---------------------------------------------------------------------------
+    assert results == []
 
 
 @pytest.mark.asyncio
-async def test_search_memory_filters_and_coroutine_results(monkeypatch):
-    mem = DummyMemory({
-        "search_results": [
-            {"id": "1", "memory": "u", "score": 0.9},
-            {"id": "2", "memory": "a", "score": 0.8, "agent_id": "a1"},
-        ],
-        "search_results_are_coroutine": True,
-    })
+async def test_search_memory_returns_empty_when_no_embedding_model():
+    """Without an embedding model and no provided embedding, no search runs."""
 
-    async def _gm(_: Dict[str, Any]):
-        return mem
+    async def backend_search(_payload):
+        raise AssertionError("backend_search should not be called")
 
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    # user level should filter out agent memories
-    res_user = await memory_service.search_memory(
-        query_text="q",
-        memory_level="user",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        top_k=3,
-        threshold=0.5,
+    service = MemoryService(backend_search=backend_search)
+    results = await service.search_memory(
+        query="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
     )
-    assert all("agent_id" not in r for r in res_user["results"])  # filtered
-
-    # agent level should keep only agent memories
-    res_agent = await memory_service.search_memory(
-        query_text="q",
-        memory_level="agent",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-    )
-    assert all("agent_id" in r for r in res_agent["results"])  # filtered
+    assert results == []
 
 
 @pytest.mark.asyncio
-async def test_search_memory_invalid_level(monkeypatch):
-    monkeypatch.setattr(memory_service, "get_memory_instance", _return_dummy_memory)
-    with pytest.raises(ValueError):
-        await memory_service.search_memory(
-            query_text="q",
-            memory_level="bad",
-            memory_config={},
-            tenant_id="t1",
-            user_id="u1",
-        )
+async def test_search_memory_uses_provided_embedding_without_calling_model():
+    captured = {}
 
+    async def backend_search(payload):
+        captured.update(payload)
+        return [
+            {"memory_id": "1", "content": "c", "score": 0.5, "layer": "agent"},
+        ]
 
-@pytest.mark.asyncio
-async def test_search_memory_in_levels_aggregates_and_order(monkeypatch):
-    async def _fake_search(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold):  # noqa: ARG001
-        return {"results": [
-            {"id": f"{memory_level}-1", "memory": "m", "score": 0.9},
-        ]}
-
-    monkeypatch.setattr(memory_service, "search_memory", _fake_search)
-
-    levels = ["tenant", "user", "agent", "user_agent"]
-    out = await memory_service.search_memory_in_levels(
-        query_text="q",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        top_k=2,
-        threshold=0.6,
-        memory_levels=levels,
+    fake_emb = _FakeEmbedding()
+    service = MemoryService(
+        embedding_model=fake_emb,
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
     )
-    # Ensure each level contributes one result and order preserved
-    got_levels = [r["memory_level"] for r in out["results"]]
-    assert got_levels == levels
+
+    results = await service.search_memory(
+        query="what?",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+        embedding=[0.1, 0.2, 0.3],
+    )
+
+    assert fake_emb.calls == []
+    assert captured["embedding"] == [0.1, 0.2, 0.3]
+    assert isinstance(results[0], MemorySearchResult)
 
 
 @pytest.mark.asyncio
-async def test_search_memory_in_levels_traces_parent_and_level_spans(monkeypatch):
-    async def _fake_search(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold):  # noqa: ARG001
-        return {"results": [
+async def test_search_memory_invokes_embedding_model_for_query(caplog):
+    captured = {}
+
+    async def backend_search(payload):
+        captured.update(payload)
+        return [
+            {"memory_id": "1", "content": "c1", "score": 0.8, "layer": "agent"},
+            {"memory_id": "2", "content": "c2", "score": 0.7, "layer": "agent"},
+        ]
+
+    fake_emb = _FakeEmbedding(vector=[0.5, 0.5, 0.5])
+    service = MemoryService(
+        embedding_model=fake_emb,
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
+    )
+
+    results = await service.search_memory(
+        query="what time is it?",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+        top_k=10,
+        threshold=0.3,
+    )
+
+    assert fake_emb.calls == ["what time is it?"]
+    assert captured["query"] == "what time is it?"
+    assert captured["top_k"] == 10
+    assert captured["threshold"] == 0.3
+    assert captured["embedding"] == [0.5, 0.5, 0.5]
+    assert captured["layers"] == [MemoryLayer.AGENT]
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_memory_returns_empty_when_embedding_generation_fails(caplog):
+    """Embedding failures are tolerated by returning an empty list."""
+
+    async def backend_search(_payload):
+        raise AssertionError("backend_search should not be called")
+
+    fake_emb = _FakeEmbedding(error=RuntimeError("down"))
+    service = MemoryService(
+        embedding_model=fake_emb, backend_search=backend_search,
+    )
+
+    results = await service.search_memory(
+        query="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_memory_no_backend_search_returns_empty():
+    """Without backend_search hook, results are [] even with embedding."""
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        embedding_model_info=_embedding_model_info(),
+    )
+    results = await service.search_memory(
+        query="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_memory_backend_exception_returns_empty(caplog):
+    """A backend_search exception is logged and turned into an empty list."""
+
+    async def backend_search(_payload):
+        raise RuntimeError("backend down")
+
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
+    )
+    results = await service.search_memory(
+        query="hi",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_memory_clamps_top_k_to_max():
+    """top_k is validated against MemoryRetrievalPolicy rules."""
+    captured = {}
+
+    async def backend_search(payload):
+        captured.update(payload)
+        return []
+
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
+    )
+    await service.search_memory(
+        query="x",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
+        top_k=1000,  # Should be clamped to MAX_TOP_K == 100
+    )
+    assert captured["top_k"] == 100
+
+
+@pytest.mark.asyncio
+async def test_search_memory_normalizes_hits():
+    """Result normalization handles missing fields and an invalid layer value."""
+
+    async def backend_search(_payload):
+        return [
+            # missing layer → falls back to AGENT; id field used as memory_id
+            {"id": 11, "content": "c1", "score": 0.9},
+            # invalid layer → falls back to AGENT
+            {"memory_id": 22, "content": "c2", "score": 0.7, "layer": "bogus"},
+            # external flag preserved
             {
-                "id": f"{memory_level}-1",
-                "memory": f"secret memory body {memory_level}",
-                "score": 0.9,
+                "memory_id": 33,
+                "content": "c3",
+                "score": 0.5,
+                "layer": "agent",
+                "is_external": True,
+                "source": "mem0",
             },
-        ]}
+            # missing score defaults to 0.0
+            {"memory_id": 44, "content": "c4", "layer": "agent"},
+        ]
 
-    class FakeMonitoringManager:
-        def __init__(self):
-            self.spans = []
-            self._active = []
-
-        @contextmanager
-        def trace_retriever_call(self, retriever_name, agent_name=None, retrieval_input=None, **attrs):  # noqa: ANN001
-            span = {
-                "name": retriever_name,
-                "agent_name": agent_name,
-                "input": retrieval_input,
-                "attrs": attrs,
-                "set_attrs": {},
-                "output": None,
-            }
-            self.spans.append(span)
-            self._active.append(span)
-            try:
-                yield span
-            finally:
-                self._active.pop()
-
-        def set_retriever_output(self, output):  # noqa: ANN001
-            self._active[-1]["output"] = output
-
-        def set_span_attributes(self, **attrs):  # noqa: ANN003
-            self._active[-1]["set_attrs"].update(attrs)
-
-    fake_manager = FakeMonitoringManager()
-    monkeypatch.setattr(memory_service, "search_memory", _fake_search)
-    monkeypatch.setattr(memory_service, "get_monitoring_manager", lambda: fake_manager)
-
-    out = await memory_service.search_memory_in_levels(
-        query_text="q",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        top_k=2,
-        threshold=0.6,
-        memory_levels=["tenant", "user"],
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
     )
 
-    assert [r["memory_level"] for r in out["results"]] == ["tenant", "user"]
-
-    parent_span = fake_manager.spans[0]
-    level_spans = fake_manager.spans[1:]
-    assert parent_span["name"] == "memory.search"
-    assert parent_span["input"]["query"] == "q"
-    assert parent_span["attrs"]["memory.search.top_k"] == 2
-    assert parent_span["attrs"]["memory.search.threshold"] == 0.6
-    assert parent_span["set_attrs"]["memory.search.error_count"] == 0
-    assert parent_span["output"]["results"][0]["score"] == 0.9
-    assert "memory" not in parent_span["output"]["results"][0]
-    assert "memory" in parent_span["output"]["results"][0]["keys"]
-
-    assert [span["name"] for span in level_spans] == ["memory.search.tenant", "memory.search.user"]
-    assert level_spans[0]["attrs"]["memory.level"] == "tenant"
-    assert level_spans[0]["attrs"]["memory.search.top_k"] == 2
-    assert level_spans[0]["output"]["results"][0]["memory_level"] == "tenant"
-
-
-# ---------------------------------------------------------------------------
-# Tests for list_memory
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_list_memory_filters_and_counts(monkeypatch):
-    mem = DummyMemory({
-        "all_results": [
-            {"id": "1", "memory": "m"},  # no agent_id
-            {"id": "2", "memory": "a", "agent_id": "a1"},
-            {"id": "3", "memory": "m3"},
-        ],
-        "all_results_are_coroutine": True,
-    })
-
-    async def _gm(_: Dict[str, Any]):
-        return mem
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    # tenant level -> only items without agent_id
-    out_tenant = await memory_service.list_memory(
-        memory_level="tenant",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
+    results = await service.search_memory(
+        query="x",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
     )
-    assert out_tenant["total"] == 2
-    assert all("agent_id" not in r for r in out_tenant["items"])
 
-    # agent level -> only items with agent_id
-    out_agent = await memory_service.list_memory(
-        memory_level="agent",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
+    assert len(results) == 4
+    assert results[0].memory_id == 11
+    assert results[0].layer == MemoryLayer.AGENT  # defaulted
+    assert results[1].memory_id == 22
+    assert results[1].layer == MemoryLayer.AGENT  # invalid layer fell back to AGENT
+    assert results[2].is_external is True
+    assert results[2].source == "mem0"
+    assert results[2].metadata.get("tenant_id") == "t"
+    assert results[3].score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_search_memory_includes_index_name_when_info_present():
+    captured = {}
+
+    async def backend_search(payload):
+        captured.update(payload)
+        return []
+
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(name="text-emb", repo="vendor"),
     )
-    assert out_agent["total"] == 1
-    assert all("agent_id" in r for r in out_agent["items"])
-
-
-# ---------------------------------------------------------------------------
-# Tests for delete_memory
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_delete_memory_success(monkeypatch):
-    mem = DummyMemory()
-
-    async def _gm(_: Dict[str, Any]):
-        return mem
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    res = await memory_service.delete_memory("X", memory_config={})
-    assert res["ok"] is True
-    assert mem.calls["delete"][0]["memory_id"] == "X"
-
-
-@pytest.mark.asyncio
-async def test_delete_memory_unsupported(monkeypatch):
-    class NoDelete:
-        async def reset(self):  # pragma: no cover - not used here
-            return None
-
-    async def _gm(_: Dict[str, Any]):
-        return NoDelete()
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    with pytest.raises(AttributeError):
-        await memory_service.delete_memory("X", memory_config={})
-
-
-# ---------------------------------------------------------------------------
-# Tests for clear_memory
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_clear_memory_counts_and_failures(monkeypatch):
-    mem = DummyMemory({
-        "all_results": [
-            {"id": "1", "memory": "m"},
-            {"id": "2", "memory": "a", "agent_id": "a1"},
-            {"id": "3", "memory": "m3"},
-        ],
-        "delete_fail_ids": {"3"},
-    })
-
-    async def _gm(_: Dict[str, Any]):
-        return mem
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
-
-    # tenant level: should attempt to delete ids 1 and 3, with 3 failing
-    out = await memory_service.clear_memory(
-        memory_level="tenant",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
+    await service.search_memory(
+        query="x",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layers=[MemoryLayer.AGENT],
     )
-    assert out == {"deleted_count": 1, "total_count": 2}
 
-
-# ---------------------------------------------------------------------------
-# Tests for reset_all_memory
-# ---------------------------------------------------------------------------
+    assert captured["index_name"].startswith("mem_vendor_text-emb_")
 
 
 @pytest.mark.asyncio
-async def test_reset_all_memory_success_and_failure(monkeypatch):
-    ok_mem = DummyMemory()
-    bad_mem = DummyMemory({"reset_raises": True})
+async def test_search_memory_default_layers_when_none_provided():
+    """If layers is None, the policy default is used."""
+    captured = {}
 
-    async def _gm_ok(_: Dict[str, Any]):
-        return ok_mem
+    async def backend_search(payload):
+        captured.update(payload)
+        return []
 
-    async def _gm_bad(_: Dict[str, Any]):
-        return bad_mem
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm_ok)
-    assert await memory_service.reset_all_memory({}) is True
-
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm_bad)
-    assert await memory_service.reset_all_memory({}) is False
-
-
-# ---------------------------------------------------------------------------
-# Tests for _filter_by_memory_level
-# ---------------------------------------------------------------------------
-
-
-def test_filter_by_memory_level_variants():
-    data = [
-        {"id": "1"},
-        {"id": "2", "agent_id": "a1"},
-    ]
-    assert memory_service._filter_by_memory_level("tenant", data) == [{"id": "1"}]
-    assert memory_service._filter_by_memory_level("user", data) == [{"id": "1"}]
-    assert memory_service._filter_by_memory_level("agent", data) == [{"id": "2", "agent_id": "a1"}]
-    assert memory_service._filter_by_memory_level("user_agent", data) == [{"id": "2", "agent_id": "a1"}]
-
-    with pytest.raises(ValueError):
-        memory_service._filter_by_memory_level("bad", data)
-
-
-# ---------------------------------------------------------------------------
-# Additional coverage for error paths and clear_model_memories
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_add_memory_in_levels_ignores_failing_levels(monkeypatch):
-    async def _fake_add(messages, memory_level, memory_config, tenant_id, user_id, agent_id, infer):  # noqa: ARG001
-        if memory_level == "agent":
-            raise RuntimeError("boom")
-        return {"results": [{"id": memory_level, "event": "ADD"}]}
-
-    monkeypatch.setattr(memory_service, "add_memory", _fake_add)
-
-    out = await memory_service.add_memory_in_levels(
-        messages="hi",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        memory_levels=["agent", "user"],
+    service = MemoryService(
+        embedding_model=_FakeEmbedding(),
+        backend_search=backend_search,
+        embedding_model_info=_embedding_model_info(),
     )
-    # agent failed and returns [], user succeeded
-    assert [r["id"] for r in out["results"]] == ["user"]
-
-
-@pytest.mark.asyncio
-async def test_search_memory_in_levels_ignores_failing_levels_and_preserves_order(monkeypatch):
-    async def _fake_search(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold):  # noqa: ARG001
-        if memory_level == "user":
-            raise RuntimeError("fail user")
-        return {"results": [{"id": f"ok-{memory_level}", "memory": "m", "score": 0.9}]}
-
-    monkeypatch.setattr(memory_service, "search_memory", _fake_search)
-
-    levels = ["tenant", "user", "agent"]
-    out = await memory_service.search_memory_in_levels(
-        query_text="q",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
-        agent_id="a1",
-        top_k=2,
-        threshold=0.6,
-        memory_levels=levels,
+    await service.search_memory(
+        query="x",
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
     )
-    # Only tenant and agent appear, in their relative order
-    got_ids = [r["id"] for r in out["results"]]
-    assert got_ids == ["ok-tenant", "ok-agent"]
+
+    assert MemoryLayer.AGENT in captured["layers"]
 
 
-@pytest.mark.asyncio
-async def test_list_memory_non_coroutine_results(monkeypatch):
-    class Mem:
-        async def get_all(self, *, user_id, agent_id=None):  # noqa: ANN001
-            return {"results": [
-                {"id": "1", "memory": "x"},
-                {"id": "2", "memory": "a", "agent_id": agent_id or "a1"},
-            ]}
+# ---------------------------------------------------------------------------
+# Helpers / static helpers
+# ---------------------------------------------------------------------------
 
-    async def _gm(_: Dict[str, Any]):
-        return Mem()
 
-    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
+def test_get_index_name_returns_none_without_info():
+    service = MemoryService()
+    assert service._get_index_name() is None
 
-    # user level -> only items without agent_id
-    out = await memory_service.list_memory(
-        memory_level="user",
-        memory_config={},
-        tenant_id="t1",
-        user_id="u1",
+
+def test_get_index_name_delegates_to_embedding_model_info():
+    info = _embedding_model_info(name="text-emb", repo="vendor")
+    service = MemoryService(embedding_model_info=info)
+    assert service._get_index_name() == "mem_vendor_text-emb_3"
+
+
+def test_build_backend_store_payload_translates_enums_to_values():
+    """The static helper should serialize layer/memory_type enums."""
+    from nexent.memory.models import MemoryRecord
+
+    record_obj = MemoryRecord(
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        conversation_id="c",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+        content="hi",
+        idempotency_key="k",
     )
-    assert out == {"items": [{"id": "1", "memory": "x"}], "total": 1}
 
-
-# ---------------------------- clear_model_memories ---------------------------
-
-
-class _DummyESCore:
-    def __init__(self, exists_behavior=None, delete_raises=False):
-        if exists_behavior is None:
-            def exists_behavior(index):  # noqa: ANN001
-                return True
-        self._exists_behavior = exists_behavior
-        indices = types.SimpleNamespace(exists=self._exists_behavior)
-        self.client = types.SimpleNamespace(indices=indices)
-        self._delete_raises = delete_raises
-        self.deleted = []
-
-    def delete_index(self, index_name: str):
-        self.deleted.append(index_name)
-        if self._delete_raises:
-            raise RuntimeError("delete failed")
-
-
-@pytest.mark.asyncio
-async def test_clear_model_memories_early_exit_when_index_missing(monkeypatch):
-    es = _DummyESCore(exists_behavior=lambda index: False)
-
-    # Ensure reset is not called when index missing
-    called = {"reset": False}
-
-    async def _reset(cfg):  # noqa: ANN001
-        called["reset"] = True
-        return True
-
-    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
-
-    ok = await memory_service.clear_model_memories(
-        vdb_core=es,
-        model_repo="jina-ai",
-        model_name="jina-embeddings-v2-base-en",
-        embedding_dims=768,
-        base_memory_config={"vector_store": {
-            "config": {}}, "embedder": {"config": {}}},
+    payload = MemoryService._build_backend_store_payload(
+        memory_record=record_obj,
+        content="hi",
+        embedding=[0.1, 0.2],
     )
-    assert ok is True
-    assert called["reset"] is False
-    assert es.deleted == []
+
+    assert payload["layer"] == "agent"
+    assert payload["memory_type"] == "short_term"
+    assert payload["memory_id"] == record_obj.memory_id
+    assert payload["embedding"] == [0.1, 0.2]
+    assert payload["idempotency_key"] == "k"
+    assert payload["conversation_id"] == "c"
+    assert payload["user_id"] == "u"
+    assert payload["tenant_id"] == "t"
+    assert payload["agent_id"] == "a"
+    assert payload["content"] == "hi"
 
 
-@pytest.mark.asyncio
-async def test_clear_model_memories_success_and_config_adjustment_with_repo(monkeypatch):
-    es = _DummyESCore(exists_behavior=lambda index: True)
-    seen_config: Dict[str, Any] = {}
+def test_build_backend_store_payload_with_none_embedding():
+    """The embedding slot is forwarded as None when omitted."""
+    from nexent.memory.models import MemoryRecord
 
-    async def _reset(cfg):  # noqa: ANN001
-        seen_config.update(cfg)
-        return True
+    record_obj = MemoryRecord(
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        layer=MemoryLayer.AGENT,
+        memory_type=MemoryType.SHORT_TERM,
+        content="hi",
+        idempotency_key="k",
+    )
 
-    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+    payload = MemoryService._build_backend_store_payload(
+        memory_record=record_obj,
+        content="hi",
+        embedding=None,
+    )
+    assert payload["embedding"] is None
 
-    ok = await memory_service.clear_model_memories(
-        vdb_core=es,
-        model_repo="jina-ai",
-        model_name="jina-embeddings-v2-base-en",
-        embedding_dims=1024,
-        base_memory_config={
-            "vector_store": {"config": {"collection_name": "ignored", "embedding_model_dims": 0}},
-            "embedder": {"config": {"embedding_dims": 0}},
+
+def test_build_backend_search_payload_attaches_index_name():
+    request = MemorySearchRequest(
+        query="q",
+        tenant_id="t",
+        user_id="u",
+        layers=[MemoryLayer.AGENT],
+    )
+    payload = MemoryService._build_backend_search_payload(
+        request=request,
+        index_name="mem_openai_text-emb_3",
+    )
+
+    assert payload["index_name"] == "mem_openai_text-emb_3"
+    assert payload["query"] == "q"
+    assert payload["tenant_id"] == "t"
+
+
+def test_to_search_result_with_minimal_fields_uses_defaults():
+    result = MemoryService._to_search_result(
+        item={"memory_id": 1, "content": "c", "score": 0.1},
+        tenant_id="t",
+    )
+    assert result.layer == MemoryLayer.AGENT
+    assert result.source == "internal"
+    assert result.is_external is False
+    assert result.metadata.get("tenant_id") == "t"
+
+
+def test_to_search_result_uses_id_field_when_memory_id_missing():
+    result = MemoryService._to_search_result(
+        item={"id": 7, "content": "c", "score": 0.1},
+        tenant_id="t",
+    )
+    assert result.memory_id == 7
+
+
+def test_to_search_result_invalid_layer_falls_back_to_agent():
+    result = MemoryService._to_search_result(
+        item={
+            "memory_id": "1",
+            "content": "c",
+            "score": 0.1,
+            "layer": "not-a-layer",
         },
+        tenant_id="t",
     )
-    assert ok is True
-
-    # Index name should include repo and dims
-    assert es.deleted == ["mem0_jina-ai_jina-embeddings-v2-base-en_1024"]
-    # Config passed to reset should be adjusted (without mutating base)
-    assert seen_config["vector_store"]["config"]["collection_name"] == "mem0_jina-ai_jina-embeddings-v2-base-en_1024"
-    assert seen_config["vector_store"]["config"]["embedding_model_dims"] == 1024
-    assert seen_config["embedder"]["config"]["embedding_dims"] == 1024
+    assert result.layer == MemoryLayer.AGENT
 
 
-@pytest.mark.asyncio
-async def test_clear_model_memories_handles_es_exists_exception(monkeypatch):
-    def _exists_raises(index):  # noqa: ANN001
-        raise RuntimeError("exists failed")
-
-    es = _DummyESCore(exists_behavior=_exists_raises)
-
-    # reset is called despite exists() failing
-    called = {"reset": 0}
-
-    async def _reset(cfg):  # noqa: ANN001
-        called["reset"] += 1
-        return True
-
-    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
-
-    ok = await memory_service.clear_model_memories(
-        vdb_core=es,
-        model_repo="",
-        model_name="m",
-        embedding_dims=128,
-        base_memory_config={"vector_store": {
-            "config": {}}, "embedder": {"config": {}}},
+def test_to_search_result_preserves_metadata_when_provided():
+    result = MemoryService._to_search_result(
+        item={
+            "memory_id": "1",
+            "content": "c",
+            "score": 0.1,
+            "metadata": {"external": True},
+        },
+        tenant_id="t",
     )
-    assert ok is True
-    assert called["reset"] == 1
-    assert es.deleted == ["mem0_m_128"]
+    assert result.metadata == {"external": True}
 
 
-@pytest.mark.asyncio
-async def test_clear_model_memories_swallow_failures_and_no_repo(monkeypatch):
-    es = _DummyESCore(exists_behavior=lambda index: True, delete_raises=True)
+# ---------------------------------------------------------------------------
+# Module-level service accessors
+# ---------------------------------------------------------------------------
 
-    async def _reset(_: Dict[str, Any]):
-        raise RuntimeError("reset failed")
 
-    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+def test_get_memory_service_returns_singleton_instance():
+    reset_memory_service()
+    a = get_memory_service()
+    b = get_memory_service()
+    assert isinstance(a, MemoryService)
+    assert a is b
 
-    ok = await memory_service.clear_model_memories(
-        vdb_core=es,
-        model_repo=None,
-        model_name="Model",
-        embedding_dims=256,
-        base_memory_config={"vector_store": {
-            "config": {}}, "embedder": {"config": {}}},
+
+def test_reset_memory_service_clears_singleton(monkeypatch):
+    reset_memory_service()
+    first = get_memory_service()
+    # Patch the singleton so we can detect re-creation.
+    monkeypatch.setattr(first, "embedding_model", object())
+    reset_memory_service()
+    second = get_memory_service()
+    assert isinstance(second, MemoryService)
+    assert second is not first
+
+
+def test_reset_memory_service_is_idempotent():
+    reset_memory_service()
+    reset_memory_service()
+    assert get_memory_service() is not None
+
+
+# ---------------------------------------------------------------------------
+# EmbeddingModelInfo passed into _get_index_name
+# ---------------------------------------------------------------------------
+
+
+def test_get_index_name_handles_missing_model_repo():
+    info = EmbeddingModelInfo(
+        model_name="text-emb",
+        dimension=64,
+        base_url="http://x",
+        api_key="k",
     )
-    # Even with reset and delete failures, function reports best-effort True
-    assert ok is True
-    assert es.deleted == ["mem0_model_256"]
-
-
-@pytest.mark.asyncio
-async def test_clear_model_memories_invalid_model_name():
-    es = _DummyESCore(exists_behavior=lambda index: True)
-    ok = await memory_service.clear_model_memories(
-        vdb_core=es,
-        model_repo="any",
-        model_name="",
-        embedding_dims=512,
-        base_memory_config={"vector_store": {
-            "config": {}}, "embedder": {"config": {}}},
-    )
-    assert ok is False
+    service = MemoryService(embedding_model_info=info)
+    assert service._get_index_name() == "mem_text-emb_64"

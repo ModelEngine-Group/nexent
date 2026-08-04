@@ -7,7 +7,16 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Input, Button, App, Select } from "antd";
+import {
+  Input,
+  InputNumber,
+  Button,
+  App,
+  Select,
+  Segmented,
+  Space,
+} from "antd";
+import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
 const { TextArea } = Input;
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
@@ -29,10 +38,7 @@ import {
   LAYOUT,
   DOCUMENT_STATUS,
 } from "@/const/knowledgeBase";
-import {
-  SUMMARY_FREQUENCY_OPTIONS_API,
-  FrequencyOption,
-} from "@/const/scheduler";
+import { FrequencyOption } from "@/const/scheduler";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
@@ -45,7 +51,7 @@ import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
-import { useGroupList } from "@/hooks/group/useGroupList";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
@@ -95,6 +101,8 @@ interface DocumentListProps {
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
   isMultimodal?: boolean;
+  quotaLimitBytes?: number | null;
+  onQuotaLimitBytesChange?: (value: number | null) => void;
   onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
   preserveSourceFile?: boolean;
@@ -110,7 +118,7 @@ interface DocumentListProps {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
-  onUpload?: () => void;
+  onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
 }
 
@@ -150,7 +158,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       permission,
       preserveSourceFile = true,
       onPreserveSourceFileChange,
-
+      quotaLimitBytes = null,
+      onQuotaLimitBytesChange,
       // Auto-summary frequency
       summaryFrequency,
       onSummaryFrequencyChange,
@@ -170,18 +179,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const uploadAreaRef = useRef<any>(null);
     const { state: docState } = useDocumentContext();
     const { modelConfig } = useConfig();
-    const { user } = useAuthorizationContext();
+    const { user, groupIds } = useAuthorizationContext();
     const tenantId = user?.tenantId || null;
+    const storageQuota = useStorageQuotaBlocked(tenantId);
 
-    // Fetch groups for group selection
+    // Fetch tenant groups and limit selections to current user's groups.
     const { data: groupData } = useGroupList(tenantId);
-    const groups = groupData?.groups || [];
+    const { groups } = useGroupDetails(groupData?.groups ?? [], groupIds);
 
-    // Create group name mapping
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
       value: group.group_id,
     }));
+
+    // Preview drawer state
+    const [quotaUnit, setQuotaUnit] = useState<"GB" | "MB">("GB");
+
+    const [selectedFile, setSelectedFile] = useState<{
+      objectName: string;
+      fileName: string;
+      fileType?: string;
+      fileSize?: number;
+    } | null>(null);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -314,7 +333,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         const initDefaultGroup = async () => {
           try {
             const defaultGroupId = await getTenantDefaultGroupId(tenantId);
-            if (defaultGroupId) {
+            if (defaultGroupId && groupIds.includes(defaultGroupId)) {
               onSelectedGroupIdsChange([defaultGroupId]);
             }
           } catch (error) {
@@ -323,7 +342,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId]);
+    }, [isCreatingMode, tenantId, groupIds, onSelectedGroupIdsChange]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -360,9 +379,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       const loadFrequencyOptions = async () => {
         if (showDetail && frequencyOptions.length === 0) {
           try {
-            const response = await fetch(SUMMARY_FREQUENCY_OPTIONS_API);
-            const data = await response.json();
-            setFrequencyOptions(data.options || []);
+            const options =
+              await knowledgeBaseService.fetchSummaryFrequencyOptions();
+            setFrequencyOptions(options);
           } catch (error) {
             log.error("Failed to load frequency options:", error);
             // Fallback to default options if API fails
@@ -559,7 +578,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             <div className="flex items-start flex-1 min-w-0 overflow-hidden">
               {isCreatingMode ? (
                 <div className="flex flex-wrap items-start gap-3 w-full overflow-hidden">
-                  <div className="flex flex-col flex-1" style={{ minWidth: 120 }}>
+                  <div
+                    className="flex flex-col flex-1"
+                    style={{ minWidth: 120 }}
+                  >
                     <Input
                       value={knowledgeBaseName}
                       onChange={(e) =>
@@ -572,18 +594,22 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       status={
                         isCreatingMode &&
                         (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                          nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT)
+                          nameStatus ===
+                            NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT)
                           ? "error"
                           : undefined
                       }
                       autoFocus
                       disabled={
-                        hasDocuments || isUploading || docState.isLoadingDocuments
+                        hasDocuments ||
+                        isUploading ||
+                        docState.isLoadingDocuments
                       }
                     />
                     {isCreatingMode &&
                       (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
+                        nameStatus ===
+                          NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
                         <div className="flex items-center gap-1 text-red-500 text-s whitespace-nowrap mt-0.5 ml-3">
                           <AlertCircle size={14} />
                           <span>
@@ -602,7 +628,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       <Select
                         value={selectedEmbeddingModel}
                         onChange={onEmbeddingModelChange}
-                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
                         placeholder={
                           t("knowledgeBase.create.embeddingModelPlaceholder") ||
                           "Select embedding model"
@@ -640,7 +671,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         mode="multiple"
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
-                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
                         placeholder={t(
                           "knowledgeBase.create.permission.groupPlaceholder"
                         )}
@@ -655,7 +691,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       <Select
                         value={ingroupPermission}
                         onChange={onIngroupPermissionChange}
-                        style={{ flex: "1 1 160px", minWidth: 160, justifyContent: "center", alignItems: "flex-end" }}
+                        style={{
+                          flex: "1 1 160px",
+                          minWidth: 160,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
                         placeholder={t(
                           "knowledgeBase.ingroup.permission.DEFAULT"
                         )}
@@ -684,6 +725,41 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           },
                         ]}
                       />
+                    )}
+                    {onQuotaLimitBytesChange && (
+                      <Space size={4}>
+                        <InputNumber
+                          value={
+                            quotaLimitBytes != null
+                              ? quotaUnit === "GB"
+                                ? Math.round(
+                                    quotaLimitBytes / (1024 * 1024 * 1024)
+                                  )
+                                : Math.round(quotaLimitBytes / (1024 * 1024))
+                              : null
+                          }
+                          onChange={(v) => {
+                            if (v == null) {
+                              onQuotaLimitBytesChange(null);
+                            } else if (quotaUnit === "GB") {
+                              onQuotaLimitBytesChange(v * 1024 * 1024 * 1024);
+                            } else {
+                              onQuotaLimitBytesChange(v * 1024 * 1024);
+                            }
+                          }}
+                          addonAfter={quotaUnit}
+                          placeholder={t("quota.unlimited", "无限制")}
+                          min={0}
+                          precision={0}
+                          style={{ width: 130 }}
+                        />
+                        <Segmented
+                          size="small"
+                          options={["GB", "MB"]}
+                          value={quotaUnit}
+                          onChange={(val) => setQuotaUnit(val as "GB" | "MB")}
+                        />
+                      </Space>
                     )}
                   </div>
                 </div>
@@ -741,7 +817,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         {/* Document list */}
 
         <div
-          className="p-2 overflow-auto flex-grow"
+          className={`p-2 flex-grow min-h-0 ${
+            showChunk ? "overflow-hidden" : "overflow-auto"
+          }`}
           onDragOver={(e) => {
             if (!isCreatingMode && knowledgeBaseName) {
               return;
@@ -763,7 +841,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           }}
         >
           {showChunk ? (
-            <div className="flex h-full flex-col px-8">
+            <div className="flex h-full min-h-0 flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
                 knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
@@ -1050,18 +1128,20 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                             >
                               {t("common.download")}
                             </button>
-                            <button
-                              onClick={() => onDelete(doc.id)}
-                              className={LAYOUT.ACTION_TEXT}
-                              title={
-                                doc.status === DOCUMENT_STATUS.PROCESSING ||
-                                doc.status === DOCUMENT_STATUS.FORWARDING
-                                  ? t("document.delete.terminateTask")
-                                  : undefined
-                              }
-                            >
-                              {t("common.delete")}
-                            </button>
+                            {!isReadOnlyMode && (
+                              <button
+                                onClick={() => onDelete(doc.id)}
+                                className={LAYOUT.ACTION_TEXT}
+                                title={
+                                  doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                  doc.status === DOCUMENT_STATUS.FORWARDING
+                                    ? t("document.delete.terminateTask")
+                                    : undefined
+                                }
+                              >
+                                {t("common.delete")}
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}
@@ -1095,13 +1175,26 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               }
               ref={uploadAreaRef}
               onFileSelect={onFileSelect}
-              onUpload={onUpload || (() => {})}
+              onUpload={onUpload || (async () => {})}
               isUploading={isUploading}
               isDragging={isDragging}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              disabled={!isCreatingMode && !knowledgeBaseId}
+              disabled={
+                storageQuota.isBlocked ||
+                isReadOnlyMode ||
+                (!isCreatingMode && !knowledgeBaseId)
+              }
+              disabledMessage={
+                storageQuota.isBlocked
+                  ? storageQuota.message ||
+                    t(
+                      "quota.uploadBlocked",
+                      "Uploads are blocked - storage limit reached"
+                    )
+                  : undefined
+              }
               componentHeight={uploadHeight}
               isCreatingMode={isCreatingMode}
               // Use internal ID for backend operations; fall back to name in creation mode

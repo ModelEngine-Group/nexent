@@ -10,7 +10,7 @@ import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, ANY, AsyncMock
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
@@ -142,6 +142,25 @@ def auth_data():
         "auth_header": {"Authorization": "Bearer test_token"}
     }
 
+
+@pytest.fixture(autouse=True)
+def mock_knowledge_base_edit_permission():
+    with patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.require_knowledge_base_edit_permission",
+        return_value="EDIT",
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_knowledge_base_read_permission():
+    """Auto-mock read permission so hybrid_search and other endpoints don't hit the real DB."""
+    with patch(
+        "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
+        return_value="READ_ONLY",
+    ):
+        yield
+
 # Test cases using pytest-asyncio
 
 
@@ -161,8 +180,12 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         mock_create.return_value = expected_response
 
         # Execute request
-        response = client.post(f"/indices/{auth_data['index_name']}", params={
-                               "embedding_dim": 768}, headers=auth_data["auth_header"])
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            params={"embedding_dim": 768},
+            json={"embedding_model_id": 101},
+            headers=auth_data["auth_header"],
+        )
 
         # Verify
         assert response.status_code == 200
@@ -196,7 +219,7 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
         response = client.post(
             f"/indices/{auth_data['index_name']}",
             params={"embedding_dim": 768},
-            json={"ingroup_permission": "EDIT", "group_ids": [1, 2, 3]},
+            json={"embedding_model_id": 101, "ingroup_permission": "EDIT", "group_ids": [1, 2, 3]},
             headers=auth_data["auth_header"]
         )
 
@@ -232,7 +255,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
         # Execute request with only ingroup_permission
         response = client.post(
             f"/indices/{auth_data['index_name']}",
-            json={"ingroup_permission": "READ_ONLY"},
+            json={"embedding_model_id": 101, "ingroup_permission": "READ_ONLY"},
             headers=auth_data["auth_header"]
         )
 
@@ -245,7 +268,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
 
 
 @pytest.mark.asyncio
-async def test_create_new_index_with_multimodal_flag(vdb_core_mock, auth_data):
+async def test_create_new_index_passes_embedding_model_id(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
@@ -254,13 +277,13 @@ async def test_create_new_index_with_multimodal_flag(vdb_core_mock, auth_data):
 
         response = client.post(
             f"/indices/{auth_data['index_name']}",
-            json={"is_multimodal": True},
+            json={"embedding_model_id": 202},
             headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 200
         called_kwargs = mock_create.call_args[1]
-        assert called_kwargs["is_multimodal"] is True
+        assert called_kwargs["embedding_model_id"] == 202
 
 
 @pytest.mark.asyncio
@@ -278,12 +301,31 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
 
         # Execute request
         response = client.post(
-            f"/indices/{auth_data['index_name']}", headers=auth_data["auth_header"])
+            f"/indices/{auth_data['index_name']}",
+            json={"embedding_model_id": 101},
+            headers=auth_data["auth_header"],
+        )
 
         # Verify
         assert response.status_code == 500
         assert response.json() == {
             "detail": "Error creating index: Test error"}
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_requires_integer_embedding_model_id(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ):
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            json={"embedding_model_id": "101"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "embedding_model_id must be an integer"}
 
 
 @pytest.mark.asyncio
@@ -356,6 +398,36 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
             auth_data["user_id"]
         )
+
+
+@pytest.mark.asyncio
+async def test_delete_index_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete a knowledge base."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ) as mock_require_permission, \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base",
+                new_callable=AsyncMock,
+            ) as mock_full_delete:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}",
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_full_delete.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -685,6 +757,37 @@ async def test_create_index_documents_success(vdb_core_mock, auth_data):
     assert response.status_code == 200
     assert response.json() == expected_response.dict()
     mock_index.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to index documents."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.index_documents") as mock_index:
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_index.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1086,6 +1189,37 @@ async def test_create_chunk_success(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_create_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to create chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/chunk",
+            json={"content": "Hello world", "path_or_url": "doc-1"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_chunk_passes_tenant_id_to_service(vdb_core_mock, auth_data):
     """
     Test that create_chunk endpoint passes tenant_id to the service method.
@@ -1181,6 +1315,37 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
+async def test_update_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to update chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.require_knowledge_base_edit_permission",
+                side_effect=HTTPException(
+                    status_code=403,
+                    detail="No permission to modify this knowledge base",
+                ),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_chunk") as mock_update:
+
+        response = client.put(
+            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+            json={"content": "Updated content"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            auth_data["index_name"],
+            auth_data["user_id"],
+            auth_data["tenant_id"],
+        )
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_update_chunk_value_error(vdb_core_mock, auth_data):
     """
     Test updating a chunk when service raises ValueError.
@@ -1259,6 +1424,33 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_delete.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_chunk_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete chunks."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ) as mock_require_permission, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_chunk") as mock_delete:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/chunk/chunk-1",
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_require_permission.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_delete.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1446,6 +1638,31 @@ async def test_update_index_partial_update(auth_data):
 
 
 @pytest.mark.asyncio
+async def test_update_index_clear_quota(auth_data):
+    """Test that an explicit null quota removes the knowledge base limit."""
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+        mock_update.return_value = True
+
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json={"quota_limit_bytes": None},
+            headers=auth_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        mock_update.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            knowledge_name=None,
+            ingroup_permission=None,
+            group_ids=None,
+            tenant_id=auth_data["tenant_id"],
+            user_id=auth_data["user_id"],
+            quota_limit_bytes=None
+        )
+
+
+@pytest.mark.asyncio
 async def test_update_index_value_error(auth_data):
     """
     Test updating a knowledge base with invalid permission value.
@@ -1616,13 +1833,14 @@ async def test_delete_index_auth_exception(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents successfully.
     Verifies that the endpoint returns the expected response and performs Redis cleanup.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1653,6 +1871,7 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code
@@ -1680,9 +1899,36 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data):
+    """Read-only users must not be able to delete files from a knowledge base."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.require_knowledge_base_edit_permission",
+                side_effect=PermissionError("No permission to modify this knowledge base"),
+            ), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
+
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}/documents",
+            params={"path_or_url": "test_document.pdf", "scope": "full"},
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "No permission to modify this knowledge base"
+        mock_delete_by_scope.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock, auth_data):
     """source_only scope must not trigger Redis document cleanup."""
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1702,6 +1948,7 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "source_only"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 200
@@ -1713,13 +1960,14 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents with Redis error.
     Verifies that the endpoint still succeeds with ES but reports Redis cleanup error.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1744,6 +1992,7 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code (the operation should still succeed even with Redis errors)
@@ -1770,13 +2019,14 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_es_exception(vdb_core_mock):
+async def test_delete_documents_es_exception(vdb_core_mock, auth_data):
     """
     Test deleting documents with Elasticsearch exception.
     Verifies that the endpoint returns an appropriate error response when ES deletion fails.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -1791,6 +2041,7 @@ async def test_delete_documents_es_exception(vdb_core_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 500
@@ -1802,13 +2053,14 @@ async def test_delete_documents_es_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents with Redis warnings.
     Verifies that the endpoint handles Redis warnings properly.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1839,6 +2091,7 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code
@@ -1866,13 +2119,14 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_validation_exception(vdb_core_mock):
+async def test_delete_documents_validation_exception(vdb_core_mock, auth_data):
     """
     Test deleting documents with validation exception.
     Verifies that the endpoint returns an appropriate error response when validation fails.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -1887,6 +2141,7 @@ async def test_delete_documents_validation_exception(vdb_core_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "source_only"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 400
@@ -2620,3 +2875,105 @@ async def test_get_document_error_info_regex_failure_returns_none(auth_data):
         response = client.get(f"/indices/i1/documents/docA/error-info", headers=auth_data["auth_header"])
     assert response.status_code == 200
     assert response.json()["error_code"] is None
+
+
+# ============================================================================
+# KB Read Permission Control Tests for hybrid_search (Issue #3339)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_forbidden_without_read_permission(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search returns 403 when user lacks read permission on knowledge base.
+    The permission check happens BEFORE the search is executed.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=403, detail="No permission to access this knowledge base")) as mock_perm, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["private_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        assert "No permission to access this knowledge base" in response.json()["detail"]
+        mock_perm.assert_called_once_with(
+            index_name="private_kb",
+            user_id=auth_data["user_id"],
+            tenant_id=auth_data["tenant_id"],
+        )
+        mock_search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_not_found_when_kb_missing(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search returns 404 when knowledge base does not exist.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=HTTPException(status_code=404, detail="Knowledge base 'missing_kb' not found")) as mock_perm, \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["missing_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"]
+        mock_perm.assert_called_once()
+        mock_search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_checks_all_indices(vdb_core_mock, auth_data):
+    """
+    Test hybrid_search checks permission for EVERY index in the request.
+    If any index fails permission check, the entire request is rejected.
+    """
+    call_log = []
+
+    def mock_permission_check(index_name, user_id, tenant_id):
+        call_log.append(index_name)
+        if index_name == "forbidden_kb":
+            raise HTTPException(status_code=403, detail="No permission to access this knowledge base")
+
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.require_knowledge_base_read_permission", side_effect=mock_permission_check), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.search_hybrid") as mock_search:
+
+        payload = {
+            "index_names": ["allowed_kb", "forbidden_kb", "another_kb"],
+            "query": "test query",
+            "top_k": 5,
+            "weight_accurate": 0.5,
+        }
+        response = client.post(
+            "/indices/search/hybrid",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 403
+        # Should have checked allowed_kb, then forbidden_kb (stopped there)
+        assert call_log == ["allowed_kb", "forbidden_kb"]
+        mock_search.assert_not_called()

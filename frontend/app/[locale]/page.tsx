@@ -26,7 +26,6 @@ export default function Homepage() {
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
-
   /**
  * Navigate to a route with permission pre-check
  * Returns true if navigation is allowed, false if permission is denied
@@ -52,6 +51,8 @@ export default function Homepage() {
   const navigateToChat = () => navigateWithPermissionCheck("/chat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
   const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
+  const canShowQuickAction = (route: string) =>
+    !isAuthenticated || canAccessRoute(route);
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -78,33 +79,40 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <Row gutter={[16, 16]} justify="center">
-            <Col xs={24} sm={24} md={8}>
-              <Button
-                onClick={navigateToChat}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-              >
-                <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.startChat")}
-              </Button>
-            </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button
-                onClick={navigateToAgent}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-              >
-                <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.quickConfig")}
-              </Button>
-            </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button
-                onClick={navigateToRepository}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-              >
-                <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("sidebar.agentRepository")}
-              </Button>
-            </Col>
+            {canShowQuickAction("/chat") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button type="primary" size="large" onClick={navigateToChat}>
+                    <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("page.startChat")}
+                  </Button>
+                </div>
+              </Col>
+            )}
+            {canShowQuickAction("/agents") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button type="primary" size="large" onClick={navigateToAgent}>
+                    <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("page.quickConfig")}
+                  </Button>
+                </div>
+              </Col>
+            )}
+            {canShowQuickAction("/agent-space") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    onClick={navigateToRepository}
+                  >
+                    <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("sidebar.agentRepository")}
+                  </Button>
+                </div>
+              </Col>
+            )}
           </Row>
         </motion.div>
 

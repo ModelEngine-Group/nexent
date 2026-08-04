@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   addMcpServer,
@@ -18,6 +18,7 @@ import {
 import { McpServer, McpContainer } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { MCP_SERVERS_QUERY_KEY, useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { useMcpContainerList } from "@/hooks/mcp/useMcpContainerList";
 
 export interface UseMcpConfigOptions {
@@ -58,19 +59,40 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   const queryClient = useQueryClient();
 
   const {
-    serverList,
+    serverList: rawServerList,
     enableUploadImage,
+    mcpPortsVirtual,
     isLoading: loadingServers,
     refetch: refetchMcpServers,
     invalidate: invalidateMcpServers,
   } = useMcpServerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
 
+  // Filter to match MCP space "My" tab: only show editable or group-shared MCPs
+  const serverList = useMemo(
+    () => rawServerList.filter((s) => s.permission === "EDIT" || s.group_ids),
+    [rawServerList],
+  );
+
   const {
-    containerList,
+    containerList: rawContainerList,
     isLoading: loadingContainers,
     refetch: refetchMcpContainers,
     invalidate: invalidateMcpContainers,
   } = useMcpContainerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
+
+  // Filter containers to match visible MCPs: match by container_id or host_port
+  const containerList = useMemo(() => {
+    const visibleIds = new Set<string>();
+    const visiblePorts = new Set<number>();
+    for (const srv of serverList) {
+      const s = srv as any;
+      if (s.container_id) visibleIds.add(s.container_id);
+      if (s.container_port) visiblePorts.add(s.container_port);
+    }
+    return rawContainerList.filter(
+      (c) => visibleIds.has(c.container_id) || visiblePorts.has(c.host_port ?? 0),
+    );
+  }, [rawContainerList, serverList]);
 
   const loading = loadingServers || loadingContainers;
 
@@ -86,6 +108,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       await updateToolList();
       queryClient.invalidateQueries({ queryKey: ["tools"] });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
       options.onToolsRefreshed?.();
     } catch (error) {
       log.error("Failed to refresh tools and agents:", error);
@@ -391,6 +414,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     loading,
     containerList,
     enableUploadImage,
+    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
 

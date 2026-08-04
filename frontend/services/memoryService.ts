@@ -64,6 +64,18 @@ export interface MemoryConfig {
   disableUserAgentIds: string[];
 }
 
+export interface MemoryEmbeddingStatus {
+  configured: boolean;
+  current_es_index_name: string | null;
+}
+
+export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus> {
+  return requestJson(API_ENDPOINTS.memory.config.embeddingStatus, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
+}
+
 export async function loadMemoryConfig(): Promise<MemoryConfig> {
   try {
     const res = await requestJson(API_ENDPOINTS.memory.config.load, {

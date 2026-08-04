@@ -25,7 +25,6 @@ from consts.const import (
     INVITE_CODE,
     SUPABASE_URL,
     SUPABASE_KEY,
-    DEFAULT_TENANT_ID,
     ASSET_OWNER_TENANT_ID,
     ASSET_OWNER_INVITE_CODE_TYPE,
     ASSET_OWNER_ROLE,
@@ -206,12 +205,16 @@ async def signup_user_with_invitation(email: EmailStr,
                                       invite_code: Optional[str] = None,
                                       auto_login: Optional[bool] = True):
     """User registration with invitation code support"""
-    client = get_supabase_client()
+    if not isinstance(invite_code, str) or not invite_code.strip():
+        raise ValidationError("INVITE_CODE_REQUIRED")
+    invite_code = invite_code.strip().upper()
 
     # Validate password strength before registration
     if not validate_password_strength(password):
         raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK,
                            "Password must be at least 8 characters with uppercase, lowercase, and digit.")
+
+    client = get_supabase_client()
 
     logging.info(
         f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
@@ -223,9 +226,6 @@ async def signup_user_with_invitation(email: EmailStr,
     # Validate invitation code if provided (without using it yet)
     if invite_code:
         try:
-            # Convert invite code to upper case for consistency
-            invite_code = invite_code.upper()
-
             # Check if invitation is available
             if not check_invitation_available(invite_code):
                 raise IncorrectInviteCodeException(
@@ -269,13 +269,10 @@ async def signup_user_with_invitation(email: EmailStr,
     if response.user:
         user_id = response.user.id
 
-        # Determine tenant_id based on invitation code
-        if invitation_info:
-            tenant_id = invitation_info["tenant_id"]
-            if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
-                tenant_id = ASSET_OWNER_TENANT_ID
-        else:
-            tenant_id = DEFAULT_TENANT_ID
+        # Determine tenant_id from the validated invitation code.
+        tenant_id = invitation_info["tenant_id"]
+        if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
+            tenant_id = ASSET_OWNER_TENANT_ID
 
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 

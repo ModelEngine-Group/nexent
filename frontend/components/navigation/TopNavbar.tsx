@@ -12,9 +12,11 @@ import { useLanguageSwitch } from "@/lib/language";
 import React, { useEffect, useState } from "react";
 import { Flex, Layout } from "antd";
 import { ChatTopNavContent } from "./ChatTopNavContent";
+import { NotificationBell } from "./NotificationBell";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/useNotifications";
 import type { MonitoringStatus } from "@/types/monitoring";
 import { USER_ROLES } from "@/const/auth";
 
@@ -35,6 +37,15 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     useState<MonitoringStatus | null>(null);
   const canViewMonitoringDashboard =
     isSpeedMode || user?.role === USER_ROLES.SU;
+
+  const showNotificationBell = !isSpeedMode && !!user;
+  const {
+    unreadCount,
+    items,
+    isLoading: isNotificationsLoading,
+  } = useNotifications(showNotificationBell);
+  const markNotificationReadMutation = useMarkNotificationRead();
+  const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
   useEffect(() => {
     if (!canViewMonitoringDashboard) {
@@ -116,7 +127,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
           onClick: ({ key }) => handleLanguageChange(key as string),
         }}
       >
-        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer w-[90px] border-0 shadow-none bg-transparent text-left">
+        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer w-[90px] border-0 shadow-none bg-transparent text-left no-underline">
           <Flex align="center" gap={6}>
             <Globe className="h-3.5 w-3.5" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||
@@ -125,6 +136,21 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
           </Flex>
         </a>
       </Dropdown>
+
+      {showNotificationBell && (
+        <NotificationBell
+          unreadCount={unreadCount}
+          items={items}
+          isLoading={isNotificationsLoading}
+          isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+          onMarkRead={async (receiverId) => {
+            await markNotificationReadMutation.mutateAsync(receiverId);
+          }}
+          onMarkAllRead={async () => {
+            await markAllNotificationsReadMutation.mutateAsync();
+          }}
+        />
+      )}
 
       {/* User status - only shown in full version */}
       {!isSpeedMode && (
@@ -146,49 +172,16 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
 
   return (
     <Header
-      className="w-full py-3 px-4 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm fixed top-0 z-50"
-      style={{ height: HEADER_CONFIG.DISPLAY_HEIGHT }}
+      className="w-full py-3 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm fixed top-0 z-50"
+      style={{ height: HEADER_CONFIG.DISPLAY_HEIGHT, background: "#ffffff", paddingInline: 16 }}
     >
-      <Flex align="center" justify="space-between" className="h-full">
+      <div className="h-full flex items-center justify-between">
         {/* Left section - Logo + additional title */}
         {leftContent}
 
         {/* Right section - Additional content + default navigation */}
         {rightContent}
-
-        {/* Mobile hamburger menu button */}
-        {monitoringUrl && (
-          <Tooltip title={t("monitoring.topbar.openDashboard")}>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t("monitoring.topbar.openDashboard")}
-              className="md:hidden h-8 w-8 p-0 text-emerald-600 dark:text-emerald-400"
-              icon={<Activity className="h-4 w-4" />}
-              onClick={openMonitoringDashboard}
-            />
-          </Tooltip>
-        )}
-
-        <Button type="text" size="small" className="md:hidden h-5 w-5 p-0">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-5 w-5"
-          >
-            <line x1="4" x2="20" y1="12" y2="12" />
-            <line x1="4" x2="20" y1="6" y2="6" />
-            <line x1="4" x2="20" y1="18" y2="18" />
-          </svg>
-        </Button>
-      </Flex>
+      </div>
     </Header>
   );
 }

@@ -24,6 +24,7 @@ import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import {
   isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
   isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
+  getKnowledgeBaseEmbeddingIdentity,
 } from "@/lib/knowledgeBaseCompatibility";
 import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -65,6 +66,8 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   isSelectable?: (kb: KnowledgeBase) => boolean;
   currentEmbeddingModel?: string | null;
   currentMultiEmbeddingModel?: string | null;
+  currentEmbeddingModelId?: number | null;
+  currentMultiEmbeddingModelId?: number | null;
   toolMultimodal?: boolean | null;
   // Dify/iData configuration for fetching knowledge bases
   difyConfig?: {
@@ -93,6 +96,8 @@ export default function KnowledgeBaseSelectorModal({
   isSelectable,
   currentEmbeddingModel = null,
   currentMultiEmbeddingModel = null,
+  currentEmbeddingModelId = null,
+  currentMultiEmbeddingModelId = null,
   toolMultimodal = null,
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
@@ -225,10 +230,17 @@ export default function KnowledgeBaseSelectorModal({
       return isEmbeddingModelCompatibleBase(
         kb,
         currentEmbeddingModel,
-        currentMultiEmbeddingModel
+        currentMultiEmbeddingModel,
+        currentEmbeddingModelId,
+        currentMultiEmbeddingModelId
       );
     },
-    [currentEmbeddingModel, currentMultiEmbeddingModel]
+    [
+      currentEmbeddingModel,
+      currentMultiEmbeddingModel,
+      currentEmbeddingModelId,
+      currentMultiEmbeddingModelId,
+    ]
   );
 
   // Check if a knowledge base can be selected
@@ -276,24 +288,21 @@ export default function KnowledgeBaseSelectorModal({
         return true;
       }
 
-      const embeddingModel = kb.embeddingModel;
-      if (!embeddingModel || embeddingModel === "unknown") {
-        return false;
-      }
-
-      if (kb.is_multimodal) {
-        if (!currentMultiEmbeddingModel) {
-          return true;
-        }
-        return embeddingModel !== currentMultiEmbeddingModel;
-      }
-
-      if (!currentEmbeddingModel) {
-        return false;
-      }
-      return embeddingModel !== currentEmbeddingModel;
+      return !isEmbeddingModelCompatibleBase(
+        kb,
+        currentEmbeddingModel,
+        currentMultiEmbeddingModel,
+        currentEmbeddingModelId,
+        currentMultiEmbeddingModelId
+      );
     },
-    [currentEmbeddingModel, currentMultiEmbeddingModel, toolMultimodal]
+    [
+      currentEmbeddingModel,
+      currentMultiEmbeddingModel,
+      currentEmbeddingModelId,
+      currentMultiEmbeddingModelId,
+      toolMultimodal,
+    ]
   );
 
   // Filter knowledge bases based on tool type, search, and filters
@@ -370,12 +379,21 @@ export default function KnowledgeBaseSelectorModal({
             setSelectedModels([]); // Clear the model filter dropdown as well
           } else {
             // Check if remaining selected nexent KBs have consistent models
-          const remainingKBs = knowledgeBases.filter((k) => newSelected.includes(k.id) && k.source === "nexent");
-            const remainingModels = [...new Set(remainingKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
-            if (remainingModels.length === 1) {
-              setSelectedEmbeddingModel(remainingModels[0]);
-              setSelectedModels([remainingModels[0]]);
-            } else if (remainingModels.length === 0) {
+            const remainingKBs = knowledgeBases.filter(
+              (k) => newSelected.includes(k.id) && k.source === "nexent"
+            );
+            const remainingIdentities = new Set(
+              remainingKBs
+                .map(getKnowledgeBaseEmbeddingIdentity)
+                .filter((identity): identity is string => identity !== null)
+            );
+            if (
+              remainingIdentities.size === 1 &&
+              remainingKBs[0]?.embeddingModel
+            ) {
+              setSelectedEmbeddingModel(remainingKBs[0].embeddingModel);
+              setSelectedModels([remainingKBs[0].embeddingModel]);
+            } else if (remainingIdentities.size === 0) {
               setSelectedEmbeddingModel(null);
               setSelectedModels([]);
             }
@@ -392,19 +410,26 @@ export default function KnowledgeBaseSelectorModal({
         // Only apply model consistency check when adding nexent KBs
         const isNewKBNexent = kb.source === "nexent";
 
-        if (isNewKBNexent && kb.embeddingModel && kb.embeddingModel !== "unknown") {
+        const newKnowledgeBaseIdentity = getKnowledgeBaseEmbeddingIdentity(kb);
+        if (isNewKBNexent && newKnowledgeBaseIdentity) {
           // Get existing nexent KBs from selection
-          const existingNexentKBs = knowledgeBases.filter((k) => prev.includes(k.id) && k.source === "nexent");
-          const existingNexentModels = [...new Set(existingNexentKBs.map((k) => k.embeddingModel).filter((m) => m && m !== "unknown"))];
+          const existingNexentKBs = knowledgeBases.filter(
+            (k) => prev.includes(k.id) && k.source === "nexent"
+          );
+          const existingNexentModelIdentities = new Set(
+            existingNexentKBs
+              .map(getKnowledgeBaseEmbeddingIdentity)
+              .filter((identity): identity is string => identity !== null)
+          );
 
           // If there are existing nexent selections and the new KB has a different model, show confirmation
           if (
-            existingNexentModels.length > 0 &&
-            !existingNexentModels.includes(kb.embeddingModel)
+            existingNexentModelIdentities.size > 0 &&
+            !existingNexentModelIdentities.has(newKnowledgeBaseIdentity)
           ) {
             // Store the pending selection and show confirmation modal
             setModelMismatchInfo({
-              existingModel: existingNexentModels[0],
+              existingModel: existingNexentKBs[0]?.embeddingModel || "unknown",
               newModel: kb.embeddingModel,
               existingKBName: existingNexentKBs[0]?.name || "",
               newKBName: kb.name,
@@ -489,7 +514,13 @@ export default function KnowledgeBaseSelectorModal({
 
     // Check for model mismatch among selected nexent KBs
     const nexentKBs = selectedKBs.filter((kb) => kb.source === "nexent");
-    const nexentModelIds = [...new Set(nexentKBs.map((kb) => kb.embeddingModel).filter((m) => m && m !== "unknown"))];
+    const nexentModelIds = [
+      ...new Set(
+        nexentKBs
+          .map(getKnowledgeBaseEmbeddingIdentity)
+          .filter((identity): identity is string => identity !== null)
+      ),
+    ];
 
     if (nexentModelIds.length > 1) {
       // Multiple different models - show the embedding model config dialog

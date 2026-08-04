@@ -1,6 +1,8 @@
-import { API_ENDPOINTS } from "./api";
+import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
+import { withBasePath } from "@/lib/basePath";
+import log from "@/lib/logger";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -104,11 +106,47 @@ export function extractObjectNameFromUrl(url: string): string | null {
  * @param url Original image URL (can be MinIO URL or local path)
  * @returns Backend API URL for the image
  */
+export async function fetchImageBlob(url: string): Promise<Blob> {
+  const apiUrl = convertImageUrlToApiUrl(url);
+  log.info(`[fetchImageBlob] input=${url}, apiUrl=${apiUrl}`);
+  const response = await fetch(apiUrl);
+  log.info(`[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch image: ${response.status} ${response.statusText}`
+    );
+  }
+  const contentType = response.headers.get("content-type") || "";
+  // Image service returns JSON error body with HTTP 200 on proxy failure;
+  // must detect this or FileReader will try to render JSON as an image.
+  if (contentType.startsWith("application/json")) {
+    const body = await response.text();
+    log.error(`[fetchImageBlob] got JSON instead of image: ${body.slice(0, 300)}`);
+    try {
+      const json = JSON.parse(body);
+      throw new Error(
+        json?.error || `Image proxy returned JSON: ${body.slice(0, 200)}`
+      );
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        throw new Error(`Image proxy returned non-image JSON: ${body.slice(0, 200)}`);
+      }
+      throw e;
+    }
+  }
+  return response.blob();
+}
+
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
 
-  if (url.startsWith("/api/share/")) {
+  if (url.startsWith(`${API_BASE_URL}/share/`)) {
     return url;
+  }
+
+  // Backend share URLs do not include the frontend base path.
+  if (url.startsWith("/api/share/")) {
+    return withBasePath(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues
@@ -119,8 +157,8 @@ export function convertImageUrlToApiUrl(url: string): string {
   // For external http/https URLs, use proxy to avoid CORS issues
   if (
     isHttpUrl &&
-    !url.includes("/api/file/download/") &&
-    !url.includes("/api/image")
+    !url.includes(`${API_BASE_URL}/file/download/`) &&
+    !url.includes(`${API_BASE_URL}/image`)
   ) {
     return API_ENDPOINTS.proxy.image(url);
   }

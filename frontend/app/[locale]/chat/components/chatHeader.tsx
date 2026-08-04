@@ -5,20 +5,14 @@ import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
-import { Share2, X } from "lucide-react";
-import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
-import { useConfig } from "@/hooks/useConfig";
-import log from "@/lib/logger";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-import { USER_ROLES } from "@/const/auth";
-import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { CalendarClock, Share2, X } from "lucide-react";
 
 interface ChatHeaderProps {
   title: string;
   onRename?: (newTitle: string) => void;
   onShareClick?: () => void;
   isShareMode?: boolean;
+  hasAutomation?: boolean;
 }
 
 export function ChatHeader({
@@ -26,35 +20,13 @@ export function ChatHeader({
   onRename,
   onShareClick,
   isShareMode = false,
+  hasAutomation = false,
 }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const { t, i18n } = useTranslation("common");
-  const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
-  const { confirm } = useConfirmModal();
-  const { modelConfig } = useConfig();
-  const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
-
-  const showAutoOffConfirm = () => {
-    confirm({
-      title: t("embedding.chatMemoryAutoDeselectModal.title"),
-      content: (
-        <div className="py-2">
-          <div className="text-sm leading-6">
-            {t("embedding.chatMemoryAutoDeselectModal.content")}
-          </div>
-          {!isAdmin && (
-            <div className="mt-2 text-xs opacity-70">
-              {t("embedding.chatMemoryAutoDeselectModal.tip")}
-            </div>
-          )}
-        </div>
-      ),
-    });
-  };
+  const { t } = useTranslation("common");
 
   // Update editTitle when the title attribute changes
   useEffect(() => {
@@ -72,37 +44,6 @@ export function ChatHeader({
       }
     }, 10);
   };
-
-  // Check embedding configuration and memory switch once when entering the page
-  useEffect(() => {
-    try {
-      const configured = Boolean(
-        modelConfig?.embedding?.modelName ||
-        modelConfig?.multiEmbedding?.modelName
-      );
-
-      if (!configured) {
-        // If memory switch is on, turn it off automatically and notify the user
-        loadMemoryConfig()
-          .then(async (cfg) => {
-            if (cfg.memoryEnabled) {
-              const ok = await setMemorySwitch(false);
-              if (!ok) {
-                log.warn(
-                  "Failed to auto turn off memory switch when embedding is not configured"
-                );
-              }
-              showAutoOffConfirm();
-            }
-          })
-          .catch((e) => {
-            log.error("Failed to check memory config on page enter", e);
-          });
-      }
-    } catch (e) {
-      log.error("Failed to read model config for embedding check", e);
-    }
-  }, []);
 
   // Handle submit editing
   const handleSubmit = () => {
@@ -141,13 +82,20 @@ export function ChatHeader({
               autoFocus
             />
           ) : (
-            <h1
-              className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200"
-              onDoubleClick={handleDoubleClick}
-              title={t("chatHeader.doubleClickToEdit")}
-            >
-              {title}
-            </h1>
+            <div className="flex items-center justify-center gap-2 min-w-0">
+              <h1
+                className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200 truncate"
+                onDoubleClick={handleDoubleClick}
+                title={t("chatHeader.doubleClickToEdit")}
+              >
+                {title}
+              </h1>
+              {hasAutomation && (
+                <Tooltip title={t("agentAutomation.boundTask")}>
+                  <CalendarClock className="h-4 w-4 shrink-0 text-blue-600" />
+                </Tooltip>
+              )}
+            </div>
           )}
           <div className="flex justify-end">
             {onShareClick && (

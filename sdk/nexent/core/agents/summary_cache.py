@@ -1,23 +1,7 @@
-"""Cache dataclasses for agent context compression."""
+"""LLM compression call record used by context evidence."""
 
 from dataclasses import dataclass
 from typing import Optional
-
-
-@dataclass
-class PreviousSummaryCache:
-    """Caches the compressed summary from the previous run."""
-    summary_text: str
-    covered_pairs: int
-    anchor_fingerprint: str
-
-
-@dataclass
-class CurrentSummaryCache:
-    """Caches the compressed summary for the current run."""
-    summary_text: str
-    end_steps: int
-    anchor_fingerprint: str
 
 
 @dataclass

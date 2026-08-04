@@ -6,7 +6,6 @@ import pytest
 from sdk.nexent.core.tools import analyze_audio_tool, analyze_video_tool
 from sdk.nexent.core.tools.analyze_audio_tool import AnalyzeAudioTool
 from sdk.nexent.core.tools.analyze_video_tool import AnalyzeVideoTool
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
 
 
 @pytest.fixture
@@ -24,7 +23,7 @@ def mock_vlm_model():
 
 @pytest.fixture
 def observer_en():
-    observer = MagicMock(spec=MessageObserver)
+    observer = MagicMock()
     observer.lang = "en"
     return observer
 
@@ -52,8 +51,6 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
     call_kwargs = mock_vlm_model.analyze_audio.call_args.kwargs
     assert hasattr(call_kwargs["audio_input"], "read")
     assert call_kwargs["content_type"].startswith("audio/")
-    observer_en.add_message.assert_called_once_with("", ProcessType.TOOL, "Analyzing audio...")
-
 
 def test_analyze_audio_schema_uses_single_url():
     assert "audio_url" in AnalyzeAudioTool.inputs
@@ -119,8 +116,6 @@ def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_mode
     call_kwargs = mock_vlm_model.analyze_video.call_args.kwargs
     assert hasattr(call_kwargs["video_input"], "read")
     assert call_kwargs["content_type"].startswith("video/")
-    observer_en.add_message.assert_called_once_with("", ProcessType.TOOL, "Analyzing video...")
-
 
 def test_analyze_video_schema_uses_single_url():
     assert "video_url" in AnalyzeVideoTool.inputs

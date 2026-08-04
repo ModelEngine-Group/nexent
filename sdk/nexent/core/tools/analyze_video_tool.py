@@ -107,9 +107,6 @@ class AnalyzeVideoTool(Tool):
         self.forward = self.mm.load_object(
             input_names=["video_url", "video_urls_list"])(self._forward_impl)
 
-        self.running_prompt_zh = "正在分析视频..."
-        self.running_prompt_en = "Analyzing video..."
-
     def _forward_impl(
             self,
             video_url: Optional[bytes] = None,
@@ -123,9 +120,9 @@ class AnalyzeVideoTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self._is_chinese else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. This tool does not emit a card.
 
         if video_url is not None:
             video_items = [video_url]

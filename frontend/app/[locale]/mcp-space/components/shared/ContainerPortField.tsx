@@ -6,6 +6,8 @@ import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortA
 interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
+  /** i18n key for the readonly hint shown when `enabled` is false. Defaults to `portReadonlyHint`. */
+  readonlyHintKey?: string;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
 }
@@ -13,6 +15,7 @@ interface ContainerPortFieldProps {
 export default function ContainerPortField({
   scope,
   enabled = true,
+  readonlyHintKey,
   containerPort,
   setContainerPort,
 }: ContainerPortFieldProps) {
@@ -33,19 +36,26 @@ export default function ContainerPortField({
           onChange={(value) =>
             setContainerPort(value === null ? undefined : value)
           }
+          readOnly={!enabled}
           controls={false}
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
-        <Button
-          onClick={suggestPort}
-          loading={suggesting}
-          disabled={portCheckLoading || suggesting}
-        >
-          {t("mcpTools.addModal.suggestPort")}
-        </Button>
+        {enabled ? (
+          <Button
+            onClick={suggestPort}
+            loading={suggesting}
+            disabled={portCheckLoading || suggesting}
+          >
+            {t("mcpTools.addModal.suggestPort")}
+          </Button>
+        ) : null}
       </div>
-      {containerPort && portCheckLoading ? (
+      {!enabled ? (
+        <p className="mt-2 text-xs text-slate-400">
+          {t(readonlyHintKey ?? "mcpTools.addModal.portReadonlyHint")}
+        </p>
+      ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">
           <LoadingOutlined className="animate-spin" />
           {t("mcpTools.addModal.portChecking")}...

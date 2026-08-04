@@ -47,6 +47,7 @@ from services.remote_mcp_service import (
     test_mcp_connection,
     check_container_port_conflict,
     suggest_container_port,
+    mcp_ports_are_virtual,
 )
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.mcp_container_service import MCPContainerManager
@@ -170,10 +171,15 @@ async def add_mcp_service_endpoint(
             authorization_token=payload.authorization_token,
             custom_headers=payload.custom_headers,
             container_config=payload.container_config,
+            container_port=payload.container_port,
             registry_json=payload.registry_json,
             config_json=payload.config_json,
             market_id=payload.market_id,
             enabled=payload.enabled if payload.enabled is not None else False,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
+            skip_health_check=payload.skip_health_check if payload.skip_health_check is not None else False,
         )
 
         return JSONResponse(
@@ -186,7 +192,10 @@ async def add_mcp_service_endpoint(
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="MCP name already exists")
     except MCPConnectionError as e:
         logger.error(f"Failed to add MCP service: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="MCP connection failed")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(e) or "MCP connection failed"
+        )
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -222,6 +231,9 @@ async def add_container_mcp_service_endpoint(
             market_id=payload.market_id,
             port=payload.port,
             mcp_config=payload.mcp_config,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -254,7 +266,7 @@ async def add_container_mcp_service_endpoint(
         logger.error(f"MCP connection failed when adding container service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed"
+            detail=str(e) or "MCP connection failed"
         )
     except Exception as e:
         logger.error(f"Failed to add container MCP service: {e}")
@@ -293,6 +305,9 @@ async def update_mcp_service_endpoint(
             config_json=payload.config_json,
             tags=payload.tags,
             market_id=payload.market_id,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -302,6 +317,8 @@ async def update_mcp_service_endpoint(
 
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpNameConflictError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -433,6 +450,7 @@ async def get_mcp_list(
             content={
                 "remote_mcp_server_list": remote_mcp_list,
                 "enable_upload_image": ENABLE_UPLOAD_IMAGE,
+                "mcp_ports_virtual": _mcp_ports_are_virtual(),
                 "status": "success"
             }
         )
@@ -686,6 +704,25 @@ async def test_mcp_connection_endpoint(
 # Port Management Endpoints
 # ---------------------------------------------------------------------------
 
+# Default MCP port used when running inside a container (Docker/K8s), where
+# MCP container ports are not published to the host and therefore never
+# conflict. Multiple MCPs can share this internal port because each container
+# is isolated and addressed by container DNS name. Matches
+# DockerContainerClient's stable default in container mode.
+MCP_DEFAULT_CONTAINER_PORT = 5020
+
+
+def _mcp_ports_are_virtual() -> bool:
+    """Return True when MCP container ports are not published to the host.
+
+    When nexent itself runs inside a container (Docker or Kubernetes), MCP
+    containers communicate over the internal container network and do not
+    occupy host ports, so multiple MCPs can share the same internal port and
+    port conflicts cannot occur.
+    """
+    return mcp_ports_are_virtual()
+
+
 @router.get("/port/check")
 async def check_mcp_port(
     port: int = Query(..., ge=1, le=65535),
@@ -695,7 +732,12 @@ async def check_mcp_port(
     """Check if a port is available for MCP container."""
     try:
         get_current_user_info(authorization, http_request)
-        available = check_container_port_conflict(port=port)
+        if _mcp_ports_are_virtual():
+            # Inside a container, ports are never published to the host, so
+            # any port is considered available.
+            available = True
+        else:
+            available = check_container_port_conflict(port=port)
         no_cache_headers = {
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
@@ -724,7 +766,12 @@ async def suggest_mcp_port(
     """Suggest an available port for MCP container."""
     try:
         get_current_user_info(authorization, http_request)
-        port = suggest_container_port()
+        if _mcp_ports_are_virtual():
+            # Inside a container, use the fixed default port so users do not
+            # need to choose one themselves.
+            port = MCP_DEFAULT_CONTAINER_PORT
+        else:
+            port = suggest_container_port()
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": {"port": port}}
@@ -833,6 +880,12 @@ if ENABLE_UPLOAD_IMAGE:
             None, description="Name for the MCP service (auto-generated if not provided)"),
         env_vars: Optional[str] = Form(
             None, description="Environment variables as JSON string"),
+        group_ids: Optional[str] = Form(
+            None, description="Comma-separated group IDs that can access this MCP"),
+        ingroup_permission: Optional[str] = Form(
+            None, description="Permission level: EDIT, READ_ONLY, PRIVATE"),
+        shared_fields: Optional[str] = Form(
+            None, description="JSON string of field-level sharing flags"),
         tenant_id: Optional[str] = Form(
             None, description="Tenant ID for filtering (uses auth if not provided)"),
         authorization: Optional[str] = Header(None),
@@ -858,6 +911,9 @@ if ENABLE_UPLOAD_IMAGE:
                 port=port,
                 service_name=service_name,
                 env_vars=env_vars,
+                group_ids=group_ids,
+                ingroup_permission=ingroup_permission,
+                shared_fields=json.loads(shared_fields) if shared_fields else None,
             )
 
             return JSONResponse(status_code=HTTPStatus.OK, content=result)

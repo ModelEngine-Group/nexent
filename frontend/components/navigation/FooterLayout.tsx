@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import Link from "next/link";
 import { APP_VERSION } from "@/const/constants";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 

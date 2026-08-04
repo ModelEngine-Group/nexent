@@ -107,8 +107,6 @@ class TerminalTool(Tool):
         self.ssh_port = ssh_port
         self.ssh_user = ssh_user
         self.password = password
-        self.running_prompt_zh = "正在执行终端命令..."
-        self.running_prompt_en = "Executing terminal command..."
 
     def _get_session(self, session_name: str) -> Dict[str, Any]:
         """Get or create SSH session.
@@ -344,8 +342,8 @@ class TerminalTool(Tool):
             str: Command execution result
         """
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+            self.observer.add_message("", ProcessType.TOOL, "",
+                                     tool_name=self.name, tool_arguments={"command": command, "session_name": session_name, "timeout": timeout})
             card_content = [{"icon": "terminal", "text": f"Executing: {command}"}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 

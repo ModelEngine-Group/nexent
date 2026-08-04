@@ -1,23 +1,43 @@
-const { createServer } = require("http");
-const http = require("http");
-const https = require("https");
-const { parse } = require("url");
-const next = require("next");
-const { createProxyServer } = require("http-proxy");
-const cookie = require("cookie");
-const path = require("path");
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { parse } from "node:url";
+import httpProxy from "http-proxy";
+import cookie from "cookie";
+import path from "node:path";
+import multiparty from "multiparty";
+import dotenv from "dotenv";
+import { BASE_PATH } from "./base-path.mjs";
+import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+
+const { createProxyServer } = httpProxy;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dev = process.env.NODE_ENV !== "production";
+let nextConfig;
+
+if (!dev) {
+  nextConfig = JSON.parse(
+    fs.readFileSync(path.join(__dirname, ".next", "required-server-files.json"), "utf8")
+  ).config;
+  process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
+}
+
+const { default: next } = await import("next");
 
 // Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
 // Using optional: true to avoid errors if .env file is not found
-require("dotenv").config({
+dotenv.config({
   path: path.resolve(__dirname, "../deploy/env/.env"),
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
-const dev = process.env.NODE_ENV !== "production";
 const app = next({
   dev,
+  ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
 
@@ -31,7 +51,22 @@ const MARKET_BACKEND =
   process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
 const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
+
+const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
+const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
 const PORT = 3000;
+
+function withoutBasePath(pathname) {
+  if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {
+    return pathname;
+  }
+
+  return pathname.slice(BASE_PATH.length) || "/";
+}
+
+function withBasePath(pathname) {
+  return BASE_PATH ? `${BASE_PATH}${pathname}` : pathname;
+}
 
 function parseTimeout(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -70,7 +105,7 @@ function buildCookieOptions(httpOnly) {
     httpOnly,
     secure: false, // cookie can be send through http
     sameSite: "lax",
-    path: "/",
+    path: BASE_PATH || "/",
   };
 }
 
@@ -166,6 +201,50 @@ function parseCookies(req) {
   return cookie.parse(req.headers.cookie || "");
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !==3 ) {
+      return null;
+    }
+      const payload = parts[1];
+      const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+      const decoded = Buffer.from(padded, "base64").toString("utf-8");
+      return JSON.parse(decoded)
+  } catch (error) {
+    console.error("decodeJwtPayload error:", error.message);
+    return null;
+  }
+}
+
+function isSuperAdminRequest(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+  if (!token) {
+    return false;
+  }
+  const payload = decodeJwtPayload(token);
+  if (!payload) {
+    return false;
+  }
+  return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
+}
+
+function renameFile(oldPath, newFileName) {
+  ensureDir(ICON_UPLOAD_DIR);
+  fs.renameSync(oldPath, path.join(ICON_UPLOAD_DIR, newFileName));
+}
+
+function updateLocalConfig(oldData, newData) {
+  if (!oldData || !newData) {
+    return oldData;
+  }
+  return Object.keys(oldData).reduce((acc, key) => {
+    acc[key] = newData[key] ? newData[key] : oldData[key]
+    return acc;
+  }, {});
+}
+
 // ============================================================================
 // Auth endpoint interception — manually forward and intercept tokens
 // ============================================================================
@@ -203,11 +282,8 @@ function collectRequestBody(req) {
  * If no refresh_token cookie exists, return 401 immediately.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
@@ -240,12 +316,17 @@ function forwardAuthRequest(req, res, targetUrl) {
 
   collectRequestBody(req)
     .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+      const body = prepareAuthRequestBody(
+        req.parsedPathname,
+        rawBody,
+        cookies,
+        res
+      );
 
-    // If body is null, prepareAuthRequestBody already sent the error response
-    if (body === null) {
-      return;
-    }
+      // If body is null, prepareAuthRequestBody already sent the error response
+      if (body === null) {
+        return;
+      }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
@@ -308,7 +389,7 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: `/${locale}/oauth/complete` });
+                res.writeHead(302, { Location: withBasePath(`/${locale}/oauth/complete`) });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -322,13 +403,13 @@ function forwardAuthRequest(req, res, targetUrl) {
                 const isCasRenewCallback =
                   req.parsedPathname === "/api/user/cas/renew_callback";
                 if (isOAuthCallback) {
-                  res.writeHead(302, { Location: "/" });
+                  res.writeHead(302, { Location: withBasePath("/") });
                   res.end();
                   return;
                 }
                 if (isCasCallback) {
                   res.writeHead(302, {
-                    Location: data.data.redirect_url || "/",
+                    Location: data.data.redirect_url || withBasePath("/"),
                   });
                   res.end();
                   return;
@@ -375,7 +456,7 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+                res.writeHead(302, { Location: `${withBasePath("/")}?${errorParams.toString()}` });
                 res.end();
                 return;
               }
@@ -449,79 +530,36 @@ proxy.on("proxyReq", (proxyReq, req) => {
 // Server setup
 // ============================================================================
 app.prepare().then(() => {
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
-    req.parsedPathname = pathname;
+    const internalPathname = withoutBasePath(pathname);
+    req.parsedPathname = internalPathname;
 
-    // Runtime frontend configuration for browser-only features.
-    if (pathname === "/api/frontend-config") {
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
-      return;
+    const isProxyRequest =
+      internalPathname.startsWith("/api/") ||
+      (internalPathname.includes("/attachments/") && !internalPathname.startsWith("/api/"));
+    if (isProxyRequest && BASE_PATH) {
+      req.url = req.url.slice(BASE_PATH.length) || "/";
     }
 
-    // Proxy HTTP requests
-    if (pathname.includes("/attachments/") && !pathname.startsWith("/api/")) {
-      proxy.web(req, res, { target: MINIO_BACKEND });
-    } else if (pathname.startsWith("/api/")) {
-      // Intercept auth endpoints to manage HttpOnly cookies
-      if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
-        const target = HTTP_BACKEND;
-        forwardAuthRequest(req, res, target);
-      } else if (pathname.startsWith("/api/market/")) {
-        // Route market endpoints to market backend
-        req.url = req.url.replace("/api/market", "");
-        proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
-      } else {
-        // Route runtime endpoints to runtime backend, others to config backend
-        const isRuntime =
-          pathname.startsWith("/api/agent/run") ||
-          pathname.startsWith("/api/agent/stop") ||
-          pathname.startsWith("/api/conversation/") ||
-          pathname.startsWith("/api/share/") ||
-          pathname.startsWith("/api/memory/") ||
-          pathname.startsWith("/api/file/storage") ||
-          pathname.startsWith("/api/file/preprocess");
-        if (isRuntime) {
-          const runtimeProxyTimeout = pathname.startsWith("/api/agent/run")
-            ? SSE_PROXY_TIMEOUT_MS
-            : PROXY_TIMEOUT_MS;
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-            proxyTimeout: runtimeProxyTimeout,
-            timeout: runtimeProxyTimeout,
-          });
-        } else if (
-          pathname === "/api/skills/create" ||
-          pathname.startsWith("/api/skills/stop/")
-        ) {
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-            proxyTimeout: PROXY_TIMEOUT_MS,
-            timeout: PROXY_TIMEOUT_MS,
-          });
-        } else {
-          proxy.web(req, res, {
-            target: HTTP_BACKEND,
-            changeOrigin: true,
-            proxyTimeout: PROXY_TIMEOUT_MS,
-            timeout: PROXY_TIMEOUT_MS,
-          });
-        }
-      }
-    } else {
-      // Let Next.js handle the request
-      handle(req, res, parsedUrl);
-    }
+    // Route dispatch uses paths without the Next.js base path.
+    if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (await handleProjectConfigApi(internalPathname, req, res)) return;
+    if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleAllApiProxy(internalPathname, req, res)) return;
+
+    // Fallback: let Next.js render pages and framework resources with basePath intact.
+    handle(req, res, parsedUrl);
   });
-
-  // Proxy WebSocket upgrade requests
+    // Proxy WebSocket upgrade requests
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
-    if (pathname.startsWith("/api/voice/")) {
+    const internalPathname = withoutBasePath(pathname);
+    if (internalPathname.startsWith("/api/voice/")) {
+      if (BASE_PATH) {
+        req.url = req.url.slice(BASE_PATH.length) || "/";
+      }
       proxy.ws(
         req,
         socket,
@@ -555,3 +593,172 @@ app.prepare().then(() => {
     console.log("> ---------------------------------");
   });
 });
+
+// ====================== 拆分独立路由处理函数 ======================
+/**
+ * 接口：/api/frontend-config
+ */
+function handleFrontendConfigApi(pathname, req, res) {
+  if (pathname !== "/api/frontend-config") return false;
+
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+  return true;
+}
+
+/**
+ * 接口：/api/config/project-config 上传Logo+修改多语言配置
+ */
+async function handleProjectConfigApi(pathname, req, res) {
+  if (pathname !== "/api/config/project-config") return false;
+
+  // 权限校验
+  if (!isSuperAdminRequest(req)) {
+    sendJsonResponse(res, 403, { message: "Super admin access required" });
+    return true;
+  }
+
+  // 文件上传处理
+  const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
+  try {
+    const { fields, files } = await parseMultipartForm(form, req);
+    handleLogoUpload(files);
+    updateAndSaveLocaleConfig(fields);
+    sendJsonResponse(res, 200, { message: "success update" });
+  } catch (err) {
+    console.error(err);
+    const status = err.httpCode || 400;
+    res.writeHead(status, { "Content-Type": "text/plain" });
+    res.end("Request failed");
+  }
+
+  return true;
+}
+
+/**
+ * 静态附件代理 /attachments/
+ */
+function handleAttachmentProxy(pathname, req, res) {
+  const isAttachmentRoute = pathname.includes("/attachments/") && !pathname.startsWith("/api/");
+  if (!isAttachmentRoute) return false;
+
+  proxy.web(req, res, { target: MINIO_BACKEND });
+  return true;
+}
+
+/**
+ * 统一处理所有 /api/ 代理转发逻辑
+ */
+function handleAllApiProxy(pathname, req, res) {
+  if (!pathname.startsWith("/api/")) return false;
+
+  // 1. 认证接口单独处理
+  if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
+    forwardAuthRequest(req, res, HTTP_BACKEND);
+    return true;
+  }
+
+  // 2. 市场接口
+  if (pathname.startsWith("/api/market/")) {
+    req.url = req.url.replace("/api/market", "");
+    proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
+    return true;
+  }
+
+  // 3. 判断是否为 runtime 运行时接口
+  const runtimePathPrefixes = [
+    "/api/agent/run",
+    "/api/agent/nl2agent/run",
+    "/api/agent/stop",
+    "/api/agent/automations",
+    "/api/conversation/",
+    "/api/share/",
+    "/api/file/storage",
+    "/api/file/preprocess",
+  ];
+  const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
+
+  // 4. skills 特殊接口
+  const skillsPathsStartWith = ["/api/skills/stop/"];
+  const skillsPathsEquals = ["/api/skills/create"];
+  const isSkillApi = skillsPathsStartWith.some(path => pathname.startsWith(path)) || skillsPathsEquals.some(path => pathname === path);
+
+  // 分发代理目标
+  if (isRuntime) {
+    const runtimeProxyTimeout =
+      pathname.startsWith("/api/agent/run") ||
+      pathname.startsWith("/api/agent/nl2agent/run")
+        ? SSE_PROXY_TIMEOUT_MS
+        : PROXY_TIMEOUT_MS;
+    proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
+  } else if (isSkillApi) {
+    proxy.web(req, res, getRuntimeProxyConfig(PROXY_TIMEOUT_MS));
+  } else {
+    proxy.web(req, res, {
+      target: HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+  }
+
+  return true;
+}
+
+// ====================== 通用工具函数（消除重复代码） ======================
+/**
+ * 通用返回JSON响应
+ */
+function sendJsonResponse(res, statusCode, data) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
+/**
+ * 解析 multipart/form-data 表单封装 Promise
+ */
+function parseMultipartForm(form, req) {
+  return new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) reject(err);
+      else resolve({ fields, files });
+    });
+  });
+}
+
+/**
+ * 处理Logo重命名上传
+ */
+function handleLogoUpload(files) {
+  if (files.logo) renameFile(files.logo[0].path, "modelengine-logo2.png");
+  if (files.logo2) renameFile(files.logo2[0].path, "modelengine-logo.png");
+}
+
+/**
+ * 读取、更新、保存多语言配置
+ */
+function updateAndSaveLocaleConfig(fields) {
+  const configZh = readLocaleConfig("zh");
+  const configEn = readLocaleConfig("en");
+
+  const fieldsZh = JSON.parse(fields.configZh[0]);
+  const fieldsEn = JSON.parse(fields.configEn[0]);
+
+  const newConfigZh = updateLocalConfig(configZh, fieldsZh);
+  const newConfigEn = updateLocalConfig(configEn, fieldsEn);
+
+  saveLocaleConfig(JSON.stringify(newConfigZh, null, 2), "zh");
+  saveLocaleConfig(JSON.stringify(newConfigEn, null, 2), "en");
+}
+
+/**
+ * 获取 Runtime 代理公共配置
+ */
+function getRuntimeProxyConfig(timeout) {
+  return {
+    target: RUNTIME_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: timeout,
+    timeout: timeout,
+  };
+}

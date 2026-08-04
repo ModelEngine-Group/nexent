@@ -1,6 +1,11 @@
 import { TFunction } from 'i18next';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
+import {
+  AIDP_ALLOWED_EXTENSIONS,
+  AIDP_ALLOWED_MIME_TYPES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from '@/const/knowledgeBase';
 import knowledgeBaseService from '@/services/knowledgeBaseService';
 import { AbortableError } from '@/types/knowledgeBase';
 import log from "@/lib/logger";
@@ -51,7 +56,8 @@ export const fetchKnowledgeBaseInfo = async (
 export const validateFileType = (file: File, t: TFunction, message: any): boolean => {
   const validTypes = [
     'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword', // .doc
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/markdown',
@@ -75,7 +81,9 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
     if (
       name.endsWith('.md') ||
       name.endsWith('.markdown') ||
-      name.endsWith('.csv')
+      name.endsWith('.csv') ||
+      name.endsWith('.doc') ||
+      name.endsWith('.docx')
     ) {
       isValidType = true;
     }
@@ -87,4 +95,55 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
   }
 
   return true;
+};
+
+export const isKnowledgeBaseFileSizeValid = (file: File): boolean =>
+  file.size <= KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES;
+
+export const validateKnowledgeBaseFileSize = (
+  file: File,
+  t: TFunction,
+  message: any
+): boolean => {
+  if (isKnowledgeBaseFileSizeValid(file)) {
+    return true;
+  }
+
+  message.error(t('knowledgeBase.upload.fileTooLarge'));
+  return false;
+};
+
+/**
+ * Pure check (no side effects): returns true if the file's MIME type or extension is allowed for AIDP.
+ */
+export const isAidpFileValid = (file: File): boolean => {
+  if (file.type && AIDP_ALLOWED_MIME_TYPES.has(file.type)) return true;
+  const ext = (file.name.toLowerCase().split('.').pop() ?? '');
+  return (AIDP_ALLOWED_EXTENSIONS as readonly string[]).includes(ext);
+};
+
+/**
+ * Split a batch of files into valid/invalid subsets. Shows a single error toast
+ * when any file is invalid (aligned with antd's beforeUpload batch semantics).
+ */
+export const partitionAidpFiles = (
+  files: File[],
+  t: TFunction,
+  message: any
+): { valid: File[]; invalid: File[] } => {
+  const valid: File[] = [];
+  const invalid: File[] = [];
+  for (const f of files) {
+    if (isAidpFileValid(f)) {
+      valid.push(f);
+    } else {
+      invalid.push(f);
+    }
+  }
+  if (invalid.length > 0) {
+    message.error(
+      t('aidpKnowledge.invalidFileType', { count: invalid.length })
+    );
+  }
+  return { valid, invalid };
 };

@@ -98,7 +98,7 @@ def _compute_split_wait_timeout(parts_count: int) -> int:
     waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
     dynamic_timeout = base_timeout + \
         max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
-    return min(MAX_TIMEOUT, max(base_timeout, dynamic_timeout))
+    return min(MAX_TIMEOUT, dynamic_timeout)
 
 
 def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
@@ -107,7 +107,9 @@ def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
     return sum(
         1
         for chunk in chunks
-        if isinstance(chunk, dict) and chunk.get("process_source") == IMAGE_METADATA_PROCESS_SOURCE
+        if isinstance(chunk, dict)
+        and (chunk.get("process_source") or chunk.get("metadata", {}).get("process_source"))
+        == IMAGE_METADATA_PROCESS_SOURCE
     )
 
 
@@ -338,6 +340,7 @@ def _delete_source_file_via_http_sync(
     index_name: str,
     path_or_url: str,
     scope: str,
+    authorization: Optional[str] = None,
     timeout_s: float = 30.0,
 ) -> Dict[str, Any]:
     base = (base_url or "").rstrip("/")
@@ -345,8 +348,13 @@ def _delete_source_file_via_http_sync(
         raise RuntimeError("ELASTICSEARCH_SERVICE is not configured")
     url = f"{base}/indices/{index_name}/documents"
     params = {"path_or_url": path_or_url, "scope": scope}
+    headers: Dict[str, str] = {}
+    if authorization:
+        headers["Authorization"] = authorization
 
-    resp = requests.delete(url, params=params, timeout=timeout_s)
+    resp = requests.delete(
+        url, params=params, headers=headers, timeout=timeout_s
+    )
     body_text = getattr(resp, "text", "")
     parsed = None
     try:
@@ -1957,12 +1965,19 @@ def forward(
     name="data_process.tasks.cleanup_source",
     queue="forward_q",
 )
-def cleanup_source(self, forward_result: Dict[str, Any]) -> Dict[str, Any]:
+def cleanup_source(
+    self,
+    forward_result: Dict[str, Any],
+    authorization: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Conditionally delete the MinIO source file after successful indexing.
 
     If the knowledge base is configured with preserve_source_file=false, call:
     DELETE /indices/{index_name}/documents?path_or_url=...&scope=source_only
+
+    authorization is passed as a Celery signature kwarg (not via forward_result)
+    so tokens are not persisted in task result payloads.
     """
     index_name = (forward_result or {}).get("index_name")
     source = (forward_result or {}).get("source")
@@ -2010,6 +2025,7 @@ def cleanup_source(self, forward_result: Dict[str, Any]) -> Dict[str, Any]:
             index_name=index_name,
             path_or_url=source,
             scope="source_only",
+            authorization=authorization,
         )
         cleanup_info["http_status"] = resp.get("http_status")
         cleanup_info["response"] = (
@@ -2083,7 +2099,7 @@ def submit_process_forward_chain(
             original_filename=original_filename,
             authorization=authorization
         ).set(queue='forward_q'),
-        cleanup_source.s().set(queue='forward_q'),
+        cleanup_source.s(authorization=authorization).set(queue='forward_q'),
     )
 
     result = task_chain.apply_async()

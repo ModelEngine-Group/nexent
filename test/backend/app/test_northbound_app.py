@@ -265,6 +265,77 @@ def test_list_agents_success():
         assert len(data["agents"]) == 2
 
 
+def test_get_agent_by_name_success():
+    """Test successful retrieval of one published agent by name."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+
+        mock_ctx.return_value = MagicMock()
+        mock_get.return_value = {
+            "message": "success",
+            "data": {"name": "agent1", "description": "First agent"},
+            "requestId": "req-123",
+        }
+
+        resp = client.get(
+            "/nb/v1/agents/agent1",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["name"] == "agent1"
+        mock_get.assert_awaited_once()
+
+
+def test_get_agent_by_name_not_found():
+    """Test missing published agent returns 404."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LookupError("Published agent not found: missing-agent")
+
+        resp = client.get(
+            "/nb/v1/agents/missing-agent",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 404
+        assert "missing-agent" in resp.json()["detail"]
+
+
+def test_get_agent_by_name_limit_exceeded():
+    """Test get agent by name returns 429 when limit exceeded."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = LimitExceededError("Rate limit exceeded")
+
+        resp = client.get(
+            "/nb/v1/agents/any-agent",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 429
+
+
+def test_get_agent_by_name_internal_error():
+    """Test get agent by name returns 500 on unexpected internal error."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.get_agent_info_by_name_for_northbound', new_callable=AsyncMock) as mock_get:
+
+        mock_ctx.return_value = MagicMock()
+        mock_get.side_effect = Exception("Unexpected internal error")
+
+        resp = client.get(
+            "/nb/v1/agents/any-agent",
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 500
+
+
 # =============================================================================
 # List Conversations Tests
 # =============================================================================

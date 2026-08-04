@@ -18,6 +18,7 @@ dependencies = [
     "supabase>=2.18.1",
     "websocket-client>=1.8.0",
     "pyyaml>=6.0.2",
+    "rapidfuzz>=3.0.0",
     "jsonref>=1.1.0",
     "ruamel-yaml==0.19.1",
     "redis>=5.0.0",
@@ -30,6 +31,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-docx>=1.1.0",
     "xlrd>=2.0.1",
+    "croniter>=2.0.0",
 ]
 
 [project.optional-dependencies]

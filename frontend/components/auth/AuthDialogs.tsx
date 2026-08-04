@@ -3,15 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Button } from "antd";
-import { GithubOutlined } from "@ant-design/icons";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { UserPlus, LogIn } from "lucide-react";
+import { LogIn } from "lucide-react";
 import Image from "next/image";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
+import { publicAsset } from "@/lib/publicAsset";
 
 /**
  * Authentication dialogs component
@@ -26,7 +26,6 @@ export function AuthDialogs() {
     closeSessionExpiredModal,
     closeAuthPromptModal,
     openLoginModal,
-    openRegisterModal,
   } = useAuthenticationContext();
 
   const {
@@ -83,7 +82,7 @@ export function AuthDialogs() {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
-              src="/modelengine-logo.png"
+              src={publicAsset("/modelengine-logo.png")}
               alt="ModelEngine Logo"
               width={80}
               height={80}

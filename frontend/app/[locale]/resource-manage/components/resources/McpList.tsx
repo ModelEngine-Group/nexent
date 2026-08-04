@@ -42,8 +42,12 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import McpEditServerModal from "@/components/mcp/McpEditServerModal";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import {
+  getOpenApiServices,
+  importOpenApiService,
+  deleteOpenApiService,
+} from "@/services/mcpService";
+import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -59,6 +63,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     loading,
     containerList,
     enableUploadImage,
+    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
     loadServerList,
@@ -120,6 +125,22 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
+
+  // When running inside a container (Docker/K8s), MCP ports are not published
+  // to the host, so a fixed default port is used and the user cannot change it.
+  // Auto-suggest the port when the add modal opens (backend returns the default).
+  useEffect(() => {
+    if (!mcpPortsVirtual || !addModalVisible) return;
+    if (containerPort === undefined || uploadPort === undefined) {
+      suggestMcpContainerPortService().then((res) => {
+        if (res.success && res.data?.port) {
+          const p = res.data.port;
+          if (containerPort === undefined) setContainerPort(p);
+          if (uploadPort === undefined) setUploadPort(p);
+        }
+      });
+    }
+  }, [addModalVisible, mcpPortsVirtual, containerPort, uploadPort]);
 
   // Load OpenAPI services on mount
   useEffect(() => {
@@ -396,12 +417,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const loadOpenapiServices = async () => {
     setLoadingOpenapiServices(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
-      if (result.data) {
-        setOpenapiServices(result.data);
+      const services = await getOpenApiServices();
+      if (services) {
+        setOpenapiServices(services);
       } else {
         message.error(t("mcpConfig.openApiToMcp.message.loadToolsFailed"));
       }
@@ -436,33 +454,19 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
     setImportingOpenApi(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiService, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          service_name: openApiServiceName.trim(),
-          server_url: openApiServerUrl.trim(),
-          openapi_json: parsedJson,
-          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
-        }),
+      await importOpenApiService({
+        service_name: openApiServiceName.trim(),
+        server_url: openApiServerUrl.trim(),
+        openapi_json: parsedJson,
+        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
       });
 
-      if (response.ok) {
-        message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
-        setOpenApiJson("");
-        setOpenApiServiceName("");
-        setOpenApiServerUrl("");
-        setOpenApiHeadersTemplate("");
-        await loadOpenapiServices();
-      } else {
-        const errorData = await response.json();
-        message.error(
-          errorData.detail || t("mcpConfig.openApiToMcp.message.importFailed")
-        );
-      }
+      message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
+      setOpenApiJson("");
+      setOpenApiServiceName("");
+      setOpenApiServerUrl("");
+      setOpenApiHeadersTemplate("");
+      await loadOpenapiServices();
     } catch (error) {
       log.error("Failed to import OpenAPI service:", error);
       message.error(t("mcpConfig.openApiToMcp.message.importFailed"));
@@ -480,24 +484,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       cancelText: t("common.cancel"),
       onOk: async () => {
         try {
-          const response = await fetch(
-            API_ENDPOINTS.tool.deleteOpenapiService(service.mcp_service_name),
-            {
-              method: "DELETE",
-              headers: getAuthHeaders(),
-            }
-          );
-
-          if (response.ok) {
-            message.success(
-              t("mcpConfig.openApiToMcp.message.deleteSuccess")
-            );
-            await loadOpenapiServices();
-          } else {
-            message.error(
-              t("mcpConfig.openApiToMcp.message.deleteFailed")
-            );
-          }
+          await deleteOpenApiService(service.mcp_service_name);
+          message.success(t("mcpConfig.openApiToMcp.message.deleteSuccess"));
+          await loadOpenapiServices();
         } catch (error) {
           log.error("Failed to delete OpenAPI service:", error);
           message.error(t("mcpConfig.openApiToMcp.message.deleteFailed"));
@@ -532,12 +521,35 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       render: (_: any, record: McpServer) => {
         const isEnabled = Boolean(record.status);
         return isEnabled ? (
-          <Tag color="#229954" variant="solid">
+          <Tag
+            color="#229954"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
+            variant="solid"
+          >
             {t("mcpConfig.serverList.enabled.yes")}
           </Tag>
         ) : (
           <Tooltip title={t("mcpConfig.serverList.enabled.tooltip")}>
-            <Tag color="#AEB6BF" variant="solid" style={{ cursor: "pointer" }}>
+            <Tag
+              color="#AEB6BF"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                lineHeight: "20px",
+                height: "auto",
+                whiteSpace: "nowrap",
+                cursor: "pointer",
+              }}
+              variant="solid"
+            >
               {t("mcpConfig.serverList.enabled.no")}
             </Tag>
           </Tooltip>
@@ -554,7 +566,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         return (
           <Tag
             color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
-            className="inline-flex items-center"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
             variant="solid"
           >
             {healthCheckLoading[key] ? (
@@ -564,7 +583,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             ) : (
               <CircleX className="w-3 h-3 mr-1" />
             )}
-            {t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}
+            <span>{t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}</span>
           </Tag>
         );
       },
@@ -670,9 +689,20 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         };
         const config = statusConfig[status || ""] || { color: "#2E4053", icon: <AlertCircle className="w-3 h-3" /> };
         return (
-          <Tag color={config.color} className="inline-flex items-center" variant="solid">
+          <Tag
+            color={config.color}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
+            variant="solid"
+          >
             <span className="mr-1">{config.icon}</span>
-            {status || "unknown"}
+            <span>{status || "unknown"}</span>
           </Tag>
         );
       },
@@ -924,7 +954,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         min={1}
                         max={65535}
                         style={{ width: 120 }}
-                        disabled={actionsLocked}
+                        disabled={actionsLocked || mcpPortsVirtual}
                         controls={false}
                       />
                       <div className="flex-1" />
@@ -974,7 +1004,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                             setUploadPort(value === null ? undefined : value);
                         }}
                         style={{ width: 150 }}
-                        disabled={actionsLocked}
+                        disabled={actionsLocked || mcpPortsVirtual}
                         min={1}
                         max={65535}
                         controls={false}

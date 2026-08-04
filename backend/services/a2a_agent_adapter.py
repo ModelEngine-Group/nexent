@@ -403,12 +403,14 @@ class A2AAgentAdapter:
             }
 
         if event_type == "taskArtifact":
+            last_chunk = data.get("lastChunk", True)
+            artifact = {**data.get("artifact", {}), "lastChunk": last_chunk}
             return {
                 "artifactUpdate": {
                     **common_fields,
-                    "artifact": data.get("artifact", {}),
+                    "artifact": artifact,
                     "append": data.get("append", False),
-                    "lastChunk": data.get("lastChunk", True)
+                    "lastChunk": last_chunk
                 }
             }
 

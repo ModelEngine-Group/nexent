@@ -41,8 +41,8 @@ Use the language switcher in the top-right corner to toggle between Simplified C
 
 We recommend configuring the platform in this order:
 
-1. Set up **[Model Management](./model-management)** to define app details and connect AI models.
-2. Create your **[Knowledge Base](./knowledge-base)** and upload documents.
+1. Set up **[Model Management](./agent-development/model-configuration.md)** to define app details and connect AI models.
+2. Create your **[Knowledge Base](./agent-development/knowledge-configuration.md)** and upload documents.
 3. Conduct **[Agent Development](./agent-development)** on top of the models and knowledge base.
 4. When everything is ready, chat with your agents via **[Start Chat](./start-chat)**.
 
@@ -50,4 +50,4 @@ Alternatively, you can click the "Quick Setup" button on the homepage or in the 
 
 ## 💡 Get Help
 
-Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

@@ -275,7 +275,10 @@ function groupToolsBySource(tools: Tool[]): SourceGroup[] {
     if (srcTools.length === 0) continue;
     const catMap = new Map<string, Tool[]>();
     for (const tool of srcTools) {
-      const cat = (tool as any).category?.trim() || "toolPool.category.other";
+      const cat =
+        key === "mcp"
+          ? (tool as any).usage?.trim() || "toolPool.category.other"
+          : (tool as any).category?.trim() || "toolPool.category.other";
       if (!catMap.has(cat)) catMap.set(cat, []);
       catMap.get(cat)!.push(tool);
     }

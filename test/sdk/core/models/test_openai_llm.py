@@ -1753,5 +1753,82 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     assert openai_model_instance.last_provider_cache_advice.supported is True
 
 
+def test_prepare_completion_kwargs_forces_flatten_false_for_vlm(openai_model_instance):
+    """OpenAIModel._prepare_completion_kwargs must force flatten_messages_as_text=False.
+
+    This is critical for VLM: VLM content is always a list of typed blocks
+    (image_url + text) and must never be flattened into a plain string.
+    """
+    # Patch the base class method to capture what it receives
+    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
+
+    captured_kwargs = {}
+
+    def capture_base_prepare(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return original_prepare(self, *args, **kwargs)
+
+    # Replace base class method temporarily
+    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
+
+    try:
+        result = openai_model_instance._prepare_completion_kwargs(messages=[{"role": "user", "content": "hi"}])
+        # The override must ensure flatten_messages_as_text=False reaches the base class
+        assert captured_kwargs.get("flatten_messages_as_text") is False
+    finally:
+        # Restore original
+        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
+
+
+def test_prepare_completion_kwargs_preserves_explicit_flatten_setting(openai_model_instance):
+    """When flatten_messages_as_text is already in kwargs, setdefault must not overwrite it."""
+    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
+
+    captured_kwargs = {}
+
+    def capture_base_prepare(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return original_prepare(self, *args, **kwargs)
+
+    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
+
+    try:
+        # Pass flatten_messages_as_text explicitly as True (should be preserved by setdefault)
+        result = openai_model_instance._prepare_completion_kwargs(
+            messages=[{"role": "user", "content": "hi"}],
+            flatten_messages_as_text=True,
+        )
+        # setdefault only sets when key is absent, so existing True should be preserved
+        assert captured_kwargs.get("flatten_messages_as_text") is True
+    finally:
+        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
+
+
+def test_prepare_completion_kwargs_forces_flatten_false_regardless_of_model_factory(openai_model_instance):
+    """flatten_messages_as_text=False must be enforced even when model_factory=modelengine.
+
+    The modelengine factory defaults flatten_messages_as_text=True in OpenAIServerModel,
+    but OpenAIModel override forces it back to False for VLM compatibility.
+    """
+    openai_model_instance.model_factory = "modelengine"
+
+    original_prepare = openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs
+
+    captured_kwargs = {}
+
+    def capture_base_prepare(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return original_prepare(self, *args, **kwargs)
+
+    openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = capture_base_prepare
+
+    try:
+        result = openai_model_instance._prepare_completion_kwargs(messages=[{"role": "user", "content": "hi"}])
+        # Override must force False even though modelengine would set True
+        assert captured_kwargs.get("flatten_messages_as_text") is False
+    finally:
+        openai_model_instance.__class__.__bases__[0]._prepare_completion_kwargs = original_prepare
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -7,6 +7,7 @@ from typing import Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from consts.const import JWT_EXPIRY_SECONDS
 from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
 from consts.oauth_providers import (
@@ -215,8 +216,10 @@ async def callback(
             token_expires_at=token_expires_at,
         )
 
-        expiry_seconds = 3600
-        jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+        jwt_token = generate_session_jwt(
+            supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+        )
+        expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
         return JSONResponse(

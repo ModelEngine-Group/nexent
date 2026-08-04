@@ -16,6 +16,7 @@ export type AgentConfigUpdate = Partial<
     | "model_ids"
     | "max_step"
     | "requested_output_tokens"
+    | "is_main_agent"
     | "provide_run_summary"
     | "description"
     | "duty_prompt"
@@ -51,7 +52,40 @@ export interface AgentVerificationConfig {
     | "handoff"
     | "final_answer"
   >;
+  guardrail_config?: GuardrailConfig;
 }
+
+// Guardrail types
+
+export type GuardrailSeverity = "block" | "mask" | "pass";
+
+export interface GuardrailRule {
+  /** Human-readable rule identifier */
+  name: string;
+  /** Regular expression in Python re syntax */
+  pattern: string;
+  /** Action when pattern matches */
+  severity: GuardrailSeverity;
+  /** Optional explanation shown in configuration UI */
+  description?: string;
+}
+
+export interface GuardrailConfig {
+  /** Master switch; when false the engine is not created */
+  enabled: boolean;
+  /** Ordered pattern rules; first match wins */
+  rules: GuardrailRule[];
+  /** Fallback severity when a matched rule has unknown severity */
+  default_action: GuardrailSeverity;
+}
+
+export const DEFAULT_GUARDRAIL_RULES: GuardrailRule[] = [];
+
+export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
+  enabled: false,
+  rules: [...DEFAULT_GUARDRAIL_RULES],
+  default_action: "pass",
+};
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
   enabled: false,
@@ -70,9 +104,31 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
     "handoff",
     "final_answer",
   ],
+  guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
 };
 
 // ========== Core Interfaces ==========
+
+export interface PublishedAgent {
+  id: string;
+  agent_id: number;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  unavailable_reasons?: string[];
+  model_ids?: number[];
+  model_names?: string[];
+  /** Single model name resolved from model_ids for display purposes */
+  model_name?: string;
+  is_available?: boolean;
+  is_new?: boolean;
+  group_ids?: string;
+  permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number;
+  greeting_message?: string;
+  example_questions?: string[];
+}
 
 export interface Agent {
   id: string;
@@ -80,12 +136,15 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
+  /** Nexent user_id of the agent creator (owner). */
+  created_by?: string | null;
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
@@ -162,12 +221,33 @@ export interface AidpKnowledgeBaseItem {
   description?: string;
   document_count?: number;
   chunk_count?: number;
+  /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
+  permission?: "EDIT" | "READ_ONLY" | null;
+  /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. Ignored when PRIVATE. */
+  group_ids?: number[];
+  /** Nexent user_id of the KB creator (owner). */
+  created_by?: string;
+  /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
+  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
+  created_at?: string;
+  /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
+  updated_at?: string;
+  /** Embedding model name configured for this KB in AIDP. */
+  embedding_model?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {
   value: AidpKnowledgeBaseItem[];
   total_count?: number;
   next_link?: string | null;
+  has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface SkillParam {
@@ -214,6 +294,9 @@ export interface Skill {
   config_schemas?: SkillParam[] | null;
   config_values?: Record<string, any> | null;
   tool_ids?: number[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  permission?: "EDIT" | "READ_ONLY";
   created_by?: string | null;
   updated_by?: string | null;
   update_time?: string;
@@ -477,6 +560,7 @@ export interface McpServer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  group_ids?: string;
 }
 
 // MCP tool interface definition

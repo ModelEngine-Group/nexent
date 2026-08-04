@@ -21,6 +21,7 @@ from consts.const import (
     OAUTH_SSL_VERIFY,
     OAUTH_CA_BUNDLE,
     SUPABASE_JWT_SECRET,
+    JWT_EXPIRY_SECONDS,
 )
 from consts.exceptions import OAuthLinkError, OAuthProviderError
 from services.asset_owner_visibility import require_asset_owner_enabled
@@ -223,7 +224,7 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
         if param_map.get("redirect_uri", "") == "redirect_uri":
             body["redirect_uri"] = redirect_uri
 
-        if definition.token_content_type == "application/x-www-form-urlencoded":
+        if getattr(definition, "token_content_type", "application/json") == "application/x-www-form-urlencoded":
             resp = _http_post_form(definition.token_url, body)
         else:
             resp = _http_post_json(definition.token_url, data=body)
@@ -518,8 +519,10 @@ async def complete_pending_oauth_account(
         tenant_id=tenant_id,
     )
 
-    expiry_seconds = 3600
-    jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+    jwt_token = generate_session_jwt(
+        supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+    )
+    expiry_seconds = JWT_EXPIRY_SECONDS
     expires_at = calculate_expires_at(jwt_token)
 
     return {

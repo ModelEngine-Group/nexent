@@ -73,6 +73,30 @@ export function pickReviewDisplayRepositoryInfo(
   return pickLatestRepositoryInfo(sharedItems);
 }
 
+export function findRepositoryInfoById(
+  items: MyAgentRepositoryInfoItem[],
+  agentRepositoryId: number
+): MyAgentRepositoryInfoItem | null {
+  return (
+    items.find((item) => item.agent_repository_id === agentRepositoryId) ?? null
+  );
+}
+
+export function resolveReviewModalMode(
+  agent: MyEditableAgentItem,
+  repositoryInfo: MyAgentRepositoryInfoItem
+): "review" | "reviewUpdate" {
+  const repositoryInfoList = agent.repository_info ?? [];
+  const hasShared = repositoryInfoList.some((item) => item.status === "shared");
+  const isPendingOrRejected =
+    repositoryInfo.status === "pending_review" ||
+    repositoryInfo.status === "rejected";
+  if (isPendingOrRejected && hasShared) {
+    return "reviewUpdate";
+  }
+  return "review";
+}
+
 export function pickPendingReviewRepositoryInfo(
   items: MyAgentRepositoryInfoItem[]
 ): MyAgentRepositoryInfoItem | null {
@@ -142,10 +166,10 @@ export interface MineCardRepositoryStatusBadge {
 }
 
 const MINE_STATUS_LABEL_KEYS = {
-  reviewing: "agentRepository.mine.status.reviewing",
+  reviewing: "repository.status.reviewing",
   updateReviewing: "agentRepository.mine.status.updateReviewing",
-  listed: "agentRepository.mine.status.listed",
-  rejected: "agentRepository.mine.status.rejected",
+  listed: "repository.status.listed",
+  rejected: "repository.status.rejected",
 } as const;
 
 export function getMineCardRepositoryStatusBadge(
@@ -243,5 +267,8 @@ export function buildApplyListingFormPrefill(
 
   const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
 
-  return { icon, tags };
+  return {
+    icon,
+    tags,
+  };
 }

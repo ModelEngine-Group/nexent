@@ -1,6 +1,7 @@
 """Unit tests for backend.database.skill_db module."""
 import sys
 import os
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
@@ -45,11 +46,18 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
+utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
+utils_str_utils_mock.convert_string_to_list = (
+    lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
+)
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['utils.str_utils'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,
@@ -63,6 +71,7 @@ from backend.database.skill_db import (
     delete_skills_by_agent_id,
     delete_skill_instances_by_skill_id,
     delete_skill_instances_by_tenant,
+    list_skill_permission_summaries,
     list_skills,
     get_skill_by_name,
     get_skill_by_id,
@@ -115,6 +124,8 @@ class MockSkillInfo:
         self.config_schemas = kwargs.get('config_schemas', {})
         self.config_values = kwargs.get('config_values', {})
         self.source = kwargs.get('source', 'custom')
+        self.group_ids = kwargs.get('group_ids', '')
+        self.ingroup_permission = kwargs.get('ingroup_permission')
         self.created_by = kwargs.get('created_by', 'creator1')
         self.create_time = kwargs.get('create_time', datetime.now())
         self.updated_by = kwargs.get('updated_by', 'updater1')
@@ -1053,7 +1064,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = [skill1, skill2]
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -1072,6 +1083,10 @@ class TestListSkills:
         assert result[0]['name'] == 'skill1'
         assert result[0]['tool_ids'] == [1, 2]
         assert result[1]['tool_ids'] == []
+        mock_filter.order_by.assert_called_once_with(
+            db_models_mock.SkillInfo.create_time.desc(),
+            db_models_mock.SkillInfo.skill_id.desc(),
+        )
 
     def test_list_skills_empty(self, monkeypatch, mock_session):
         """Test listing when no skills exist."""
@@ -1080,7 +1095,7 @@ class TestListSkills:
         mock_all = MagicMock()
         mock_all.return_value = []
         mock_filter = MagicMock()
-        mock_filter.all = mock_all
+        mock_filter.order_by.return_value.all = mock_all
         query.filter.return_value = mock_filter
 
         mock_ctx = MagicMock()
@@ -1092,6 +1107,37 @@ class TestListSkills:
         result = list_skills('tenant1')
 
         assert result == []
+
+
+class TestListSkillPermissionSummaries:
+    """Tests for the lightweight skill permission query."""
+
+    def test_returns_only_permission_fields(self, monkeypatch, mock_session):
+        session, query = mock_session
+        row = MagicMock(
+            skill_id=1,
+            created_by="user-1",
+            group_ids="10,20",
+            ingroup_permission="READ_ONLY",
+        )
+        query.filter.return_value.all.return_value = [row]
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session",
+            lambda: mock_ctx,
+        )
+
+        result = list_skill_permission_summaries("tenant1")
+
+        assert result == [{
+            "skill_id": 1,
+            "created_by": "user-1",
+            "group_ids": [10, 20],
+            "ingroup_permission": "READ_ONLY",
+        }]
 
 
 # ===== get_skill_by_name Tests =====
@@ -1303,7 +1349,10 @@ class TestCreateSkill:
         class MockSkillToolRelationClass:
             skill_id = None
             tool_id = None
+            created_by = None
             create_time = None
+            updated_by = None
+            update_time = None
 
             def __init__(self, **kwargs):
                 for key, value in kwargs.items():
@@ -1323,6 +1372,8 @@ class TestCreateSkill:
 
         skill_data = {
             'name': 'tool_skill',
+            'created_by': 'installer',
+            'updated_by': 'installer',
             'tool_ids': [1, 2, 3]
         }
 
@@ -1330,6 +1381,10 @@ class TestCreateSkill:
 
         assert result['skill_id'] == 1
         assert result['tool_ids'] == [1, 2, 3]
+        relations = [call.args[0] for call in session.add.call_args_list[1:]]
+        assert len(relations) == 3
+        assert all(relation.created_by == 'installer' for relation in relations)
+        assert all(relation.updated_by == 'installer' for relation in relations)
         session.commit.assert_called()
 
 
@@ -2274,6 +2329,20 @@ class TestBuildSkillUpdateValues:
         assert "config_schemas" in result
         assert "config_values" in result
 
+    def test_group_permission_fields(self):
+        result = _build_skill_update_values(
+            {"group_ids": [10, 20], "ingroup_permission": "READ_ONLY"},
+            "admin",
+        )
+
+        assert result["group_ids"] == "10,20"
+        assert result["ingroup_permission"] == "READ_ONLY"
+
+    def test_group_ids_string_is_preserved(self):
+        result = _build_skill_update_values({"group_ids": "10,20"}, "admin")
+
+        assert result["group_ids"] == "10,20"
+
     def test_empty_skill_data(self):
         result = _build_skill_update_values({}, "user1")
         assert "update_time" in result
@@ -2281,15 +2350,31 @@ class TestBuildSkillUpdateValues:
 
 
 class TestReplaceSkillToolRelations:
-    def test_replace_deletes_and_adds(self, mock_session):
+    def test_replace_deletes_and_adds(self, monkeypatch, mock_session):
         session, query = mock_session
+
+        class MockSkillToolRelationClass:
+            skill_id = None
+
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        monkeypatch.setattr(
+            "backend.database.skill_db.SkillToolRelation",
+            MockSkillToolRelationClass,
+        )
         mock_delete = MagicMock()
         mock_filter = MagicMock()
         mock_filter.delete = mock_delete
         query.filter.return_value = mock_filter
-        _replace_skill_tool_relations(session, 5, [1, 2, 3])
+        _replace_skill_tool_relations(session, 5, [1, 2, 3], updated_by="admin")
         mock_delete.assert_called_once()
         assert session.add.call_count == 3
+        for call in session.add.call_args_list:
+            relation = call.args[0]
+            assert relation.created_by == "admin"
+            assert relation.updated_by == "admin"
 
     def test_replace_empty_tool_ids(self, mock_session):
         session, query = mock_session

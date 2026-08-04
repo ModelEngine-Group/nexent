@@ -114,7 +114,7 @@ sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 agent_service_mod = types.ModuleType("services.agent_service")
 agent_service_mod.run_agent_stream = AsyncMock()
 agent_service_mod.stop_agent_tasks = MagicMock(return_value={"message": "stopped"})
-agent_service_mod.get_agent_id_by_name = AsyncMock(return_value=1)
+agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
 sys.modules["services.agent_service"] = agent_service_mod
 
 # Mock conversation_management_service
@@ -183,7 +183,12 @@ def reset_test_isolation():
     """Reset test isolation state before each test."""
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
-    token_db_mod.log_token_usage.reset_mock()
+    token_db_mod.log_token_usage.reset_mock(side_effect=True)
+    token_db_mod.log_token_usage.return_value = 1
+    agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
+    agent_version_mod.list_published_agents_impl.return_value = [
+        {"agent_id": 1, "name": "test_agent", "description": "Test agent"}
+    ]
     yield
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
@@ -694,6 +699,41 @@ class TestStartStreamingChat:
             assert agent_request is not None
             assert getattr(agent_request, "model_id", None) == 99
 
+    async def test_start_streaming_chat_sets_conversation_id_header(self):
+        """Test that streaming response sets conversation_id via headers only (no SSE trailer)."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        async def _body_iterator():
+            yield b"data: hello\n\n"
+
+        mock_response = MagicMock()
+        mock_response.headers = {"x-existing": "1"}
+        mock_response.media_type = "text/event-stream"
+        mock_response.body_iterator = _body_iterator()
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+                patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+                patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock) as mock_history:
+            mock_history.return_value = {"data": {"history": []}}
+
+            response = await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+            )
+
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk)
+
+        # Stream body is passed through unchanged; conversation_id is only in headers
+        assert chunks == [b"data: hello\n\n"]
+        assert response.headers["conversation_id"] == "123"
+        assert response.headers["X-Request-Id"] == ctx.request_id
+        assert response.headers["x-existing"] == "1"
+
 
 @pytest.mark.asyncio
 class TestStopChat:
@@ -810,6 +850,73 @@ class TestGetConversationHistoryInternal:
 
         token_db_mod.log_token_usage.assert_not_called()
 
+    async def test_get_conversation_history_internal_minio_files_as_json_string(self):
+        """Test that minio_files stored as a JSON string is parsed back into a list.
+
+        Covers the json.loads branch of the try/except at lines 540-542.
+        """
+        ctx = MockNorthboundContext(token_id=0)
+        conversation_db_mod.get_conversation_messages.return_value = [
+            {
+                "message_id": 1,
+                "message_role": "user",
+                "message_content": "with attachment",
+                "minio_files": '[{"name": "a.txt"}, {"name": "b.png"}]',
+            }
+        ]
+
+        result = await ns.get_conversation_history_internal(ctx=ctx, conversation_id=123)
+
+        history = result["data"]["history"]
+        assert history[0]["minio_files"] == [{"name": "a.txt"}, {"name": "b.png"}]
+
+    async def test_get_conversation_history_internal_minio_files_already_parsed(self):
+        """Test that minio_files already deserialized (list) is passed through unchanged.
+
+        Covers the non-string branch (isinstance(raw_minio_files, str) == False)
+        of the conditional at line 541.
+        """
+        ctx = MockNorthboundContext(token_id=0)
+        minio_files_value = [{"name": "a.txt"}]
+        conversation_db_mod.get_conversation_messages.return_value = [
+            {
+                "message_id": 1,
+                "message_role": "user",
+                "message_content": "with attachment",
+                "minio_files": minio_files_value,
+            }
+        ]
+
+        result = await ns.get_conversation_history_internal(ctx=ctx, conversation_id=123)
+
+        history = result["data"]["history"]
+        assert history[0]["minio_files"] is minio_files_value
+
+    async def test_get_conversation_history_internal_minio_files_invalid_json(self):
+        """Test that an invalid JSON minio_files string falls back to empty list and logs warning.
+
+        Covers the JSONDecodeError branch of the except clause at line 542.
+        """
+        ctx = MockNorthboundContext(token_id=0)
+        conversation_db_mod.get_conversation_messages.return_value = [
+            {
+                "message_id": 7,
+                "message_role": "user",
+                "message_content": "corrupt attachment metadata",
+                "minio_files": "not valid json {",
+            }
+        ]
+
+        with patch.object(ns.logger, "warning") as mock_warn:
+            result = await ns.get_conversation_history_internal(ctx=ctx, conversation_id=123)
+
+        history = result["data"]["history"]
+        assert history[0]["minio_files"] == []
+        mock_warn.assert_called_once()
+        # First positional arg is the format string; the message_id (7) is the second arg
+        assert mock_warn.call_args.args[0] == "Failed to parse minio_files for message %s"
+        assert mock_warn.call_args.args[1] == 7
+
 
 @pytest.mark.asyncio
 class TestGetAgentInfoList:
@@ -841,6 +948,43 @@ class TestGetAgentInfoList:
 
         assert len(result["data"]) == 2
         agent_version_mod.list_published_agents_impl.assert_called()
+
+    async def test_get_agent_info_by_name_success(self):
+        """Test exact-name lookup returns one published agent without its internal ID."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = [
+            {"agent_id": 42, "name": "target_agent", "description": "Target"},
+            {"agent_id": 43, "name": "other_agent", "description": "Other"},
+        ]
+
+        result = await ns.get_agent_info_by_name_for_northbound(ctx, "target_agent")
+
+        assert result["message"] == "success"
+        assert result["data"]["name"] == "target_agent"
+        assert "agent_id" not in result["data"]
+
+    async def test_get_agent_info_by_name_not_found(self):
+        """Test lookup rejects unpublished or unavailable agent names."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.return_value = []
+
+        with pytest.raises(LookupError, match="Published agent not found"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "missing_agent")
+
+    async def test_get_agent_info_by_name_empty(self):
+        """Test that empty/whitespace agent_name raises ValueError."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+
+        with pytest.raises(ValueError, match="agent_name is required"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "   ")
+
+    async def test_get_agent_info_by_name_internal_error(self):
+        """Test that internal errors from _get_visible_published_agents are wrapped."""
+        ctx = MockNorthboundContext(tenant_id="asset-owner-tenant", token_id=0)
+        agent_version_mod.list_published_agents_impl.side_effect = RuntimeError("DB connection lost")
+
+        with pytest.raises(Exception, match="Failed to get agent info for agent_name"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "any_agent")
 
 
 @pytest.mark.asyncio
@@ -966,25 +1110,6 @@ class TestStartStreamingChatErrorHandling:
                     query="test query"
                 )
 
-    async def test_start_streaming_chat_get_agent_id_error(self):
-        """Test that get_agent_id_by_name error is wrapped properly."""
-        ctx = MockNorthboundContext(token_id=0)
-
-        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'get_conversation_history_internal', new_callable=AsyncMock) as mock_history, \
-                patch.object(ns, 'get_agent_id_by_name', new_callable=AsyncMock) as mock_get_id:
-            mock_history.return_value = {"data": {"history": []}}
-            mock_get_id.side_effect = Exception("Agent not found")
-
-            with pytest.raises(Exception) as exc_info:
-                await ns.start_streaming_chat(
-                    ctx=ctx,
-                    conversation_id=123,
-                    agent_name="nonexistent_agent",
-                    query="test query"
-                )
-            # The exception is wrapped in the outer try/except block
-            assert "Agent not found" in str(exc_info.value)
 
     async def test_start_streaming_chat_save_message_error(self):
         """Test that save_conversation_user error is wrapped properly."""
@@ -1001,7 +1126,7 @@ class TestStartStreamingChatErrorHandling:
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch.object(ns, 'save_conversation_user', side_effect=Exception("DB error")):
+                patch('backend.services.northbound_service.asyncio.to_thread', side_effect=Exception("DB error")):
             with pytest.raises(Exception) as exc_info:
                 await ns.start_streaming_chat(
                     ctx=ctx,
@@ -1036,6 +1161,106 @@ class TestStartStreamingChatErrorHandling:
                 meta_data={"key": "value"}
             )
             assert result is not None
+
+    async def test_start_streaming_chat_passes_version_no_to_agent_request(self, mocker):
+        """Test that latest_version_no from get_agent_by_name_impl is passed as version_no in AgentRequest.
+
+        PR 3498 changed the flow to use get_agent_by_name_impl (which returns agent_id + latest_version_no)
+        and pass latest_version_no as version_no in AgentRequest, instead of using get_agent_id_by_name
+        which only returned the agent_id (defaulting to draft version_no=0).
+        """
+        ctx = MockNorthboundContext(token_id=0)
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+
+        async def mock_get_history(*args, **kwargs):
+            return {"data": {"history": []}}
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
+                patch.object(ns, 'get_agent_by_name_impl', return_value={
+                    "agent_id": 42,
+                    "latest_version_no": 5
+                }), \
+                patch.object(ns, 'save_conversation_user', side_effect=lambda *args: None), \
+                patch.object(ns, 'run_agent_stream', new_callable=AsyncMock, return_value=mock_response) as mock_stream:
+            conv_mgmt_mod.save_conversation_user.reset_mock()
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query"
+            )
+
+            mock_stream.assert_called_once()
+            call_kwargs = mock_stream.call_args.kwargs
+            assert call_kwargs["agent_request"].version_no == 5
+            assert call_kwargs["agent_request"].agent_id == 42
+
+    async def test_start_streaming_chat_save_conversation_user_via_asyncio_to_thread(self, mocker):
+        """Test that save_conversation_user is called via asyncio.to_thread (PR 3498 change).
+
+        PR 3498 changed save_conversation_user from a direct synchronous call to
+        asyncio.to_thread(save_conversation_user, ...) to avoid blocking the event loop
+        while preserving synchronous commit semantics.
+        """
+        import asyncio as async_lib
+        ctx = MockNorthboundContext(token_id=0)
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        async def mock_get_history(*args, **kwargs):
+            return {"data": {"history": []}}
+
+        async def mock_to_thread(func, *args):
+            func(*args)
+            return None
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
+                patch.object(ns, 'save_conversation_user') as mock_save, \
+                patch('backend.services.northbound_service.asyncio.to_thread', side_effect=mock_to_thread):
+            mock_save.reset_mock()
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query"
+            )
+
+            assert mock_save.call_count == 1
+
+    async def test_start_streaming_chat_get_agent_by_name_impl_error_wrapped(self):
+        """Test that get_agent_by_name_impl error is wrapped by outer exception handler.
+
+        Since get_agent_by_name_impl is synchronous, its exception is caught by
+        the outer except Exception and re-raised as "Failed to start streaming chat...".
+        """
+        ctx = MockNorthboundContext(token_id=0)
+
+        async def mock_get_history(*args, **kwargs):
+            return {"data": {"history": []}}
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
+                patch.object(ns, 'get_agent_by_name_impl', side_effect=Exception("Agent not found")):
+            with pytest.raises(Exception) as exc_info:
+                await ns.start_streaming_chat(
+                    ctx=ctx,
+                    conversation_id=123,
+                    agent_name="nonexistent_agent",
+                    query="test query"
+                )
+            assert "Agent not found" in str(exc_info.value)
 
 
 class TestStopChatErrorHandling:
@@ -1142,25 +1367,6 @@ class TestGetConversationHistoryErrorHandling:
 
 class TestGetAgentInfoListErrorHandling:
     """Tests for get_agent_info_list function."""
-
-    @pytest.mark.asyncio
-    async def test_get_agent_info_by_name_success(self):
-        """Test successful agent ID retrieval."""
-        agent_service_mod.get_agent_id_by_name.return_value = 42
-
-        result = await ns.get_agent_info_by_name("test_agent", "tenant-1")
-        assert result == 42
-
-    @pytest.mark.asyncio
-    async def test_get_agent_info_by_name_error(self):
-        """Test that errors are wrapped properly."""
-        agent_service_mod.get_agent_id_by_name.side_effect = Exception("Agent not found")
-
-        with pytest.raises(Exception) as exc_info:
-            await ns.get_agent_info_by_name("nonexistent", "tenant-1")
-        assert "Failed to get agent id" in str(exc_info.value)
-        assert "nonexistent" in str(exc_info.value)
-        assert "tenant-1" in str(exc_info.value)
 
     async def test_get_agent_info_list_error(self):
         """Test that errors in get_agent_info_list are wrapped properly."""

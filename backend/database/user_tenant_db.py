@@ -11,6 +11,27 @@ from database.db_models import UserTenant
 logger = logging.getLogger(__name__)
 
 
+def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:
+    """Return the user's role within the given tenant.
+
+    Joins ``user_tenant_t`` by ``(user_id, tenant_id)`` so the result is
+    strictly tenant-scoped. Returns the empty string when no active row
+    exists; callers should treat that as "no role".
+    """
+    if not user_id or not tenant_id:
+        return ""
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.user_id == user_id,
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N",
+        ).first()
+        # Access ORM attributes INSIDE the session context — the session
+        # closes on context-manager exit and lazy-loaded attributes are not
+        # reachable after that (would raise DetachedInstanceError).
+        return (result.user_role or "") if result is not None else ""
+
+
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
     """
     Get user tenant relationship by user ID
@@ -51,6 +72,25 @@ def get_user_tenant_by_user_email(email: str) -> Optional[Dict[str, Any]]:
         if result:
             return as_dict(result)
         return None
+
+
+def get_user_email_map(user_ids: List[str]) -> Dict[str, str]:
+    """Return active user email addresses keyed by user ID."""
+    unique_user_ids = list({user_id for user_id in user_ids if user_id})
+    if not unique_user_ids:
+        return {}
+
+    with get_db_session() as session:
+        rows = session.query(UserTenant.user_id, UserTenant.user_email).filter(
+            UserTenant.user_id.in_(unique_user_ids),
+            UserTenant.delete_flag == "N",
+        ).all()
+
+    return {
+        user_id: user_email
+        for user_id, user_email in rows
+        if user_email
+    }
 
 
 def get_all_tenant_ids() -> list[str]:

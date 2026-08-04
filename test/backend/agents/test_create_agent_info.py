@@ -108,16 +108,6 @@ def _create_stub_module(name: str, **attrs):
     return module
 
 
-def _create_stub_component_class(name: str):
-    class StubComponent:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-            self.component_type = name.lower().replace("component", "")
-    StubComponent.__name__ = name
-    return StubComponent
-
-
 # Configure required constants via shared bootstrap env
 consts_const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const.MINIO_ACCESS_KEY = "test_access_key"
@@ -140,7 +130,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
 utils_mock.context_utils = MagicMock()
-utils_mock.context_utils.build_context_components = MagicMock(return_value=[])
+utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
@@ -190,19 +180,24 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentRunInfo=MagicMock(),
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
-    ContextComponent=_create_stub_component_class("ContextComponent"),
-    ToolsComponent=_create_stub_component_class("ToolsComponent"),
-    SkillsComponent=_create_stub_component_class("SkillsComponent"),
-    MemoryComponent=_create_stub_component_class("MemoryComponent"),
-    KnowledgeBaseComponent=_create_stub_component_class("KnowledgeBaseComponent"),
-    ManagedAgentsComponent=_create_stub_component_class("ManagedAgentsComponent"),
-    ExternalAgentsComponent=_create_stub_component_class("ExternalAgentsComponent"),
-    SystemPromptComponent=_create_stub_component_class("SystemPromptComponent"),
 )
 sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     "nexent.core.agents.agent_context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
+)
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
+    ContextManager=MagicMock(),
+    ContextManagerConfig=MagicMock(),
+    ContextProcessingMode=types.SimpleNamespace(
+        PASSTHROUGH="passthrough",
+        ADAPTIVE_COMPACT="adaptive_compact",
+    ),
+    PolicyLayers=types.SimpleNamespace(model_validate=lambda value: value),
+    resolve_policy=lambda layers: types.SimpleNamespace(
+        processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
+    ),
 )
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",
@@ -220,6 +215,9 @@ sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
 database_module = _create_stub_module("database")
 sys.modules['database'] = database_module
+skill_db_stub = MagicMock()
+sys.modules['database.skill_db'] = skill_db_stub
+database_module.skill_db = skill_db_stub
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
@@ -234,6 +232,10 @@ database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
 sys.modules['services.vectordatabase_service'] = MagicMock()
+# Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
+# existing tests (which don't explicitly mock this permission filter) still work correctly.
+sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_accessible_indices.side_effect = \
+    lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
@@ -259,6 +261,11 @@ sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
     initialize_tools_on_startup=AsyncMock(),
 )
+sys.modules['services.agent_service'] = _create_stub_module(
+    "services.agent_service",
+    build_sandbox_policy=MagicMock(return_value=None),
+    get_sandbox_minio_client=MagicMock(return_value=None),
+)
 sys.modules['nexent.memory.memory_service'] = MagicMock()
 
 # Build top-level nexent module to avoid importing the real package
@@ -267,9 +274,28 @@ sys.modules['nexent'] = nexent_module
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
-sys.modules['nexent.core.agents'] = _create_stub_module("nexent.core.agents")
+nexent_agents_module = _create_stub_module("nexent.core.agents")
+nexent_agents_module.__path__ = []
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
 sys.modules['nexent.core.models'] = _create_stub_module("nexent.core.models")
+
+
+class MockSandboxConfig:
+    def __init__(self, auto_sync_outputs=True, **kwargs):
+        self.auto_sync_outputs = auto_sync_outputs
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**(data or {}))
+
+
+sandbox_module = _create_stub_module(
+    "nexent.core.agents.sandbox",
+    SandboxConfig=MockSandboxConfig,
+)
+nexent_agents_module.sandbox = sandbox_module
 
 
 class MockProviderCapabilityUnknown(Exception):
@@ -370,6 +396,19 @@ sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
 sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
+# Stub parallel_executor so that create_agent_info can import ParallelExecutorTool
+_mock_parallel_executor_tool_cls = MagicMock()
+_mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
+_mock_parallel_executor_tool_cls.name = "parallel_executor"
+_mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
+_mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
+_mock_parallel_executor_tool_cls.output_type = "any"
+_parallel_executor_mod = _create_stub_module(
+    "nexent.core.tools.parallel_executor",
+    ParallelExecutorTool=_mock_parallel_executor_tool_cls,
+)
+sys.modules["nexent.core.tools.parallel_executor"] = _parallel_executor_mod
+
 # Mock BASE_BUILTIN_MODULES
 sys.modules['smolagents.utils'].BASE_BUILTIN_MODULES = ["os", "sys", "json"]
 
@@ -379,6 +418,43 @@ smolagents_tools_module = _create_stub_module("smolagents.tools", Tool=MagicMock
 smolagents_module.tools = smolagents_tools_module
 sys.modules['smolagents'] = smolagents_module
 sys.modules['smolagents.tools'] = smolagents_tools_module
+
+# Mock utils package (referenced by create_agent_info.py)
+_utils_pkg = types.ModuleType("utils")
+_utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
+sys.modules["utils"] = _utils_pkg
+
+# Mock all utils submodules that create_agent_info.py imports
+_redis_utils_mod = _create_stub_module("utils.redis_utils")
+_redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
+sys.modules["utils.redis_utils"] = _redis_utils_mod
+setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
+
+_model_name_utils_mod = _create_stub_module("utils.model_name_utils")
+_model_name_utils_mod.add_repo_to_name = lambda name, repo=None, **kwargs: name
+sys.modules["utils.model_name_utils"] = _model_name_utils_mod
+setattr(_utils_pkg, "model_name_utils", _model_name_utils_mod)
+
+_prompt_template_utils_mod = _create_stub_module("utils.prompt_template_utils")
+_prompt_template_utils_mod.get_agent_prompt_template = MagicMock(return_value="")
+sys.modules["utils.prompt_template_utils"] = _prompt_template_utils_mod
+setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
+
+_config_utils_mod = _create_stub_module("utils.config_utils")
+_config_utils_mod.tenant_config_manager = MagicMock()
+_config_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
+sys.modules["utils.config_utils"] = _config_utils_mod
+setattr(_utils_pkg, "config_utils", _config_utils_mod)
+
+_context_utils_mod = _create_stub_module("utils.context_utils")
+_context_utils_mod.build_context_inputs = MagicMock(return_value=[])
+sys.modules["utils.context_utils"] = _context_utils_mod
+setattr(_utils_pkg, "context_utils", _context_utils_mod)
+
+_langchain_utils_mod = _create_stub_module("utils.langchain_utils")
+_langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
+sys.modules["utils.langchain_utils"] = _langchain_utils_mod
+setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
 # Ensure real backend.agents.create_agent_info is available and uses our stubs
 backend_pkg = sys.modules.get("backend")
@@ -425,6 +501,7 @@ from backend.agents.create_agent_info import (
     _normalize_tool_params_request,
     _get_agent_tool_overrides,
     _merge_tool_params,
+    _resolve_runtime_tool_records,
     _resolve_input_budget,
     _resolve_safe_input_budget,
 )
@@ -818,6 +895,90 @@ class TestDiscoverLangchainTools:
 class TestCreateToolConfigList:
     """Tests for the create_tool_config_list function"""
 
+    @pytest.fixture(autouse=True)
+    def mock_filter_accessible_indices(self):
+        """Pass-through mock for filter_accessible_indices for all tests in this class."""
+        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+                   side_effect=lambda index_names, **kwargs: index_names):
+            yield
+
+    def test_resolve_runtime_tools_adds_skill_dependencies_with_saved_config(self):
+        """An enabled skill makes its declared tool available without explicit selection."""
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[{"skill_id": 10, "config_values": {"api_key": "saved-key"}}],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 10,
+                "name": "search-web-linkup",
+                "tool_ids": [20],
+                "config_values": {"depth": "standard"},
+            },
+        ), patch(
+            "backend.agents.create_agent_info.query_tools_by_ids",
+            return_value=[{
+                "tool_id": 20,
+                "name": "linkup_search",
+                "is_available": True,
+                "params": [
+                    {"name": "api_key", "default": ""},
+                    {"name": "depth", "default": "deep"},
+                ],
+            }],
+        ):
+            result = _resolve_runtime_tool_records(1, "tenant-1")
+
+        assert [tool["name"] for tool in result] == ["linkup_search"]
+        assert result[0]["params"] == [
+            {"name": "api_key", "default": "saved-key"},
+            {"name": "depth", "default": "standard"},
+        ]
+
+    def test_resolve_runtime_tools_does_not_duplicate_explicit_tool(self):
+        """Explicit tool configuration remains authoritative for a skill dependency."""
+        explicit_tool = {"tool_id": 20, "name": "linkup_search", "params": []}
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[explicit_tool],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[{"skill_id": 10, "config_values": {"api_key": "skill-key"}}],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            return_value={"skill_id": 10, "name": "search-web-linkup", "tool_ids": [20]},
+        ), patch("backend.agents.create_agent_info.query_tools_by_ids") as mock_query:
+            result = _resolve_runtime_tool_records(1, "tenant-1")
+
+        assert result == [explicit_tool]
+        mock_query.assert_not_called()
+
+    def test_resolve_runtime_tools_rejects_conflicting_skill_config(self):
+        """Two skills cannot silently assign different values to the same tool parameter."""
+        skill_instances = [
+            {"skill_id": 10, "config_values": {"api_key": "first"}},
+            {"skill_id": 11, "config_values": {"api_key": "second"}},
+        ]
+        skills = {
+            10: {"skill_id": 10, "name": "first-skill", "tool_ids": [20]},
+            11: {"skill_id": 11, "name": "second-skill", "tool_ids": [20]},
+        }
+        with patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=skill_instances,
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            side_effect=lambda skill_id, tenant_id: skills[skill_id],
+        ):
+            with pytest.raises(ValidationError, match="different values"):
+                _resolve_runtime_tool_records(1, "tenant-1")
+
     @pytest.mark.asyncio
     async def test_create_tool_config_list_basic(self):
         """Test case for basic tool configuration list creation"""
@@ -1118,7 +1279,7 @@ class TestCreateToolConfigList:
             # Verify that call uses tenant_id and first index_name
             mock_embedding.assert_called_once_with("tenant_1", "idx_a")
             mock_rerank.assert_called_once_with(tenant_id="tenant_1", model_name="gte-rerank-v2")
-            mock_get_knowledge_map.assert_called_once_with(["idx_a"])
+            mock_get_knowledge_map.assert_called_once_with(["idx_a"], tenant_id="tenant_1")
 
             # Verify metadata contains required fields
             assert "vdb_core" in mock_tool_instance.metadata
@@ -1766,9 +1927,10 @@ class TestCreateAgentConfig:
         self,
         *,
         enable_context_manager: bool,
-        template: str,
         prepared_prompt: str,
         components: Optional[List[Mock]] = None,
+        memory_switch: bool = False,
+        fixed_search_result: str = "No relevant memories found.",
     ):
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
@@ -1778,9 +1940,28 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.build_context_inputs') as mock_build_components, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch.dict(sys.modules, {
+                    'services.memory_record_service': MagicMock(
+                        _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                    ),
+                    'services.memory_context_service': MagicMock(
+                        get_memory_context_service=MagicMock(
+                            return_value=MagicMock(
+                                build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                    tenant_long_term=(),
+                                    user_long_term=(),
+                                ))
+                            )
+                        ),
+                    ),
+                    'services.memory_backend_adapter': MagicMock(
+                        build_memory_service_for_agent=MagicMock(return_value=None),
+                    ),
+                }), \
                 patch(
                     'backend.agents.create_agent_info.ContextManagerConfig',
                     side_effect=lambda **kwargs: Mock(**kwargs),
@@ -1792,47 +1973,117 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": False,
                 "enable_context_manager": enable_context_manager,
             }
-            mock_get_template.return_value = {"system_prompt": template}
+            mock_get_template.return_value = {}
             mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
-                user_config=Mock(memory_switch=False),
+                user_config=Mock(
+                    memory_switch=memory_switch,
+                    agent_share_option="always",
+                    disable_agent_ids=[],
+                    disable_user_agent_ids=[],
+                ),
                 memory_config={},
                 tenant_id="tenant_1",
                 user_id="user_1",
                 agent_id="agent_1",
             )
+            mock_search_tool.return_value.forward.return_value = fixed_search_result
             mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
             mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
             mock_build_components.return_value = components or []
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
             return {
                 "build_components": mock_build_components,
                 "prepare_templates": mock_prepare_templates,
                 "agent_config": mock_agent_config,
+                "search_tool": mock_search_tool,
             }
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
-        """Managed path should build components and avoid rendering legacy system prompt."""
+    async def test_create_agent_config_uses_raw_components(self):
+        """Agent configuration should always delegate stable context assembly to the SDK."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=True,
-            template="legacy {{duty}}",
             prepared_prompt="",
             components=components,
         )
 
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
-        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
-        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_routes_memory_policy_through_context_items(self):
+        memory_tools = [
+            types.SimpleNamespace(name="search_memory"),
+            types.SimpleNamespace(name="store_memory"),
+        ]
+        with patch(
+            "backend.agents.create_agent_info._get_skill_script_tools",
+            return_value=memory_tools,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        context_kwargs = mocks["build_components"].call_args.kwargs
+        policy = context_kwargs["memory_tool_policy"]
+        assert "### Memory Tool Policy" in policy
+        assert "search_memory" not in policy
+        assert "store_memory" in policy
+        assert "instructions" not in mocks["agent_config"].call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_runs_fixed_search_once_without_exposing_tool(self):
+        result_text = "Found 1 relevant memories:\n[1] Existing preference"
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=True,
+            prepared_prompt="",
+            memory_switch=True,
+            fixed_search_result=result_text,
+        )
+
+        search_instance = mocks["search_tool"].return_value
+        search_instance.forward.assert_called_once_with("test query", 5)
+
+        context_kwargs = mocks["build_components"].call_args.kwargs
+        assert context_kwargs["memory_list"] == [{
+            "memory": result_text,
+            "memory_level": "agent",
+        }]
+        assert "search_memory" not in context_kwargs["tools"]
+        assert "search_memory" not in context_kwargs["memory_tool_policy"]
+        assert all(
+            tool.name != "search_memory"
+            for tool in mocks["agent_config"].call_args.kwargs["tools"]
+        )
+        assert mocks["agent_config"].call_args.kwargs["pre_run_tool_events"] == [
+            {
+                "type": "tool",
+                "content": "",
+                "tool_name": "search_memory",
+                "tool_arguments": {
+                    "query": "test query",
+                    "top_k": 5,
+                },
+            },
+            {
+                "type": "execution_logs",
+                "content": result_text,
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
@@ -1863,22 +2114,61 @@ class TestCreateAgentConfig:
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
-        """Legacy path should render the Jinja prompt and not build managed components."""
+    async def test_create_agent_config_managed_path_includes_builtin_tools_in_context(self):
+        """Managed path should describe the same builtin tools that AgentConfig exposes."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
+        builtin_tools = [
+            types.SimpleNamespace(name="run_skill_script"),
+            types.SimpleNamespace(name="read_skill_md"),
+            types.SimpleNamespace(name="read_skill_config"),
+            types.SimpleNamespace(name="write_skill_file"),
+        ]
+        with patch(
+            'backend.agents.create_agent_info._get_skill_script_tools',
+            return_value=builtin_tools,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        context_tools = mocks["build_components"].call_args.kwargs["tools"]
+        agent_tools = mocks["agent_config"].call_args.kwargs["tools"]
+
+        assert "run_skill_script" in context_tools
+        assert "read_skill_md" in context_tools
+        assert "read_skill_config" in context_tools
+        assert "write_skill_file" in context_tools
+        assert set(context_tools) == {tool.name for tool in agent_tools}
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_disabled_compression_still_builds_components(self):
+        """Disabling compression must not restore a second context assembly path."""
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
+        components = [Mock(component_type="system_prompt")]
         mocks = await self._run_context_manager_case(
             enable_context_manager=False,
-            template="{{duty}} | {{constraint}}",
-            prepared_prompt="rendered",
+            prepared_prompt="",
+            components=components,
         )
 
-        mocks["build_components"].assert_not_called()
-        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
-        assert mocks["agent_config"].call_args.kwargs["context_components"] == []
-        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+        mocks["build_components"].assert_called_once()
+        assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
+        assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
+        assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
+        # Reset module-level mock — parallel_executor appends an extra
+        # ToolConfig call after create_tool_config_list returns.  Both
+        # call history and side_effect must be cleared because prior
+        # tests may have left an exhausted iterator on the shared mock.
+        mock_tool_config.reset_mock()
+        mock_tool_config.side_effect = None
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
@@ -1897,7 +2187,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -1932,11 +2222,21 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
+                pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
+            # Verify parallel_executor ToolConfig call was made
+            pe_calls = [
+                c for c in mock_tool_config.call_args_list
+                if c[1].get("class_name") == "ParallelExecutorTool"
+            ]
+            assert len(pe_calls) == 1
+            assert pe_calls[0][1]["name"] == "parallel_executor"
+            assert pe_calls[0][1]["source"] == "local"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
@@ -1947,7 +2247,6 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
@@ -1960,7 +2259,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = [
@@ -2007,10 +2306,12 @@ class TestCreateAgentConfig:
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
-                    context_components=ANY,
+                    context_items=ANY,
+                    pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
-                    verification_config=ANY
+                    verification_config=ANY,
+                    enable_planning=ANY
                 )
 
     @pytest.mark.asyncio
@@ -2034,7 +2335,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = [
@@ -2081,9 +2382,27 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
+                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch.dict(sys.modules, {
+                    'services.memory_record_service': MagicMock(
+                        _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                    ),
+                    'services.memory_context_service': MagicMock(
+                        get_memory_context_service=MagicMock(
+                            return_value=MagicMock(
+                                build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                    tenant_long_term=(),
+                                    user_long_term=(),
+                                ))
+                            )
+                        ),
+                    ),
+                    'services.memory_backend_adapter': MagicMock(
+                        build_memory_service_for_agent=MagicMock(return_value=None),
+                    ),
+                }):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2093,7 +2412,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -2117,22 +2436,18 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_search_memory.return_value = {"results": [{"memory": "test"}]}
+            mock_search_tool.return_value.forward = MagicMock(
+                return_value="Found 1 result"
+            )
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
-            # Verify that memory search was called
-            mock_search_memory.assert_called_once_with(
-                query_text="test query",
-                memory_config={"test": "config"},
-                tenant_id="tenant_1",
-                user_id="user_1",
-                agent_id="agent_1",
-                memory_levels=["tenant", "agent", "user", "user_agent"]
-            )
+            # Verify that fixed search memory tool's forward was called
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
@@ -2158,9 +2473,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.get_model_by_model_id"
             ) as mock_get_model_by_id, \
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory, \
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool, \
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates:
@@ -2171,7 +2485,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2184,9 +2498,11 @@ class TestCreateAgentConfig:
                 "Test Description",
             ]
 
-            # memory_switch is on, but search is disabled
+            # When allow_memory_search=False, build_memory_context returns
+            # a context with memory_switch=False, which prevents the fixed
+            # search memory tool from being invoked at all.
             mock_user_config = Mock()
-            mock_user_config.memory_switch = True
+            mock_user_config.memory_switch = False
             mock_user_config.agent_share_option = "always"
             mock_user_config.disable_agent_ids = []
             mock_user_config.disable_user_agent_ids = []
@@ -2212,7 +2528,7 @@ class TestCreateAgentConfig:
                 allow_memory_search=False,
             )
 
-            mock_search_memory.assert_not_called()
+            mock_search_tool.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_model_id_none(self):
@@ -2235,7 +2551,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": None,  # Test None case
+                "model_ids": None,  # Test None case
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -2269,15 +2585,24 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY,
+                context_items=ANY,
+                pre_run_tool_events=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                verification_config=ANY
+                verification_config=ANY,
+                enable_planning=ANY
             )
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_exception(self):
-        """raise when search_memory_in_levels raises an exception"""
+        """Verify that errors raised by the fixed search tool are swallowed
+        and logged instead of aborting ``create_agent_config``.
+
+        The legacy multi-level ``search_memory_in_levels`` fan-out has been
+        removed; the new code path uses ``_create_fixed_search_memory_tool``
+        whose failures are caught and logged at WARNING level so the agent
+        can still start.
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2298,12 +2623,32 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.logger"
+            ) as mock_logger,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2312,7 +2657,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2338,26 +2683,35 @@ class TestCreateAgentConfig:
                 agent_id="agent_1",
             )
 
-            mock_search_memory.side_effect = Exception("boom")
+            mock_search_tool.return_value.forward.side_effect = Exception("boom")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
 
-            with pytest.raises(Exception) as excinfo:
-                await create_agent_config(
-                    "agent_1",
-                    "tenant_1",
-                    "user_1",
-                    "zh",
-                    "test query",
-                    allow_memory_search=True,
-                )
+            # Should NOT raise; the error is swallowed and logged.
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                allow_memory_search=True,
+            )
 
-            assert "Failed to retrieve memory list: boom" in str(excinfo.value)
+            mock_logger.warning.assert_called()
+            warning_message = mock_logger.warning.call_args[0][0]
+            assert "memory_tools_load_failed" in warning_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_agent_share_never(self):
-        """Test that agent level is removed when agent_share_option is 'never'"""
+        """Verify that with ``agent_share_option='never'`` the agent-level
+        memory search is still executed via the fixed search tool.
+
+        The legacy ``search_memory_in_levels`` multi-level fan-out has been
+        removed; the new code path always uses a single
+        ``_create_fixed_search_memory_tool`` instance whose ``forward`` is
+        invoked once during agent preparation.
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2378,9 +2732,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2393,6 +2746,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2401,7 +2772,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2425,7 +2796,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2442,17 +2813,17 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" not in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" in memory_levels
+            # Fixed search memory tool should have been invoked exactly once.
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_agent(self):
-        """Test that agent level is removed when agent_id is in disable_agent_ids"""
+        """Verify that with ``disable_agent_ids`` containing the agent id the
+        fixed search memory tool is still invoked (its level filtering is
+        now performed inside the service).
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2473,9 +2844,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2488,6 +2858,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2496,7 +2884,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2520,7 +2908,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2537,17 +2925,16 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" not in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" in memory_levels
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_disable_user_agent(self):
-        """Test that user_agent level is removed when agent_id is in disable_user_agent_ids"""
+        """Verify that with ``disable_user_agent_ids`` containing the agent id
+        the fixed search memory tool is still invoked (per-level disable
+        checks are now performed inside the service).
+        """
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2568,9 +2955,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.build_memory_context"
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.search_memory_in_levels",
-                new_callable=AsyncMock,
-            ) as mock_search_memory,
+                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+            ) as mock_search_tool,
             patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
@@ -2583,6 +2969,24 @@ class TestCreateAgentConfig:
             patch(
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
+            patch.dict(sys.modules, {
+                'services.memory_record_service': MagicMock(
+                    _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                ),
+                'services.memory_context_service': MagicMock(
+                    get_memory_context_service=MagicMock(
+                        return_value=MagicMock(
+                            build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                tenant_long_term=(),
+                                user_long_term=(),
+                            ))
+                        )
+                    ),
+                ),
+                'services.memory_backend_adapter': MagicMock(
+                    build_memory_service_for_agent=MagicMock(return_value=None),
+                ),
+            }),
         ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2591,7 +2995,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2615,7 +3019,7 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1",
             )
-            mock_search_memory.return_value = {"results": []}
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -2632,13 +3036,9 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            # Verify user_agent level is removed from memory_levels
-            mock_search_memory.assert_called_once()
-            memory_levels = mock_search_memory.call_args[1]["memory_levels"]
-            assert "agent" in memory_levels
-            assert "tenant" in memory_levels
-            assert "user" in memory_levels
-            assert "user_agent" not in memory_levels
+            mock_search_tool.assert_called_once()
+            search_instance = mock_search_tool.return_value
+            search_instance.forward.assert_called_once_with("test query", 5)
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
@@ -2690,7 +3090,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2750,7 +3150,9 @@ class TestCreateAgentConfig:
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
             mock_prepare_templates.assert_called_once()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == "**idx_a**: AAA\n\n"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ] == "**idx_a**: AAA\n\n"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
@@ -2808,7 +3210,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2859,13 +3261,15 @@ class TestCreateAgentConfig:
             # because we're using the mapping from tool.metadata
             mock_get_knowledge_name_map.assert_not_called()
 
-            # Verify the system prompt uses the display names from metadata
+            # Verify the SDK context component uses display names from metadata.
             mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**Custom Name 1**" in system_prompt
-            assert "**Custom Name 2**" in system_prompt
-            assert "idx1" not in system_prompt
-            assert "idx2" not in system_prompt
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ]
+            assert "**Custom Name 1**" in knowledge_summary
+            assert "**Custom Name 2**" in knowledge_summary
+            assert "idx1" not in knowledge_summary
+            assert "idx2" not in knowledge_summary
 
     @pytest.mark.asyncio
     async def test_create_agent_config_metadata_without_index_name_to_display_map(self):
@@ -2919,7 +3323,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -2959,9 +3363,11 @@ class TestCreateAgentConfig:
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
             mock_prepare_templates.assert_called_once()
-            system_prompt = mock_prepare_templates.call_args[1]["system_prompt"]
-            assert "**idx1**" in system_prompt
-            assert "**idx2**" in system_prompt
+            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ]
+            assert "**idx1**" in knowledge_summary
+            assert "**idx2**" in knowledge_summary
 
     @pytest.mark.parametrize(
         "language,expected_message",
@@ -3010,7 +3416,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True,
             }
             mock_query_sub.return_value = []
@@ -3038,7 +3444,9 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert mock_prepare_templates.call_args[1]["system_prompt"] == expected_message
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_base_summary"
+            ] == expected_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
@@ -3062,7 +3470,7 @@ class TestCreateAgentConfig:
                 "constraint_prompt": "test constraint",
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
-                "model_id": 123,
+                "model_ids": [123],
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
@@ -3091,6 +3499,43 @@ class TestCreateAgentConfig:
 
             # Verify that error was logged
             mock_logger.error.assert_any_call("Failed to build knowledge base summary: Test Error")
+
+        @pytest.mark.asyncio
+        async def test_create_agent_config_includes_parallel_executor(self):
+            """parallel_executor is always included as a system-managed tool."""
+            with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search, \
+                    patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                    patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
+                    patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                    patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                    patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                    patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                    patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                    patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                    patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]):
+                mock_search.return_value = {
+                    "name": "test_agent", "description": "desc",
+                    "duty_prompt": "d", "constraint_prompt": "c",
+                    "few_shots_prompt": "f", "max_steps": 5,
+                    "model_ids": [123], "provide_run_summary": False,
+                }
+                mock_get_template.return_value = {"system_prompt": "{{duty}}"}
+                mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
+                mock_build_memory.return_value = Mock(
+                    user_config=Mock(memory_switch=False),
+                    memory_config={}, tenant_id="t", user_id="u", agent_id="a",
+                )
+                mock_prepare_templates.return_value = {"system_prompt": "p"}
+                mock_get_model_by_id.return_value = {"display_name": "m"}
+
+                await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "")
+
+                tools = mock_agent_config.call_args[1]["tools"]
+                # Last tool should be parallel_executor
+                last_tool = tools[-1]
+                assert last_tool.name == "parallel_executor"
+                assert last_tool.class_name == "ParallelExecutorTool"
+                assert last_tool.source == "local"
 
 
 class TestCreateModelConfigList:
@@ -3406,7 +3851,10 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None
+                safe_input_budget_snapshot=None,
+                redis_client=ANY,
+                sandbox_config=None,
+                minio_client=None,
             )
 
             # Verify that other functions were called correctly
@@ -3422,6 +3870,8 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
+                conversation_id=None,
+                enable_planning=ANY,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -3438,6 +3888,57 @@ class TestCreateAgentRunInfo:
                     "authorization_token": None
                 }
             })
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_enables_automation_tool_for_conversation(self):
+        mock_agent_run_info.reset_mock()
+        with patch(
+            'backend.agents.create_agent_info.join_minio_file_description_to_query',
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            'backend.agents.create_agent_info.create_model_config_list',
+            new_callable=AsyncMock,
+            return_value=["model_config"],
+        ), patch(
+            'backend.agents.create_agent_info.get_remote_mcp_server_list',
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            'backend.agents.create_agent_info.create_agent_config',
+            new_callable=AsyncMock,
+            return_value="agent_config",
+        ) as mock_create_agent, patch(
+            'backend.agents.create_agent_info.filter_mcp_servers_and_tools',
+            return_value=[],
+        ), patch(
+            'backend.agents.create_agent_info.urljoin',
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            'backend.agents.create_agent_info.threading'
+        ) as mock_threading, patch(
+            'backend.agents.create_agent_info.query_current_version_no',
+            return_value=1,
+        ):
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[{"name": "report.csv"}],
+                query="每天九点分析报表",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh",
+                conversation_id=123,
+                override_model_id=9,
+            )
+
+        create_kwargs = mock_create_agent.await_args.kwargs
+        assert create_kwargs["include_automation_tool"] is True
+        assert create_kwargs["automation_user_message"] == "每天九点分析报表"
+        assert create_kwargs["automation_model_id"] == 9
+        assert create_kwargs["automation_has_attachments"] is True
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_with_authorization_token(self):
@@ -3958,6 +4459,8 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=False,
                 version_no=1,
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
             )
 
@@ -4005,6 +4508,8 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
             )
 
@@ -4058,6 +4563,8 @@ class TestCreateAgentRunInfo:
                 last_user_query="processed_query",
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
+                conversation_id=None,
+                enable_planning=False,
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
@@ -4365,10 +4872,10 @@ class TestPreparePromptTemplates:
 
             mock_get_template.return_value = {"test": "template"}
 
-            result = await prepare_prompt_templates(True, "test system prompt", "zh")
+            result = await prepare_prompt_templates(True, "zh")
 
             mock_get_template.assert_called_once_with(True, "zh")
-            assert result["system_prompt"] == "test system prompt"
+            assert result["system_prompt"] == ""
             assert result["test"] == "template"
 
     @pytest.mark.asyncio
@@ -4378,27 +4885,120 @@ class TestPreparePromptTemplates:
 
             mock_get_template.return_value = {"test": "template"}
 
-            result = await prepare_prompt_templates(False, "test system prompt", "en")
+            result = await prepare_prompt_templates(False, "en")
 
             mock_get_template.assert_called_once_with(False, "en")
-            assert result["system_prompt"] == "test system prompt"
+            assert result["system_prompt"] == ""
             assert result["test"] == "template"
 
     @pytest.mark.asyncio
-    async def test_prepare_prompt_templates_overwrites_existing_system_prompt(self):
-        """Latest rendered system prompt should replace the template default."""
+    async def test_prepare_prompt_templates_clears_existing_system_prompt(self):
+        """Template files cannot introduce a second stable-context source."""
         with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
             mock_get_template.return_value = {
                 "system_prompt": "stale prompt",
                 "user_prompt": "keep me",
             }
 
-            result = await prepare_prompt_templates(False, "fresh system prompt", "en")
+            result = await prepare_prompt_templates(False, "en")
 
             assert result == {
-                "system_prompt": "fresh system prompt",
+                "system_prompt": "",
                 "user_prompt": "keep me",
             }
+
+
+class TestAdditionalAgentInfoCoverage:
+    def test_format_long_term_memory_prompt_supports_dict_and_object_entries(self):
+        context = types.SimpleNamespace(
+            tenant_long_term=[{"content": " tenant preference "}, {"content": ""}],
+            user_long_term=[types.SimpleNamespace(content="user preference")],
+        )
+
+        result = create_agent_info_module._format_long_term_memory_prompt(context, "en")
+
+        assert result == (
+            "### Tenant Long-term Memory\n- tenant preference\n\n"
+            "### User Long-term Memory\n- user preference"
+        )
+
+    def test_normalize_tool_params_rejects_non_object_payload(self):
+        with pytest.raises(ValidationError, match="must be an object"):
+            _normalize_tool_params_request("not-an-object")
+
+    def test_resolve_input_budget_uses_legacy_fallback_for_unknown_capacity(self):
+        create_agent_info_module._CAPACITY_WARNING_EMITTED.clear()
+        with patch(
+            "backend.agents.create_agent_info.resolve_capacity",
+            side_effect=MockProviderCapabilityUnknown("unknown provider"),
+        ), patch("backend.agents.create_agent_info.logger") as mock_logger:
+            result = _resolve_input_budget({"model_id": 7, "model_name": "unknown"})
+
+        assert result == (32768, None, None)
+        mock_logger.warning.assert_called_once()
+
+    def test_resolve_safe_input_budget_returns_none_for_uncertain_basis(self):
+        capacity = MockModelCapacitySnapshot(model_name="legacy-model")
+        calculator = MagicMock()
+        calculator.calculate_safe_input_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
+        with patch(
+            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            return_value=calculator,
+        ):
+            result = _resolve_safe_input_budget(
+                capacity_snapshot=capacity,
+                tenant_id="tenant-1",
+                agent_requested_output_tokens=None,
+                request_requested_output_tokens=512,
+            )
+
+        assert result is None
+
+    def test_inject_plan_tools_adds_tools_once(self):
+        tools = []
+        mock_tool_config.reset_mock()
+        first_tool = MagicMock()
+        first_tool.name = "create_plan"
+        second_tool = MagicMock()
+        second_tool.name = "update_plan_step"
+        mock_tool_config.side_effect = [first_tool, second_tool]
+
+        try:
+            create_agent_info_module._inject_plan_tools(tools, True)
+            create_agent_info_module._inject_plan_tools(tools, True)
+        finally:
+            mock_tool_config.side_effect = None
+
+        assert len(tools) == 2
+        assert mock_tool_config.call_count == 2
+
+    def test_resolve_runtime_tool_records_rejects_missing_or_unavailable_dependency(self):
+        common_patches = (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent",
+                return_value=[],
+            ),
+            patch(
+                "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+                return_value=[{"skill_id": 1, "config_values": {}}],
+            ),
+            patch(
+                "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+                return_value={"name": "skill", "tool_ids": [5]},
+            ),
+        )
+        with common_patches[0], common_patches[1], common_patches[2], patch(
+            "backend.agents.create_agent_info.query_tools_by_ids", return_value=[]
+        ):
+            with pytest.raises(ValidationError, match="missing tools"):
+                _resolve_runtime_tool_records(1, "tenant-1")
+
+        with common_patches[0], common_patches[1], common_patches[2], patch(
+            "backend.agents.create_agent_info.query_tools_by_ids",
+            return_value=[{"tool_id": 5, "name": "required", "is_available": False}],
+        ):
+            with pytest.raises(ValidationError, match="unavailable tool"):
+                _resolve_runtime_tool_records(1, "tenant-1")
 
 
 class TestExtractUrlFromCard:
@@ -4718,6 +5318,13 @@ class TestGetExternalA2AAgents:
 class TestCreateToolConfigListWithDisplayNameMap:
     """Tests for create_tool_config_list with display_name_to_index_map functionality"""
 
+    @pytest.fixture(autouse=True)
+    def mock_filter_accessible_indices(self):
+        """Pass-through mock for filter_accessible_indices for all tests in this class."""
+        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+                   side_effect=lambda index_names, **kwargs: index_names):
+            yield
+
     @pytest.mark.asyncio
     async def test_knowledge_base_with_display_name_to_index_map(self):
         """Test that KnowledgeBaseSearchTool gets correct display_name_to_index_map from index_names"""
@@ -4766,7 +5373,10 @@ class TestCreateToolConfigListWithDisplayNameMap:
 
             assert len(result) == 1
             # Verify get_knowledge_name_map_by_index_names was called
-            mock_get_knowledge_map.assert_called_once_with(["idx1", "idx2"])
+            mock_get_knowledge_map.assert_called_once_with(
+                ["idx1", "idx2"],
+                tenant_id="tenant_1",
+            )
             # Verify display_name_to_index_map contains reversed mapping
             assert result[0].metadata["display_name_to_index_map"] == {
                 "Knowledge Base 1": "idx1",
@@ -4984,8 +5594,15 @@ class TestCreateToolConfigListWithDisplayNameMap:
             assert "idx3" not in result[0].metadata["display_name_to_index_map"]
 
     @pytest.mark.asyncio
-    async def test_knowledge_base_empty_index_names_raises_validation_error(self):
-        """Test that ValidationError is raised when index_names is empty for KnowledgeBaseSearchTool."""
+    async def test_knowledge_base_empty_index_names_keeps_tool(self):
+        """Test that tool is kept when index_names is empty for KnowledgeBaseSearchTool.
+
+        After the permission-control change, an empty index_names list (whether from permission
+        filtering or not configured) causes the tool to be kept with empty index_names rather
+        than being skipped. The SDK forward() will return a clear "no accessible knowledge base"
+        message, allowing the LLM to explain the situation to the user instead of entering a
+        retry loop against a non-existent tool.
+        """
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
         mock_tool_instance.params = {
@@ -5020,16 +5637,16 @@ class TestCreateToolConfigListWithDisplayNameMap:
                 }
             ]
             mock_get_vector_db_core.return_value = "vdb_core_instance"
-            mock_get_emb.return_value = None  # Will trigger ValidationError
+            mock_get_emb.return_value = None
             mock_rerank.return_value = None
             mock_get_knowledge_map.return_value = {}
 
-            # Should raise ValidationError
-            with pytest.raises(ValidationError) as exc_info:
-                await create_tool_config_list("agent_1", "tenant_1", "user_1")
+            # Tool with empty index_names should be kept (not skipped) so the LLM can call it
+            # and receive a clear permission-denial message from the SDK forward()
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
-            # Verify error message
-            assert "index_names" in str(exc_info.value) and "not configured" in str(exc_info.value)
+            # Verify the tool was kept with empty index_names
+            assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_knowledge_base_no_embedding_model_raises_validation_error(self):
@@ -5909,3 +6526,629 @@ class TestDispatchProfileHitMetric:
             None,
         ):
             create_agent_info_module._record_dispatch_profile_hit("openai")
+
+
+# ============================================================================
+# KB Read Permission Control Tests for create_tool_config_list (Issue #3339)
+# ============================================================================
+
+
+class TestKBPermissionFilteringInCreateToolConfigList:
+    """Tests for knowledge base permission filtering in create_tool_config_list."""
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_filters_inaccessible_kbs(self):
+        """
+        When user lacks read permission on some knowledge bases, those indices are filtered out
+        from the KnowledgeBaseSearchTool's index_names.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
+             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
+             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            # Mock tool list with KnowledgeBaseSearchTool
+            # params must be a list of dicts with "name" and "default" keys
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb_allowed", "kb_forbidden", "kb_creator"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # Mock permission check: kb_forbidden returns None, others return permissions
+            def mock_filter(indices, user_id, tenant_id=None):
+                return [idx for idx in indices if idx != "kb_forbidden"]
+
+            mock_es_service.filter_accessible_indices = mock_filter
+            mock_kb_map.return_value = {
+                "kb_allowed": "Allowed KB",
+                "kb_creator": "Creator KB",
+            }
+            mock_vdb.return_value = MagicMock()
+            mock_get_embedding.return_value = (MagicMock(), None, None)
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            mock_tc_instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            # Tool should be included (2 accessible KBs remain)
+            assert len(result) == 1
+            # Verify params.index_names was updated to filtered list
+            assert mock_tc_instance.params["index_names"] == ["kb_allowed", "kb_creator"]
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_keeps_tool_when_no_accessible_kbs(self):
+        """
+        When user has no read permission on any knowledge base, the KnowledgeBaseSearchTool
+        is kept in the tool list with empty index_names. The SDK forward() will return a
+        clear "no accessible knowledge base" message, allowing the LLM to explain the
+        situation to the user instead of entering a retry loop against a non-existent tool.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb1", "kb2"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # All KBs are inaccessible - filter returns empty list
+            def mock_filter(indices, user_id, tenant_id=None):
+                return []  # Return empty list to simulate no accessible KBs
+
+            mock_es_service.filter_accessible_indices = mock_filter
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            mock_tc_instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            # Tool should be kept in the list (not skipped) so the LLM can call it
+            # and receive a clear permission-denial message from the SDK forward()
+            assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_preserves_order_after_filtering(self):
+        """
+        After filtering, the order of accessible knowledge bases is preserved.
+        """
+        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
+             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
+             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
+             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": ["kb_a", "kb_b", "kb_c", "kb_d"]},
+                    {"name": "top_k", "default": 5},
+                ],
+            }]
+
+            # Filter out kb_a and kb_c, preserving relative order
+            def mock_filter(indices, user_id, tenant_id=None):
+                return [idx for idx in indices if idx in ["kb_b", "kb_d"]]
+
+            mock_es_service.filter_accessible_indices = mock_filter
+            mock_kb_map.return_value = {
+                "kb_b": "B KB",
+                "kb_d": "D KB",
+            }
+            mock_vdb.return_value = MagicMock()
+            mock_get_embedding.return_value = (MagicMock(), None, None)
+
+            # Create a simple class that stores params and allows modification
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            mock_tc_instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                # Set all kwargs as attributes on the instance
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert len(result) == 1
+            # Order should be preserved from original index_names list
+            assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
+
+
+class TestFormatLongTermMemoryPrompt:
+    """Coverage for lines 100-109: _format_long_term_memory_prompt with mixed item types."""
+
+    def test_dict_items_with_content(self):
+        """Dict items with content keys are rendered as bullet points."""
+        ctx = types.SimpleNamespace(
+            tenant_long_term=[
+                {"content": "Tenant policy X"},
+                {"content": "Tenant rule Y"},
+            ],
+            user_long_term=[],
+        )
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert "- Tenant policy X" in result
+        assert "- Tenant rule Y" in result
+        assert "Tenant Long-term Memory" in result
+
+    def test_object_items_with_content_attr(self):
+        """Object items with a .content attribute are rendered correctly."""
+        item1 = types.SimpleNamespace(content="User preference A")
+        item2 = types.SimpleNamespace(content="User fact B")
+        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[item1, item2])
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert "- User preference A" in result
+        assert "- User fact B" in result
+        assert "User Long-term Memory" in result
+
+    def test_mixed_dict_and_object_items(self):
+        """Mixed dict and object items (in the same section) are both handled."""
+        ctx = types.SimpleNamespace(
+            tenant_long_term=[
+                {"content": "dict-content"},
+                types.SimpleNamespace(content="obj-content"),
+            ],
+            user_long_term=[],
+        )
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert "- dict-content" in result
+        assert "- obj-content" in result
+
+    def test_empty_and_whitespace_content_filtered(self):
+        """Items with empty or whitespace-only content are skipped."""
+        ctx = types.SimpleNamespace(
+            tenant_long_term=[
+                {"content": ""},
+                {"content": "   "},
+                {"content": "real"},
+            ],
+            user_long_term=[
+                types.SimpleNamespace(content=None),
+                types.SimpleNamespace(content=""),
+            ],
+        )
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert "- real" in result
+        assert "- " not in result.replace("- real", "").strip()
+
+    def test_both_sections_empty_returns_empty_string(self):
+        """When both sections have no items, returns an empty string."""
+        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[])
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert result == ""
+
+    def test_none_attributes_treated_as_empty(self):
+        """When the attribute is None on the context, it is treated as empty."""
+        ctx = types.SimpleNamespace(tenant_long_term=None, user_long_term=None)
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
+        assert result == ""
+
+    def test_zh_language_headings(self):
+        """Chinese language parameter produces Chinese headings."""
+        ctx = types.SimpleNamespace(
+            tenant_long_term=[{"content": "tenant fact"}],
+            user_long_term=[{"content": "user fact"}],
+        )
+        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "zh")
+        assert "租户长期记忆" in result
+        assert "用户长期记忆" in result
+
+
+class TestCreateAgentConfigMemoryBuildFailure:
+    """Coverage for lines 882-883: MemoryService build failure logs warning and continues."""
+
+    @pytest.mark.asyncio
+    async def test_memory_service_build_failure_logs_warning(self):
+        """When build_memory_service_for_agent raises, a warning is logged and flow continues."""
+        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
+             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
+             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
+             patch("backend.agents.create_agent_info.create_tool_config_list",
+                   new_callable=AsyncMock, return_value=[]), \
+             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
+             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
+             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
+             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
+             patch("backend.agents.create_agent_info.prepare_prompt_templates",
+                   new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
+             patch("backend.agents.create_agent_info.get_model_by_model_id",
+                   return_value={"display_name": "model", "max_tokens": 1000}), \
+             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
+             patch("backend.agents.create_agent_info.AgentConfig"), \
+             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+             patch.dict(sys.modules, {
+                 "services.memory_record_service": MagicMock(
+                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                 ),
+                 "services.memory_context_service": MagicMock(
+                     get_memory_context_service=MagicMock(
+                         return_value=MagicMock(
+                             build_context=AsyncMock(return_value=types.SimpleNamespace(
+                                 tenant_long_term=(),
+                                 user_long_term=(),
+                             ))
+                         )
+                     ),
+                 ),
+                 "services.memory_backend_adapter": MagicMock(
+                     build_memory_service_for_agent=MagicMock(
+                         side_effect=RuntimeError("DB connection lost")
+                     ),
+                 ),
+             }):
+            mock_search_agent.return_value = {
+                "name": "test_agent", "description": "desc",
+                "duty_prompt": "", "constraint_prompt": "",
+                "few_shots_prompt": "", "max_steps": 5,
+                "model_ids": [1], "provide_run_summary": False,
+                "enable_context_manager": False,
+            }
+            mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "always"
+            mock_user_config.disable_agent_ids = []
+            mock_user_config.disable_user_agent_ids = []
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config, memory_config={},
+                tenant_id="t1", user_id="u1", agent_id="a1",
+            )
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
+
+            # Should NOT raise — the exception is caught and warning logged
+            result = await create_agent_config("a1", "t1", "u1", "en", "query")
+            assert result is not None
+
+
+class TestCreateAgentConfigMemoryContextServiceFailure:
+    """Coverage for lines 930-931: MemoryContextService attachment failure logs warning."""
+
+    @pytest.mark.asyncio
+    async def test_memory_context_service_failure_logs_warning(self):
+        """When get_memory_context_service raises, the flow continues gracefully."""
+        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
+             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
+             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
+             patch("backend.agents.create_agent_info.create_tool_config_list",
+                   new_callable=AsyncMock, return_value=[]), \
+             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
+             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
+             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
+             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
+             patch("backend.agents.create_agent_info.prepare_prompt_templates",
+                   new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
+             patch("backend.agents.create_agent_info.get_model_by_model_id",
+                   return_value={"display_name": "model", "max_tokens": 1000}), \
+             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
+             patch("backend.agents.create_agent_info.AgentConfig"), \
+             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+             patch.dict(sys.modules, {
+                 "services.memory_record_service": MagicMock(
+                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
+                 ),
+                 "services.memory_context_service": MagicMock(
+                     get_memory_context_service=MagicMock(
+                         side_effect=RuntimeError("config missing")
+                     ),
+                 ),
+                 "services.memory_backend_adapter": MagicMock(
+                     build_memory_service_for_agent=MagicMock(return_value=None),
+                 ),
+             }):
+            mock_search_agent.return_value = {
+                "name": "test_agent", "description": "desc",
+                "duty_prompt": "", "constraint_prompt": "",
+                "few_shots_prompt": "", "max_steps": 5,
+                "model_ids": [1], "provide_run_summary": False,
+                "enable_context_manager": False,
+            }
+            mock_tenant_config.get_app_config.side_effect = ["App", "Desc"]
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "always"
+            mock_user_config.disable_agent_ids = []
+            mock_user_config.disable_user_agent_ids = []
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config, memory_config={},
+                tenant_id="t1", user_id="u1", agent_id="a1",
+            )
+            mock_search_tool.return_value.forward = MagicMock(return_value="")
+
+            # Should NOT raise — the error is caught
+            result = await create_agent_config("a1", "t1", "u1", "en", "query")
+            assert result is not None
+
+
+class TestCreateToolConfigListAidpSearch:
+    """Coverage for lines 1294-1297, 1310-1354: AidpSearchTool credential injection and permission filtering."""
+
+    @pytest.fixture(autouse=True)
+    def mock_filter_accessible_indices(self):
+        """Pass-through mock for filter_accessible_indices for all tests in this class."""
+        with patch("backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices",
+                   side_effect=lambda index_names, **kwargs: index_names):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_injects_credentials_from_env(self):
+        """AidpSearchTool must pop stale creds and inject AIDP_SERVER_URL, AIDP_API_KEY, AIDP_TENANT_ID."""
+        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+                   new_callable=AsyncMock, return_value=[]), \
+             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                   return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
+             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
+             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key-123"), \
+             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "aidp-tenant"), \
+             patch.dict(sys.modules, {
+                 "ext_components.aidp.services": MagicMock(
+                     aidp_permission_service=MagicMock(
+                         get_allowed_kds_list=MagicMock(return_value=["kb1"]),
+                     ),
+                 ),
+             }):
+
+            mock_tools.return_value = [{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "description": "AIDP search",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "server_url", "default": "stale-url"},
+                    {"name": "api_key", "default": "stale-key"},
+                    {"name": "tenant_id", "default": "stale-tenant"},
+                    {"name": "kds_list", "default": ["kb1"]},
+                ],
+                "source": "langchain",
+                "usage": None,
+            }]
+
+            mock_tc_instance = Mock()
+            mock_tc_instance.params = {}
+            mock_tc_instance.metadata = None
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+            )
+
+            assert len(result) == 1
+            # Verify env creds are in the params (overriding stale DB values)
+            assert mock_tc_instance.params["server_url"] == "https://aidp.test"
+            assert mock_tc_instance.params["api_key"] == "key-123"
+            assert mock_tc_instance.params["tenant_id"] == "aidp-tenant"
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_permission_whitelist_success(self):
+        """When get_allowed_kds_list succeeds, allowed_kds_set is set in metadata."""
+        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+                   new_callable=AsyncMock, return_value=[]), \
+             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                   return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
+             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
+             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
+             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch.dict(sys.modules, {
+                 "ext_components.aidp.services": MagicMock(
+                     aidp_permission_service=MagicMock(
+                         get_allowed_kds_list=MagicMock(
+                             return_value=["kb_allowed_1", "kb_allowed_2"],
+                         ),
+                     ),
+                 ),
+             }):
+
+            mock_tools.return_value = [{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "description": "AIDP search",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [{"name": "kds_list", "default": ["kb_allowed_1", "kb_allowed_2"]}],
+                "source": "langchain",
+                "usage": None,
+            }]
+
+            mock_tc_instance = Mock()
+            mock_tc_instance.params = {}
+            mock_tc_instance.metadata = None
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+            )
+
+            assert len(result) == 1
+            assert mock_tc_instance.metadata is not None
+            assert "allowed_kds_set" in mock_tc_instance.metadata
+            assert mock_tc_instance.metadata["allowed_kds_set"] == {"kb_allowed_1", "kb_allowed_2"}
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_permission_whitelist_failure_fallback(self):
+        """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+                   new_callable=AsyncMock, return_value=[]), \
+             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                   return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
+             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
+             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
+             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch.dict(sys.modules, {
+                 "ext_components.aidp.services": MagicMock(
+                     aidp_permission_service=MagicMock(
+                         get_allowed_kds_list=MagicMock(
+                             side_effect=Exception("DB down"),
+                         ),
+                     ),
+                 ),
+             }):
+
+            mock_tools.return_value = [{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "description": "AIDP search",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [{"name": "kds_list", "default": []}],
+                "source": "langchain",
+                "usage": None,
+            }]
+
+            mock_tc_instance = Mock()
+            mock_tc_instance.params = {}
+            mock_tc_instance.metadata = None
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+            )
+
+            assert len(result) == 1
+            # allowed_kds_set should be empty set on failure
+            assert mock_tc_instance.metadata is not None
+            assert mock_tc_instance.metadata["allowed_kds_set"] == set()
+
+    @pytest.mark.asyncio
+    async def test_aidp_search_metadata_merges_langchain_tool(self):
+        """When a langchain tool matches the AidpSearchTool class_name, it is merged into metadata."""
+        matching_langchain_tool = Mock()
+        matching_langchain_tool.name = "AidpSearchTool"
+
+        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+                   new_callable=AsyncMock, return_value=[matching_langchain_tool]), \
+             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
+             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                   return_value={"name": "test_agent"}), \
+             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
+             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
+             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
+             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch.dict(sys.modules, {
+                 "ext_components.aidp.services": MagicMock(
+                     aidp_permission_service=MagicMock(
+                         get_allowed_kds_list=MagicMock(return_value=[]),
+                     ),
+                 ),
+             }):
+
+            mock_tools.return_value = [{
+                "class_name": "AidpSearchTool",
+                "name": "aidp_search",
+                "description": "AIDP search",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [],
+                "source": "langchain",
+                "usage": None,
+            }]
+
+            mock_tc_instance = Mock()
+            mock_tc_instance.params = {}
+            mock_tc_instance.metadata = None
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(mock_tc_instance, key, value)
+                return mock_tc_instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
+            )
+
+            assert len(result) == 1
+            assert "langchain_tool" in mock_tc_instance.metadata
+            assert mock_tc_instance.metadata["langchain_tool"] is matching_langchain_tool
+            assert "allowed_kds_set" in mock_tc_instance.metadata

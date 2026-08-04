@@ -7,7 +7,10 @@ from typing import Optional, List
 
 from jinja2 import StrictUndefined, Template
 
+from nexent.core.tools.parallel_executor import ParallelExecutorTool
+
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
+from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
 from consts.error_code import ErrorCode
 from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
@@ -32,6 +35,7 @@ from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_prompt_optimize_prompt_template,
     get_prompt_template,
+    get_guardrail_regex_prompt_template,
 )
 
 from dataclasses import dataclass, field
@@ -106,6 +110,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None,
                                          knowledge_base_display_names: Optional[List[str]] = None,
+                                         aidp_kb_display_names: Optional[List[str]] = None,
                                          has_selected_resources: bool = True):
     # Get description of tool and agent from frontend-provided IDs
     # Frontend always provides tool_ids and sub_agent_ids (could be empty arrays)
@@ -133,6 +138,20 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         )
         logger.debug(
             f"Using database query for knowledge base display names: {knowledge_base_display_names}")
+
+    # Get aidp knowledge base display names for few-shot examples
+    # Priority: frontend-provided > database query
+    if aidp_kb_display_names:
+        logger.debug(
+            f"Using frontend-provided aidp knowledge base display names: {aidp_kb_display_names}")
+    else:
+        aidp_kb_display_names = _resolve_aidp_kb_display_names(
+            tool_info_list=tool_info_list,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        logger.debug(
+            f"Using database query for aidp knowledge base display names: {aidp_kb_display_names}")
 
     # Handle sub-agent IDs
     if sub_agent_ids and len(sub_agent_ids) > 0:
@@ -192,7 +211,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         language,
         prompt_template_id,
         knowledge_base_display_names,
-            has_selected_resources
+        aidp_kb_display_names,
+        has_selected_resources
     ):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
@@ -386,6 +406,7 @@ def optimize_prompt_section_impl(
     tool_ids: Optional[List[int]] = None,
     sub_agent_ids: Optional[List[int]] = None,
     knowledge_base_display_names: Optional[List[str]] = None,
+    aidp_kb_display_names: Optional[List[str]] = None,
 ) -> dict:
     normalized_section_type = (section_type or "").strip()
     if normalized_section_type not in {"duty", "constraint", "few_shots"}:
@@ -436,6 +457,7 @@ def optimize_prompt_section_impl(
         sub_agent_info_list=sub_agent_info_list,
         language=language,
         knowledge_base_display_names=knowledge_base_display_names,
+        aidp_kb_display_names=aidp_kb_display_names,
     )
 
     optimized_content = call_llm_for_system_prompt(
@@ -456,7 +478,118 @@ def optimize_prompt_section_impl(
     }
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def _extract_json_object(raw: str) -> Optional[dict]:
+    """Extract the first JSON object from LLM output that may contain markdown fences / surrounding text.
+
+    Fallbacks: markdown fence, surrounding explanation text, single quotes, trailing commas.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    snippet = text[start:end + 1]
+    try:
+        return json.loads(snippet)
+    except (ValueError, TypeError):
+        pass
+    # Fallback: single quotes -> double quotes, strip trailing commas
+    import re as _re
+    try:
+        fixed = snippet.replace("'", '"')
+        fixed = _re.sub(r",\s*([}\]])", r"\1", fixed)
+        return json.loads(fixed)
+    except (ValueError, TypeError):
+        pass
+    # Fallback: LLM often inlines regex escapes (\d \w \s \. etc.) directly into JSON strings.
+    # A single backslash is invalid in JSON (only \" \\ \/ \b \f \n \r \t \uXXXX are allowed).
+    # Double up backslashes that are not part of a valid JSON escape sequence.
+    try:
+        fixed = _re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', snippet)
+        return json.loads(fixed)
+    except (ValueError, TypeError):
+        return None
+
+
+def generate_guardrail_rules_impl(
+    description: str,
+    model_id: int,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+) -> dict:
+    """Generate guardrail regex rules from a natural-language description via LLM.
+
+    Loads the guardrail prompt template, renders the user prompt with the
+    description, calls the LLM, and extracts the JSON object from the (possibly
+    malformed) response. Tolerates markdown fences, surrounding prose, single
+    quotes, trailing commas, and invalid JSON escapes such as ``\\d`` (LLMs
+    often paste regex escapes with a single backslash).
+
+    Args:
+        description: Natural-language description of what to match or block.
+        model_id: ID of the LLM model used for generation.
+        tenant_id: Tenant ID for model resolution and monitoring.
+        language: Language code ('zh' or 'en') selecting the prompt template.
+
+    Returns:
+        A dict keyed by ``type``:
+        - ``{"type": "single", "candidates": [{"pattern": str, "desc": str}]}``
+        - ``{"type": "multi", "rules": [{"name": str, "pattern": str,
+          "severity": str, "desc": str}]}``
+
+    Raises:
+        AppException: If ``description`` is empty, the LLM returns nothing,
+            or the response is not valid JSON / carries an unknown ``type``.
+    """
+
+    if not (description or "").strip():
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "Description is required.",
+        )
+
+    prompt_template = get_guardrail_regex_prompt_template(language)
+    user_prompt = Template(
+        prompt_template["GUARDRAIL_USER_PROMPT"], undefined=StrictUndefined
+    ).render({"description": description})
+
+    raw = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=user_prompt,
+        system_prompt=prompt_template["GUARDRAIL_SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    ).strip()
+
+    # Diagnostic log: record raw LLM output (for troubleshooting "bad format" issues)
+    logger.info("[guardrail] desc=%r model_id=%s raw(500)=%s", description[:80], model_id, (raw or "")[:500])
+
+    if not raw:
+        raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    parsed = _extract_json_object(raw)
+    if not isinstance(parsed, dict):
+        logger.warning("[guardrail] JSON parse failed, raw=%s", (raw or "")[:800])
+        raise AppException(
+            ErrorCode.MODEL_PROMPT_GENERATION_FAILED,
+            "LLM did not return valid JSON for guardrail rules.",
+        )
+
+    result_type = str(parsed.get("type") or "").strip().lower()
+    if result_type == "single":
+        candidates = parsed.get("candidates")
+        return {"type": "single", "candidates": candidates if isinstance(candidates, list) else []}
+    if result_type == "multi":
+        rules = parsed.get("rules")
+        return {"type": "multi", "rules": rules if isinstance(rules, list) else []}
+    raise AppException(
+        ErrorCode.MODEL_PROMPT_GENERATION_FAILED,
+        "Unknown guardrail result type.",
+    )
+
+
+def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     """Main function for generating system prompts"""
     prompt_for_generate = resolve_prompt_generate_template(
         tenant_id=tenant_id,
@@ -473,6 +606,7 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
         tool_info_list=tool_info_list,
         language=language,
         knowledge_base_display_names=knowledge_base_display_names,
+        aidp_kb_display_names=aidp_kb_display_names,
         has_selected_resources=has_selected_resources,
     )
 
@@ -536,6 +670,19 @@ def _resolve_knowledge_base_display_names(
     logger.debug(
         f"Using database query for knowledge base display names: {resolved_names}")
     return resolved_names
+
+
+def _resolve_aidp_kb_display_names(
+    tool_info_list: List[dict],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[List[str]]:
+    """Resolve aidp knowledge base display names from tool list."""
+    return get_aidp_kb_display_names(
+        tool_info_list=tool_info_list,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
 
 
 def _resolve_prompt_generation_sub_agents(
@@ -706,7 +853,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
             last_results[tag] = latest[tag]
 
 
-def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     input_label = "Inputs" if language == 'en' else "接受输入"
     output_label = "Output type" if language == 'en' else "返回输出类型"
 
@@ -724,6 +871,9 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         # Always include knowledge_base_names to avoid StrictUndefined errors in template.
         # An empty string is falsy, so the {% if knowledge_base_names %} block will be skipped.
         "knowledge_base_names": "",
+        # Always include aidp_kb_names to avoid StrictUndefined errors in template.
+        # An empty string is falsy, so the {% if aidp_kb_names %} block will be skipped.
+        "aidp_kb_names": "",
         # Flag indicating whether tools or sub-agents are selected;
         # templates use this to suppress boilerplate in constraint/few_shots sections
         "has_selected_resources": has_selected_resources,
@@ -738,6 +888,16 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     else:
         kb_names_str = ""
     template_context["knowledge_base_names"] = kb_names_str
+
+    # Always add aidp_kb_names to context (empty string when not available).
+    # This is necessary because Jinja2 StrictUndefined raises an error for any
+    # undefined variable, even inside an {% if %} block.
+    if aidp_kb_display_names:
+        aidp_names_str = ", ".join(
+            f'"{name}"' for name in aidp_kb_display_names)
+    else:
+        aidp_names_str = ""
+    template_context["aidp_kb_names"] = aidp_names_str
 
     # Generate content using template
     content = Template(
@@ -756,6 +916,7 @@ def join_info_for_optimize_prompt_section(
     sub_agent_info_list,
     language: str = LANGUAGE["ZH"],
     knowledge_base_display_names: Optional[List[str]] = None,
+    aidp_kb_display_names: Optional[List[str]] = None,
 ):
     input_label = "Inputs" if language == LANGUAGE["EN"] else "接受输入"
     output_label = "Output type" if language == LANGUAGE["EN"] else "返回输出类型"
@@ -774,6 +935,12 @@ def join_info_for_optimize_prompt_section(
     else:
         kb_names_str = ""
 
+    if aidp_kb_display_names:
+        aidp_names_str = ", ".join(
+            f'"{name}"' for name in aidp_kb_display_names)
+    else:
+        aidp_names_str = ""
+
     template_context = {
         "section_type": section_type,
         "section_title": section_title,
@@ -783,6 +950,7 @@ def join_info_for_optimize_prompt_section(
         "tool_description": tool_description,
         "assistant_description": assistant_description,
         "knowledge_base_names": kb_names_str,
+        "aidp_kb_names": aidp_names_str,
     }
 
     return Template(
@@ -804,7 +972,25 @@ def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: s
     logger.info("Fetching tool instances")
     tool_id_list = get_enable_tool_id_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id)
+    # If no tools are enabled, return early — nothing to parallelize.
+    if not tool_id_list:
+        return []
     tool_info_list = query_tools_by_ids(tool_id_list)
+
+    # parallel_executor is always built from the SDK class — no DB query.
+    seen_names = {t.get("name") for t in tool_info_list if t.get("name")}
+    if PARALLEL_EXECUTOR_TOOL_NAME not in seen_names:
+        tool_info_list.append({
+            "name": ParallelExecutorTool.name,
+            "description": ParallelExecutorTool.description,
+            "description_zh": ParallelExecutorTool.description_zh,
+            "inputs": json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
+            "output_type": ParallelExecutorTool.output_type,
+            "params": [],
+            "source": "local",
+            "class_name": ParallelExecutorTool.__name__,
+        })
+
     return tool_info_list
 
 
@@ -862,7 +1048,9 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
 
     # Convert to display names
     knowledge_name_map = get_knowledge_name_map_by_index_names(
-        unique_index_names)
+        unique_index_names,
+        tenant_id=tenant_id,
+    )
 
     # Return list of display names (knowledge_name) for each configured index_name
     display_names = []
@@ -874,6 +1062,41 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
     logger.debug(
         f"Converted index_names {unique_index_names} to display_names: {display_names}")
     return display_names if display_names else None
+
+
+def get_aidp_kb_display_names(tool_info_list: List[dict], user_id: str, tenant_id: str) -> Optional[List[str]]:
+    """
+    Extract aidp knowledge base display names from tool configurations.
+    This is used to ensure few-shot examples use actual configured aidp knowledge base names.
+
+    Args:
+        tool_info_list: List of tool info dictionaries
+        user_id: User ID for permission queries
+        tenant_id: Tenant ID for database queries
+
+    Returns:
+        List of aidp knowledge base display names if aidp_search tool is configured, None otherwise
+    """
+    # Check if aidp_search tool is in the list
+    aidp_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get('name') == 'aidp_search']
+    if not aidp_tool_ids:
+        logger.debug("No aidp_search tool found in tool list")
+        return None
+
+    try:
+        from ext_components.aidp.services import aidp_permission_service
+        # Get the kds_name_to_id_map from permission service
+        kds_name_to_id_map = aidp_permission_service.get_kds_name_to_id_map(
+            user_id=user_id,
+            tenant_id=tenant_id
+        )
+        # Extract the kds_name keys as display names
+        display_names = list(kds_name_to_id_map.keys())
+        logger.debug(f"Retrieved aidp_kb_display_names: {display_names}")
+        return display_names if display_names else None
+    except Exception as e:
+        logger.warning(f"Failed to get aidp knowledge base display names: {e}")
+        return None
 
 
 def get_enabled_sub_agent_description_for_generate_prompt(agent_id: int, tenant_id: str):
