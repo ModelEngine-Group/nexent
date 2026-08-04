@@ -341,8 +341,8 @@ def test_search_records_propagates_user_identity(client):
     )  # the fixture returns at least one item, but assert route runs.
 
 
-def test_create_record_logs_when_agent_layer_not_indexed(client, caplog):
-    """Line 148: emit a DEBUG log when agent short-term memory fails to index."""
+def test_create_record_returns_unindexed_agent_short_term_memory(client):
+    """An unindexed agent short-term memory is returned without route-level logging."""
     cli, services = client
 
     def _create(**kwargs):
@@ -356,21 +356,20 @@ def test_create_record_logs_when_agent_layer_not_indexed(client, caplog):
 
     services["record"].create_memory.side_effect = _create
 
-    with caplog.at_level(logging.DEBUG, logger="memory_record_app"):
-        response = cli.post(
-            "/memory/records",
-            json={"layer": "agent", "content": "x", "memory_type": "short_term"},
-            headers={"Authorization": "Bearer test"},
-        )
+    response = cli.post(
+        "/memory/records",
+        json={"layer": "agent", "content": "x", "memory_type": "short_term"},
+        headers={"Authorization": "Bearer test"},
+    )
 
     assert response.status_code == 200
-    matched = [
-        record
-        for record in caplog.records
-        if "memory_id=7" in record.getMessage()
-        and "ES indexing" in record.getMessage()
-    ]
-    assert matched, "Expected the 'no ES indexing' debug log to be emitted"
+    assert response.json() == {
+        "memory_id": 7,
+        "event": "ADD",
+        "layer": "agent",
+        "memory_type": "short_term",
+        "indexed": False,
+    }
 
 
 def test_create_record_does_not_log_when_other_layer_not_indexed(client, caplog):

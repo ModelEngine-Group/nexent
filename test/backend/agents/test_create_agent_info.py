@@ -2603,6 +2603,13 @@ class TestCreateAgentConfig:
         whose failures are caught and logged at WARNING level so the agent
         can still start.
         """
+        services_pkg = types.ModuleType("services")
+        services_pkg.__path__ = []
+        skill_service_mod = types.ModuleType("services.skill_service")
+        skill_service_mod.SkillService = MagicMock(
+            return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
+        )
+
         with (
             patch(
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
@@ -2632,6 +2639,8 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.logger"
             ) as mock_logger,
             patch.dict(sys.modules, {
+                'services': services_pkg,
+                'services.skill_service': skill_service_mod,
                 'services.memory_record_service': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
@@ -2698,9 +2707,9 @@ class TestCreateAgentConfig:
                 allow_memory_search=True,
             )
 
-            mock_logger.warning.assert_called()
-            warning_message = mock_logger.warning.call_args[0][0]
-            assert "memory_tools_load_failed" in warning_message
+            mock_logger.error.assert_called_once()
+            error_message = mock_logger.error.call_args[0][0]
+            assert "Failed to load memory tools" in error_message
 
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_levels_agent_share_never(self):
@@ -5311,7 +5320,7 @@ class TestGetExternalA2AAgents:
 
                 assert result == []
                 mock_logger.error.assert_called_once()
-                assert "FAILED" in mock_logger.error.call_args[0][0]
+                assert "Get external A2A agents failed" in mock_logger.error.call_args[0][0]
                 assert "Database error" in mock_logger.error.call_args[0][0]
 
 

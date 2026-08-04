@@ -46,7 +46,6 @@ for entry in (str(PROJECT_ROOT), str(PROJECT_ROOT / "sdk"), str(PROJECT_ROOT / "
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-
 # --------------------------------------------------------------------------- #
 # Module bootstrapping                                                         #
 # --------------------------------------------------------------------------- #
@@ -281,10 +280,7 @@ class TestSearchMemoryToolPipelinePath:
 
         out = t.forward(query="anything", top_k=3)
 
-        assert out == (
-            "Memory search failed: retrieval pipeline unavailable. "
-            "Continuing without memory results."
-        )
+        assert out == "Memory search failed. Continuing without memory results."
         assert "event=memory_tool_failed tool=search_memory" in caplog.text
         assert "path=pipeline" in caplog.text
         assert "fallback=memory_service" not in caplog.text
