@@ -170,6 +170,7 @@ from backend.services.prompt_service import (
     join_info_for_optimize_prompt_section,
     optimize_prompt_section_impl,
     get_enabled_tool_description_for_generate_prompt,
+    _resolve_aidp_kb_display_names,
     PromptOptimizationService,
     OptimizeRequest,
     OptimizeResult,
@@ -2425,3 +2426,346 @@ class TestPromptOptimizationService(unittest.TestCase):
                     True,
                     "has_selected_resources should be True when sub-agents are present",
                 )
+
+
+# ==================== Tests for aidp_kb_display_names parameter ====================
+
+
+class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
+    """Test aidp_kb_display_names handling in generate_and_save_system_prompt_impl."""
+
+    def setUp(self):
+        self.test_model_id = 1
+
+    def _make_mock_generator(self):
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraints", "is_complete": True}
+            yield {"type": "few_shots", "content": "examples", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test_agent", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test Agent", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+        return mock_gen
+
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_frontend_provided_aidp_names_is_used_directly(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_resolve_aidp,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+    ):
+        """When frontend provides aidp_kb_display_names, _resolve_aidp_kb_display_names is skipped."""
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent.return_value = {"name": "a1", "description": "d"}
+        mock_query_all_agents.return_value = []
+        mock_generate_system_prompt.side_effect = self._make_mock_generator()
+
+        list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=self.test_model_id,
+            task_description="Task",
+            user_id="user1",
+            tenant_id="tenant1",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[10],
+            aidp_kb_display_names=["aidp-kb-1"],
+        ))
+
+        mock_resolve_aidp.assert_not_called()
+
+        mock_generate_system_prompt.assert_called_once()
+        bound_args = inspect.signature(generate_system_prompt).bind(
+            *mock_generate_system_prompt.call_args.args,
+            **mock_generate_system_prompt.call_args.kwargs,
+        )
+        self.assertEqual(
+            bound_args.arguments["aidp_kb_display_names"],
+            ["aidp-kb-1"],
+        )
+
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_falls_back_to_db_resolution_when_not_provided(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_resolve_aidp,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+    ):
+        """When aidp_kb_display_names is None, _resolve_aidp_kb_display_names is called."""
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent.return_value = {"name": "a1", "description": "d"}
+        mock_query_all_agents.return_value = []
+        mock_resolve_aidp.return_value = ["db-resolved"]
+        mock_generate_system_prompt.side_effect = self._make_mock_generator()
+
+        list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=self.test_model_id,
+            task_description="Task",
+            user_id="user1",
+            tenant_id="tenant1",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[10],
+            aidp_kb_display_names=None,
+        ))
+
+        # Verify _resolve_aidp_kb_display_names was called with correct args
+        mock_resolve_aidp.assert_called_once_with(
+            tool_info_list=[
+                {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            user_id="user1",
+            tenant_id="tenant1",
+        )
+
+        # Verify downstream receives the resolved value
+        mock_generate_system_prompt.assert_called_once()
+        bound_args = inspect.signature(generate_system_prompt).bind(
+            *mock_generate_system_prompt.call_args.args,
+            **mock_generate_system_prompt.call_args.kwargs,
+        )
+        self.assertEqual(
+            bound_args.arguments["aidp_kb_display_names"],
+            ["db-resolved"],
+        )
+
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_empty_frontend_names_triggers_fallback(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_resolve_aidp,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+    ):
+        """Empty list is falsy, so _resolve_aidp_kb_display_names should be called."""
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent.return_value = {"name": "a1", "description": "d"}
+        mock_query_all_agents.return_value = []
+        mock_resolve_aidp.return_value = ["fallback-name"]
+        mock_generate_system_prompt.side_effect = self._make_mock_generator()
+
+        list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=self.test_model_id,
+            task_description="Task",
+            user_id="user1",
+            tenant_id="tenant1",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[10],
+            aidp_kb_display_names=[],
+        ))
+
+        mock_resolve_aidp.assert_called_once()
+
+    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_aidp_names_passed_through_to_join_info(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_resolve_aidp,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_join_info,
+    ):
+        """Resolved aidp_kb_display_names flows to join_info_for_generate_system_prompt."""
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent.return_value = {"name": "a1", "description": "d"}
+        mock_query_all_agents.return_value = []
+        mock_resolve_aidp.return_value = ["resolved-kb"]
+        mock_join_info.return_value = "content"
+        mock_generate_system_prompt.side_effect = self._make_mock_generator()
+
+        list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=self.test_model_id,
+            task_description="Task",
+            user_id="user1",
+            tenant_id="tenant1",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[10],
+            aidp_kb_display_names=None,
+        ))
+
+        # generate_system_prompt calls join_info_for_generate_system_prompt internally
+        # but since we mock generate_system_prompt we cannot observe that chain directly.
+        # Instead verify the resolved value reaches generate_system_prompt kwargs.
+        mock_generate_system_prompt.assert_called_once()
+        bound_args = inspect.signature(generate_system_prompt).bind(
+            *mock_generate_system_prompt.call_args.args,
+            **mock_generate_system_prompt.call_args.kwargs,
+        )
+        self.assertEqual(
+            bound_args.arguments["aidp_kb_display_names"],
+            ["resolved-kb"],
+        )
+
+
+class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
+    """Test aidp_kb_names rendering in join_info_for_generate_system_prompt."""
+
+    @patch('backend.services.prompt_service.Template')
+    def test_rendered_string_when_aidp_kb_display_names_set(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "rendered"
+
+        join_info_for_generate_system_prompt(
+            prompt_for_generate={"user_prompt": "tmpl"},
+            sub_agent_info_list=[{"name": "a", "description": "d"}],
+            task_description="task",
+            tool_info_list=[
+                {"name": "t", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            language="en",
+            aidp_kb_display_names=["kb-1", "kb-2"],
+        )
+
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["aidp_kb_names"], '"kb-1", "kb-2"')
+
+    @patch('backend.services.prompt_service.Template')
+    def test_empty_string_when_aidp_kb_display_names_none(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "rendered"
+
+        join_info_for_generate_system_prompt(
+            prompt_for_generate={"user_prompt": "tmpl"},
+            sub_agent_info_list=[{"name": "a", "description": "d"}],
+            task_description="task",
+            tool_info_list=[
+                {"name": "t", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            language="en",
+            aidp_kb_display_names=None,
+        )
+
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["aidp_kb_names"], "")
+
+    @patch('backend.services.prompt_service.Template')
+    def test_empty_string_when_aidp_kb_display_names_empty_list(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "rendered"
+
+        join_info_for_generate_system_prompt(
+            prompt_for_generate={"user_prompt": "tmpl"},
+            sub_agent_info_list=[{"name": "a", "description": "d"}],
+            task_description="task",
+            tool_info_list=[
+                {"name": "t", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            language="en",
+            aidp_kb_display_names=[],
+        )
+
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["aidp_kb_names"], "")
+
+    @patch('backend.services.prompt_service.Template')
+    def test_default_value_is_empty_string(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "rendered"
+
+        join_info_for_generate_system_prompt(
+            prompt_for_generate={"user_prompt": "tmpl"},
+            sub_agent_info_list=[{"name": "a", "description": "d"}],
+            task_description="task",
+            tool_info_list=[
+                {"name": "t", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            language="en",
+        )
+
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["aidp_kb_names"], "")
+
+
+class TestResolveAidpKbDisplayNames(unittest.TestCase):
+    """Test _resolve_aidp_kb_display_names delegation."""
+
+    @patch('backend.services.prompt_service.get_aidp_kb_display_names')
+    def test_delegates_to_get_aidp_kb_display_names(self, mock_get_aidp):
+        tool_info = [{"name": "aidp_search", "tool_id": 42}]
+        mock_get_aidp.return_value = ["resolved-kb-1", "resolved-kb-2"]
+
+        result = _resolve_aidp_kb_display_names(
+            tool_info_list=tool_info,
+            user_id="user1",
+            tenant_id="tenant1",
+        )
+
+        mock_get_aidp.assert_called_once_with(
+            tool_info_list=tool_info,
+            user_id="user1",
+            tenant_id="tenant1",
+        )
+        self.assertEqual(result, ["resolved-kb-1", "resolved-kb-2"])
+
+
+class TestJoinInfoForOptimizePromptSectionAidpKbNames(unittest.TestCase):
+    """Test aidp_kb_names in join_info_for_optimize_prompt_section template context."""
+
+    @patch('backend.services.prompt_service.Template')
+    def test_aidp_kb_display_names_passed_to_template_context(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "rendered"
+
+        join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "tmpl"},
+            section_type="duty",
+            section_title="Duties",
+            task_description="task",
+            current_content="content",
+            feedback="feedback",
+            tool_info_list=[
+                {"name": "t", "description": "d", "inputs": "{}", "output_type": "text"}
+            ],
+            sub_agent_info_list=[
+                {"name": "a", "description": "d"}
+            ],
+            language="en",
+            aidp_kb_display_names=["aidp-kb-a", "aidp-kb-b"],
+        )
+
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(
+            template_vars["aidp_kb_names"],
+            '"aidp-kb-a", "aidp-kb-b"',
+        )
