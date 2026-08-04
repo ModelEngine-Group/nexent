@@ -55,10 +55,18 @@ import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
 
 const { TextArea } = Input;
+
+const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
 
 interface SkillBuildModalProps {
   isOpen: boolean;
@@ -162,6 +170,13 @@ export default function SkillBuildModal({
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
+  const isCreator =
+    !isEditMode ||
+    (!!editingSkill?.created_by &&
+      !!user?.id &&
+      String(editingSkill.created_by) === String(user.id));
+  const canEditGroupSettings = isAdmin || isCreator;
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
   const groupNamesById = useMemo(
     () =>
@@ -914,6 +929,7 @@ export default function SkillBuildModal({
   }, [chatMessages]);
 
   const modalBodyFrame = "min(92vh, 760px)";
+  const modalViewportFrame = "calc(100vh - 32px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
   const isEditContentReady =
@@ -1216,6 +1232,7 @@ export default function SkillBuildModal({
       onTextareaScroll={handleTextareaScroll}
       groupSelectOptions={groupSelectOptions}
       groupNamesById={groupNamesById}
+      canEditGroupSettings={canEditGroupSettings}
     />
   );
 
@@ -1270,13 +1287,21 @@ export default function SkillBuildModal({
       open={isOpen}
       onCancel={handleModalClose}
       centered
-      width={1180}
+      width="min(1180px, calc(100vw - 32px))"
       styles={{
+        container: {
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: modalViewportFrame,
+          overflow: "hidden",
+        },
         body: {
           display: "flex",
+          flex: "1 1 auto",
           flexDirection: "column",
           height: modalBodyFrame,
           maxHeight: modalBodyFrame,
+          minHeight: 0,
           overflow: "hidden",
         },
       }}

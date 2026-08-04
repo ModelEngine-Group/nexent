@@ -28,6 +28,14 @@ def test_model_request_and_validation():
     assert req.filename == "f"
 
 
+def test_skill_repository_install_request_limits_target_name_to_100_characters():
+    request = model_consts.SkillRepositoryInstallRequest(target_name="x" * 100)
+    assert len(request.target_name) == 100
+
+    with pytest.raises(ValidationError):
+        model_consts.SkillRepositoryInstallRequest(target_name="x" * 101)
+
+
 def test_model_request_threads_w11_capacity_and_accept_fields():
     """W11 spec L721-727 + L500-502: ModelRequest must carry every capacity
     column the save handler can persist AND the audit-only accept-signal
@@ -118,5 +126,4 @@ def test_capacity_suggestion_response_has_required_fields():
     assert not missing, (
         f"ModelCapacitySuggestionResponse missing W11 fields: {missing}"
     )
-
 

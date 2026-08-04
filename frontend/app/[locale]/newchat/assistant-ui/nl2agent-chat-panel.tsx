@@ -1,6 +1,6 @@
 "use client";
 
-import type { FC } from "react";
+import { useMemo, type FC } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
@@ -11,6 +11,8 @@ import { useTranslation } from "react-i18next";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
+import { useConfig } from "@/hooks/useConfig";
+import { ServerDictationAdapter } from "../adapter/server-dictation-adapter";
 import { remoteChatModelAdapter } from "../adapter/remote-chat-model-adapter";
 import { Chat } from "./chat";
 
@@ -40,11 +42,15 @@ const NL2AGENT_DISPLAY_BASE: Agent = {
 
 export const Nl2AgentChatPanel: FC = () => {
   const { t } = useTranslation("common");
-  const runtime = useLocalRuntime(nl2AgentChatModelAdapter, {
-    adapters: {
+  const { modelConfig } = useConfig();
+  const adapters = useMemo(
+    () => ({
       attachments: compositeAttachmentAdapter,
-    },
-  });
+      dictation: new ServerDictationAdapter(() => modelConfig?.stt),
+    }),
+    [modelConfig?.stt]
+  );
+  const runtime = useLocalRuntime(nl2AgentChatModelAdapter, { adapters });
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
   const nl2AgentDisplay: Agent = {

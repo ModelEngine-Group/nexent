@@ -491,23 +491,86 @@ class A2AServerService:
 
         return task_id, context_id, is_complex_request
 
+    async def _collect_stream_events(self, stream_response) -> List[Dict[str, Any]]:
+        """Collect parsed agent/run SSE payloads without dropping event types."""
+        events = []
+        async for chunk in stream_response.body_iterator:
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8")
+            if not chunk.startswith("data: "):
+                continue
+            data_str = chunk[6:].strip()
+            if not data_str:
+                continue
+            try:
+                event = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return events
+
+    def _extract_final_answer(self, events: List[Dict[str, Any]]) -> str:
+        """Extract the final answer for task persistence and completion metadata."""
+        return "".join(
+            str(event.get("content", ""))
+            for event in events
+            if event.get("type") == "final_answer"
+        )
+
+    def _coalesce_consecutive_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge adjacent string-content events with identical non-content fields."""
+        coalesced = []
+        for event in events:
+            content = event.get("content")
+            if not isinstance(content, str) or not coalesced:
+                coalesced.append(dict(event))
+                continue
+
+            previous = coalesced[-1]
+            previous_content = previous.get("content")
+            if (
+                isinstance(previous_content, str)
+                and event.get("type") == previous.get("type")
+                and {key: value for key, value in event.items() if key != "content"}
+                == {key: value for key, value in previous.items() if key != "content"}
+            ):
+                previous["content"] += content
+            else:
+                coalesced.append(dict(event))
+        return coalesced
+
+    def _build_agent_run_event_parts(
+        self,
+        events: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Represent every agent/run event as an A2A JSON data part."""
+        return [
+            {
+                "data": event,
+                "mediaType": "application/json",
+            }
+            for event in events
+        ]
+
     async def _collect_stream_text(self, stream_response) -> str:
-        """Collect and accumulate text from a streaming response."""
+        """Collect text from a streaming response for legacy callers."""
         accumulated = []
         async for chunk in stream_response.body_iterator:
             if isinstance(chunk, bytes):
                 chunk = chunk.decode("utf-8")
-            if chunk.startswith("data: "):
-                data_str = chunk[6:].strip()
-                if not data_str:
-                    continue
-                try:
-                    chunk_data = json.loads(data_str)
-                    text = self.adapter.extract_stream_chunk(chunk_data)
-                    if text:
-                        accumulated.append(text)
-                except json.JSONDecodeError:
-                    pass
+            if not chunk.startswith("data: "):
+                continue
+            data_str = chunk[6:].strip()
+            if not data_str:
+                continue
+            try:
+                chunk_data = json.loads(data_str)
+                text = self.adapter.extract_stream_chunk(chunk_data)
+                if text:
+                    accumulated.append(text)
+            except json.JSONDecodeError:
+                continue
         return "".join(accumulated)
 
     def _store_user_message(self, task_id: Optional[str], message_obj: Dict[str, Any], endpoint_id: str) -> None:
@@ -639,22 +702,26 @@ class A2AServerService:
                 tenant_id=tenant_id or server_agent.get("tenant_id")
             )
 
-            accumulated_text = await self._collect_stream_text(stream_response)
-            self._store_agent_response(task_id, accumulated_text, endpoint_id)
+            events = await self._collect_stream_events(stream_response)
+            final_answer = self._extract_final_answer(events)
+            self._store_agent_response(task_id, final_answer, endpoint_id)
+            raw_parts = self._build_agent_run_event_parts(
+                self._coalesce_consecutive_events(events)
+            )
 
             if is_complex_request:
-                from datetime import datetime, timezone
                 return self.adapter.build_a2a_task_response(
                     task_id=task_id,
                     status="TASK_STATE_COMPLETED",
-                    parts=[{"text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else None,
+                    parts=raw_parts or None,
                     context_id=context_id,
                     timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
             else:
                 return self.adapter.build_a2a_message_response(
                     role="ROLE_AGENT",
-                    text=accumulated_text,
+                    parts=raw_parts,
+                    text=final_answer if not raw_parts else None,
                     context_id=context_id,
                     task_id=task_id
                 )
@@ -761,7 +828,7 @@ class A2AServerService:
                 tenant_id=tenant_id or server_agent.get("tenant_id")
             )
 
-            accumulated_text = ""
+            events = []
             async for chunk in stream_response.body_iterator:
                 if isinstance(chunk, bytes):
                     chunk = chunk.decode("utf-8")
@@ -772,24 +839,34 @@ class A2AServerService:
                     continue
                 try:
                     chunk_data = json.loads(data_str)
-                    text = self.adapter.extract_stream_chunk(chunk_data)
-                    if text:
-                        accumulated_text += text
-                        yield self.adapter.build_a2a_task_event(
-                            task_id=task_id,
-                            event_type="taskProgress",
-                            data={"content": text, "lastChunk": False},
-                            context_id=context_id
-                        )
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                if not isinstance(chunk_data, dict):
+                    continue
 
-            self._store_agent_response(task_id, accumulated_text, endpoint_id)
+                events.append(chunk_data)
+                yield self.adapter.build_a2a_task_event(
+                    task_id=task_id or "simple",
+                    event_type="taskArtifact",
+                    data={
+                        "artifact": {"parts": self._build_agent_run_event_parts([chunk_data])},
+                        "append": True,
+                        "lastChunk": False,
+                    },
+                    context_id=context_id
+                )
+
+            final_answer = self._extract_final_answer(events)
+            self._store_agent_response(task_id, final_answer, endpoint_id)
 
             yield self.adapter.build_a2a_task_event(
                 task_id=task_id or "simple",
-                event_type="taskProgress",
-                data={"content": accumulated_text, "lastChunk": True},
+                event_type="taskArtifact",
+                data={
+                    "artifact": {"parts": []},
+                    "append": True,
+                    "lastChunk": True,
+                },
                 context_id=context_id
             )
 

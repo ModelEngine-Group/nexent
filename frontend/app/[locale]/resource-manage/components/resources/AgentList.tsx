@@ -384,11 +384,18 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             {isAvailable ? (
               <Tag
                 color="#229954"
-                className="inline-flex items-center"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "2px 8px",
+                  lineHeight: "20px",
+                  height: "auto",
+                  whiteSpace: "nowrap",
+                }}
                 variant="solid"
               >
                 <CheckCircle className="w-3 h-3 mr-1" />
-                {t("mcpConfig.status.available")}
+                <span>{t("mcpConfig.status.available")}</span>
               </Tag>
             ) : (
               <Tooltip
@@ -397,11 +404,18 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               >
                 <Tag
                   color="#E74C3C"
-                  className="inline-flex items-center"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "2px 8px",
+                    lineHeight: "20px",
+                    height: "auto",
+                    whiteSpace: "nowrap",
+                  }}
                   variant="solid"
                 >
                   <CircleSlash className="w-3.5 h-3 mr-1" />
-                  {t("mcpConfig.status.unavailable")}
+                  <span>{t("mcpConfig.status.unavailable")}</span>
                 </Tag>
               </Tooltip>
             )}
