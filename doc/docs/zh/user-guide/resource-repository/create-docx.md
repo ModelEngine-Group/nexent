@@ -259,6 +259,6 @@ Use `scripts/generate_report.py` to create the final report.
 ## 相关文档
 
 - [官方技能](./official-skills.md)
-- [文件生成 Skill 编写指南](../../backend/skills/file-generation-guide.md)
-- [技能系统概览](../../backend/skills/overview.md)
+- [文件生成 Skill 编写指南](../../../backend/skills/file-generation-guide.md)
+- [技能系统概览](../../../backend/skills/overview.md)
 - [Skill 仓库](./skill-repository.md)

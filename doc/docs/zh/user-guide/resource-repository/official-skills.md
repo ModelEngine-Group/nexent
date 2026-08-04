@@ -58,7 +58,7 @@ Nexent 在 `official-skills-zip` 目录中提供了一组可直接安装的官�
 4. 在智能体配置的技能列表中启用已安装技能。
 5. 根据技能要求填写参数并保存配置。
 
-官方技能的具体参数和调用约束以对应技能包中的 `SKILL.md` 为准。文件生成类技能的使用方式请参阅 [文件生成技能指南](../../backend/skills/file-generation-guide.md)。
+官方技能的具体参数和调用约束以对应技能包中的 `SKILL.md` 为准。文件生成类技能的使用方式请参阅 [文件生成技能指南](../../../backend/skills/file-generation-guide.md)。
 
 ## 相关文档
 
