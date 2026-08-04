@@ -704,6 +704,11 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 if 'minio_files' in msg and msg['minio_files']:
                     message_item['minio_files'] = msg['minio_files']
 
+            # Keep the logical message position so clients can distinguish a
+            # regenerated branch from a separate turn with identical text.
+            if msg.get('message_index') is not None:
+                message_item['message_index'] = msg['message_index']
+
             # Add image content (if any)
             if message_id in image_by_message:
                 message_item['picture'] = image_by_message[message_id]

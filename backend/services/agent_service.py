@@ -1287,6 +1287,24 @@ async def _stream_agent_chunks(
                                 "unit_index": next_unit_index,
                                 "mergeable": mergeable,
                             }
+                            if chunk_type == "automation_proposal":
+                                try:
+                                    from services.agent_automation.tool_adapter import (
+                                        link_persisted_proposal_card,
+                                    )
+
+                                    link_persisted_proposal_card(
+                                        persisted_content,
+                                        tenant_id,
+                                        user_id,
+                                        streaming_message_id,
+                                        new_unit_id,
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to link persisted automation proposal card",
+                                        exc_info=True,
+                                    )
                             next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
@@ -2779,23 +2797,28 @@ async def prepare_agent_run(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
 
+    create_run_kwargs = {
+        "agent_id": agent_request.agent_id,
+        "minio_files": agent_request.minio_files,
+        "query": agent_request.query,
+        "history": agent_request.history,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "language": language,
+        "allow_memory_search": allow_memory_search,
+        "is_debug": agent_request.is_debug,
+        "override_version_no": agent_request.version_no,
+        "override_model_id": agent_request.model_id,
+        "requested_output_tokens": agent_request.requested_output_tokens,
+        "tool_params": agent_request.tool_params,
+        "conversation_id": agent_request.conversation_id,
+        "context_policy": agent_request.context_policy,
+        "enable_planning": agent_request.enable_plan,
+    }
+    if not agent_request.enable_automation_tool:
+        create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
-        agent_id=agent_request.agent_id,
-        minio_files=agent_request.minio_files,
-        query=agent_request.query,
-        history=agent_request.history,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        language=language,
-        allow_memory_search=allow_memory_search,
-        is_debug=agent_request.is_debug,
-        override_version_no=agent_request.version_no,
-        override_model_id=agent_request.model_id,
-        requested_output_tokens=agent_request.requested_output_tokens,
-        tool_params=agent_request.tool_params,
-        conversation_id=agent_request.conversation_id,
-        context_policy=agent_request.context_policy,
-        enable_planning=agent_request.enable_plan,
+        **create_run_kwargs,
     )
 
     historical_context = None

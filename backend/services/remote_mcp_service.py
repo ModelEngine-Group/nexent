@@ -4,9 +4,10 @@ import tempfile
 import asyncio
 import socket
 import random
+from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE, IS_DEPLOYED_BY_KUBERNETES
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -208,7 +209,12 @@ def _is_container_record(record: dict | None) -> bool:
 
     A record is considered container-based if it has:
     - container_id (Docker container ID)
-    - config_json (container configuration)
+    - a non-empty config_json holding a container configuration
+
+    API-type MCPs store OpenAPI JSON in config_json and are never treated as
+    containers. An empty dict config_json (e.g. `{}`) is not a container
+    configuration either, so records with only an empty config_json are treated
+    as plain remote MCPs instead of being misclassified as containers.
     """
     if not record:
         return False
@@ -216,12 +222,26 @@ def _is_container_record(record: dict | None) -> bool:
     # API-type MCPs store OpenAPI JSON in config_json, not container config
     if isinstance(config_json, dict) and "openapi" in config_json:
         return False
-    return record.get("container_id") is not None or config_json is not None
+    return record.get("container_id") is not None or (
+        isinstance(config_json, dict) and bool(config_json)
+    )
 
 
 # ---------------------------------------------------------------------------
 # Port Management Functions
 # ---------------------------------------------------------------------------
+
+def mcp_ports_are_virtual() -> bool:
+    """Return True when MCP container ports are not published to the host.
+
+    When nexent itself runs inside a container (Docker or Kubernetes), MCP
+    containers communicate over the internal container network and do not
+    occupy host ports. Each container has its own network namespace, so
+    multiple MCPs can share the same internal port and port conflicts cannot
+    occur.
+    """
+    return IS_DEPLOYED_BY_KUBERNETES or Path("/.dockerenv").exists()
+
 
 def check_container_port_conflict_records(port: int) -> bool:
     """Check if there are enabled MCP records that already use the given container port."""
@@ -544,7 +564,10 @@ async def add_container_mcp_service(
     if check_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
         raise McpNameConflictError("Enabled MCP name already exists")
 
-    if not check_container_port_conflict(port=port):
+    # In container mode (Docker/K8s) ports are never published to the host and
+    # each container is isolated, so multiple MCPs can share the same internal
+    # port without conflict.
+    if not mcp_ports_are_virtual() and not check_container_port_conflict(port=port):
         raise McpPortConflictError(f"Port {port} is already in use")
 
     servers = mcp_config.mcpServers
@@ -1137,7 +1160,9 @@ async def get_remote_mcp_server_list(
         config_json = record.get("config_json")
         container_id = record.get("container_id")
 
-        is_container = container_id is not None or config_json is not None
+        # Reuse _is_container_record so an empty config_json (e.g. `{}`) is not
+        # misclassified as a container, matching the API/enable path behavior.
+        is_container = _is_container_record(record)
 
         container_status = None
         if is_container:

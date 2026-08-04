@@ -3890,6 +3890,57 @@ class TestCreateAgentRunInfo:
             })
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_enables_automation_tool_for_conversation(self):
+        mock_agent_run_info.reset_mock()
+        with patch(
+            'backend.agents.create_agent_info.join_minio_file_description_to_query',
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            'backend.agents.create_agent_info.create_model_config_list',
+            new_callable=AsyncMock,
+            return_value=["model_config"],
+        ), patch(
+            'backend.agents.create_agent_info.get_remote_mcp_server_list',
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            'backend.agents.create_agent_info.create_agent_config',
+            new_callable=AsyncMock,
+            return_value="agent_config",
+        ) as mock_create_agent, patch(
+            'backend.agents.create_agent_info.filter_mcp_servers_and_tools',
+            return_value=[],
+        ), patch(
+            'backend.agents.create_agent_info.urljoin',
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            'backend.agents.create_agent_info.threading'
+        ) as mock_threading, patch(
+            'backend.agents.create_agent_info.query_current_version_no',
+            return_value=1,
+        ):
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[{"name": "report.csv"}],
+                query="每天九点分析报表",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh",
+                conversation_id=123,
+                override_model_id=9,
+            )
+
+        create_kwargs = mock_create_agent.await_args.kwargs
+        assert create_kwargs["include_automation_tool"] is True
+        assert create_kwargs["automation_user_message"] == "每天九点分析报表"
+        assert create_kwargs["automation_model_id"] == 9
+        assert create_kwargs["automation_has_attachments"] is True
+
+    @pytest.mark.asyncio
     async def test_create_agent_run_info_with_authorization_token(self):
         """Test case for mcp_host with authorization token"""
         mock_agent_run_info.reset_mock()

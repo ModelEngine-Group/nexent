@@ -396,6 +396,7 @@ def build_context_inputs(
     memory_list: Optional[List[Any]] = None,
     memory_search_query: Optional[str] = None,
     memory_tool_policy: Optional[str] = None,
+    automation_tool_policy: Optional[str] = None,
     long_term_memory_prompt: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
@@ -433,6 +434,9 @@ def build_context_inputs(
 
     if memory_tool_policy:
         add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
+
+    if automation_tool_policy:
+        add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
 
     if include_memory and long_term_memory_prompt:
         add_system(

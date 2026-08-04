@@ -19,9 +19,10 @@ import type {
 } from "@assistant-ui/react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
-import type { AgentAutomationProposalData } from "@/types/agentAutomation";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
+import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -157,22 +158,6 @@ const parseSearchImageUrls = (content: string): string[] => {
   }
 };
 
-const parseAutomationProposal = (
-  content: string
-): AgentAutomationProposalData | null => {
-  try {
-    const value = JSON.parse(content) as unknown;
-    if (typeof value !== "object" || value === null) return null;
-
-    const proposal = value as AgentAutomationProposalData;
-    return typeof proposal.proposal_id === "number" && proposal.task
-      ? proposal
-      : null;
-  } catch {
-    return null;
-  }
-};
-
 type HistoryMessage = Parameters<
   typeof ExportedMessageRepository.fromArray
 >[0][number];
@@ -206,41 +191,6 @@ const buildBranchableHistory = (
   }
 
   return branchableMessages;
-};
-
-const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
-  left.role === "user" &&
-  right.role === "user" &&
-  JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) ===
-    JSON.stringify(right.minio_files ?? []);
-
-/**
- * Collapse refresh-generated duplicate user messages while preserving every
- * assistant response as a branch under the first user message.
- *
- * Assistant messages do not reset the comparison. A different user message
- * does reset it, so identical questions from separate turns remain distinct.
- */
-const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
-  const collapsed: ApiMessage[] = [];
-  let activeUserMessage: ApiMessage | undefined;
-
-  for (const message of messages) {
-    if (message.role !== "user") {
-      collapsed.push(message);
-      continue;
-    }
-
-    if (activeUserMessage && areSameUserMessages(activeUserMessage, message)) {
-      continue;
-    }
-
-    collapsed.push(message);
-    activeUserMessage = message;
-  }
-
-  return collapsed;
 };
 
 const restoreAttachments = (
@@ -301,7 +251,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   constructor(
     private readonly getRemoteId: () => string | undefined,
     private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
-    private readonly loadDetail?: () => Promise<ApiConversationDetail | undefined>,
+    private readonly loadDetail?: () => Promise<
+      ApiConversationDetail | undefined
+    >
   ) {}
 
   async load(): Promise<
@@ -363,8 +315,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           (part.type === "final_answer" || part.type === "text") &&
           typeof part.content === "string"
             ? [part.content]
-            : [],
-        ),
+            : []
+        )
       );
 
       // Collect token_count units so the per-message `SingleTurnTokenUsage`
@@ -486,9 +438,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         const flushReasoning = (invocationId?: string) => {
-          const entry = invocationId
-            ? activeSubAgents.get(invocationId)
-            : null;
+          const entry = invocationId ? activeSubAgents.get(invocationId) : null;
           if (entry?.reasoningText) {
             content.push({
               type: "reasoning",
@@ -519,23 +469,22 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         const persistedImageSources = Array.isArray(msg.search)
           ? msg.search.filter(
               (searchItem) =>
-                typeof searchItem === "object" && searchItem !== null,
+                typeof searchItem === "object" && searchItem !== null
             )
           : [];
         const restoredImageUrls = new Set<string>();
         const restoredImages: any[] = [];
-        const appendHistoricalImage = (
-          imageUrl: string,
-        ) => {
+        const appendHistoricalImage = (imageUrl: string) => {
           if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
           const imageIndex = restoredImageUrls.size;
           const imageKey = answerImageKeys[imageIndex];
           const metadata = persistedImageSources.find((searchItem) => {
             const item = searchItem as Record<string, unknown>;
-            return imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+            return (
+              imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`
+            );
           }) as Record<string, unknown> | undefined;
-          const title =
-            (metadata?.title as string | undefined) || imageUrl;
+          const title = (metadata?.title as string | undefined) || imageUrl;
           const imagePart: any = {
             type: "source",
             sourceType: "url",
@@ -920,13 +869,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||
                 answerImageKeys.includes(searchImageKey)
-              ) continue;
+              )
+                continue;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
@@ -1115,7 +1064,7 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
 };
 
 const createShareHistoryProvider = (
-  snapshot: ApiConversationDetail,
+  snapshot: ApiConversationDetail
 ): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
@@ -1124,12 +1073,16 @@ const createShareHistoryProvider = (
         new RemoteConversationHistoryAdapter(
           () => aui.threadListItem().getState().remoteId,
           () => aui.threadListItem().initialize(),
-          async () => snapshot,
+          async () => snapshot
         ),
-      [aui],
+      [aui]
     );
     const adapters = useMemo(() => ({ history }), [history]);
-    return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
+    return (
+      <RuntimeAdapterProvider adapters={adapters}>
+        {children}
+      </RuntimeAdapterProvider>
+    );
   };
   return Provider;
 };
@@ -1141,11 +1094,12 @@ const createShareHistoryProvider = (
  * attachment mapping used by a normal historical conversation.
  */
 export const createShareThreadListAdapter = (
-  snapshot: ApiConversationDetail,
+  snapshot: ApiConversationDetail
 ): RemoteThreadListAdapter => {
   const remoteId = String(snapshot.conversation_id);
-  const title = (snapshot as ApiConversationDetail & { conversation_title?: string })
-    .conversation_title || "Shared conversation";
+  const title =
+    (snapshot as ApiConversationDetail & { conversation_title?: string })
+      .conversation_title || "Shared conversation";
   const metadata: RemoteThreadMetadata = {
     remoteId,
     status: "regular",
@@ -1354,12 +1308,15 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       conversationService.getList(),
     ]);
     const conversation = conversations.find(
+      // Conversation detail serializes the id as a string, while the list
+      // endpoint returns a number. Normalize both sides so direct URL entry
+      // can reuse the persisted conversation title instead of the fallback.
       (item) => String(item.conversation_id) === String(detail.conversation_id)
     );
 
     return toRemoteThreadMetadata(
       conversation ?? {
-        conversation_id: detail.conversation_id,
+        conversation_id: Number(detail.conversation_id),
         conversation_title: "Untitled conversation",
         agent_id: detail.agent_id,
         create_time: detail.create_time,
