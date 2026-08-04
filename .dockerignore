@@ -46,6 +46,11 @@ uploads/
 test/
 assets/
 
+# Environment files (must never be baked into images: local dev config,
+# secrets, and the wrong SUPABASE_URL would otherwise override compose env)
+**/.env
+**/.env.local
+
 # Github
 .github/
 

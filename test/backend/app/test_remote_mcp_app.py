@@ -651,6 +651,19 @@ class TestPortCheck:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"]["available"] is False
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.check_container_port_conflict')
+    @patch('apps.remote_mcp_app._mcp_ports_are_virtual')
+    def test_port_check_virtual_mode_skips_conflict_check(self, mock_virtual, mock_check, mock_auth):
+        """In Docker/K8s (virtual) mode any port is available; the conflict check is skipped."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_virtual.return_value = True
+        mock_check.return_value = False  # would normally block, must be ignored in virtual mode
+        resp = client.get("/mcp/port/check?port=8080", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["available"] is True
+        mock_check.assert_not_called()
+
 
 # ============================================================================
 # GET /mcp/port/suggest
@@ -667,6 +680,53 @@ class TestPortSuggest:
         resp = client.get("/mcp/port/suggest", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"]["port"] == 5000
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.suggest_container_port')
+    @patch('apps.remote_mcp_app._mcp_ports_are_virtual')
+    def test_port_suggest_virtual_mode_returns_fixed_default(self, mock_virtual, mock_suggest, mock_auth):
+        """In Docker/K8s (virtual) mode suggest returns the fixed default port without probing the host."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_virtual.return_value = True
+        mock_suggest.return_value = 5000  # must be ignored in virtual mode
+        resp = client.get("/mcp/port/suggest", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["port"] == remote_app.MCP_DEFAULT_CONTAINER_PORT
+        mock_suggest.assert_not_called()
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.suggest_container_port')
+    @patch('apps.remote_mcp_app._mcp_ports_are_virtual')
+    def test_port_suggest_host_mode_delegates_to_free_port_finder(self, mock_virtual, mock_suggest, mock_auth):
+        """On a host (non-virtual) deployment suggest delegates to the free-port finder."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_virtual.return_value = False
+        mock_suggest.return_value = 5000
+        resp = client.get("/mcp/port/suggest", headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["port"] == 5000
+        mock_suggest.assert_called_once()
+
+
+# ============================================================================
+# Ports-virtual detection (default port constant + delegation to service)
+# ============================================================================
+
+class TestPortVirtualDetection:
+    """Test the ports-virtual detection helpers."""
+
+    def test_default_container_port_is_5020(self):
+        """The fixed default port matches DockerContainerClient's container-mode default."""
+        assert remote_app.MCP_DEFAULT_CONTAINER_PORT == 5020
+
+    @patch('apps.remote_mcp_app.mcp_ports_are_virtual')
+    def test_app_virtual_flag_delegates_to_service(self, mock_service):
+        """_mcp_ports_are_virtual() delegates to the shared service helper."""
+        mock_service.return_value = True
+        assert remote_app._mcp_ports_are_virtual() is True
+        mock_service.return_value = False
+        assert remote_app._mcp_ports_are_virtual() is False
+        assert mock_service.call_count == 2
 
 
 # ============================================================================
