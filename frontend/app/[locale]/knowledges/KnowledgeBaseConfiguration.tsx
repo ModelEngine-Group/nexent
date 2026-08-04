@@ -276,19 +276,19 @@ function DataConfig({ isActive }: DataConfigProps) {
   const resolveEmbeddingModelId = useCallback(
     ({
       displayName,
-      isMultimodal,
+      modelType,
     }: {
       displayName?: string;
-      isMultimodal?: boolean;
+      modelType?: string;
     }) => {
       const normalizedDisplayName = (displayName || "").trim();
-      if (!normalizedDisplayName) return undefined;
+      const normalizedModelType = normalizeEmbeddingModelType(modelType || "");
+      if (!normalizedDisplayName || !normalizedModelType) return undefined;
 
-      const modelType = isMultimodal ? "multi_embedding" : "embedding";
       return availableEmbeddingModels.find(
         (model) =>
           model.displayName === normalizedDisplayName &&
-          model.type === modelType
+          model.type === normalizedModelType
       )?.id;
     },
     [availableEmbeddingModels]
@@ -823,11 +823,13 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const parsedSelectedModel =
           parseEmbeddingModelOptionValue(newKbEmbeddingModel);
-        const isMultimodal = parsedSelectedModel.isMultimodal;
         const selectedModelId = resolveEmbeddingModelId({
           displayName: parsedSelectedModel.displayName,
-          isMultimodal: parsedSelectedModel.isMultimodal,
+          modelType: parsedSelectedModel.type,
         });
+        if (selectedModelId === undefined) {
+          throw new Error("Selected embedding model could not be resolved");
+        }
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
@@ -835,8 +837,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
-          parsedSelectedModel.displayName,
-          isMultimodal,
+          selectedModelId,
           newKbPreserveSourceFile,
           newKbQuotaBytes,
         );
@@ -896,7 +897,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     try {
       const activeKbModelId = resolveEmbeddingModelId({
         displayName: kbState.activeKnowledgeBase?.embeddingModel,
-        isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
+        modelType: kbState.activeKnowledgeBase?.is_multimodal
+          ? "multi_embedding"
+          : "embedding",
       });
 
       await uploadDocuments(kbId, filesToUpload, activeKbModelId);

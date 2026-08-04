@@ -229,6 +229,8 @@ async def create_skill_from_file(
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
         logger.warning(f"SkillException: {e}")
@@ -269,6 +271,8 @@ async def get_skill_file_tree(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -309,6 +313,8 @@ async def get_skill_file_content(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -394,18 +400,16 @@ async def get_skill_instance(
         # The instance's per-agent overrides are mapped to config_values for the frontend.
         skill = service.get_skill_by_id(skill_id, tenant_id)
         if skill:
+            instance_config_values = instance.get("config_values") or {}
             instance["skill_name"] = skill.get("name")
             instance["skill_description"] = skill.get("description", "")
             instance["skill_content"] = skill.get("content", "")
             # Template defaults from YAML-enriched skill
             instance["config_schemas"] = skill.get("config_schemas") or []
-            instance["config_values"] = skill.get("config_values") or {}
             # Per-agent overrides from SkillInstance.config_values override the template defaults
-            instance_params = instance.get("config_values") or {}
-            if instance_params:
-                merged = dict(instance.get("config_values") or {})
-                merged.update(instance_params)
-                instance["config_values"] = merged
+            merged = dict(skill.get("config_values") or {})
+            merged.update(instance_config_values)
+            instance["config_values"] = merged
 
         return JSONResponse(content=instance)
     except UnauthorizedError as e:
@@ -446,16 +450,14 @@ async def update_skill_instance(
         )
 
         # Enrich with template info so the frontend gets config_schemas and config_values
+        instance_config_values = instance.get("config_values") or {}
         instance["skill_name"] = skill.get("name")
         instance["skill_description"] = skill.get("description", "")
         instance["skill_content"] = skill.get("content", "")
         instance["config_schemas"] = skill.get("config_schemas") or []
-        instance["config_values"] = skill.get("config_values") or {}
-        instance_params = instance.get("config_values") or {}
-        if instance_params:
-            merged = dict(instance.get("config_values") or {})
-            merged.update(instance_params)
-            instance["config_values"] = merged
+        merged = dict(skill.get("config_values") or {})
+        merged.update(instance_config_values)
+        instance["config_values"] = merged
 
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except UnauthorizedError as e:

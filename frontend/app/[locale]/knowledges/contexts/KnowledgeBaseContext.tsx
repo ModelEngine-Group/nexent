@@ -117,8 +117,7 @@ export const KnowledgeBaseContext = createContext<{
     source?: string,
     ingroup_permission?: string,
     group_ids?: number[],
-    embeddingModel?: string,
-    is_multimodal?: boolean,
+    embeddingModelId?: number,
     preserve_source_file?: boolean,
     quota_limit_bytes?: number | null,
   ) => Promise<KnowledgeBase | null>;
@@ -349,33 +348,21 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       source: string = "elasticsearch",
       ingroup_permission?: string,
       group_ids?: number[],
-      embeddingModel?: string,
-      is_multimodal?: boolean,
+      embeddingModelId?: number,
       preserve_source_file?: boolean,
       quota_limit_bytes?: number | null,
     ) => {
       try {
-        const selectedEmbeddingModel = embeddingModel?.trim() || "";
-        const defaultMultiEmbeddingModel =
-          modelConfig?.multiEmbedding?.modelName?.trim() || "";
-        const resolvedIsMultimodal =
-          typeof is_multimodal === "boolean"
-            ? is_multimodal
-            : !!defaultMultiEmbeddingModel &&
-              selectedEmbeddingModel === defaultMultiEmbeddingModel;
-        const fallbackEmbeddingModel = resolvedIsMultimodal
-          ? defaultMultiEmbeddingModel
-          : state.currentEmbeddingModel || "";
-        const resolvedEmbeddingModel =
-          selectedEmbeddingModel || fallbackEmbeddingModel;
+        if (embeddingModelId === undefined) {
+          throw new Error("Embedding model ID is required");
+        }
         const newKB = await knowledgeBaseService.createKnowledgeBase({
           name,
           description,
           source,
-          embeddingModel: resolvedEmbeddingModel,
+          embeddingModelId,
           ingroup_permission,
           group_ids,
-          is_multimodal: resolvedIsMultimodal,
           preserve_source_file,
           quota_limit_bytes,
         });

@@ -26,16 +26,59 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import ValidationError, NotFoundException
+from consts.exceptions import ForbiddenError, ValidationError, NotFoundException
 from backend.services.tenant_service import (
     get_tenant_info,
+    get_tenant_info_for_user,
     get_tenants_paginated,
+    get_tenants_paginated_for_user,
     create_tenant,
     update_tenant_info,
     delete_tenant,
     _create_default_group_for_tenant,
     check_tenant_name_exists
 )
+
+
+class TestTenantAuthorization:
+    """Test tenant role and scope enforcement."""
+
+    def test_su_can_list_all_tenants(self):
+        with patch(
+            "backend.services.tenant_service.get_tenants_paginated",
+            return_value={"data": [], "total": 0},
+        ) as mock_list:
+            result = get_tenants_paginated_for_user(requester_role="SU")
+
+        assert result == {"data": [], "total": 0}
+        mock_list.assert_called_once_with(page=1, page_size=20)
+
+    @pytest.mark.parametrize("role", ["ADMIN", "DEV", "USER"])
+    def test_non_su_cannot_list_tenants(self, role):
+        with pytest.raises(ForbiddenError, match="super administrators"):
+            get_tenants_paginated_for_user(requester_role=role)
+
+    def test_non_su_can_only_read_own_tenant(self):
+        with patch(
+            "backend.services.tenant_service.get_tenant_info",
+            return_value={"tenant_id": "tenant-1"},
+        ) as mock_get:
+            result = get_tenant_info_for_user(
+                "tenant-1",
+                requester_tenant_id="tenant-1",
+                requester_role="USER",
+            )
+
+        assert result == {"tenant_id": "tenant-1"}
+        mock_get.assert_called_once_with("tenant-1")
+
+    def test_non_su_cannot_read_other_tenant(self):
+        with pytest.raises(ForbiddenError, match="access this tenant"):
+            get_tenant_info_for_user(
+                "tenant-2",
+                requester_tenant_id="tenant-1",
+                requester_role="ADMIN",
+            )
 
 
 @pytest.fixture
