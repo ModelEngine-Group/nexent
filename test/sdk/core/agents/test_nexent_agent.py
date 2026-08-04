@@ -5183,6 +5183,35 @@ class TestCreateBuiltinToolPlanTools:
         assert result is mock_tool_instance
         mock_tool_class.assert_called_once_with()
 
+    def test_create_builtin_tool_scheduled_task_proposal(self, nexent_agent_instance):
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+        create_proposal = MagicMock()
+        tool_config = ToolConfig(
+            class_name="CreateScheduledTaskProposalTool",
+            name="create_scheduled_task_proposal",
+            description="Create a scheduled-task proposal",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+            metadata={"create_proposal": create_proposal},
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.create_scheduled_task_tool": MagicMock(
+                CreateScheduledTaskProposalTool=mock_tool_class,
+            ),
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with(
+            create_proposal=create_proposal,
+            observer=nexent_agent_instance.observer,
+        )
+
 
 # ----------------------------------------------------------------------------
 # Tests for agent_run_with_observer token_usage extraction (lines 767-768, 770)

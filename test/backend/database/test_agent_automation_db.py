@@ -347,6 +347,7 @@ def test_proposal_crud_helpers_cover_pending_and_accepted_updates(monkeypatch):
 
     assert agent_automation_db.create_proposal({"agent_id": 1}, "user") == payload
     assert agent_automation_db.get_proposal(2, "tenant", "user") == payload
+    assert agent_automation_db.get_proposal_by_source_message(12, "tenant", "user") == payload
     assert agent_automation_db.update_proposal_status(2, "tenant", "user", "ACCEPTED") is True
     assert agent_automation_db.update_proposal_task(2, "tenant", "user", {"title": "task"}) is True
     assert (
@@ -384,6 +385,18 @@ def test_link_proposal_message_unit_updates_private_card_references(monkeypatch)
         "_conversation_unit_id": 41,
     }
     assert proposal.updated_by == "user"
+
+
+def test_link_proposal_message_unit_returns_false_when_proposal_is_missing(monkeypatch):
+    _install_recording_session(monkeypatch, _RecordingResult(payload=None))
+
+    assert agent_automation_db.link_proposal_message_unit(
+        2,
+        "tenant",
+        "user",
+        31,
+        41,
+    ) is False
 
 
 def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):
@@ -474,6 +487,7 @@ def test_optional_database_rows_return_empty_values(monkeypatch):
     assert agent_automation_db.get_task_by_conversation(9, "user") is None
     assert agent_automation_db.update_task(1, "tenant", "user", {}) is None
     assert agent_automation_db.get_proposal(2, "tenant", "user") is None
+    assert agent_automation_db.get_proposal_by_source_message(12, "tenant", "user") is None
     assert agent_automation_db.get_run(3, "tenant", "user") is None
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") is None
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["FAILED"]) is None

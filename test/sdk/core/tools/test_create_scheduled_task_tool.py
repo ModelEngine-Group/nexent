@@ -2,6 +2,8 @@ import importlib
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from sdk.nexent.core.tools.create_scheduled_task_tool import (
     CreateScheduledTaskProposalTool,
 )
@@ -55,3 +57,37 @@ def test_proposal_tool_is_not_exported_to_the_user_tool_catalog():
     tools_package = importlib.import_module("sdk.nexent.core.tools")
 
     assert not hasattr(tools_package, "CreateScheduledTaskProposalTool")
+
+
+def test_proposal_tool_requires_host_callback():
+    with pytest.raises(RuntimeError, match="not configured"):
+        CreateScheduledTaskProposalTool(create_proposal=None).forward("每天九点生成日报")
+
+
+def test_proposal_tool_returns_guidance_for_empty_request():
+    callback = MagicMock()
+    tool = CreateScheduledTaskProposalTool(create_proposal=callback)
+
+    assert tool.forward("   ") == "请说明要定时执行的任务和执行时间。"
+    callback.assert_not_called()
+
+
+def test_proposal_tool_rejects_invalid_host_result():
+    tool = CreateScheduledTaskProposalTool(create_proposal=lambda _: "invalid")
+
+    with pytest.raises(RuntimeError, match="invalid result"):
+        tool.forward("每天九点生成日报")
+
+
+def test_proposal_tool_falls_back_when_host_message_is_missing():
+    observer = MagicMock()
+    tool = CreateScheduledTaskProposalTool(
+        create_proposal=lambda _: {
+            "status": "proposal_ready",
+            "proposal": None,
+        },
+        observer=observer,
+    )
+
+    assert tool.forward("每天九点生成日报") == "定时任务请求已处理，请查看结果。"
+    observer.add_message.assert_not_called()

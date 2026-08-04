@@ -139,6 +139,32 @@ def test_consecutive_runs_allocate_independent_turn_indexes(monkeypatch):
     ]
 
 
+def test_first_run_in_empty_conversation_starts_at_zero(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        adapter_module,
+        "get_conversation_history_service",
+        lambda *args: [],
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "save_message",
+        lambda request, user_id, tenant_id: captured.setdefault("request", request) and 31,
+    )
+    monkeypatch.setattr(adapter_module, "save_message_unit", lambda **kwargs: None)
+
+    turn = AutomationConversationAdapter().append_run_prompt(
+        321,
+        "查询当天运势",
+        "user",
+        "tenant",
+    )
+
+    assert turn["user_message_id"] == 31
+    assert turn["history"] == []
+    assert captured["request"].message_idx == 0
+
+
 def test_append_proposal_exchange_persists_user_instruction_and_assistant_card(monkeypatch):
     captured = {"requests": [], "units": []}
     monkeypatch.setattr(

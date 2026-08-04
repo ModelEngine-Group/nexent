@@ -4189,6 +4189,39 @@ async def test_prepare_agent_run(
     assert mock_run_info.context_input.items == ()
 
 
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.build_memory_context')
+@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
+@patch('backend.services.agent_service.agent_run_manager')
+async def test_prepare_agent_run_can_disable_automation_tool(
+    mock_agent_run_manager,
+    mock_create_run_info,
+    mock_build_memory_context,
+    mock_agent_request,
+):
+    mock_agent_request.enable_automation_tool = False
+    mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
+    mock_create_run_info.return_value = mock_run_info
+
+    await prepare_agent_run(
+        mock_agent_request,
+        user_id="test_user",
+        tenant_id="test_tenant",
+    )
+
+    assert mock_create_run_info.await_args.kwargs["enable_automation_tool"] is False
+    mock_agent_run_manager.register_agent_run.assert_called_once_with(
+        123,
+        mock_run_info,
+        "test_user",
+    )
+
+
 @patch('backend.services.agent_service.save_conversation_user')
 def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
