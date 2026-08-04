@@ -74,6 +74,7 @@ interface SkillBuildModalProps {
   onSuccess: () => void | Promise<void>;
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
+  zIndex?: number;
 }
 
 interface StreamedFrontmatter {
@@ -165,6 +166,7 @@ export default function SkillBuildModal({
   onSuccess,
   editingSkill,
   onBeforeEditSave,
+  zIndex = 1000,
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -1286,6 +1288,7 @@ export default function SkillBuildModal({
       }
       open={isOpen}
       onCancel={handleModalClose}
+      zIndex={zIndex}
       centered
       width="min(1180px, calc(100vw - 32px))"
       styles={{
