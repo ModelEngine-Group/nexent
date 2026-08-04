@@ -272,8 +272,6 @@ async def signup_user_with_invitation(email: EmailStr,
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}, auto_login={auto_login}")
 
-        if user_role == "ADMIN":
-            await generate_tts_stt_4_admin(tenant_id, user_id)
 
         # Initialize tool list for the new tenant (only once per tenant)
         if not is_asset_owner_registration:
@@ -310,38 +308,6 @@ async def parse_supabase_response(is_admin, response, user_role, auto_login: boo
         "session": session_data,
         "registration_type": "admin" if is_admin else "user"
     }
-
-
-async def generate_tts_stt_4_admin(tenant_id, user_id):
-    tts_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_tts",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "tts",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_tts",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    stt_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_stt",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "stt",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_stt",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    create_model_record(tts_model_data, user_id, tenant_id)
-    create_model_record(stt_model_data, user_id, tenant_id)
-
 
 async def verify_invite_code(invite_code):
     logging.info(
