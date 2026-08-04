@@ -144,6 +144,7 @@ export default function AgentGenerateDetail({}) {
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  const [guardrailContentKey, setGuardrailContentKey] = useState(0);
   const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
@@ -534,6 +535,12 @@ export default function AgentGenerateDetail({}) {
     });
     setAdvancedSettingsTab("basic");
     setAdvancedSettingsOpen(true);
+  };
+
+  const handleCloseAdvancedSettings = () => {
+    setAdvancedSettingsOpen(false);
+    // Remount only the guardrail panel to discard drafts and other temporary UI state.
+    setGuardrailContentKey((key) => key + 1);
   };
 
   const handleSaveAdvancedSettings = async () => {
@@ -1207,7 +1214,7 @@ export default function AgentGenerateDetail({}) {
         open={advancedSettingsOpen}
         centered
         destroyOnClose={false}
-        onCancel={() => setAdvancedSettingsOpen(false)}
+        onCancel={handleCloseAdvancedSettings}
         onOk={handleSaveAdvancedSettings}
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
@@ -1215,36 +1222,25 @@ export default function AgentGenerateDetail({}) {
         width={760}
         styles={{ body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 } }}
       >
-        {/* Tab bar — pill style */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-          {[
-            { key: "basic" as const, label: t("agent.advancedSettings.tab.basic") || "Basic settings" },
-            { key: "guardrail" as const, label: t("agent.guardrail.summaryTitle") || "Guardrail" },
-          ].map((tab) => {
-            const active = advancedSettingsTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setAdvancedSettingsTab(tab.key)}
-                style={{
-                  padding: "6px 18px",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: active ? "#fff" : "#5F5E5A",
-                  background: active ? "#185FA5" : "#F1EFE8",
-                  border: "none",
-                  borderRadius: 20,
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+        {/* Match the shared agent-detail tab style. */}
+        <Tabs
+          value={advancedSettingsTab}
+          onValueChange={(value) =>
+            setAdvancedSettingsTab(value as "basic" | "guardrail")
+          }
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="basic">
+              {t("agent.advancedSettings.tab.basic") || "Basic settings"}
+            </TabsTrigger>
+            <TabsTrigger value="guardrail">
+              {t("agent.guardrail.summaryTitle") || "Guardrail"}
+            </TabsTrigger>
+          </TabsList>
 
-        <div style={{ display: advancedSettingsTab === "basic" ? "block" : "none" }}>
+          {/* Keep both panels mounted so unsaved form and guardrail state survive tab switches. */}
+          <TabsContent value="basic" className="mt-4" forceMount>
         <Form form={advancedSettingsForm} layout="vertical" disabled={!editable || isGenerating}>
           <Row gutter={16}>
             <Col span={12}>
@@ -1376,23 +1372,25 @@ export default function AgentGenerateDetail({}) {
             </Col>
           </Row>
         </Form>
-        </div>
+          </TabsContent>
 
         {/* Guardrail tab content */}
-        <div style={{ display: advancedSettingsTab === "guardrail" ? "block" : "none" }}>
-          <GuardrailConfigContent
-            ref={guardrailContentRef}
-            config={
-              (editedAgent.verification_config?.guardrail_config) || {
-                enabled: false,
-                rules: [],
-                default_action: "pass",
+          <TabsContent value="guardrail" className="mt-4" forceMount>
+            <GuardrailConfigContent
+              key={guardrailContentKey}
+              ref={guardrailContentRef}
+              config={
+                editedAgent.verification_config?.guardrail_config || {
+                  enabled: false,
+                  rules: [],
+                  default_action: "pass",
+                }
               }
-            }
-            llmModels={availableLlmModels}
-            defaultModelId={selectedMainAgentModel?.id}
-          />
-        </div>
+              llmModels={availableLlmModels}
+              defaultModelId={selectedMainAgentModel?.id}
+            />
+          </TabsContent>
+        </Tabs>
       </Modal>
 
       {/* Expand Edit Modal */}

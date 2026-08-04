@@ -29,7 +29,6 @@ import {
   Plug,
   BlocksIcon,
   Globe,
-  ListChecks,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -160,7 +159,7 @@ export default function AgentConfigComp() {
                 size="small"
                 icon={<Globe size={16} />}
                 onClick={() => setShowA2ADiscovery(true)}
-                className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
+                className="!text-green-600 hover:!bg-green-50 hover:!text-green-700"
                 title={t("toolManagement.refresh.title")}
               >
                 {t("collaborativeAgent.addExternal")}
@@ -265,9 +264,11 @@ export default function AgentConfigComp() {
                       icon={<Wrench size={14} />}
                       onClick={() => setIsToolSelectOpen(true)}
                       disabled={currentAgentId === null && !isCreatingMode}
-                      className="h-7 gap-1 text-xs bg-white border border-gray-200 hover:!border-gray-300 hover:!bg-gray-50"
+                      className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                     >
-                      {t("toolPool.selectTools")}
+                      <span className="inline-flex items-center self-center leading-none">
+                        {t("toolPool.selectTools")}
+                      </span>
                     </Button>
                   </div>
                 </Flex>
@@ -319,12 +320,14 @@ export default function AgentConfigComp() {
                   </div>
                   <Button
                     size="small"
-                    icon={<ListChecks size={14} />}
+                    icon={<Wrench size={14} />}
                     onClick={() => setIsSkillSelectOpen(true)}
                     disabled={currentAgentId === null && !isCreatingMode}
-                    className="h-7 gap-1 border border-gray-200 bg-white text-xs hover:!border-gray-300 hover:!bg-gray-50"
+                    className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                   >
-                    {t("skillPool.selectSkills")}
+                    <span className="inline-flex items-center self-center leading-none">
+                      {t("skillPool.selectSkills")}
+                    </span>
                   </Button>
                 </Flex>
               </Col>

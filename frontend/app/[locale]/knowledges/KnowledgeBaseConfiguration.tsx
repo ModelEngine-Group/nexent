@@ -273,6 +273,26 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   }, [models]);
 
+  const hasKnowledgeBaseDetailModelMismatch = useCallback(
+    (knowledgeBase: KnowledgeBase) => {
+      if (hasKnowledgeBaseModelMismatch(knowledgeBase)) {
+        return true;
+      }
+      if (
+        knowledgeBase.embeddingModel === "unknown" ||
+        knowledgeBase.source === "datamate"
+      ) {
+        return false;
+      }
+
+      const knowledgeBaseModel = knowledgeBase.embeddingModel.trim();
+      return !availableEmbeddingModels.some(
+        (model) => model.displayName.trim() === knowledgeBaseModel
+      );
+    },
+    [availableEmbeddingModels, hasKnowledgeBaseModelMismatch]
+  );
+
   const resolveEmbeddingModelId = useCallback(
     ({
       displayName,
@@ -1057,7 +1077,6 @@ function DataConfig({ isActive }: DataConfigProps) {
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
-              configuredEmbeddingModels={availableEmbeddingModels}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
               onClick={handleKnowledgeBaseClick}
@@ -1147,7 +1166,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
-                modelMismatch={hasKnowledgeBaseModelMismatch(
+                modelMismatch={hasKnowledgeBaseDetailModelMismatch(
                   kbState.activeKnowledgeBase
                 )}
                 currentModel={
@@ -1157,7 +1176,9 @@ function DataConfig({ isActive }: DataConfigProps) {
                 }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
-                  hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
+                  hasKnowledgeBaseDetailModelMismatch(
+                    kbState.activeKnowledgeBase
+                  )
                     ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
                     : undefined
                 }

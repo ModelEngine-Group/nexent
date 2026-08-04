@@ -227,12 +227,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       if (kb.is_multimodal) {
         const multiEmbeddingModel =
           modelConfig?.multiEmbedding?.modelName?.trim() || "";
-        // Only show warning when the required current model is not configured.
-        return !multiEmbeddingModel;
+        return multiEmbeddingModel !== kb.embeddingModel.trim();
       }
 
-      // Only show warning when the required current model is not configured.
-      return !state.currentEmbeddingModel;
+      const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
+      return currentEmbeddingModel !== kb.embeddingModel.trim();
     },
     [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
   );

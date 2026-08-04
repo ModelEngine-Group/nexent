@@ -6802,11 +6802,11 @@ class TestFormatLongTermMemoryPrompt:
 
 
 class TestCreateAgentConfigMemoryBuildFailure:
-    """Coverage for lines 882-883: MemoryService build failure logs warning and continues."""
+    """MemoryService initialization failures leave no unusable store tool."""
 
     @pytest.mark.asyncio
-    async def test_memory_service_build_failure_logs_warning(self):
-        """When build_memory_service_for_agent raises, a warning is logged and flow continues."""
+    async def test_memory_service_build_failure_skips_store_tool(self):
+        """Storage failure is isolated while pipeline pre-search continues."""
         with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
              patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
              patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
@@ -6821,7 +6821,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
              patch("backend.agents.create_agent_info.get_model_by_model_id",
                    return_value={"display_name": "model", "max_tokens": 1000}), \
              patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.AgentConfig"), \
+             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
                  "services.memory_record_service": MagicMock(
@@ -6830,10 +6830,9 @@ class TestCreateAgentConfigMemoryBuildFailure:
                  "services.memory_context_service": MagicMock(
                      get_memory_context_service=MagicMock(
                          return_value=MagicMock(
-                             build_context=AsyncMock(return_value=types.SimpleNamespace(
-                                 tenant_long_term=(),
-                                 user_long_term=(),
-                             ))
+                             build_context=AsyncMock(
+                                 side_effect=RuntimeError("long-term unavailable")
+                             )
                          )
                      ),
                  ),
@@ -6865,14 +6864,19 @@ class TestCreateAgentConfigMemoryBuildFailure:
             # Should NOT raise — the exception is caught and warning logged
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
+            tool_names = [
+                tool.name for tool in mock_agent_config.call_args.kwargs["tools"]
+            ]
+            assert "store_memory" not in tool_names
+            mock_search_tool.return_value.forward.assert_called_once_with("query", 5)
 
 
 class TestCreateAgentConfigMemoryContextServiceFailure:
-    """Coverage for lines 930-931: MemoryContextService attachment failure logs warning."""
+    """ContextService failures do not switch pre-search retrieval modes."""
 
     @pytest.mark.asyncio
-    async def test_memory_context_service_failure_logs_warning(self):
-        """When get_memory_context_service raises, the flow continues gracefully."""
+    async def test_memory_context_service_failure_skips_presearch(self):
+        """Missing pipeline degrades to no memory without direct retrieval."""
         with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
              patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
              patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
@@ -6887,7 +6891,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
              patch("backend.agents.create_agent_info.get_model_by_model_id",
                    return_value={"display_name": "model", "max_tokens": 1000}), \
              patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.AgentConfig"), \
+             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
                  "services.memory_record_service": MagicMock(
@@ -6924,6 +6928,16 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
             # Should NOT raise — the error is caught
             result = await create_agent_config("a1", "t1", "u1", "en", "query")
             assert result is not None
+            mock_search_tool.assert_not_called()
+            execution_logs = [
+                event["content"]
+                for event in mock_agent_config.call_args.kwargs["pre_run_tool_events"]
+                if event["type"] == "execution_logs"
+            ]
+            assert execution_logs == [
+                "Memory search unavailable: retrieval pipeline is not configured. "
+                "Continuing without memory results."
+            ]
 
 
 class TestCreateToolConfigListAidpSearch:
