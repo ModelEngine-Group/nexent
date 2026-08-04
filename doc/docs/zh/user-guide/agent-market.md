@@ -50,7 +50,7 @@
 
 ![智能体市场下载3](./assets/agent-market/agent-market-download3.png)
 
-安装完成后，您的智能体会在 **[智能体空间](./agent-space)** 准备好
+安装完成后，您的智能体会在 **[智能体空间](./agent-development.md)** 准备好
 
 ## 📢 分享您的创作
 
@@ -62,8 +62,8 @@
 
 在等待智能体市场上线期间，您可以：
 
-1. 在 **[智能体空间](./agent-space)** 中管理您自己的智能体
-2. 通过 **[智能体开发](./agent-development)** 创建专属智能体
+1. 在 **[智能体空间](./agent-development.md)** 中管理您自己的智能体
+2. 通过 **[智能体开发](./agent-development.md)** 创建专属智能体
 3. 在 **[开始问答](./start-chat)** 中体验智能体的强大功能
 
-如果您使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq.md)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
