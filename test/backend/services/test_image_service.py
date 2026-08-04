@@ -1,6 +1,7 @@
 import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -921,16 +922,18 @@ class TestValidateAndReconstructAidpUrl:
         )
         assert result is not None
         # Host must be replaced with the configured authority, NOT the original host
-        assert "aidp.example.com" in result
-        assert "other.host" not in result
+        parsed_result = urlparse(result)
+        assert parsed_result.netloc == "aidp.example.com"
+        assert parsed_result.netloc != "other.host"
 
     def test_preserves_same_host_url(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         input_url = "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         result = image_service_module._validate_and_reconstruct_aidp_url(input_url)
         assert result is not None
-        assert "aidp.example.com" in result
-        assert "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png" in result
+        parsed_result = urlparse(result)
+        assert parsed_result.netloc == "aidp.example.com"
+        assert parsed_result.path == "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
 
     def test_returns_none_when_parsed_path_is_none(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
@@ -946,7 +949,9 @@ class TestValidateAndReconstructAidpUrl:
             "http://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
         assert result is not None
-        assert result.startswith("https://aidp.example.com")
+        parsed_result = urlparse(result)
+        assert parsed_result.scheme == "https"
+        assert parsed_result.netloc == "aidp.example.com"
 
     def test_returns_none_when_base_parsed_netloc_is_empty(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "file:///x")
@@ -1002,9 +1007,10 @@ class TestFetchAidpImageHostReplacement:
         # The actual GET must use the reconstructed URL with the configured host
         call_args = mock_session.get.call_args
         called_url = call_args.args[0]
-        assert "aidp.example.com" in called_url
-        assert "alias.host" not in called_url
-        assert "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png" in called_url
+        parsed_called = urlparse(called_url)
+        assert parsed_called.netloc == "aidp.example.com"
+        assert parsed_called.netloc != "alias.host"
+        assert parsed_called.path == "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
 
         # Bearer header must use AIDP_API_KEY
         assert call_args.kwargs["headers"] == {"Authorization": "Bearer test-api-key"}
