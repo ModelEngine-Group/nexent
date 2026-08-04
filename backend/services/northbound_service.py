@@ -398,6 +398,7 @@ async def start_streaming_chat(
             tool_params=tool_params,
             model_id=model_id,
             version_no=latest_version_no,
+            enable_automation_tool=False,
         )
 
         # Persist the user message off the event loop before starting the stream.

@@ -128,6 +128,24 @@ def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
     return raw if isinstance(raw, ScheduleTrigger) else ScheduleTrigger.model_validate(raw)
 
 
+def _proposal_response_from_row(proposal: Dict[str, Any]) -> Dict[str, Any]:
+    proposed_task = proposal.get("proposed_task") or {}
+    public_task = {
+        key: value for key, value in proposed_task.items() if not key.startswith("_")
+    }
+    resolution = proposal.get("capability_resolution") or {}
+    return {
+        "proposal_id": proposal["proposal_id"],
+        "conversation_id": proposal["conversation_id"],
+        "confidence": 1.0,
+        "executable": bool(resolution.get("executable", True)),
+        "task": public_task,
+        "capability_resolution": resolution,
+        "intent_analysis_source": "existing",
+        "task_content_source": "existing",
+    }
+
+
 def _validate_schedule_policy(trigger: ScheduleTrigger) -> None:
     if trigger.mode.value == "ONCE" and _as_utc(trigger.start_at) <= _utcnow():
         raise AutomationScheduleInvalidError(
@@ -159,13 +177,26 @@ class AgentAutomationFacade:
         request: AutomationProposalCreateRequest,
         tenant_id: str,
         user_id: str,
+        *,
+        persist_conversation_exchange: bool = True,
+        source_message_id: Optional[int] = None,
+        force_llm: bool = False,
     ) -> Dict[str, Any]:
+        if source_message_id is not None:
+            existing = agent_automation_db.get_proposal_by_source_message(
+                source_message_id,
+                tenant_id,
+                user_id,
+            )
+            if existing:
+                return _proposal_response_from_row(existing)
         try:
             parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
                 tenant_id=tenant_id,
                 message=request.message,
                 timezone=request.timezone,
                 model_id=request.model_id,
+                force_llm=force_llm,
             ))
         except ValueError as exc:
             raise AutomationScheduleInvalidError(
@@ -186,7 +217,12 @@ class AgentAutomationFacade:
         if parsed.get("schedule_error") or not parsed.get("schedule_trigger"):
             raise AutomationScheduleInvalidError(
                 parsed.get("schedule_error") or "Unable to determine the automation schedule.",
-                details={"input": request.message, "timezone": request.timezone},
+                details={
+                    "input": request.message,
+                    "timezone": request.timezone,
+                    "missing_fields": parsed.get("missing_fields") or [],
+                    "clarification_question": parsed.get("clarification_question"),
+                },
             )
         _validate_schedule_policy(parsed["schedule_trigger"])
 
@@ -246,16 +282,29 @@ class AgentAutomationFacade:
             "tool_params": request.tool_params,
             "schedule_trigger": parsed["schedule_trigger"].model_dump(mode="json"),
         }
-        proposal = agent_automation_db.create_proposal({
+        proposal_values = {
             "tenant_id": tenant_id,
             "user_id": user_id,
             "conversation_id": conversation_id,
             "agent_id": request.agent_id,
+            "source_message_id": source_message_id,
             "proposed_task": proposed_task,
             "capability_resolution": resolution.model_dump(mode="json"),
             "status": AutomationProposalStatus.PENDING.value,
             "expires_at": _utcnow() + timedelta(hours=24),
-        }, user_id)
+        }
+        try:
+            proposal = agent_automation_db.create_proposal(proposal_values, user_id)
+        except IntegrityError:
+            if source_message_id is not None:
+                existing = agent_automation_db.get_proposal_by_source_message(
+                    source_message_id,
+                    tenant_id,
+                    user_id,
+                )
+                if existing:
+                    return _proposal_response_from_row(existing)
+            raise
         response = {
             "proposal_id": proposal["proposal_id"],
             "conversation_id": conversation_id,
@@ -266,27 +315,28 @@ class AgentAutomationFacade:
             "intent_analysis_source": parsed.get("analysis_source", "rule"),
             "task_content_source": parsed.get("task_content_source", "rule"),
         }
-        try:
-            message_refs = automation_conversation_adapter.append_proposal_exchange(
-                conversation_id,
-                request.message,
-                response,
-                user_id,
-                tenant_id,
-            )
-            stored_task = {
-                **proposed_task,
-                "_conversation_message_id": message_refs["message_id"],
-                "_conversation_unit_id": message_refs["unit_id"],
-            }
-            agent_automation_db.update_proposal_task(
-                proposal["proposal_id"],
-                tenant_id,
-                user_id,
-                stored_task,
-            )
-        except Exception as exc:
-            logger.warning("Failed to persist automation proposal card: %s", exc, exc_info=True)
+        if persist_conversation_exchange:
+            try:
+                message_refs = automation_conversation_adapter.append_proposal_exchange(
+                    conversation_id,
+                    request.message,
+                    response,
+                    user_id,
+                    tenant_id,
+                )
+                stored_task = {
+                    **proposed_task,
+                    "_conversation_message_id": message_refs["message_id"],
+                    "_conversation_unit_id": message_refs["unit_id"],
+                }
+                agent_automation_db.update_proposal_task(
+                    proposal["proposal_id"],
+                    tenant_id,
+                    user_id,
+                    stored_task,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist automation proposal card: %s", exc, exc_info=True)
         return response
 
     async def update_proposal(

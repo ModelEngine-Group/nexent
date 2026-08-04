@@ -210,6 +210,21 @@ def test_memory_tool_policy_is_omitted_when_empty():
     assert all(item.id != "system:memory_tool_policy" for item in items)
 
 
+def test_automation_tool_policy_is_required_platform_context():
+    policy = "Use create_scheduled_task_proposal without executing the business task."
+
+    items = build_context_inputs(automation_tool_policy=policy, language="en")
+    policy_item = next(item for item in items if item.id == "system:automation_tool_policy")
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.content == {"text": policy}
+    assert policy_item.metadata["authority"] == "platform"
+    normalized = normalize_context_inputs(items)
+    assert next(
+        item for item in normalized if item.id == "system:automation_tool_policy"
+    ).required is True
+
+
 def test_long_term_memory_prompt_is_a_required_system_item():
     context = (
         "### Tenant Long-term Memory\n- Follow company policy\n\n"

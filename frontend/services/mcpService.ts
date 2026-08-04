@@ -66,6 +66,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
         success: true,
         data: formattedData,
         enable_upload_image: data.enable_upload_image || false,
+        mcp_ports_virtual: data.mcp_ports_virtual || false,
         message: ''
       };
     } else {
