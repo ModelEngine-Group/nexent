@@ -15,6 +15,7 @@ import SkillConfigModal from "./SkillConfigModal";
 import SkillRowContent from "./SkillRowContent";
 import {
   hasMissingRequiredSkillConfig,
+  requiresSkillConfigOnSelection,
   withEffectiveSkillConfig,
 } from "./utils";
 
@@ -117,7 +118,10 @@ export default function SelectSkillsDialog({
           skill,
           skillInstanceMap[skill.skill_id]
         );
-        return !hasMissingRequiredSkillConfig(configuredSkill);
+        return (
+          !requiresSkillConfigOnSelection(configuredSkill) &&
+          !hasMissingRequiredSkillConfig(configuredSkill)
+        );
       }) || [],
     [activeGroup, skillInstanceMap]
   );
@@ -207,7 +211,10 @@ export default function SelectSkillsDialog({
         skillInstanceMap[skill.skill_id]
       );
 
-      if (hasMissingRequiredSkillConfig(configuredSkill)) {
+      if (
+        requiresSkillConfigOnSelection(configuredSkill) ||
+        hasMissingRequiredSkillConfig(configuredSkill)
+      ) {
         setConfigSkill(configuredSkill);
         return;
       }

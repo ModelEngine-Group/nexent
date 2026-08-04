@@ -45,3 +45,6 @@ export const hasMissingRequiredSkillConfig = (skill: Skill): boolean => {
       isMissingRequiredValue(getEffectiveParamValue(param, configValues))
   );
 };
+
+export const requiresSkillConfigOnSelection = (skill: Skill): boolean =>
+  skill.name.toLowerCase() === "search-knowledge-base";

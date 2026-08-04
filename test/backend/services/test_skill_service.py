@@ -6435,15 +6435,14 @@ class TestLocalSkillPathSecurity:
     def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
         mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
 
-        for unsafe_path in ("../secret.txt", "C:\\temp\\secret.txt", "\\\\host\\share\\x"):
+        for unsafe_path in (
+            "../secret.txt",
+            os.path.abspath("secret.txt"),
+            "C:\\temp\\secret.txt",
+            "\\\\host\\share\\x",
+        ):
             with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
                 skill_service._resolve_local_skill_path(str(tmp_path), "safe-skill", unsafe_path)
-
-        # A POSIX-rooted path is relative on Windows and is therefore safe here.
-        path = skill_service._resolve_local_skill_path(
-            str(tmp_path), "safe-skill", "/tmp/secret.txt"
-        )
-        assert path.endswith(os.path.join("safe-skill", "tmp", "secret.txt"))
 
     def test_zip_slip_is_rejected_before_any_file_is_written(self, mocker, tmp_path):
         import zipfile

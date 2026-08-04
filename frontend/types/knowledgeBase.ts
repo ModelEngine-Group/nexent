@@ -20,6 +20,7 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  embeddingModelId?: number | null;
   is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;

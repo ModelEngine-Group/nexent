@@ -804,6 +804,7 @@ class KnowledgeBaseService {
                       indexInfo.embedding_model_name ||
                       stats.embedding_model ||
                       "unknown",
+                    embeddingModelId: indexInfo.embedding_model_id ?? null,
                     summaryFrequency: indexInfo.summary_frequency || null,
                     lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
@@ -1047,6 +1048,7 @@ class KnowledgeBaseService {
         chunkCount: 0,
         createdAt: new Date().toISOString(),
         embeddingModel: result.embedding_model_name || "",
+        embeddingModelId: params.embeddingModelId,
         is_multimodal: result.model_type === "multi_embedding",
         avatar: "",
         chunkNum: 0,

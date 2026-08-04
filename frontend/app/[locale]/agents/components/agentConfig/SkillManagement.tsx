@@ -18,6 +18,7 @@ import SkillConfigModal from "./skill/SkillConfigModal";
 import SkillRowContent from "./skill/SkillRowContent";
 import {
   hasMissingRequiredSkillConfig,
+  requiresSkillConfigOnSelection,
   withEffectiveSkillConfig,
 } from "./skill/utils";
 
@@ -129,9 +130,10 @@ export default function SkillManagement({
         savedConfigValues
       );
       const hasRequiredParams = hasMissingRequiredSkillConfig(skillWithValues);
-      const isKnowledgeBaseSkill = skill.name === "search-knowledge-base";
+      const alwaysRequiresConfig =
+        requiresSkillConfigOnSelection(skillWithValues);
 
-      if (hasRequiredParams || isKnowledgeBaseSkill) {
+      if (hasRequiredParams || alwaysRequiresConfig) {
         setConfigModalSkill(skillWithValues);
         setConfigModalOpen(true);
       } else {
