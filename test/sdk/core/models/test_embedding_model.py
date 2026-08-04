@@ -55,7 +55,7 @@ def test_openai_embedding_default_model_type():
         embedding_dim=128,
         ssl_verify=True,
     )
-    assert emb.model_type == "text"
+    assert emb.model_type == "embedding"
 
 
 def test_jina_embedding_default_model_type():

@@ -1,7 +1,8 @@
-﻿import json
-import asyncio
-import threading
+﻿import asyncio
+import copy
+import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -47,7 +48,8 @@ from database.agent_db import (
     resolve_sub_agent_version_no,
 )
 from database.agent_version_db import query_current_version_no
-from database.tool_db import search_tools_for_sub_agent
+from database import skill_db
+from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
@@ -597,6 +599,23 @@ def _get_skill_script_tools(
         "version_no": version_no,
     }
 
+    skill_config_values: Dict[str, Dict[str, Any]] = {}
+    try:
+        from services.skill_service import SkillService
+
+        enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        skill_config_values = {
+            skill.get("name", ""): dict(skill.get("config_values") or {})
+            for skill in enabled_skills
+            if skill.get("name")
+        }
+    except Exception as exc:
+        logger.debug("Failed to resolve effective skill configuration: %s", exc)
+
     try:
         return [
             ToolConfig(
@@ -627,7 +646,10 @@ def _get_skill_script_tools(
                 description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
                 inputs='{"skill_name": "str"}',
                 output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                params={
+                    "local_skills_dir": CONTAINER_SKILLS_PATH,
+                    "config_overrides": skill_config_values,
+                },
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
@@ -1252,6 +1274,78 @@ async def create_agent_config(
     return agent_config
 
 
+def _resolve_runtime_tool_records(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0,
+) -> List[Dict[str, Any]]:
+    """Merge explicitly enabled tools with tools required by enabled skills."""
+    explicit_tools = search_tools_for_sub_agent(
+        agent_id,
+        tenant_id,
+        version_no=version_no,
+    )
+    explicit_tool_ids = {
+        tool.get("tool_id") for tool in explicit_tools if tool.get("tool_id") is not None
+    }
+
+    dependency_values: Dict[int, Dict[str, Any]] = {}
+    dependency_sources: Dict[int, Dict[str, str]] = {}
+    enabled_skill_instances = skill_db.search_skills_for_agent(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
+    for skill_instance in enabled_skill_instances:
+        skill = skill_db.get_skill_by_id(skill_instance.get("skill_id"), tenant_id)
+        if not skill:
+            continue
+        effective_config = dict(skill.get("config_values") or {})
+        effective_config.update(skill_instance.get("config_values") or {})
+        skill_name = skill.get("name") or str(skill.get("skill_id"))
+        for tool_id in skill.get("tool_ids") or []:
+            if tool_id in explicit_tool_ids:
+                continue
+            values = dependency_values.setdefault(tool_id, {})
+            sources = dependency_sources.setdefault(tool_id, {})
+            for name, value in effective_config.items():
+                if name in values and values[name] != value:
+                    raise ValidationError(
+                        f"Skills '{sources[name]}' and '{skill_name}' configure "
+                        f"tool ID {tool_id} parameter '{name}' with different values."
+                    )
+                values[name] = value
+                sources[name] = skill_name
+
+    implicit_tool_ids = set(dependency_values) - explicit_tool_ids
+    if not implicit_tool_ids:
+        return explicit_tools
+
+    implicit_definitions = query_tools_by_ids(list(implicit_tool_ids))
+    definitions_by_id = {tool.get("tool_id"): tool for tool in implicit_definitions}
+    missing_tool_ids = implicit_tool_ids - set(definitions_by_id)
+    if missing_tool_ids:
+        raise ValidationError(
+            f"Enabled skills require missing tools: {sorted(missing_tool_ids)}"
+        )
+
+    implicit_tools = []
+    for tool_id in sorted(implicit_tool_ids):
+        tool = copy.deepcopy(definitions_by_id[tool_id])
+        if tool.get("is_available") is False:
+            raise ValidationError(
+                f"Enabled skills require unavailable tool '{tool.get('name') or tool_id}'."
+            )
+        configured_values = dependency_values[tool_id]
+        for param in tool.get("params") or []:
+            param_name = param.get("name")
+            if param_name in configured_values:
+                param["default"] = configured_values[param_name]
+        implicit_tools.append(tool)
+
+    return explicit_tools + implicit_tools
+
+
 async def create_tool_config_list(
     agent_id,
     tenant_id,
@@ -1263,8 +1357,11 @@ async def create_tool_config_list(
     langchain_tools = await discover_langchain_tools()
     normalized_tool_params = _normalize_tool_params_request(tool_params)
 
-    # now only admin can modify the agent, user_id is not used
-    tools_list = search_tools_for_sub_agent(agent_id, tenant_id, version_no=version_no)
+    tools_list = _resolve_runtime_tool_records(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
 
     # Look up agent name for use in error messages.
     # Agent name is optional for tool_params matching (matching uses tool identifiers only),

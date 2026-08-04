@@ -19,7 +19,6 @@ import { CloseOutlined } from "@ant-design/icons";
 
 import { Skill, SkillParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { saveSkillInstance } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import {
   getToolTypeForSkill,
@@ -285,30 +284,6 @@ export default function SkillConfigModal({
         ...param,
         value: param.value,
       }));
-
-      const configValues = paramsToSave.reduce<Record<string, any>>(
-        (acc, p) => {
-          acc[p.name] = p.value;
-          return acc;
-        },
-        {}
-      );
-
-      if (!isCreatingMode && currentAgentId) {
-        const result = await saveSkillInstance(
-          Number(skill.skill_id),
-          Number(currentAgentId),
-          true,
-          0,
-          configValues
-        );
-
-        if (!result.success) {
-          message.error(result.message || t("agentConfig.skill.saveFailed"));
-          setIsLoading(false);
-          return;
-        }
-      }
 
       if (onSave) {
         onSave(paramsToSave);

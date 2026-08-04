@@ -437,6 +437,11 @@ export interface UpdateAgentInfoPayload {
   prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
+  skill_instances?: Array<{
+    skill_id: number;
+    enabled?: boolean;
+    config_values?: Record<string, unknown>;
+  }>;
   related_agent_ids?: number[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;

@@ -519,6 +519,26 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
         raise UnauthorizedError("Invalid or expired authentication token")
 
 
+def get_current_user_context(
+    authorization: Optional[str] = None,
+) -> tuple[str, str, str]:
+    """Return the authenticated user ID, tenant ID, and normalized role."""
+    user_id, tenant_id = get_current_user_id(authorization)
+
+    if IS_SPEED_MODE:
+        return user_id, tenant_id, "SPEED"
+
+    user_tenant_record = get_user_tenant_by_user_id(user_id)
+    if not user_tenant_record:
+        raise UnauthorizedError("User tenant relationship not found")
+
+    user_role = str(user_tenant_record.get("user_role") or "").upper()
+    if not user_role:
+        raise UnauthorizedError("User role not found")
+
+    return user_id, resolve_tenant_id_from_user_tenant_record(user_tenant_record), user_role
+
+
 def get_user_language(request: Request = None) -> str:
     """
     Get user language preference from request
