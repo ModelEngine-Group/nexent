@@ -64,7 +64,9 @@ export interface StreamingMessage {
 
 export interface ApiConversationDetail {
   create_time: number;
-  conversation_id: number;
+  // The history endpoint currently serializes this id as a string, while
+  // other conversation endpoints return a number.
+  conversation_id: number | string;
   agent_id?: number | null;
   chat_mode?: "planning" | "execution";
   message: ApiMessage[];

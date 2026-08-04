@@ -1308,12 +1308,15 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       conversationService.getList(),
     ]);
     const conversation = conversations.find(
-      (item) => item.conversation_id === detail.conversation_id
+      // Conversation detail serializes the id as a string, while the list
+      // endpoint returns a number. Normalize both sides so direct URL entry
+      // can reuse the persisted conversation title instead of the fallback.
+      (item) => String(item.conversation_id) === String(detail.conversation_id)
     );
 
     return toRemoteThreadMetadata(
       conversation ?? {
-        conversation_id: detail.conversation_id,
+        conversation_id: Number(detail.conversation_id),
         conversation_title: "Untitled conversation",
         agent_id: detail.agent_id,
         create_time: detail.create_time,
