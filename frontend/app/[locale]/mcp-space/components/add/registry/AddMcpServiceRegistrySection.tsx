@@ -22,17 +22,20 @@ import {
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;
+  /** True when nexent runs inside Docker/K8s: MCP container ports are virtual and locked. */
+  portsVirtual?: boolean;
   onAdded: () => void;
 }
 
 export default function AddMcpServiceRegistrySection({
   active,
+  portsVirtual = false,
   onAdded,
 }: AddMcpServiceRegistrySectionProps) {
   const [selected, setSelected] = useState<RegistryMcpCard | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<RegistryMcpCard | null>(null);
   const browser = useMcpRegistryBrowser(active);
-  const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded });
+  const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded, portsVirtual });
 
   const handleSelect = async (service: RegistryMcpCard) => {
     setSelected(service);
@@ -92,16 +95,17 @@ export default function AddMcpServiceRegistrySection({
         />
       ) : null}
 
-      <QuickAddPickerModal controller={quickAdd} />
+      <QuickAddPickerModal controller={quickAdd} portsVirtual={portsVirtual} />
     </>
   );
 }
 
 interface QuickAddPickerModalProps {
   controller: ReturnType<typeof useMcpRegistryQuickAdd>;
+  portsVirtual?: boolean;
 }
 
-function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
+function QuickAddPickerModal({ controller, portsVirtual = false }: QuickAddPickerModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const rules = useMcpFormRules();
@@ -370,6 +374,8 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
                   <div>
                     <ContainerPortField
                       scope="registry"
+                      enabled={!portsVirtual}
+                      readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                       containerPort={containerPort}
                       setContainerPort={(value) => {
                         controller.setContainerPort(value);

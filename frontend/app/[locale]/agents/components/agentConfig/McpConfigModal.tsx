@@ -44,6 +44,7 @@ import {
   importOpenApiService,
   deleteOpenApiService,
 } from "@/services/mcpService";
+import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -62,6 +63,7 @@ export default function McpConfigModal({
     loading,
     containerList,
     enableUploadImage,
+    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
     loadServerList,
@@ -123,6 +125,22 @@ export default function McpConfigModal({
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
   const noMcpEditPermissionTitle = t("mcpConfig.permission.noEdit");
+
+  // When running inside a container (Docker/K8s), MCP ports are not published
+  // to the host, so a fixed default port is used and the user cannot change it.
+  // Auto-suggest the port when the modal opens (backend returns the default).
+  useEffect(() => {
+    if (!mcpPortsVirtual || !visible) return;
+    if (containerPort === undefined || uploadPort === undefined) {
+      suggestMcpContainerPortService().then((res) => {
+        if (res.success && res.data?.port) {
+          const p = res.data.port;
+          if (containerPort === undefined) setContainerPort(p);
+          if (uploadPort === undefined) setUploadPort(p);
+        }
+      });
+    }
+  }, [visible, mcpPortsVirtual, containerPort, uploadPort]);
 
   const renderPermissionControlledButton = (props: {
     isReadOnly: boolean;
@@ -483,7 +501,7 @@ export default function McpConfigModal({
       return;
     }
     if (!openApiJson.trim()) {
-      message.error(t("mcpConfig.openApiToMcp.jsonPlaceholder"));
+      message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
       return;
     }
 
@@ -491,7 +509,16 @@ export default function McpConfigModal({
     try {
       parsedJson = JSON.parse(openApiJson);
     } catch {
-      message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+      message.error(t("mcpConfig.openApiToMcp.message.invalidJsonFormat"));
+      return;
+    }
+    if (
+      !parsedJson ||
+      typeof parsedJson !== "object" ||
+      Array.isArray(parsedJson) ||
+      !("openapi" in parsedJson)
+    ) {
+      message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
       return;
     }
 
@@ -1000,7 +1027,7 @@ export default function McpConfigModal({
                           min={1}
                           max={65535}
                           style={{ width: 120 }}
-                          disabled={actionsLocked}
+                          disabled={actionsLocked || mcpPortsVirtual}
                           controls={false}
                         />
                         <div style={{ flex: 1 }} />
@@ -1099,7 +1126,7 @@ export default function McpConfigModal({
                                 min={1}
                                 max={65535}
                                 style={{ width: 150 }}
-                                disabled={actionsLocked}
+                                disabled={actionsLocked || mcpPortsVirtual}
                                 controls={false}
                               />
                               <Input
@@ -1211,6 +1238,9 @@ export default function McpConfigModal({
                         rows={6}
                         disabled={actionsLocked || importingOpenApi}
                       />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                      </Text>
                       <div
                         style={{
                           display: "flex",
