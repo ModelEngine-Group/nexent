@@ -26,6 +26,7 @@ import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
+import { ApiError } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -787,16 +788,16 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
-  const handleFileUpload = async () => {
+  const handleFileUpload = async (selectedFiles: File[] = uploadFiles) => {
     if (!isCreatingMode && kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
       message.error(t("errorCode.000202", "Access forbidden."));
       return;
     }
-    if (!uploadFiles.length) {
+    if (!selectedFiles.length) {
       message.warning(t("document.message.noFiles"));
       return;
     }
-    const filesToUpload = uploadFiles;
+    const filesToUpload = selectedFiles;
 
     if (isCreatingMode) {
       if (!newKbName || newKbName.trim() === "") {
@@ -875,8 +876,13 @@ function DataConfig({ isActive }: DataConfigProps) {
           });
       } catch (error) {
         log.error(t("knowledgeBase.error.createUpload"), error);
-        message.error(t("knowledgeBase.message.createUploadError"));
+        message.error(
+          error instanceof ApiError && error.code === 413
+            ? t("quota.uploadBlocked")
+            : t("knowledgeBase.message.createUploadError")
+        );
         setHasClickedUpload(false);
+        throw error;
       }
       return;
     }
@@ -911,7 +917,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       );
     } catch (error) {
       log.error(t("document.error.upload"), error);
-      message.error(t("document.message.uploadError"));
+      message.error(
+        error instanceof ApiError && error.code === 413
+          ? t("quota.uploadBlocked")
+          : t("document.message.uploadError")
+      );
+      throw error;
     }
   };
 
@@ -1122,7 +1133,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onFileSelect={handleFileSelect}
-                onUpload={() => handleFileUpload()}
+                onUpload={handleFileUpload}
                 isUploading={docState.isUploading}
               />
             ) : kbState.activeKnowledgeBase ? (
@@ -1184,7 +1195,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onFileSelect={handleFileSelect}
-                onUpload={() => handleFileUpload()}
+                onUpload={handleFileUpload}
                 isUploading={docState.isUploading}
               />
             ) : (

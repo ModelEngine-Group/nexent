@@ -116,7 +116,7 @@ interface DocumentListProps {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
-  onUpload?: () => void;
+  onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
 }
 
@@ -1169,7 +1169,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               }
               ref={uploadAreaRef}
               onFileSelect={onFileSelect}
-              onUpload={onUpload || (() => {})}
+              onUpload={onUpload || (async () => {})}
               isUploading={isUploading}
               isDragging={isDragging}
               onDragOver={onDragOver}
