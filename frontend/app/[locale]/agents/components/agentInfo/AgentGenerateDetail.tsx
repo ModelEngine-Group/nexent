@@ -629,6 +629,20 @@ export default function AgentGenerateDetail({}) {
     }
   };
 
+  const handlePromptTabChange = (nextTab: string) => {
+    const promptField = getPromptFieldKey(activeTab as "duty" | "constraint" | "few-shots");
+    if (promptField) {
+      const value = form.getFieldValue(promptField) || "";
+      const storeField = {
+        dutyPrompt: "duty_prompt",
+        constraintPrompt: "constraint_prompt",
+        fewShotsPrompt: "few_shots_prompt",
+      }[promptField] as "duty_prompt" | "constraint_prompt" | "few_shots_prompt";
+      updateAgentConfig({ [storeField]: value });
+    }
+    setActiveTab(nextTab);
+  };
+
   const handleReplaceOptimizedContent = (
     content: string,
     sectionType: "duty" | "constraint" | "few_shots"
@@ -939,9 +953,7 @@ export default function AgentGenerateDetail({}) {
         <Col className="w-full h-full">
           <Tabs
             value={activeTab}
-            onValueChange={(value: string) => {
-              setActiveTab(value);
-            }}
+            onValueChange={handlePromptTabChange}
             className="agent-config-tabs flex flex-col h-full w-full"
           >
             <TabsList className="grid w-full grid-cols-5 flex-shrink-0">

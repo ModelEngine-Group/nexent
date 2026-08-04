@@ -238,7 +238,7 @@ class TestCollectStreamText:
 
     @pytest.mark.asyncio
     async def test_collect_stream_text_skips_empty_data(self):
-        """Test collecting text skips empty data."""
+        """Test collecting stream text skips empty data."""
         from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
@@ -256,6 +256,221 @@ class TestCollectStreamText:
             result = await service._collect_stream_text(mock_stream)
 
             assert result == "StartEnd"
+
+    @pytest.mark.asyncio
+    async def test_collect_stream_events_preserves_raw_event_objects(self):
+        """Test collecting stream events preserves event fields and order."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        first_event = {"type": "model_output_thinking", "content": "internal"}
+        second_event = {"type": "final_answer", "content": "answer"}
+        mock_stream = MagicMock()
+        mock_stream.body_iterator = AsyncMockIterator([
+            f"data: {json.dumps(first_event)}\n\n",
+            f"data: {json.dumps(second_event)}\n\n",
+        ])
+
+        result = await service._collect_stream_events(mock_stream)
+
+        assert result == [first_event, second_event]
+
+    def test_build_agent_run_event_parts_keeps_each_event_separate(self):
+        """Test each raw event becomes a separate JSON data part."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_thinking", "content": "internal"},
+            {"type": "final_answer", "content": "answer"},
+        ]
+
+        result = service._build_agent_run_event_parts(events)
+
+        assert [part["data"] for part in result] == events
+        assert all(part["mediaType"] == "application/json" for part in result)
+
+    def test_coalesce_consecutive_events_with_same_type(self):
+        """Test adjacent same-type string events are combined."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_deep_thinking", "content": "我们"},
+            {"type": "model_output_deep_thinking", "content": "需要"},
+            {"type": "step_count", "content": "\n**步骤 1** \n"},
+            {"type": "model_output_deep_thinking", "content": "搜索"},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == [
+            {"type": "model_output_deep_thinking", "content": "我们需要"},
+            {"type": "step_count", "content": "\n**步骤 1** \n"},
+            {"type": "model_output_deep_thinking", "content": "搜索"},
+        ]
+
+    def test_coalesce_does_not_merge_events_with_different_metadata(self):
+        """Test same-type events with different metadata stay separate."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_deep_thinking", "step": 1, "content": "a"},
+            {"type": "model_output_deep_thinking", "step": 2, "content": "b"},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == events
+
+    def test_coalesce_does_not_merge_non_string_content(self):
+        """Test events with structured content stay separate."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "tool", "content": {"name": "search"}},
+            {"type": "tool", "content": {"name": "search"}},
+        ]
+
+        assert service._coalesce_consecutive_events(events) == events
+
+    def test_extract_final_answer_ignores_non_final_events(self):
+        """Test only final_answer events are used for persistence text."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        events = [
+            {"type": "model_output_thinking", "content": "internal"},
+            {"type": "final_answer", "content": "first"},
+            {"type": "final_answer", "content": "second"},
+        ]
+
+        assert service._extract_final_answer(events) == "firstsecond"
+
+    @pytest.mark.asyncio
+    async def test_collect_stream_events_skips_non_sse_and_non_dict_payloads(self):
+        """Test event collection handles bytes, empty data, invalid JSON, and non-dicts."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        valid_event = {"type": "final_answer", "content": "done"}
+        mock_stream = MagicMock()
+        mock_stream.body_iterator = AsyncMockIterator([
+            b"event: ignored\n\n",
+            "data: ",
+            "data: invalid json",
+            "data: [1, 2, 3]",
+            f"data: {json.dumps(valid_event)}\n\n",
+        ])
+
+        assert await service._collect_stream_events(mock_stream) == [valid_event]
+
+
+class TestHandleMessageSend:
+    """Test successful message:send execution paths."""
+
+    @pytest.mark.asyncio
+    async def test_handle_message_send_persists_events_and_builds_message_response(self):
+        """Test simple requests persist the final answer and expose raw events."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        parsed_message = {"message": {"parts": [{"type": "text", "text": "hello"}]}}
+        events = [
+            {"type": "model_output_thinking", "content": "working"},
+            {"type": "final_answer", "content": "done"},
+        ]
+        stream_response = MagicMock(body_iterator=AsyncMockIterator([
+            f"data: {json.dumps(events[0])}\n\n",
+            f"data: {json.dumps(events[1])}\n\n",
+        ]))
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value=parsed_message), \
+                patch.object(service, "_resolve_task_id", return_value=(None, None, False)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service, "_store_agent_response") as store_response, \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "hello", "history": [], "is_debug": True
+                }), \
+                patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response, \
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+            result = await service.handle_message_send("endpoint-1", {"message": {}})
+
+        assert result == {"ok": True}
+        store_response.assert_called_once_with(None, "done", "endpoint-1")
+        build_response.assert_called_once()
+        assert build_response.call_args.kwargs["text"] is None
+        assert [part["data"] for part in build_response.call_args.kwargs["parts"]] == events
+
+    @pytest.mark.asyncio
+    async def test_handle_message_send_complex_request_builds_task_response(self):
+        """Test complex requests return a completed task with coalesced event parts."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "is_enabled": True}
+        parsed_message = {"message": {"parts": []}, "history": [{"role": "user"}]}
+        stream_response = MagicMock(body_iterator=AsyncMockIterator([
+            'data: {"type": "final_answer", "content": "A"}',
+            'data: {"type": "final_answer", "content": "B"}',
+        ]))
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value=parsed_message), \
+                patch.object(service, "_resolve_task_id", return_value=("task-1", "ctx-1", True)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service, "_store_agent_response") as store_response, \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "", "history": [], "is_debug": True
+                }), \
+                patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response, \
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+            result = await service.handle_message_send("endpoint-1", {"message": {}})
+
+        assert result == {"task": True}
+        store_response.assert_called_once_with("task-1", "AB", "endpoint-1")
+        parts = build_response.call_args.kwargs["parts"]
+        assert parts == [{"data": {"type": "final_answer", "content": "AB"}, "mediaType": "application/json"}]
+
+
+class TestHandleMessageStream:
+    """Test successful message:stream execution paths."""
+
+    @pytest.mark.asyncio
+    async def test_handle_message_stream_filters_chunks_and_stores_final_answer(self):
+        """Test streaming yields valid event artifacts and terminal status events."""
+        from backend.services.a2a_server_service import A2AServerService
+
+        service = A2AServerService()
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        parsed_message = {"message": {"parts": []}}
+        valid_event = {"type": "final_answer", "content": "done"}
+        stream_response = MagicMock(body_iterator=AsyncMockIterator([
+            b"comment\n",
+            b"data: invalid json",
+            b"data: [1, 2]",
+            f"data: {json.dumps(valid_event)}",
+        ]))
+
+        with patch.object(service, "_validate_endpoint", return_value=server_agent), \
+                patch.object(service.adapter, "parse_a2a_message", return_value=parsed_message), \
+                patch.object(service, "_resolve_task_id", return_value=("task-1", "ctx-1", True)), \
+                patch.object(service, "_store_user_message"), \
+                patch.object(service, "_store_agent_response") as store_response, \
+                patch.object(service.adapter, "build_agent_request", return_value={
+                    "agent_id": 7, "query": "", "history": [], "is_debug": True
+                }), \
+                patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
+                patch("services.agent_service.run_agent_stream", new_callable=AsyncMock, return_value=stream_response):
+            result = [event async for event in service.handle_message_stream("endpoint-1", {"message": {}})]
+
+        assert result[0]["event_type"] == "taskStatusUpdate"
+        assert result[1]["data"]["artifact"]["parts"] == [
+            {"data": valid_event, "mediaType": "application/json"}
+        ]
+        assert result[-2]["data"]["lastChunk"] is True
+        assert result[-1]["data"]["status"]["state"] == "TASK_STATE_COMPLETED"
+        store_response.assert_called_once_with("task-1", "done", "endpoint-1")
 
 
 class TestHandleMessageSendValidation:
