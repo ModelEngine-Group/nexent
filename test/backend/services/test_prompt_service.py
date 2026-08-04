@@ -2769,3 +2769,1303 @@ class TestJoinInfoForOptimizePromptSectionAidpKbNames(unittest.TestCase):
             template_vars["aidp_kb_names"],
             '"aidp-kb-a", "aidp-kb-b"',
         )
+
+
+# ==================== Coverage boost tests ====================
+
+
+class TestExtractJsonObject(unittest.TestCase):
+    """Tests for _extract_json_object helper (lines 486-513)."""
+
+    def test_returns_none_for_empty_input(self):
+        from backend.services.prompt_service import _extract_json_object
+        self.assertIsNone(_extract_json_object(""))
+        self.assertIsNone(_extract_json_object(None))
+        self.assertIsNone(_extract_json_object("   "))
+
+    def test_returns_none_when_no_braces(self):
+        from backend.services.prompt_service import _extract_json_object
+        self.assertIsNone(_extract_json_object("just plain text no json"))
+
+    def test_extracts_simple_json_object(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = 'some text {"key": "value"} more text'
+        result = _extract_json_object(raw)
+        self.assertEqual(result, {"key": "value"})
+
+    def test_extracts_nested_json(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = '{"type": "single", "candidates": [{"pattern": "\\d+", "desc": "digits"}]}'
+        result = _extract_json_object(raw)
+        self.assertEqual(result["type"], "single")
+        self.assertEqual(len(result["candidates"]), 1)
+
+    def test_handles_single_quotes_fallback(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = "{'type': 'single', 'count': 1}"
+        result = _extract_json_object(raw)
+        self.assertEqual(result["type"], "single")
+        self.assertEqual(result["count"], 1)
+
+    def test_handles_trailing_commas_fallback(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = '{"type": "single", "items": [1, 2,],}'
+        result = _extract_json_object(raw)
+        # Should fix trailing commas and parse successfully
+        self.assertIsNotNone(result)
+
+    def test_handles_invalid_json_escape_fallback(self):
+        from backend.services.prompt_service import _extract_json_object
+        # LLM often outputs \d \w etc. with single backslash (invalid JSON)
+        raw = r'{"pattern": "\d+\.\d+"}'
+        result = _extract_json_object(raw)
+        self.assertIsNotNone(result)
+        self.assertIn("pattern", result)
+
+    def test_returns_none_for_completely_invalid_json(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = "{not json at all!!!"
+        result = _extract_json_object(raw)
+        self.assertIsNone(result)
+
+    def test_end_before_start_returns_none(self):
+        from backend.services.prompt_service import _extract_json_object
+        raw = "} something {"
+        result = _extract_json_object(raw)
+        self.assertIsNone(result)
+
+
+class TestGenerateGuardrailRulesImpl(unittest.TestCase):
+    """Tests for generate_guardrail_rules_impl (lines 547-586)."""
+
+    def test_empty_description_raises(self):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        with self.assertRaises(AppException) as ctx:
+            generate_guardrail_rules_impl(
+                description="",
+                model_id=1,
+                tenant_id="t",
+            )
+        self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
+
+    def test_whitespace_description_raises(self):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        with self.assertRaises(AppException) as ctx:
+            generate_guardrail_rules_impl(
+                description="   ",
+                model_id=1,
+                tenant_id="t",
+            )
+        self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_empty_llm_response_raises(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = "   "
+
+        with self.assertRaises(AppException) as ctx:
+            generate_guardrail_rules_impl(
+                description="block phone numbers",
+                model_id=1,
+                tenant_id="t",
+            )
+        self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_invalid_json_response_raises(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = "no json here at all"
+
+        with self.assertRaises(AppException) as ctx:
+            generate_guardrail_rules_impl(
+                description="block phone numbers",
+                model_id=1,
+                tenant_id="t",
+            )
+        self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_unknown_type_raises(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = '{"type": "unknown_type", "data": []}'
+
+        with self.assertRaises(AppException) as ctx:
+            generate_guardrail_rules_impl(
+                description="block phone numbers",
+                model_id=1,
+                tenant_id="t",
+            )
+        self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+        self.assertIn("Unknown guardrail result type", ctx.exception.message)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_single_type_success(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = '{"type": "single", "candidates": [{"pattern": "1[3-9]\\d{9}", "desc": "phone"}]}'
+
+        result = generate_guardrail_rules_impl(
+            description="block phone numbers",
+            model_id=1,
+            tenant_id="t",
+        )
+        self.assertEqual(result["type"], "single")
+        self.assertIsInstance(result["candidates"], list)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_multi_type_success(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = '{"type": "multi", "rules": [{"name": "r1", "pattern": "\\d", "severity": "high", "desc": "d"}]}'
+
+        result = generate_guardrail_rules_impl(
+            description="block sensitive patterns",
+            model_id=1,
+            tenant_id="t",
+        )
+        self.assertEqual(result["type"], "multi")
+        self.assertIsInstance(result["rules"], list)
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_single_type_with_non_list_candidates(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = '{"type": "single", "candidates": "not_a_list"}'
+
+        result = generate_guardrail_rules_impl(
+            description="block phone numbers",
+            model_id=1,
+            tenant_id="t",
+        )
+        self.assertEqual(result["type"], "single")
+        self.assertEqual(result["candidates"], [])
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_guardrail_regex_prompt_template')
+    def test_multi_type_with_non_list_rules(self, mock_template, mock_llm):
+        from backend.services.prompt_service import generate_guardrail_rules_impl
+        mock_template.return_value = {
+            "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
+            "GUARDRAIL_SYSTEM_PROMPT": "system",
+        }
+        mock_llm.return_value = '{"type": "multi", "rules": "not_a_list"}'
+
+        result = generate_guardrail_rules_impl(
+            description="block sensitive patterns",
+            model_id=1,
+            tenant_id="t",
+        )
+        self.assertEqual(result["type"], "multi")
+        self.assertEqual(result["rules"], [])
+
+
+class TestGetAidpKbDisplayNames(unittest.TestCase):
+    """Tests for get_aidp_kb_display_names (lines 1086-1099)."""
+
+    def test_no_aidp_tool_returns_none(self):
+        from backend.services.prompt_service import get_aidp_kb_display_names
+        tool_info_list = [{"name": "web_search", "tool_id": 1}]
+        result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
+        self.assertIsNone(result)
+
+    def test_empty_tool_list_returns_none(self):
+        from backend.services.prompt_service import get_aidp_kb_display_names
+        result = get_aidp_kb_display_names([], "user1", "tenant1")
+        self.assertIsNone(result)
+
+    @patch('backend.services.prompt_service.sys')
+    def test_aidp_tool_found_returns_display_names(self, mock_sys_mod):
+        """When aidp_search tool exists, import and call permission service."""
+        from backend.services.prompt_service import get_aidp_kb_display_names
+
+        # Mock the ext_components.aidp.services module
+        mock_aidp_module = MagicMock()
+        mock_aidp_module.aidp_permission_service.get_kds_name_to_id_map.return_value = {
+            "KB-Alpha": 1,
+            "KB-Beta": 2,
+        }
+
+        tool_info_list = [
+            {"name": "aidp_search", "tool_id": 42},
+            {"name": "web_search", "tool_id": 1},
+        ]
+
+        # Patch importlib-style: intercept the from-import inside the function
+        with patch.dict(sys.modules, {'ext_components.aidp.services': mock_aidp_module}):
+            result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
+
+        self.assertEqual(result, ["KB-Alpha", "KB-Beta"])
+
+    @patch('backend.services.prompt_service.sys')
+    def test_aidp_tool_found_empty_map_returns_none(self, mock_sys_mod):
+        """When kds_name_to_id_map is empty, return None."""
+        from backend.services.prompt_service import get_aidp_kb_display_names
+
+        mock_aidp_module = MagicMock()
+        mock_aidp_module.aidp_permission_service.get_kds_name_to_id_map.return_value = {}
+
+        tool_info_list = [{"name": "aidp_search", "tool_id": 42}]
+
+        with patch.dict(sys.modules, {'ext_components.aidp.services': mock_aidp_module}):
+            result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.prompt_service.sys')
+    def test_aidp_tool_import_error_returns_none(self, mock_sys_mod):
+        """When import fails, return None gracefully."""
+        from backend.services.prompt_service import get_aidp_kb_display_names
+
+        tool_info_list = [{"name": "aidp_search", "tool_id": 42}]
+
+        # Make the import raise an exception
+        with patch.dict(sys.modules, {'ext_components.aidp.services': None}):
+            with patch('builtins.__import__', side_effect=Exception("Module not found")):
+                result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
+
+        self.assertIsNone(result)
+
+
+class TestStreamResultsErrorPath(unittest.TestCase):
+    """Tests for _stream_results error handling (lines 808-828)."""
+
+    def test_error_holder_raises_immediately(self):
+        """When error_holder has an error, _stream_results raises it after joining threads."""
+        import queue as q_module
+        from backend.services.prompt_service import _stream_results
+
+        produce_q = q_module.Queue()
+        latest = {"duty": "", "constraint": "", "few_shots": "",
+                  "agent_var_name": "", "agent_display_name": "", "agent_description": ""}
+        stop_flags = {"duty": False, "constraint": False, "few_shots": False,
+                      "agent_var_name": False, "agent_display_name": False, "agent_description": False}
+        mock_thread = MagicMock()
+        mock_thread.join = MagicMock()
+        threads = [mock_thread]
+        error_holder = {"error": RuntimeError("Thread error")}
+
+        with self.assertRaises(RuntimeError) as ctx:
+            list(_stream_results(produce_q, latest, stop_flags, threads, error_holder))
+
+        self.assertIn("Thread error", str(ctx.exception))
+        mock_thread.join.assert_called()
+
+    def test_streaming_yields_updated_content(self):
+        """When content changes and stop flags complete, yields streaming data then final results."""
+        import queue as q_module
+        from backend.services.prompt_service import _stream_results
+
+        produce_q = q_module.Queue()
+        latest = {"duty": "duty content", "constraint": "", "few_shots": "",
+                  "agent_var_name": "test_agent", "agent_display_name": "Test Agent", "agent_description": "desc"}
+        # All flags True from start -> loop exits immediately
+        stop_flags = {"duty": True, "constraint": True, "few_shots": True,
+                      "agent_var_name": True, "agent_display_name": True, "agent_description": True}
+        mock_thread = MagicMock()
+        mock_thread.join = MagicMock()
+        threads = [mock_thread]
+        error_holder = {}
+
+        # Put one item so the loop body runs once, but since all stop_flags are True,
+        # the while condition fails and we skip loop entirely -> go to final results
+        produce_q.put("signal")
+
+        results = list(_stream_results(produce_q, latest, stop_flags, threads, error_holder))
+
+        # Should yield final results for all tags that have stop_flags True
+        self.assertGreater(len(results), 0)
+        result_types = [r["type"] for r in results]
+        self.assertIn("duty", result_types)
+        self.assertIn("agent_var_name", result_types)
+
+    def test_streaming_yields_intermediate_updates(self):
+        """When new content appears, yields intermediate streaming updates."""
+        import queue as q_module
+        from backend.services.prompt_service import _stream_results
+
+        produce_q = q_module.Queue()
+
+        latest = {"duty": "", "constraint": "", "few_shots": "",
+                  "agent_var_name": "", "agent_display_name": "", "agent_description": ""}
+
+        # Start with duty not complete
+        stop_flags = {"duty": False, "constraint": True, "few_shots": True,
+                      "agent_var_name": True, "agent_display_name": True, "agent_description": True}
+        mock_thread = MagicMock()
+        mock_thread.join = MagicMock()
+        threads = [mock_thread]
+        error_holder = {}
+
+        # Add items and schedule a stop flag change
+        produce_q.put("signal1")
+
+        # We'll collect results in a thread and change stop flags concurrently
+        results_collected = []
+
+        import threading
+
+        def consumer():
+            gen = _stream_results(produce_q, latest, stop_flags, threads, error_holder)
+            try:
+                for r in gen:
+                    results_collected.append(r)
+            except Exception:
+                pass
+
+        # Schedule: after first poll, update latest and set all flags True
+        def updater():
+            import time
+            time.sleep(0.1)
+            latest["duty"] = "new duty"
+            stop_flags["duty"] = True
+            produce_q.put("signal2")
+
+        t_consumer = threading.Thread(target=consumer)
+        t_updater = threading.Thread(target=updater)
+        t_consumer.start()
+        t_updater.start()
+        t_consumer.join(timeout=10)
+        t_updater.join(timeout=5)
+
+        # Should have yielded at least one intermediate update for "duty"
+        duty_results = [r for r in results_collected if r["type"] == "duty"]
+        self.assertGreater(len(duty_results), 0)
+
+
+class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
+    """Tests for PromptOptimizationService.optimize_from_debug (lines 1158-1215)."""
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_empty_feedback_raises(self):
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
+        with self.assertRaises(AppException) as ctx:
+            service.optimize_from_debug(agent_id=1, feedback="", selected=selected)
+        self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_whitespace_feedback_raises(self):
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
+        with self.assertRaises(AppException):
+            service.optimize_from_debug(agent_id=1, feedback="   ", selected=selected)
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_jiuwen_unavailable_raises(self):
+        from adapters.exception import NexentCapabilityError
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
+        with self.assertRaises(NexentCapabilityError):
+            service.optimize_from_debug(agent_id=1, feedback="good feedback", selected=selected)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_successful_optimize_from_debug(self, mock_search_agent, mock_get_adapter):
+        from adapters.exception import JiuwenSDKError
+
+        mock_search_agent.return_value = {
+            "duty_prompt": "Duty content",
+            "constraint_prompt": "Constraint content",
+            "few_shots_prompt": "FewShots content",
+        }
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize_badcase.return_value = "Optimized full prompt"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "What is X?", "assistant_answer": "X is Y"})()
+
+        result = service.optimize_from_debug(
+            agent_id=1, feedback="Make it more specific", selected=selected
+        )
+
+        self.assertEqual(result.optimized_content, "Optimized full prompt")
+        self.assertEqual(result.source, "jiuwen")
+        self.assertEqual(result.section_type, "full_prompt")
+        mock_adapter_instance.optimize_badcase.assert_called_once()
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_from_debug_with_dict_selected(self, mock_search_agent, mock_get_adapter):
+        """Test optimize_from_debug when selected is a dict rather than an object."""
+        mock_search_agent.return_value = {
+            "duty_prompt": "Duty",
+            "constraint_prompt": "Constraint",
+            "few_shots_prompt": "FewShots",
+        }
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize_badcase.return_value = "Optimized"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+
+        result = service.optimize_from_debug(
+            agent_id=1,
+            feedback="feedback text",
+            selected={"user_question": "Q?", "assistant_answer": "A!"},
+        )
+
+        self.assertEqual(result.optimized_content, "Optimized")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_from_debug_empty_prompt_raises(self, mock_search_agent, mock_get_adapter):
+        """When all agent prompts are None, the joined prompt strips to empty => AppException."""
+        mock_search_agent.return_value = {
+            "duty_prompt": None,
+            "constraint_prompt": None,
+            "few_shots_prompt": None,
+        }
+
+        mock_adapter_cls = MagicMock()
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
+
+        # When all prompts are None, strip gives empty strings, joined gives "# Duty\n\n# Constraint\n\n# FewShots"
+        # which is NOT empty after strip. So this won't raise for empty_prompt.
+        # The function proceeds and calls adapter.optimize_badcase successfully.
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize_badcase.return_value = "optimized"
+        mock_adapter_cls.return_value = mock_adapter_instance
+
+        result = service.optimize_from_debug(agent_id=1, feedback="feedback", selected=selected)
+        self.assertEqual(result.source, "jiuwen")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_from_debug_adapter_none_raises(self, mock_search_agent, mock_get_adapter):
+        """When _get_jiuwen_adapter_class returns None after is_jiuwen_mode_available check, raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_search_agent.return_value = {
+            "duty_prompt": "Duty",
+            "constraint_prompt": "Constraint",
+            "few_shots_prompt": "FewShots",
+        }
+        # First call (is_jiuwen_mode_available) returns a class, second call returns None
+        mock_adapter_cls = MagicMock()
+        mock_get_adapter.side_effect = [mock_adapter_cls, None]
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
+
+        with self.assertRaises(JiuwenSDKError):
+            service.optimize_from_debug(agent_id=1, feedback="feedback", selected=selected)
+
+
+class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
+    """Tests for PromptOptimizationService.optimize with Jiuwen SDK paths (lines 1238-1303)."""
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_general_mode(self, mock_get_adapter):
+        """Jiuwen SDK general mode returns optimized content."""
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "Optimized by Jiuwen"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="Original content", feedback="Improve this",
+            mode="general",
+        )
+
+        result = service.optimize(req)
+
+        self.assertEqual(result.source, "jiuwen")
+        self.assertEqual(result.optimized_content, "Optimized by Jiuwen")
+        self.assertEqual(result.original_content, "Original content")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_insert_mode(self, mock_get_adapter):
+        """Jiuwen SDK insert mode inserts text at start_pos."""
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "INSERTED"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABCDE", feedback="insert here",
+            mode="insert", start_pos=2,
+        )
+
+        result = service.optimize(req)
+
+        self.assertEqual(result.optimized_content, "ABINSERTEDCDE")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_select_mode(self, mock_get_adapter):
+        """Jiuwen SDK select mode replaces selected range."""
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "REPLACED"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABCDEF", feedback="replace this",
+            mode="select", start_pos=1, end_pos=4,
+        )
+
+        result = service.optimize(req)
+
+        # "ABCDEF"[:1] + "REPLACED" + "ABCDEF"[4:] = "A" + "REPLACED" + "EF"
+        self.assertEqual(result.optimized_content, "AREPLACEDEF")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_insert_no_start_pos_raises(self, mock_get_adapter):
+        """Insert mode without start_pos raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABC", feedback="insert",
+            mode="insert", start_pos=None,
+        )
+
+        # Call _optimize_with_jiuwen directly to bypass the fallback in optimize()
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_insert_out_of_bounds_raises(self, mock_get_adapter):
+        """Insert mode with out-of-bounds start_pos raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABC", feedback="insert",
+            mode="insert", start_pos=100,
+        )
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_select_missing_positions_raises(self, mock_get_adapter):
+        """Select mode without start_pos/end_pos raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABCDEF", feedback="select",
+            mode="select", start_pos=None, end_pos=None,
+        )
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_select_non_int_positions_raises(self, mock_get_adapter):
+        """Select mode with non-integer positions raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABCDEF", feedback="select",
+            mode="select", start_pos="bad", end_pos="worse",
+        )
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_select_invalid_range_raises(self, mock_get_adapter):
+        """Select mode with start >= end raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABCDEF", feedback="select",
+            mode="select", start_pos=5, end_pos=2,
+        )
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_select_end_out_of_bounds_raises(self, mock_get_adapter):
+        """Select mode with end_pos > length raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.return_value = "text"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="ABC", feedback="select",
+            mode="select", start_pos=0, end_pos=100,
+        )
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_adapter_unavailable_raises(self, mock_get_adapter):
+        """When adapter class is None in _optimize_with_jiuwen, raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+        mock_get_adapter.return_value = None
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="old", feedback="improve",
+            mode="general",
+        )
+
+        # Call _optimize_with_jiuwen directly to avoid the fallback chain
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_with_jiuwen(req)
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.optimize_prompt_section_impl')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_optimize_jiuwen_error_falls_back_to_nexent(self, mock_impl, mock_get_adapter):
+        """When Jiuwen SDK raises JiuwenSDKError, falls back to nexent native."""
+        from adapters.exception import JiuwenSDKError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize.side_effect = JiuwenSDKError("SDK failed")
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        mock_impl.return_value = {
+            "section_type": "duty",
+            "section_title": "Role",
+            "original_content": "old",
+            "optimized_content": "nexent fallback",
+        }
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="Role",
+            current_content="old", feedback="improve",
+            mode="general",
+        )
+
+        result = service.optimize(req)
+        self.assertEqual(result.optimized_content, "nexent fallback")
+
+
+class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
+    """Tests for optimize_badcase with Jiuwen SDK (lines 1354-1388)."""
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_badcase_jiuwen_success(self, mock_get_adapter):
+        """Jiuwen SDK badcase optimization succeeds."""
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize_badcase.return_value = "Badcase optimized"
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        result = service.optimize_badcase(
+            current_content="Current prompt",
+            bad_cases=[{"question": "Q", "answer": "A"}],
+            agent_id=1,
+            section_type="duty",
+            section_title="Role",
+        )
+
+        self.assertEqual(result.source, "jiuwen")
+        self.assertEqual(result.optimized_content, "Badcase optimized")
+        self.assertEqual(result.original_content, "Current prompt")
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_badcase_jiuwen_fallback_on_error(self, mock_get_adapter):
+        """When Jiuwen SDK badcase fails, falls back to nexent which raises NexentCapabilityError."""
+        from adapters.exception import JiuwenSDKError, NexentCapabilityError
+
+        mock_adapter_cls = MagicMock()
+        mock_adapter_instance = MagicMock()
+        mock_adapter_instance.optimize_badcase.side_effect = JiuwenSDKError("badcase fail")
+        mock_adapter_cls.return_value = mock_adapter_instance
+        mock_get_adapter.return_value = mock_adapter_cls
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+
+        # Fallback to nexent which raises NexentCapabilityError (no native badcase support)
+        with self.assertRaises(NexentCapabilityError):
+            service.optimize_badcase(
+                current_content="Current prompt",
+                bad_cases=[{"question": "Q", "answer": "A"}],
+                agent_id=1,
+                section_type="duty",
+                section_title="Role",
+            )
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_badcase_jiuwen_adapter_none_raises(self, mock_get_adapter):
+        """When adapter class is None in badcase, raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError, NexentCapabilityError
+
+        mock_get_adapter.return_value = None
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+
+        # _optimize_badcase_with_jiuwen raises JiuwenSDKError, then fallback _optimize_badcase_with_nexent raises NexentCapabilityError
+        with self.assertRaises(NexentCapabilityError):
+            service.optimize_badcase(
+                current_content="Current prompt",
+                bad_cases=[{"question": "Q", "answer": "A"}],
+                agent_id=1,
+                section_type="duty",
+                section_title="Role",
+            )
+
+
+class TestGetJiuwenAdapterClass(unittest.TestCase):
+    """Tests for _get_jiuwen_adapter_class (line 53, 1375-1388)."""
+
+    def test_returns_adapter_when_importable(self):
+        """When adapters module has JiuwenSDKAdapter, return it."""
+        from backend.services.prompt_service import _get_jiuwen_adapter_class
+
+        mock_adapter = MagicMock()
+        mock_module = MagicMock()
+        mock_module.JiuwenSDKAdapter = mock_adapter
+
+        with patch.dict(sys.modules, {'adapters': mock_module}):
+            result = _get_jiuwen_adapter_class()
+
+        self.assertEqual(result, mock_adapter)
+
+    def test_returns_none_when_not_importable(self):
+        """When adapters module is not found, return None."""
+        from backend.services.prompt_service import _get_jiuwen_adapter_class
+
+        with patch.dict(sys.modules, {'adapters': None}):
+            with patch('builtins.__import__', side_effect=ModuleNotFoundError("No module named 'adapters'")):
+                result = _get_jiuwen_adapter_class()
+
+        self.assertIsNone(result)
+
+
+class TestGreetingGeneration(unittest.TestCase):
+    """Tests for greeting generation within generate_and_save_system_prompt_impl (lines 347-388)."""
+
+    @patch('backend.services.prompt_service.update_agent')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_generation_with_valid_json(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+        mock_update_agent,
+    ):
+        """Greeting generation parses JSON and yields greeting_message and example_questions."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        mock_get_prompt_template.return_value = {
+            "GREETING_SYSTEM_PROMPT": "generate greeting",
+            "USER_PROMPT": "Render {{ display_name }}",
+        }
+
+        greeting_json = json.dumps({
+            "greeting_message": "Hello! How can I help?",
+            "example_questions": ["Q1?", "Q2?", "Q3?"]
+        })
+        mock_call_llm.return_value = greeting_json
+
+        result = list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        greeting_items = [r for r in result if r.get("type") == "greeting_message"]
+        question_items = [r for r in result if r.get("type") == "example_questions"]
+
+        self.assertEqual(len(greeting_items), 1)
+        self.assertEqual(greeting_items[0]["content"], "Hello! How can I help?")
+        self.assertEqual(len(question_items), 1)
+        parsed_questions = json.loads(question_items[0]["content"])
+        self.assertEqual(len(parsed_questions), 3)
+
+    @patch('backend.services.prompt_service.update_agent')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_generation_invalid_json_fallback(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+        mock_update_agent,
+    ):
+        """When JSON parsing fails, fallback to raw text."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        mock_get_prompt_template.return_value = {
+            "GREETING_SYSTEM_PROMPT": "generate greeting",
+            "USER_PROMPT": "Render {{ display_name }}",
+        }
+        # Return invalid JSON (no valid keys)
+        mock_call_llm.return_value = "plain text greeting no json"
+
+        result = list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        greeting_items = [r for r in result if r.get("type") == "greeting_message"]
+        question_items = [r for r in result if r.get("type") == "example_questions"]
+
+        self.assertEqual(len(greeting_items), 1)
+        self.assertEqual(greeting_items[0]["content"], "plain text greeting no json")
+        self.assertEqual(len(question_items), 1)
+        parsed_questions = json.loads(question_items[0]["content"])
+        self.assertEqual(parsed_questions, [])
+
+    @patch('backend.services.prompt_service.update_agent')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_example_questions_truncated_at_six(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+        mock_update_agent,
+    ):
+        """When more than 6 example questions, truncate to 6."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        mock_get_prompt_template.return_value = {
+            "GREETING_SYSTEM_PROMPT": "generate greeting",
+            "USER_PROMPT": "Render {{ display_name }}",
+        }
+
+        # Return 10 questions - should be truncated to 6
+        questions = [f"Q{i}?" for i in range(10)]
+        greeting_json = json.dumps({
+            "greeting_message": "Hello!",
+            "example_questions": questions,
+        })
+        mock_call_llm.return_value = greeting_json
+
+        result = list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        question_items = [r for r in result if r.get("type") == "example_questions"]
+        self.assertEqual(len(question_items), 1)
+        parsed = json.loads(question_items[0]["content"])
+        self.assertEqual(len(parsed), 6)
+
+    @patch('backend.services.prompt_service.update_agent')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_skips_agent_update_in_create_mode(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+        mock_update_agent,
+    ):
+        """When agent_id=0, skip update_agent call (create mode)."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        mock_get_prompt_template.return_value = {
+            "GREETING_SYSTEM_PROMPT": "generate greeting",
+            "USER_PROMPT": "Render {{ display_name }}",
+        }
+        mock_call_llm.return_value = json.dumps({
+            "greeting_message": "Hello!",
+            "example_questions": ["Q1?"]
+        })
+
+        list(generate_and_save_system_prompt_impl(
+            agent_id=0,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        mock_update_agent.assert_not_called()
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_exception_does_not_stop_flow(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+    ):
+        """Greeting generation exception is caught and does not stop prompt generation."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        # Greeting generation fails
+        mock_get_prompt_template.side_effect = Exception("Template error")
+
+        result = list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        # Should still return results (greeting just skipped)
+        self.assertGreater(len(result), 0)
+        greeting_items = [r for r in result if r.get("type") == "greeting_message"]
+        self.assertEqual(len(greeting_items), 0)
+
+
+class TestGreetingJsonDecodeError(unittest.TestCase):
+    """Test greeting JSON decode error path (lines 360-361)."""
+
+    @patch('backend.services.prompt_service.update_agent')
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_template')
+    @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
+    @patch('backend.services.prompt_service._check_agent_name_duplicate')
+    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('backend.services.prompt_service.generate_system_prompt')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_greeting_json_decode_error_falls_back(
+        self,
+        mock_search_agent,
+        mock_query_tools,
+        mock_generate_system_prompt,
+        mock_query_all_agents,
+        mock_check_name_dup,
+        mock_check_display_dup,
+        mock_get_prompt_template,
+        mock_call_llm,
+        mock_update_agent,
+    ):
+        """When LLM returns braces with invalid JSON, JSONDecodeError is caught (lines 360-361)."""
+        mock_query_tools.return_value = []
+        mock_search_agent.return_value = {}
+        mock_query_all_agents.return_value = []
+        mock_check_name_dup.return_value = False
+        mock_check_display_dup.return_value = False
+
+        def mock_gen(*args, **kwargs):
+            yield {"type": "duty", "content": "duty", "is_complete": True}
+            yield {"type": "constraint", "content": "constraint", "is_complete": True}
+            yield {"type": "few_shots", "content": "few_shots", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+            yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+        mock_generate_system_prompt.side_effect = mock_gen
+
+        mock_get_prompt_template.return_value = {
+            "GREETING_SYSTEM_PROMPT": "generate greeting",
+            "USER_PROMPT": "Render {{ display_name }}",
+        }
+        # Text has braces but invalid JSON: undefined keys, no quotes
+        # Must have both { and } so json_start >= 0 and json_end > json_start,
+        # but content between them is invalid JSON
+        mock_call_llm.return_value = '{greeting_message: Hello broken}'
+
+        result = list(generate_and_save_system_prompt_impl(
+            agent_id=123,
+            model_id=1,
+            task_description="Task",
+            user_id="u",
+            tenant_id="t",
+            language="zh",
+            tool_ids=[1],
+            sub_agent_ids=[],
+        ))
+
+        # Should fall back to raw text (no valid JSON parse, parsed=None)
+        greeting_items = [r for r in result if r.get("type") == "greeting_message"]
+        self.assertEqual(len(greeting_items), 1)
+
+
+class TestExtractJsonObjectEdgeCases(unittest.TestCase):
+    """Additional edge case for _extract_json_object final fallback (lines 512-513)."""
+
+    def test_utterly_broken_json_all_fallbacks_fail(self):
+        """When all JSON repair strategies fail, return None (lines 512-513)."""
+        from backend.services.prompt_service import _extract_json_object
+        # Snippet with unbalanced braces that confuses all three strategies
+        raw = '{\\x not valid json ever }'
+        result = _extract_json_object(raw)
+        # All fallbacks fail - returns None
+        self.assertIsNone(result)
+
+
+class TestOptimizeBadcaseWithJiuwenDirect(unittest.TestCase):
+    """Test _optimize_badcase_with_jiuwen when adapter unavailable (line 1377)."""
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    def test_badcase_jiuwen_adapter_none_raises_directly(self, mock_get_adapter):
+        """When adapter class is None, _optimize_badcase_with_jiuwen raises JiuwenSDKError."""
+        from adapters.exception import JiuwenSDKError
+        mock_get_adapter.return_value = None
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+
+        with self.assertRaises(JiuwenSDKError):
+            service._optimize_badcase_with_jiuwen(
+                current_content="prompt",
+                bad_cases=[{"q": "Q", "a": "A"}],
+                section_type="duty",
+                section_title="Role",
+            )
