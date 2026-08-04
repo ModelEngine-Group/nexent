@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
   fetchImageBlob,
+  isLocalStorageObjectUrl,
   getLocalFilePreviewUrl,
   storageService,
 } from "@/services/storageService";
@@ -361,15 +362,11 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   );
 };
 
-const isLocalStorageUrl = (url: string): boolean => {
-  return url.startsWith("s3://") || !/^https?:\/\//i.test(url);
-};
-
 const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
   const imageUrl = item.url || "";
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const usesBackendStream = Boolean(imageUrl) && isLocalStorageUrl(imageUrl);
+  const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
 
   useEffect(() => {
     if (!imageUrl || !usesBackendStream) {

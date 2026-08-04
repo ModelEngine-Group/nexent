@@ -691,12 +691,15 @@ export function attachSearchContentToTool(
   const isDuplicate = targetToolCall.searchContent.some(
     (source: {
       url: string;
+      sourceFile?: string;
       toolSign?: string;
       citeIndex?: number;
     }) =>
       hasCitationIdentity
         ? source.toolSign === item.toolSign && source.citeIndex === item.citeIndex
-        : source.url === item.url,
+        : item.url
+          ? source.url === item.url
+          : source.sourceFile === item.sourceFile,
   );
   if ((item.url || item.sourceFile) && !isDuplicate) {
     targetToolCall.searchContent.push(item);
@@ -1419,10 +1422,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     const updateVerificationPanel = (result: VerificationContent): boolean => {
-      if (!verificationPanel) {
-        // The final-answer verifier emits `start` before evaluating the answer.
-        // Earlier step-level checks must not create a final verification panel.
-        if (result.phase !== "start") return false;
+      // Each verification lifecycle begins with `start`. Create its card as
+      // soon as that SSE event arrives so all following phases stream into it.
+      if (result.phase === "start") {
+        completeVerificationPanel();
         verificationPanel = {
           type: "verification-panel",
           results: [],
@@ -1430,6 +1433,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         };
         contentParts.push(verificationPanel);
       }
+      if (!verificationPanel) return false;
       verificationPanel.results.push(result);
       return true;
     };
@@ -1612,8 +1616,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          // Aggregate all verification events into one live panel. The first
-          // `start` event creates the panel; subsequent events update its results.
+          // Each verification `start` event creates a card immediately;
+          // following events for that lifecycle update the same card.
           if (chunk.type === "verification") {
             const parsed = parseVerification(chunk);
             if (parsed) {

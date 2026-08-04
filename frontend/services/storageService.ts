@@ -114,15 +114,10 @@ export function extractObjectNameFromUrl(url: string): string | null {
 
 export function isLocalStorageObjectUrl(url: string | undefined): boolean {
   if (!url) return false;
+  if (url.startsWith("s3://")) return true;
 
   const objectName = extractObjectNameFromUrl(url);
-  return Boolean(
-    objectName &&
-      (url.startsWith("s3://") ||
-        !/^https?:\/\//i.test(url) ||
-        /(^|\/)knowledge_base\//.test(objectName) ||
-        /(^|\/)attachments\//.test(objectName)),
-  );
+  return Boolean(objectName && /(^|\/)(knowledge_base|attachments)\//.test(objectName));
 }
 
 export function getLocalFilePreviewUrl(

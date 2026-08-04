@@ -10,7 +10,10 @@ import {
 import { createPortal } from "react-dom";
 import { ImageIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchImageBlob } from "@/services/storageService";
+import {
+  fetchImageBlob,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
 
 /**
  * Detect whether a given URL points to an AIDP KnowledgeBase image that
@@ -30,11 +33,7 @@ const isAidpImageUrl = (url: string): boolean => {
  * contains either an S3 URL or an object path instead of a browser-accessible URL.
  */
 const isLocalKnowledgeBaseImageUrl = (url: string): boolean => {
-  return (
-    typeof url === "string" &&
-    (url.startsWith("s3://") ||
-      (!/^[a-z][a-z\d+.-]*:/i.test(url) && !url.startsWith("//")))
-  );
+  return isLocalStorageObjectUrl(url);
 };
 
 /**
