@@ -5,7 +5,7 @@ accumulating conversation history with a shared ContextManager, so compression
 triggers naturally as the history grows. After every turn a debug panel shows
 how the context was built and compressed.
 
-Run from this directory (sdk/ctx_debugger); ../../ is the nexent repo root:
+Run from this directory (sdk/benchmark/tools/ctx_debugger):
     ../../backend/.venv/bin/python interactive.py
 
 Slash commands:
@@ -39,9 +39,10 @@ except ImportError:  # pragma: no cover - readline is stdlib on Linux/macOS
     readline = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SDK_DIR = os.path.dirname(HERE)
-BENCHMARK_DIR = os.path.join(SDK_DIR, "benchmark")
-for _p in (SDK_DIR, BENCHMARK_DIR):
+TOOLS_DIR = os.path.dirname(HERE)
+BENCHMARK_DIR = os.path.dirname(TOOLS_DIR)
+SDK_DIR = os.path.dirname(BENCHMARK_DIR)
+for _p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

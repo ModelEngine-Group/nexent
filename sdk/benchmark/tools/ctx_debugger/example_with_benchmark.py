@@ -1,4 +1,4 @@
-"""Run the existing benchmark with ContextDebugger attached, full layers,
+"""Run the generic benchmark with ContextDebugger attached, full layers,
 without touching benchmark or SDK source.
 
 Strategy: monkey-patch the smolagents agent class so every newly-created
@@ -6,21 +6,22 @@ agent auto-attaches a debugger after __init__. The compression-only entry
 point (attaching to ContextManager directly) is no longer needed in this
 example because attaching to the agent picks up the cm anyway.
 
-Run from this directory (sdk/ctx_debugger); ../../ is the nexent repo root:
-    ../../backend/.venv/bin/python example_with_benchmark.py
+Run from this directory (sdk/benchmark/tools/ctx_debugger):
+    ../../../../backend/.venv/bin/python example_with_benchmark.py [run_benchmark args]
 
 Trace lands at $NEXENT_CONTEXT_DEBUG or /tmp/nexent_ctx_trace.jsonl by default.
 """
 
-import asyncio
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SDK_DIR = os.path.dirname(HERE)
-BENCHMARK_DIR = os.path.join(SDK_DIR, "benchmark")
+TOOLS_DIR = os.path.dirname(HERE)
+BENCHMARK_DIR = os.path.dirname(TOOLS_DIR)
+SDK_DIR = os.path.dirname(BENCHMARK_DIR)
+GENERIC_DIR = os.path.join(BENCHMARK_DIR, "generic")
 
-for p in (SDK_DIR, BENCHMARK_DIR):
+for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, GENERIC_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -79,10 +80,10 @@ def _install_auto_attach():
 def main():
     _install_auto_attach()
 
-    os.chdir(BENCHMARK_DIR)
-    from test_benchmark import main as bench_main
+    os.chdir(GENERIC_DIR)
+    from run_benchmark import main as bench_main
 
-    asyncio.run(bench_main())
+    bench_main()
     print(f"\n[ctx_debugger] Trace written to: {TRACE_PATH}")
 
 

@@ -1,11 +1,11 @@
-# Self-hosted Langfuse for ctx_debugger trace analysis.
+# Self-hosted Langfuse for Nexent benchmark runs and trace analysis.
 #
 # Adapted from the official langfuse/langfuse docker-compose.yml. Isolation
 # choices for running alongside the Nexent stack:
-#   - separate compose project (run with: docker compose -p langfuse ...)
-#   - ONLY langfuse-web is published, on 127.0.0.1:3100 (Nexent web owns 3000)
+#   - separate compose project (run with: docker compose -p nexent-benchmark-langfuse ...)
+#   - ONLY langfuse-web is published on host port 3100 (Nexent web owns 3000)
 #   - postgres / clickhouse / redis / minio / worker have NO published ports;
-#     they talk over the isolated `langfuse_default` network only
+#     they talk over the isolated Compose network only
 # Secrets and init credentials live in the sibling .env file.
 services:
   langfuse-worker:

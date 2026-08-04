@@ -4,10 +4,10 @@ Same auto-attach strategy as example_with_benchmark.py, but targets the
 EventQA runner (sdk/benchmark/eventqa_eval/run_eventqa.py). Every CLI argument
 after the script name is forwarded straight to run_eventqa.
 
-Run from this directory (sdk/ctx_debugger); ../../ is the nexent repo root:
+Run from this directory (sdk/benchmark/tools/ctx_debugger):
 
     NEXENT_CONTEXT_DEBUG=/tmp/eventqa_trace.jsonl \\
-      ../../backend/.venv/bin/python example_with_eventqa.py \\
+      ../../../../backend/.venv/bin/python example_with_eventqa.py \\
       --book_index 0 --limit 1 --max_ingest_chars 200000
 
 The trace lands at $NEXENT_CONTEXT_DEBUG (default /tmp/nexent_eventqa_trace.jsonl).
@@ -20,11 +20,12 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SDK_DIR = os.path.dirname(HERE)
-BENCHMARK_DIR = os.path.join(SDK_DIR, "benchmark")
+TOOLS_DIR = os.path.dirname(HERE)
+BENCHMARK_DIR = os.path.dirname(TOOLS_DIR)
+SDK_DIR = os.path.dirname(BENCHMARK_DIR)
 EVENTQA_DIR = os.path.join(BENCHMARK_DIR, "eventqa_eval")
 
-for p in (SDK_DIR, BENCHMARK_DIR, EVENTQA_DIR):
+for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, EVENTQA_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 

@@ -41,14 +41,14 @@ Dependency direction: **ctx_debugger → only import nexent SDK**, nexent doesn'
 ## 3. Prerequisites
 
 > Commands below assume you're in this directory (README's location `ctx_debugger/`). Relative path conventions:
-> `.` = `ctx_debugger/`, `..` = `sdk/`, `../..` = nexent repo root directory
-> (where `sdk/`, `backend/`, `.env` reside).
+> `.` = `ctx_debugger/`, `..` = `tools/`, `../..` = `benchmark/`, `../../..` = `sdk/`,
+> and `../../../..` = the Nexent repository root.
 
 - Use backend's venv Python (nexent SDK and dependencies installed):
   ```
-  ../../backend/.venv/bin/python
+  ../../../../backend/.venv/bin/python
   ```
-- LLM credentials in repo root `.env`, i.e., `../../.env` (`agent_runner` will `load_dotenv`):
+- LLM credentials in repo root `.env`, i.e., `../../../../.env` (`agent_runner` will `load_dotenv`):
   ```
   LLM_API_KEY=...
   LLM_MODEL_NAME=...
@@ -66,7 +66,7 @@ You type user messages line by line, each line triggers one real agent execution
 
 ```bash
 # In ctx_debugger/ directory
-../../backend/.venv/bin/python interactive.py
+../../../../backend/.venv/bin/python interactive.py
 ```
 
 Each turn auto-displays agent answer + context construction panel (agent steps, main/compression LLM calls, compression triggered or not, token reduction, summary updated or not).
@@ -101,15 +101,15 @@ Without modifying benchmark code, monkey-patch `CoreAgent.__init__` so each agen
 ```bash
 # In ctx_debugger/ directory
 NEXENT_CONTEXT_DEBUG=/tmp/trace.jsonl \
-  ../../backend/.venv/bin/python example_with_benchmark.py
+  ../../../../backend/.venv/bin/python example_with_benchmark.py [run_benchmark args]
 ```
 
 ### 4.3 Post-analysis of Trace Files
 
 ```bash
-# In parent sdk/ directory
+# In parent tools/ directory
 cd ..
-python -m ctx_debugger.inspector <subcommand> <trace.jsonl> [options]
+../../../backend/.venv/bin/python -m ctx_debugger.inspector <subcommand> <trace.jsonl> [options]
 ```
 
 | Subcommand | Purpose |
@@ -128,14 +128,14 @@ python -m ctx_debugger.inspector <subcommand> <trace.jsonl> [options]
 Map trace into self-hosted [Langfuse](https://langfuse.com), get nested traces, per-call drill-down, token/duration views, session grouping—no need to build custom web UI.
 
 ```bash
-# In parent sdk/ directory
+# In parent tools/ directory
 cd ..
 # First dry run, see mapping structure (offline)
-python -m ctx_debugger.langfuse_export <trace.jsonl> --dry-run
+../../../backend/.venv/bin/python -m ctx_debugger.langfuse_export <trace.jsonl> --dry-run
 # After configuring credentials, real import
-LANGFUSE_HOST=http://localhost:3000 \
+LANGFUSE_HOST=http://localhost:3100 \
 LANGFUSE_PUBLIC_KEY=pk-... LANGFUSE_SECRET_KEY=sk-... \
-  python -m ctx_debugger.langfuse_export <trace.jsonl>
+  ../../../backend/.venv/bin/python -m ctx_debugger.langfuse_export <trace.jsonl>
 ```
 
 Mapping rules:
@@ -148,7 +148,7 @@ Mapping rules:
 | `tool_call_*` / `code_execute_*` | tool / span observation |
 | Entire trace file | One Langfuse session (turn grouping) |
 
-Depends on `langfuse` SDK (`uv pip install langfuse`). Self-hosted Langfuse can be started with official docker compose. **Known limitation**: Observations created at export time, single duration faithful, but absolute position on Langfuse timeline is export time, not original wall-clock time.
+Depends on `langfuse` SDK (`uv pip install langfuse`). Start the repository-managed Langfuse stack from `sdk/benchmark/infra/langfuse`. **Known limitation**: Observations created at export time, single duration faithful, but absolute position on Langfuse timeline is export time, not original wall-clock time.
 
 ---
 
