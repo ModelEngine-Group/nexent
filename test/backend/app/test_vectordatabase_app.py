@@ -180,8 +180,12 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         mock_create.return_value = expected_response
 
         # Execute request
-        response = client.post(f"/indices/{auth_data['index_name']}", params={
-                               "embedding_dim": 768}, headers=auth_data["auth_header"])
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            params={"embedding_dim": 768},
+            json={"embedding_model_id": 101},
+            headers=auth_data["auth_header"],
+        )
 
         # Verify
         assert response.status_code == 200
@@ -215,7 +219,7 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
         response = client.post(
             f"/indices/{auth_data['index_name']}",
             params={"embedding_dim": 768},
-            json={"ingroup_permission": "EDIT", "group_ids": [1, 2, 3]},
+            json={"embedding_model_id": 101, "ingroup_permission": "EDIT", "group_ids": [1, 2, 3]},
             headers=auth_data["auth_header"]
         )
 
@@ -251,7 +255,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
         # Execute request with only ingroup_permission
         response = client.post(
             f"/indices/{auth_data['index_name']}",
-            json={"ingroup_permission": "READ_ONLY"},
+            json={"embedding_model_id": 101, "ingroup_permission": "READ_ONLY"},
             headers=auth_data["auth_header"]
         )
 
@@ -264,7 +268,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
 
 
 @pytest.mark.asyncio
-async def test_create_new_index_with_multimodal_flag(vdb_core_mock, auth_data):
+async def test_create_new_index_passes_embedding_model_id(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
@@ -273,13 +277,13 @@ async def test_create_new_index_with_multimodal_flag(vdb_core_mock, auth_data):
 
         response = client.post(
             f"/indices/{auth_data['index_name']}",
-            json={"is_multimodal": True},
+            json={"embedding_model_id": 202},
             headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 200
         called_kwargs = mock_create.call_args[1]
-        assert called_kwargs["is_multimodal"] is True
+        assert called_kwargs["embedding_model_id"] == 202
 
 
 @pytest.mark.asyncio
@@ -297,12 +301,31 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
 
         # Execute request
         response = client.post(
-            f"/indices/{auth_data['index_name']}", headers=auth_data["auth_header"])
+            f"/indices/{auth_data['index_name']}",
+            json={"embedding_model_id": 101},
+            headers=auth_data["auth_header"],
+        )
 
         # Verify
         assert response.status_code == 500
         assert response.json() == {
             "detail": "Error creating index: Test error"}
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_requires_integer_embedding_model_id(vdb_core_mock, auth_data):
+    with patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ):
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            json={"embedding_model_id": "101"},
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "embedding_model_id must be an integer"}
 
 
 @pytest.mark.asyncio

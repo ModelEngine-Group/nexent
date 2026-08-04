@@ -1375,7 +1375,7 @@ class TestSkillServiceGetSkillFileContent:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.isfile', return_value=False):
+        with patch('builtins.open', side_effect=FileNotFoundError):
             result = service.get_skill_file_content("test_skill", "nonexistent.md")
 
         assert result is None

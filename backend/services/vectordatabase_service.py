@@ -346,14 +346,6 @@ def _build_model_config(model: dict) -> dict:
         "ssl_verify": model.get("ssl_verify", True),
     }
 
-def _is_dashscope_multimodal_endpoint(base_url: str) -> bool:
-    normalized_url = (base_url or "").lower()
-    return (
-        "dashscope.aliyuncs.com" in normalized_url
-        and "multimodal-embedding/multimodal-embedding" in normalized_url
-    )
-
-
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
     model_type = model.get("model_type", "embedding")
@@ -379,30 +371,6 @@ def _create_embedding_model(model: dict) -> Any:
             f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
             f"Please check the model configuration in the model management page."
         )
-
-    if _is_dashscope_multimodal_endpoint(common_kwargs["base_url"]):
-        # #region debug logging for ES indexing issue
-        try:
-            import time as _debug_ts
-            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-                _f.write(json.dumps({
-                    "sessionId": "c7009d",
-                    "runId": "debug-run-v4",
-                    "hypothesisId": "dashscope-native-route",
-                    "location": "vectordatabase_service.py:_create_embedding_model",
-                    "message": "embedding record routed to DashScope native multimodal client",
-                    "data": {
-                        "model_type": model_type,
-                        "model_name": common_kwargs["model_name"],
-                        "base_url": common_kwargs["base_url"],
-                        "client": "DashScopeMultimodalEmbedding",
-                    },
-                    "timestamp": int(_debug_ts.time() * 1000)
-                }) + "\n")
-        except Exception:
-            pass
-        # #endregion
-        return DashScopeMultimodalEmbedding(**common_kwargs)
 
     return OpenAICompatibleEmbedding(**common_kwargs)
 
@@ -473,92 +441,13 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
-    # #region debug logging for ES indexing issue
-    try:
-        import time as _debug_ts
-        with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-            _f.write(json.dumps({
-                "sessionId": "c7009d",
-                "runId": "debug-run-v3",
-                "hypothesisId": "by-id-enter",
-                "location": "vectordatabase_service.py:get_embedding_model_by_id",
-                "message": "get_embedding_model_by_id entered",
-                "data": {"tenant_id": tenant_id, "model_id": model_id},
-                "timestamp": int(_debug_ts.time() * 1000)
-            }) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
     try:
         model = get_model_by_model_id(model_id, tenant_id)
-        # #region debug logging for ES indexing issue
-        try:
-            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-                _f.write(json.dumps({
-                    "sessionId": "c7009d",
-                    "runId": "debug-run-v3",
-                    "hypothesisId": "by-id-loaded",
-                    "location": "vectordatabase_service.py:get_embedding_model_by_id",
-                    "message": "model loaded by id",
-                    "data": {
-                        "tenant_id": tenant_id,
-                        "model_id": model_id,
-                        "model_found": model is not None,
-                        "model_keys": list(model.keys()) if model else None,
-                        "model_type": model.get("model_type") if model else None,
-                        "model_factory": model.get("model_factory") if model else None,
-                        "model_name": model.get("model_name") if model else None,
-                        "base_url": model.get("base_url") if model else None,
-                    },
-                    "timestamp": int(__import__('time').time() * 1000)
-                }) + "\n")
-        except Exception:
-            pass
-        # #endregion
         if model and model.get("model_type") in ["embedding", "multi_embedding"]:
             return _create_embedding_model(model), model.get("model_id")
         else:
-            # #region debug logging for ES indexing issue
-            try:
-                with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "c7009d",
-                        "runId": "debug-run-v3",
-                        "hypothesisId": "by-id-rejected",
-                        "location": "vectordatabase_service.py:get_embedding_model_by_id",
-                        "message": "model rejected by type filter",
-                        "data": {
-                            "model_id": model_id,
-                            "model_type": model.get("model_type") if model else None,
-                            "allowed_types": ["embedding", "multi_embedding"],
-                        },
-                        "timestamp": int(__import__('time').time() * 1000)
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             logger.warning(f"Model with id {model_id} not found or is not an embedding model")
     except Exception as e:
-        # #region debug logging for ES indexing issue
-        try:
-            with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-                _f.write(json.dumps({
-                    "sessionId": "c7009d",
-                    "runId": "debug-run-v3",
-                    "hypothesisId": "by-id-exception",
-                    "location": "vectordatabase_service.py:get_embedding_model_by_id",
-                    "message": "exception in by-id",
-                    "data": {
-                        "model_id": model_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e)[:500],
-                    },
-                    "timestamp": int(__import__('time').time() * 1000)
-                }) + "\n")
-        except Exception:
-            pass
-        # #endregion
         logger.warning(f"Failed to get embedding model by id {model_id}: {e}")
     return None, None
 
@@ -924,8 +813,7 @@ class ElasticSearchService:
             tenant_id: Optional[str],
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
-            embedding_model_name: Optional[str] = None,
-            is_multimodal: Optional[bool] = None,
+            embedding_model_id: Optional[int] = None,
             preserve_source_file: Optional[bool] = None,
             quota_limit_bytes: Optional[int] = None,
     ):
@@ -945,8 +833,7 @@ class ElasticSearchService:
             tenant_id: Tenant ID
             ingroup_permission: Permission level (optional)
             group_ids: List of group IDs (optional)
-            embedding_model_name: Specific embedding model name to use (optional).
-                                   If provided, will use this model instead of tenant default.
+            embedding_model_id: Unique ID of the selected embedding model.
             preserve_source_file: Whether to preserve uploaded source documents after
                                    vectorization (optional; defaults to True when omitted).
 
@@ -954,24 +841,19 @@ class ElasticSearchService:
         with an explicit index_name.
         """
         try:
-            # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            selected_model_type = None
-            if is_multimodal is True:
-                selected_model_type = "multi_embedding"
-            elif is_multimodal is False and embedding_model_name:
-                selected_model_type = "embedding"
+            if embedding_model_id is None:
+                raise ValueError("embedding_model_id is required")
 
-            embedding_model, model_id = get_embedding_model(
-                tenant_id,
-                embedding_model_name,
-                selected_model_type
-            )
+            model = get_model_by_model_id(embedding_model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Embedding model with id {embedding_model_id} not found")
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model with id {embedding_model_id} is not an embedding model"
+                )
 
-            # Determine the embedding model name to save: use user-provided name if available,
-            # otherwise use the model's display name
-            saved_embedding_model_name = embedding_model_name
-            if not saved_embedding_model_name and embedding_model:
-                saved_embedding_model_name = embedding_model.model
+            embedding_model = _create_embedding_model(model)
+            saved_embedding_model_name = model.get("display_name") or model.get("model_name")
 
             # Create knowledge record first to obtain knowledge_id and generated index_name
             knowledge_data = {
@@ -980,7 +862,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
-                "embedding_model_id": model_id,
+                "embedding_model_id": embedding_model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -1009,9 +891,13 @@ class ElasticSearchService:
                 "status": "success",
                 "message": f"Index {index_name} created successfully",
                 "id": index_name,
+                "embedding_model_name": saved_embedding_model_name,
+                "model_type": model.get("model_type"),
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except ValueError:
+            raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
 

@@ -2271,12 +2271,12 @@ class SkillService:
                 file_path,
             )
 
-            if not os.path.isfile(full_path):
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except FileNotFoundError:
                 logger.warning("Skill file not found: %s/%s", skill_name, file_path)
                 return None
-
-            with open(full_path, "r", encoding="utf-8") as f:
-                return f.read()
         except ForbiddenError:
             logger.warning("Rejected unsafe file read for skill '%s'", skill_name)
             raise

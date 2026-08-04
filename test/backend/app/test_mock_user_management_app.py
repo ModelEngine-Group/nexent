@@ -71,7 +71,7 @@ class TestUserSignup:
             json={
                 "email": "user@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "MOCK_INVITE_CODE"
             }
         )
 
@@ -89,7 +89,7 @@ class TestUserSignup:
             json={
                 "email": "test@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "MOCK_INVITE_CODE"
             }
         )
 
@@ -123,7 +123,7 @@ class TestUserSignup:
             json={
                 "email": "error@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "MOCK_INVITE_CODE"
             }
         )
         
@@ -324,7 +324,7 @@ class TestRequestValidation:
             json={
                 "email": "invalid-email",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "MOCK_INVITE_CODE"
             }
         )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
@@ -341,7 +341,7 @@ class TestIntegrationFlow:
             json={
                 "email": "flow@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "MOCK_INVITE_CODE"
             }
         )
         assert signup_response.status_code == HTTPStatus.OK
@@ -428,7 +428,7 @@ class TestMockDataConsistency:
                 json={
                     "email": email,
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "MOCK_INVITE_CODE"
                 }
             )
             

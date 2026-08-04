@@ -80,7 +80,7 @@ def create_new_index(
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
         request: Dict[str, Any] = Body(
-            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"),
+            None, description="Request body containing embedding_model_id and optional knowledge-base settings"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -91,17 +91,18 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        embedding_model_name: Optional[str] = None
-        is_multimodal: Optional[bool] = None
+        embedding_model_id: Optional[int] = None
         preserve_source_file: Optional[bool] = None
         quota_limit_bytes: Optional[int] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            embedding_model_name = request.get("embeddingModel")
-            is_multimodal = request.get("is_multimodal")
+            embedding_model_id = request.get("embedding_model_id")
             preserve_source_file = request.get("preserve_source_file")
             quota_limit_bytes = request.get("quota_limit_bytes")
+
+        if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
+            raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -112,11 +113,15 @@ def create_new_index(
             tenant_id=tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            embedding_model_name=embedding_model_name,
-            is_multimodal=is_multimodal,
+            embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
             quota_limit_bytes=quota_limit_bytes,
         )
+    except HTTPException:
+        raise
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -470,28 +475,6 @@ def create_index_documents(
     Index documents with embeddings, creating the index if it doesn't exist.
     Accepts a document list from data processing.
     """
-    # #region debug logging for ES indexing issue
-    try:
-        import time as _debug_ts
-        with open("/mnt/nexent/debug-c7009d.log", "a") as _f:
-            _f.write(json.dumps({
-                "sessionId": "c7009d",
-                "runId": "debug-run-v3",
-                "hypothesisId": "entry-v3",
-                "location": "vectordatabase_app.py:create_index_documents",
-                "message": "create_index_documents entered",
-                "data": {
-                    "index_name": index_name,
-                    "data_count": len(data) if data else 0,
-                    "has_task_id": bool(task_id),
-                    "has_large_mode": large_mode,
-                },
-                "timestamp": int(_debug_ts.time() * 1000)
-            }) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)

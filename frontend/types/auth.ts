@@ -35,7 +35,7 @@ export interface AuthFormValues {
   email: string;
   password: string;
   confirmPassword: string;
-  inviteCode?: string;
+  inviteCode: string;
 }
 
 export interface RegisterModalOptions {
