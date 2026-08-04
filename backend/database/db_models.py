@@ -104,6 +104,8 @@ class ConversationMessageUnit(TableBase):
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
     tool_call_id = Column(
         String(36), doc="Unique ID of the originating tool invocation. Used to attribute side-channel units to the correct tool call when multiple calls run in parallel.")
+    invocation_id = Column(
+        String(36), doc="Identifies which sub-agent invocation produced this unit. Used by the frontend history adapter to route deep-thinking / reasoning chunks into the correct nested sub-agent card.")
 
 
 class AgentAutomationTask(TableBase):

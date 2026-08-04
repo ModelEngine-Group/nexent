@@ -12,7 +12,6 @@ const { Dragger } = Upload;
 interface UploadAreaUIProps {
   fileList: UploadFile[];
   uploadProps: UploadProps;
-  onStartNewSelection?: () => void;
   isLoading: boolean;
   isKnowledgeBaseReady: boolean;
   isCreatingMode: boolean;
@@ -29,7 +28,6 @@ interface UploadAreaUIProps {
 const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   fileList,
   uploadProps,
-  onStartNewSelection,
   isLoading,
   isKnowledgeBaseReady,
   isCreatingMode,
@@ -166,7 +164,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                 e.stopPropagation();
               }}
             >
-              <div className="h-full" onClick={() => onStartNewSelection?.()}>
+              <div className="h-full">
                 <Dragger
                   {...uploadProps}
                   className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
@@ -182,6 +180,9 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                     </p>
                     <p className="ant-upload-hint text-gray-500">
                       {t("knowledgeBase.upload.supportedFormats")}
+                    </p>
+                    <p className="ant-upload-hint !mt-1 text-gray-500">
+                      {t("knowledgeBase.upload.fileSizeLimit")}
                     </p>
                   </div>
                 </Dragger>
