@@ -257,6 +257,11 @@ class SkillDuplicateError(Exception):
     """Raised when importing an agent with skills that have duplicate names in target tenant."""
     def __init__(self, duplicate_names: List[str]):
         self.duplicate_names = duplicate_names
+        names_str = ", ".join(duplicate_names)
+        super().__init__(
+            f"Skill name conflict: the following skills already exist in your workspace: {names_str}. "
+            f"Please rename them or delete the existing skills before importing."
+        )
 
 
 class SkillException(Exception):

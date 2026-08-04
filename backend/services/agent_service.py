@@ -3969,6 +3969,30 @@ async def import_agents_batch_impl(
                     "success": True,
                     "error": None,
                 })
+            except SkillDuplicateError as e:
+                logger.warning(
+                    f"Batch import skill duplicate for folder {folder}: {e.duplicate_names}")
+                try:
+                    payload = json.loads(
+                        zf.read(agent_json_path).decode("utf-8"))
+                    main_info = payload.get("agent_info", {}).get(
+                        str(payload.get("agent_id")), {})
+                    failed_name = main_info.get("name") or folder
+                    failed_display = main_info.get("display_name")
+                except Exception:
+                    failed_name = folder
+                    failed_display = None
+
+                summary["failed_count"] += 1
+                summary["items"].append({
+                    "name": failed_name,
+                    "display_name": failed_display,
+                    "success": False,
+                    "error": (
+                        f"Skill name conflict: {', '.join(e.duplicate_names)}. "
+                        f"Please rename them or delete the existing skills before importing."
+                    ),
+                })
             except Exception as e:
                 logger.exception(
                     f"Batch import failed for folder {folder}: {e}")
