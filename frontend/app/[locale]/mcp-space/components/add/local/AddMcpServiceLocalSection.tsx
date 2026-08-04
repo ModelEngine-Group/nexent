@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Form, Input, Select, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
@@ -10,6 +10,8 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
+import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
+import { isValidPort } from "@/lib/mcpTools";
 import ContainerPortField from "../../shared/ContainerPortField";
 import TagEditor from "../../shared/TagEditor";
 
@@ -90,6 +92,30 @@ export default function AddMcpServiceLocalSection({
   useEffect(() => {
     onSubmittingChange?.(submitting);
   }, [submitting, onSubmittingChange]);
+
+  // The container port is determined by nexent and shown read-only: when
+  // running inside Docker/K8s it is the fixed default port (e.g. 5020);
+  // otherwise the backend returns a free port. Auto-suggest it once per add
+  // flow so the field is pre-filled and the user cannot edit it.
+  const autoSuggestedPortRef = useRef(false);
+  useEffect(() => {
+    const isContainerType =
+      deploymentType === McpDeploymentType.CONTAINER ||
+      deploymentType === McpDeploymentType.LOCAL_IMAGE;
+    if (
+      isContainerType &&
+      draft.containerPort === undefined &&
+      !autoSuggestedPortRef.current
+    ) {
+      autoSuggestedPortRef.current = true;
+      suggestMcpContainerPortService().then((res) => {
+        if (res.success && isValidPort(res.data.port)) {
+          patchDraft({ containerPort: res.data.port });
+          form.setFieldValue("containerPort", res.data.port);
+        }
+      });
+    }
+  }, [deploymentType, draft.containerPort]);
 
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -367,6 +393,8 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
+                    enabled={false}
+                    readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });
@@ -415,8 +443,9 @@ export default function AddMcpServiceLocalSection({
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpConfig.openapiService.form.openapiJson")}
+                  <span className="ml-1 text-red-500">*</span>
                 </label>
-                <Form.Item name="openApiJson" className="mb-0">
+                <Form.Item name="openApiJson" rules={rules.openApiJson} className="mb-0">
                   <Input.TextArea
                     {...bindField("openApiJson")}
                     rows={6}
@@ -424,6 +453,9 @@ export default function AddMcpServiceLocalSection({
                     placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                   />
                 </Form.Item>
+                <p className="mt-1 text-xs text-slate-400">
+                  {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                </p>
               </div>
             </div>
           </div>
@@ -498,6 +530,8 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
+                    enabled={false}
+                    readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });

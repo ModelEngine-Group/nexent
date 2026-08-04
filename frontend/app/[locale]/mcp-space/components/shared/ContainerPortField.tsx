@@ -1,4 +1,4 @@
-import { Button, InputNumber } from "antd";
+import { InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
@@ -6,6 +6,8 @@ import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortA
 interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
+  /** i18n key for the readonly hint shown when `enabled` is false. Defaults to `portReadonlyHint`. */
+  readonlyHintKey?: string;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
 }
@@ -13,16 +15,16 @@ interface ContainerPortFieldProps {
 export default function ContainerPortField({
   scope,
   enabled = true,
+  readonlyHintKey,
   containerPort,
   setContainerPort,
 }: ContainerPortFieldProps) {
   const { t } = useTranslation("common");
-  const { portCheckLoading, portAvailable, suggesting, suggestPort } =
-    useContainerPortAvailability({
-      enabled,
-      containerPort,
-      setContainerPort,
-    });
+  const { portCheckLoading, portAvailable } = useContainerPortAvailability({
+    enabled,
+    containerPort,
+    setContainerPort,
+  });
 
   return (
     <label className="block text-sm text-slate-500">
@@ -38,19 +40,10 @@ export default function ContainerPortField({
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
-        {enabled ? (
-          <Button
-            onClick={suggestPort}
-            loading={suggesting}
-            disabled={portCheckLoading || suggesting}
-          >
-            {t("mcpTools.addModal.suggestPort")}
-          </Button>
-        ) : null}
       </div>
       {!enabled ? (
         <p className="mt-2 text-xs text-slate-400">
-          {t("mcpTools.addModal.portReadonlyHint")}
+          {t(readonlyHintKey ?? "mcpTools.addModal.portReadonlyHint")}
         </p>
       ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">

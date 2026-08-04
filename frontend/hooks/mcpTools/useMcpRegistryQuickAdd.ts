@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
+  suggestMcpContainerPortService,
   testMcpConnectionService,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
@@ -56,6 +57,7 @@ export function useMcpRegistryQuickAdd({
   const [containerPort, setContainerPort] = useState<number | undefined>(
     undefined
   );
+  const containerPortSuggestedRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [customName, setCustomName] = useState<string>("");
   const [testingConnection, setTestingConnection] = useState(false);
@@ -84,6 +86,7 @@ export function useMcpRegistryQuickAdd({
       setSelectedKey(firstKey);
       setValues(buildInitialQuickAddValues(nextOptions[0]));
       setContainerPort(undefined);
+      containerPortSuggestedRef.current = false;
     },
     [message, t]
   );
@@ -95,6 +98,7 @@ export function useMcpRegistryQuickAdd({
     setSelectedKey("");
     setValues({});
     setContainerPort(undefined);
+    containerPortSuggestedRef.current = false;
     setCustomName("");
   }, []);
 
@@ -107,6 +111,19 @@ export function useMcpRegistryQuickAdd({
     },
     [options]
   );
+
+  // The container port is determined by nexent and shown read-only. Auto-suggest
+  // it once per container quick-add so the field is pre-filled and locked.
+  useEffect(() => {
+    if (selectedOption?.transportType !== McpTransportType.CONTAINER) return;
+    if (containerPort !== undefined || containerPortSuggestedRef.current) return;
+    containerPortSuggestedRef.current = true;
+    suggestMcpContainerPortService().then((res) => {
+      if (res.success && typeof res.data?.port === "number") {
+        setContainerPort(res.data.port);
+      }
+    });
+  }, [selectedOption, containerPort]);
 
   const setValue = useCallback((formKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [formKey]: value }));

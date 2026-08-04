@@ -370,6 +370,8 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
                   <div>
                     <ContainerPortField
                       scope="registry"
+                      enabled={false}
+                      readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                       containerPort={containerPort}
                       setContainerPort={(value) => {
                         controller.setContainerPort(value);

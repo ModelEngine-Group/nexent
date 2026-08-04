@@ -345,15 +345,6 @@ class DockerContainerClient(ContainerClient):
         if env_vars:
             authorization_token = env_vars.get("authorization_token")
 
-        # Prepare environment variables
-        container_env = {
-            "PORT": str(host_port),
-            "TRANSPORT": "streamable-http",
-            "NODE_ENV": "production",
-        }
-        if env_vars:
-            container_env.update(env_vars)
-
         # Determine image name
         command0 = full_command[0] if full_command else ""
         if image is not None:
@@ -364,10 +355,21 @@ class DockerContainerClient(ContainerClient):
             image_name = "alpine:latest"
 
         # The container-internal port the MCP server listens on may differ from
-        # the host port (e.g. an uploaded image hardcoding --port 3033). Map
-        # host:<host_port> -> container:<container_port> so the health check on
-        # the host port reaches the server.
+        # the host port (e.g. an uploaded image hardcoding --port 3033). Detect
+        # it so host:<host_port> maps to container:<container_port> and the
+        # health check / PORT env target the port the server actually binds.
         container_port = self._detect_container_port(image_name, host_port)
+
+        # Prepare environment variables. PORT must equal the container-internal
+        # port (not the host port) so servers that read PORT env listen on the
+        # same port the health check connects to.
+        container_env = {
+            "PORT": str(container_port),
+            "TRANSPORT": "streamable-http",
+            "NODE_ENV": "production",
+        }
+        if env_vars:
+            container_env.update(env_vars)
 
         full_command_to_run = full_command
 
@@ -405,7 +407,10 @@ class DockerContainerClient(ContainerClient):
 
             # Wait for service to be ready
             host = self._get_service_host(container_name)
-            service_url = f"http://{host}:{host_port}/mcp"
+            # Use the detected internal port so the URL points at the port the
+            # MCP server actually listens on (e.g. --port 3033 in the image),
+            # not the random host_port that nothing is bound to in Docker mode.
+            service_url = f"http://{host}:{container_port}/mcp"
             try:
                 await self._wait_for_service_ready(service_url, max_retries=30, authorization_token=authorization_token)
             except ContainerConnectionError:
