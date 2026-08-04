@@ -21,7 +21,7 @@ import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
-import type { ApiMessage } from "@/types/conversation";
+import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
 import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
@@ -30,9 +30,10 @@ import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
   attachSearchContentToTool,
-  attachSearchImageToTool,
   buildToolCallPart,
   conversationSourcesRegistry,
+  extractAidpImageKeys,
+  searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
   remoteChatModelAdapter,
@@ -244,12 +245,15 @@ const restoreAttachments = (
   });
 };
 
-class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
+export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   private loadGeneration = 0;
 
   constructor(
     private readonly getRemoteId: () => string | undefined,
-    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>
+    private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
+    private readonly loadDetail?: () => Promise<
+      ApiConversationDetail | undefined
+    >
   ) {}
 
   async load(): Promise<
@@ -277,8 +281,9 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     // Translate backend `ApiMessage` items into assistant-ui content parts.
     // Historical thinking output is restored as completed reasoning content,
     // while the final answer remains a separate text part.
-    const response = await conversationService.getDetail(Number(remoteId));
-    const detail = response.data?.[0];
+    const detail = this.loadDetail
+      ? await this.loadDetail()
+      : (await conversationService.getDetail(Number(remoteId))).data?.[0];
     if (!detail) {
       return { messages: [] };
     }
@@ -305,6 +310,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const persistedAnswerImageKeys = extractAidpImageKeys(
+        messageParts.flatMap((part) =>
+          (part.type === "final_answer" || part.type === "text") &&
+          typeof part.content === "string"
+            ? [part.content]
+            : []
+        )
+      );
 
       // Collect token_count units so the per-message `SingleTurnTokenUsage`
       // can render the historical step breakdown. The streaming adapter writes
@@ -326,6 +339,11 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const filename = (item.filename as string | undefined) ?? "";
             const title = (item.title as string | undefined) || filename || url;
             if (url || filename || title) {
+              const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const isImage =
+                (item.score_details as Record<string, unknown> | undefined)
+                  ?.chunk_type === "image" ||
+                persistedAnswerImageKeys.includes(derivedImageKey);
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
                 url,
@@ -337,6 +355,10 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 filename,
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
+                isImage,
+                imageKey:
+                  (item.image_key as string | undefined) ||
+                  (isImage ? derivedImageKey : undefined),
               });
             }
           }
@@ -416,9 +438,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         const flushReasoning = (invocationId?: string) => {
-          const entry = invocationId
-            ? activeSubAgents.get(invocationId)
-            : null;
+          const entry = invocationId ? activeSubAgents.get(invocationId) : null;
           if (entry?.reasoningText) {
             content.push({
               type: "reasoning",
@@ -443,6 +463,48 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             });
             reasoningText = "";
           }
+        };
+
+        const answerImageKeys = persistedAnswerImageKeys;
+        const persistedImageSources = Array.isArray(msg.search)
+          ? msg.search.filter(
+              (searchItem) =>
+                typeof searchItem === "object" && searchItem !== null
+            )
+          : [];
+        const restoredImageUrls = new Set<string>();
+        const restoredImages: any[] = [];
+        const appendHistoricalImage = (imageUrl: string) => {
+          if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
+          const imageIndex = restoredImageUrls.size;
+          const imageKey = answerImageKeys[imageIndex];
+          const metadata = persistedImageSources.find((searchItem) => {
+            const item = searchItem as Record<string, unknown>;
+            return (
+              imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`
+            );
+          }) as Record<string, unknown> | undefined;
+          const title = (metadata?.title as string | undefined) || imageUrl;
+          const imagePart: any = {
+            type: "source",
+            sourceType: "url",
+            url: imageUrl,
+            title,
+            text: metadata?.text as string | undefined,
+            citeIndex:
+              (metadata?.cite_index as number | undefined) ?? undefined,
+            isImage: true,
+            imageKey:
+              (metadata?.image_key as string | undefined) ||
+              (metadata?.tool_sign && metadata?.cite_index !== undefined
+                ? `${metadata.tool_sign}${metadata.cite_index}`
+                : undefined) ||
+              imageKey,
+          };
+          const meta = buildMetadata();
+          if (meta) imagePart.metadata = meta;
+          restoredImageUrls.add(imageUrl);
+          restoredImages.push(imagePart);
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -507,7 +569,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              attachSearchImageToTool(content, imageUrl, part.tool_call_id);
+              appendHistoricalImage(imageUrl);
             }
             continue;
           }
@@ -766,21 +828,11 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
         activeSubAgents.clear();
 
-        // Some older records only persist the message-level image list. When
-        // no picture_web unit restored images inline, associate that list with
-        // the most recent tool call so ToolFallback still shows its Sources.
+        // Some older records only persist the message-level image list.
         if (Array.isArray(msg.picture) && msg.picture.length > 0) {
-          const toolHasImages = content.some(
-            (item) =>
-              item?.type === "tool-call" &&
-              Array.isArray(item.searchImages) &&
-              item.searchImages.length > 0
-          );
-          if (!toolHasImages) {
-            for (const imageUrl of msg.picture) {
-              if (typeof imageUrl === "string" && imageUrl) {
-                attachSearchImageToTool(content, imageUrl);
-              }
+          for (const imageUrl of msg.picture) {
+            if (typeof imageUrl === "string" && imageUrl) {
+              appendHistoricalImage(imageUrl);
             }
           }
         }
@@ -793,6 +845,20 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (fallbackText) content.push({ type: "text", text: fallbackText });
         }
 
+        const restoredImageMap = new Map<string, SearchSource>();
+        for (const image of restoredImages) {
+          if (image.imageKey) restoredImageMap.set(image.imageKey, image);
+        }
+        if (restoredImageMap.size > 0) {
+          searchImagesRegistry.set(messageId, restoredImageMap);
+        }
+        const restoredConversationSources =
+          conversationSourcesRegistry.get(messageId) ?? [];
+        conversationSourcesRegistry.set(messageId, [
+          ...restoredConversationSources.filter((source) => !source.isImage),
+          ...restoredImages,
+        ]);
+
         // Emit a `source` part for each persisted search result so the
         // `group-source` block renders the inline "检索结果" trigger button.
         // Mirrors the streaming adapter's end-of-stream emission, but uses the
@@ -802,6 +868,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           for (const searchItem of msg.search) {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
+              const scoreDetails = item.score_details as
+                Record<string, unknown> | undefined;
+              const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              if (
+                scoreDetails?.chunk_type === "image" ||
+                answerImageKeys.includes(searchImageKey)
+              )
+                continue;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
@@ -824,21 +898,10 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
         }
 
-        // Emit one `source` part per persisted image so the side panel's
-        // image tab has data to render. The streaming adapter emits these
-        // from `picture_web` chunks; historical loads read them from
-        // `msg.picture` which already de-duplicates by URL.
-        if (Array.isArray(msg.picture) && msg.picture.length > 0) {
-          for (const imageUrl of msg.picture) {
-            if (typeof imageUrl !== "string" || !imageUrl) continue;
-            content.push({
-              type: "source",
-              sourceType: "url",
-              url: imageUrl,
-              title: imageUrl,
-              isImage: true,
-            });
-          }
+        // Keep image sources adjacent to regular sources so GroupedParts
+        // creates one unified source button and side panel selection.
+        for (const image of restoredImages) {
+          content.push(image);
         }
       }
 
@@ -998,6 +1061,70 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
   };
 
   return Provider;
+};
+
+const createShareHistoryProvider = (
+  snapshot: ApiConversationDetail
+): FC<PropsWithChildren> => {
+  const Provider: FC<PropsWithChildren> = ({ children }) => {
+    const aui = useAui();
+    const history = useMemo(
+      () =>
+        new RemoteConversationHistoryAdapter(
+          () => aui.threadListItem().getState().remoteId,
+          () => aui.threadListItem().initialize(),
+          async () => snapshot
+        ),
+      [aui]
+    );
+    const adapters = useMemo(() => ({ history }), [history]);
+    return (
+      <RuntimeAdapterProvider adapters={adapters}>
+        {children}
+      </RuntimeAdapterProvider>
+    );
+  };
+  return Provider;
+};
+
+/**
+ * Creates a single, read-only thread adapter for a public new-chat share.
+ * It deliberately reuses RemoteConversationHistoryAdapter so the snapshot is
+ * reconstructed with the exact same Tool Call, Reasoning, source and
+ * attachment mapping used by a normal historical conversation.
+ */
+export const createShareThreadListAdapter = (
+  snapshot: ApiConversationDetail
+): RemoteThreadListAdapter => {
+  const remoteId = String(snapshot.conversation_id);
+  const title =
+    (snapshot as ApiConversationDetail & { conversation_title?: string })
+      .conversation_title || "Shared conversation";
+  const metadata: RemoteThreadMetadata = {
+    remoteId,
+    status: "regular",
+    title,
+  };
+
+  return {
+    unstable_Provider: createShareHistoryProvider(snapshot),
+    async list(): Promise<RemoteThreadListResponse> {
+      return { threads: [metadata] };
+    },
+    async initialize(): Promise<RemoteThreadInitializeResponse> {
+      return { remoteId, externalId: remoteId };
+    },
+    async fetch(): Promise<RemoteThreadMetadata> {
+      return metadata;
+    },
+    async rename(): Promise<void> {},
+    async archive(): Promise<void> {},
+    async unarchive(): Promise<void> {},
+    async delete(): Promise<void> {},
+    async generateTitle() {
+      return createAssistantStream(() => {});
+    },
+  };
 };
 
 // ---------------------------------------------------------------------------

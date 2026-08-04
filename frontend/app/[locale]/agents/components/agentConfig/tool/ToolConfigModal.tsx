@@ -572,6 +572,7 @@ export default function ToolConfigModal({
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
+    isSuccess: isKbListLoaded,
     refetch: refetchKnowledgeBases,
     clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(toolKbType, resolveKbConfig());
@@ -1159,10 +1160,15 @@ export default function ToolConfigModal({
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Filter selectedKbIds to only include knowledge bases that exist in the current list
-  // This handles cases where knowledge bases are no longer available (e.g., wrong URL)
+  // Filter selected KB IDs to the current accessible list. For AIDP, an
+  // successfully loaded empty list is meaningful: the current user cannot
+  // read any of the KBs saved by the agent creator.
   useEffect(() => {
-    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+    const canValidateSelection =
+      knowledgeBases.length > 0 ||
+      (toolKbType === "aidp_search" && isKbListLoaded);
+
+    if (selectedKbIds.length > 0 && canValidateSelection) {
       const validKbIds = selectedKbIds.filter((id) =>
         knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
       );
@@ -1176,9 +1182,28 @@ export default function ToolConfigModal({
           return kb?.display_name || kb?.name || id;
         });
         setSelectedKbDisplayNames(displayNames);
+
+        if (toolKbType === "aidp_search") {
+          setTestPanelKbIds(validKbIds);
+          setTestPanelKbDisplayNames(displayNames);
+          const fieldIndex = currentParams.findIndex((p) => p.name === "kds_list");
+          if (fieldIndex !== -1) {
+            form.setFieldValue(`param_${fieldIndex}`, validKbIds);
+          }
+          setCurrentParams((prevParams) => {
+            const prevFieldIndex = prevParams.findIndex((p) => p.name === "kds_list");
+            if (prevFieldIndex === -1) return prevParams;
+            const updatedParams = [...prevParams];
+            updatedParams[prevFieldIndex] = {
+              ...updatedParams[prevFieldIndex],
+              value: validKbIds,
+            };
+            return updatedParams;
+          });
+        }
       }
     }
-  }, [knowledgeBases]);
+  }, [knowledgeBases, isKbListLoaded, toolKbType, selectedKbIds, currentParams, form]);
 
   // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
   // This ensures the modal receives the correct selected IDs
@@ -1707,6 +1732,14 @@ export default function ToolConfigModal({
         // Value can be an array or a JSON string
         ids = parseKbIds(formValue);
 
+        if (toolKbType === "aidp_search" && isKbListLoaded) {
+          ids = ids.filter((id) =>
+            knowledgeBases.some(
+              (kb) => String(kb.id).trim() === String(id).trim()
+            )
+          );
+        }
+
         // Map IDs to display names
         if (ids.length > 0) {
           if (toolKbType === "haotian_search" && haotianKnowledgeSets.length > 0) {
@@ -1728,7 +1761,11 @@ export default function ToolConfigModal({
       }
 
       // Fallback to selectedKbDisplayNames if displayNames is empty
-      if (displayNames.length === 0 && selectedKbDisplayNames.length > 0) {
+      if (
+        toolKbType !== "aidp_search" &&
+        displayNames.length === 0 &&
+        selectedKbDisplayNames.length > 0
+      ) {
         displayNames = selectedKbDisplayNames;
         ids = selectedKbIds;
       }
@@ -1817,6 +1854,8 @@ export default function ToolConfigModal({
     [
       form,
       knowledgeBases,
+      isKbListLoaded,
+      toolKbType,
       selectedKbIds,
       selectedKbDisplayNames,
       kbLoading,

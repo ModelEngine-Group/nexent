@@ -1,4 +1,4 @@
-# Memory Management
+# Memory Configuration
 
 Nexent’s intelligent memory system gives agents persistent context. With multi-level memories, agents can remember key facts across conversations, retrieve them automatically, and deliver more personalized answers.
 
@@ -28,7 +28,7 @@ The memory system lets agents “remember” important information and reuse it 
 | Agent Memory Sharing Strategy | Always Share / Ask Every Time / Never Share | Always Share | Defines if agents can share memories without user confirmation. |
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/memory-management/mem-config.png" style="width: 80%; height: auto;" alt="Memory configuration" />
+  <img src="../assets/memory-management/mem-config.png" style="width: 80%; height: auto;" alt="Memory configuration" />
 </div>
 
 **Setting Tips**
@@ -100,7 +100,7 @@ Need full control? Manage entries manually.
 4. Click the check mark to save.
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/memory-management/add-mem.png" style="width: 80%; height: auto;" alt="Add memory" />
+  <img src="../assets/memory-management/add-mem.png" style="width: 80%; height: auto;" alt="Add memory" />
 </div>
 
 ### Delete Memories
@@ -109,7 +109,7 @@ Need full control? Manage entries manually.
 - **Delete single entry:** Click the red eraser icon to remove one entry.
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/memory-management/delete-mem.png" style="width: 80%; height: auto;" alt="Delete memory" />
+  <img src="../assets/memory-management/delete-mem.png" style="width: 80%; height: auto;" alt="Delete memory" />
 </div>
 
 ## 💡 Usage Tips
@@ -133,8 +133,8 @@ Need full control? Manage entries manually.
 
 With memory configured you can:
 
-1. Experience the new continuity in **[Start Chat](./start-chat)**.
-2. Manage all agents in **[Agent Space](./agent-space)**.
-3. Build more agents inside **[Agent Development](./agent-development)**.
+1. Experience the new continuity in **[Start Chat](../start-chat)**.
+2. Manage all agents in **[Agent Repository](../resource-repository/agent-repository)**.
+3. Build more agents inside **[Agent Development](../agent-development)**.
 
-Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

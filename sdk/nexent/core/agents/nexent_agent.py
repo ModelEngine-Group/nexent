@@ -340,8 +340,13 @@ class NexentAgent:
                 else:
                     tools_obj.memory_context_service = None
             elif class_name == "AidpSearchTool":
-                tools_obj = tool_class(**params)
+                # kds_name_to_id_map is exclude=True; inject via metadata after init
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["kds_name_to_id_map"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.kds_name_to_id_map = tool_config.metadata.get(
+                    "kds_name_to_id_map", {}) if tool_config.metadata else {}
                 # Install the KDS whitelist so the tool only retrieves from
                 # KBs the current user is permitted to see.  Guard against
                 # ``metadata=None`` the same way every other branch does

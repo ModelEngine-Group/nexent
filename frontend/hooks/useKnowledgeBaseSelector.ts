@@ -155,10 +155,7 @@ export function useKnowledgeBasesForToolConfig(
         }
       } else if (toolType === "aidp_search") {
         try {
-          const result = await knowledgeBaseService.getAidpKnowledgeBases(
-            1,
-            100
-          );
+          const result = await knowledgeBaseService.getAidpKnowledgeBasesAll();
           kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
             result.value || []
           );
@@ -324,10 +321,7 @@ export function usePrefetchKnowledgeBases() {
             }
           } else if (toolType === "aidp_search") {
             try {
-              const result = await knowledgeBaseService.getAidpKnowledgeBases(
-                1,
-                100
-              );
+              const result = await knowledgeBaseService.getAidpKnowledgeBasesAll();
               kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
                 result.value || []
               );

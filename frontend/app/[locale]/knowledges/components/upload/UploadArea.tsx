@@ -22,7 +22,7 @@ interface UploadAreaProps {
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
   selectedFiles?: File[];
-  onUpload?: () => void;
+  onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
   disabled?: boolean;
   disabledMessage?: string;
@@ -64,13 +64,10 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const [isKnowledgeBaseReady, setIsKnowledgeBaseReady] = useState(false);
     const currentKnowledgeBaseRef = useRef<string>("");
     const pendingRequestRef = useRef<AbortController | null>(null);
-    const prevFileListRef = useRef<UploadFile[]>([]);
     // UIDs already handed off to the parent upload; kept in the visible list but not re-sent.
     const uploadedUidsRef = useRef<Set<string>>(new Set());
-
-    useEffect(() => {
-      prevFileListRef.current = fileList;
-    }, [fileList]);
+    const pendingUploadRequestsRef = useRef<any[]>([]);
+    const uploadScheduledRef = useRef(false);
 
     const updateNameStatus = useCallback((status: string) => {
       setNameStatus(status);
@@ -81,7 +78,6 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const resetAllStates = useCallback(() => {
       uploadedUidsRef.current = new Set();
       setFileList([]);
-      prevFileListRef.current = [];
       updateNameStatus("available");
       setIsLoading(true);
       setIsKnowledgeBaseReady(false);
@@ -212,37 +208,44 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
           onFileSelect(pendingFiles as unknown as File[]);
         }
 
-        // Check if a batch that was uploading has just finished
-        const prevFileList = prevFileListRef.current;
-        const uploadWasInProgress = prevFileList.some(
-          (f) => f.status === "uploading"
-        );
-        const uploadIsNowFinished =
-          deduped.length > 0 &&
-          !deduped.some((f) => f.status === "uploading");
-
-        if (uploadWasInProgress && uploadIsNowFinished) {
-          // Parent reads uploadFiles set via onFileSelect (pending only); mark all
-          // currently listed files as uploaded so they are not re-sent next time.
-          if (onUpload) {
-            onUpload();
-          }
-          for (const f of deduped) {
-            uploadedUidsRef.current.add(f.uid);
-          }
-        }
       },
-      [indexName, onFileSelect, isCreatingMode, onUpload]
+      [indexName, onFileSelect, isCreatingMode]
     );
 
     // Handle custom upload request
-    const handleCustomRequest = useCallback((options: any) => {
-      // Actual upload is handled by parent component's handleFileUpload
-      const { onSuccess, file } = options;
-      setTimeout(() => {
-        onSuccess({}, file);
-      }, 100);
-    }, []);
+    const handleCustomRequest = useCallback(
+      (options: any) => {
+        pendingUploadRequestsRef.current.push(options);
+        if (uploadScheduledRef.current) {
+          return;
+        }
+
+        uploadScheduledRef.current = true;
+        setTimeout(async () => {
+          try {
+            while (pendingUploadRequestsRef.current.length > 0) {
+              const requests = pendingUploadRequestsRef.current.splice(0);
+              try {
+                await onUpload?.(requests.map(({ file }) => file as File));
+                requests.forEach(({ onSuccess, file }) => {
+                  uploadedUidsRef.current.add(file.uid);
+                  onSuccess?.({}, file);
+                });
+              } catch (error) {
+                requests.forEach(({ onError, file }) =>
+                  onError?.(error, undefined, file)
+                );
+              }
+            }
+          } catch (error) {
+            log.error("Unexpected error while updating upload status", error);
+          } finally {
+            uploadScheduledRef.current = false;
+          }
+        }, 0);
+      },
+      [onUpload]
+    );
 
     // Upload component properties
     const uploadProps: UploadProps = {

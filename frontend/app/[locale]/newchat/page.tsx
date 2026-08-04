@@ -355,6 +355,11 @@ const HomeContent: FC<{
       <div className="flex-1 min-w-0">
         <Chat
           generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
+          conversationId={
+            activeConversationId && Number(activeConversationId) > 0
+              ? Number(activeConversationId)
+              : undefined
+          }
           isLoadingAgents={isLoadingAgents}
           selectedAgent={selectedAgent}
           onAgentSelected={handleAgentSelectedFromLanding}

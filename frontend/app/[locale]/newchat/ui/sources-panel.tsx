@@ -15,6 +15,7 @@ import {
   extractObjectNameFromUrl,
   storageService,
 } from "@/services/storageService";
+import { AuthenticatedImage } from "./authenticated-image";
 
 /**
  * Loose typing for the source items handled by the side panel. Matches the
@@ -68,7 +69,12 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   useEffect(() => {
     if (!open) return;
 
-    if (selectedCiteIndex !== undefined || sources.length > 0) {
+    const selectedIsImage =
+      selectedCiteIndex !== undefined &&
+      images.some((item) => item.citeIndex === selectedCiteIndex);
+    if (selectedIsImage) {
+      setActiveTab("images");
+    } else if (selectedCiteIndex !== undefined || sources.length > 0) {
       setActiveTab("sources");
     } else if (images.length > 0) {
       setActiveTab("images");
@@ -340,19 +346,14 @@ const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
   const imageUrl = item.url || "";
   if (!imageUrl) return null;
   return (
-    <a
-      href={imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="aui-global-search-image block overflow-hidden rounded-md border bg-muted/50"
-      title={imageUrl}
-    >
-      <img
+    <div className="aui-global-search-image overflow-hidden rounded-md border bg-muted/50">
+      <AuthenticatedImage
         src={imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"
+        preview
         className="aspect-square w-full object-cover"
       />
-    </a>
+    </div>
   );
 };

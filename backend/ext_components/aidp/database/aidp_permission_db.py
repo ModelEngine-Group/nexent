@@ -105,6 +105,27 @@ def list_all_permissions_by_tenant(
         return [as_dict(row) for row in rows]
 
 
+def list_kds_name_to_id_map(
+    tenant_id: str,
+    db_session: Optional[Session] = None,
+) -> dict:
+    """Return a ``{kds_name: kb_id}`` map for all active records in ``tenant_id``.
+
+    Skips rows where ``kds_name`` is empty or NULL. This is the DB-layer
+    primitive; user-level access filtering is applied by the service layer.
+    """
+    if not tenant_id:
+        raise ValueError("tenant_id is required")
+
+    stmt = (
+        select(AidpKbPermission.kds_name, AidpKbPermission.kb_id)
+        .where(and_(_active_clause(), AidpKbPermission.tenant_id == tenant_id))
+    )
+    with get_db_session(db_session) as session:
+        rows = session.execute(stmt).all()
+        return {row.kds_name: row.kb_id for row in rows if row.kds_name}
+
+
 def count_permissions_by_tenant(
     tenant_id: str,
     db_session: Optional[Session] = None,
@@ -152,6 +173,7 @@ def get_permission_by_kb_id(
 def create_permission(
     *,
     kb_id: str,
+    kds_name: Optional[str] = None,
     owner_user_id: str,
     tenant_id: str,
     ingroup_permission: str = "READ_ONLY",
@@ -169,6 +191,7 @@ def create_permission(
         raise ValueError("kb_id, owner_user_id and tenant_id are required")
     payload = {
         "kb_id": kb_id,
+        "kds_name": kds_name or "",
         "owner_user_id": owner_user_id,
         "tenant_id": tenant_id,
         "ingroup_permission": ingroup_permission,
@@ -203,6 +226,7 @@ def update_permission(
     tenant_id: str,
     ingroup_permission: Optional[str] = None,
     group_ids: Optional[Sequence[int]] = None,
+    kds_name: Optional[str] = None,
     updated_by: Optional[str] = None,
     db_session: Optional[Session] = None,
 ) -> bool:
@@ -218,6 +242,8 @@ def update_permission(
         values["ingroup_permission"] = ingroup_permission
     if group_ids is not None:
         values["group_ids"] = _normalize_group_ids(group_ids)
+    if kds_name is not None:
+        values["kds_name"] = kds_name
     if updated_by is not None:
         values["updated_by"] = updated_by
     if not values:
@@ -316,6 +342,7 @@ __all__ = [
     "list_permissions_by_tenant",
     "count_permissions_by_tenant",
     "get_permission_by_kb_id",
+    "list_kds_name_to_id_map",
     "create_permission",
     "update_permission",
     "soft_delete_permission",
