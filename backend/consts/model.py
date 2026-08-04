@@ -340,7 +340,6 @@ class AgentRequest(BaseModel):
         default=False,
         description="Whether to enable the planning phase before execution"
     )
-    a2ui_client_enabled: bool = False
     a2ui_action: Optional["A2UIActionMessage"] = None
 
 

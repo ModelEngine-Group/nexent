@@ -747,14 +747,13 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
 def _configure_a2ui_tools(
     tools: List[ToolConfig],
     *,
-    client_enabled: bool,
     is_root_agent: bool,
     model_name: str,
     model_config_list: Optional[List[ModelConfig]],
 ) -> bool:
-    """Apply agent-tool, client-capability, and root-agent A2UI gating."""
+    """Configure an enabled root-agent A2UI tool with its resolved model."""
     a2ui_tools = [tool for tool in tools if tool.name == "generate_a2ui"]
-    if not client_enabled or not is_root_agent or not a2ui_tools:
+    if not is_root_agent or not a2ui_tools:
         tools[:] = [tool for tool in tools if tool.name != "generate_a2ui"]
         return False
 
@@ -788,7 +787,6 @@ async def create_agent_config(
     conversation_id: Optional[int] = None,
     request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
-    enable_a2ui: bool = False,
     model_config_list: Optional[List[ModelConfig]] = None,
     is_root_agent: bool = True,
 ):
@@ -818,7 +816,6 @@ async def create_agent_config(
             override_model_id=None,
             tool_params=normalized_tool_params,
             conversation_id=conversation_id,
-            enable_a2ui=False,
             model_config_list=model_config_list,
             is_root_agent=False,
         )
@@ -1193,7 +1190,6 @@ async def create_agent_config(
 
     _configure_a2ui_tools(
         available_tools,
-        client_enabled=enable_a2ui,
         is_root_agent=is_root_agent,
         model_name=model_name,
         model_config_list=model_config_list,
@@ -1809,7 +1805,6 @@ async def create_agent_run_info(
     conversation_id: Optional[int] = None,
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
-    enable_a2ui: bool = False,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1840,12 +1835,8 @@ async def create_agent_run_info(
         "version_no": version_no,
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
+        "model_config_list": model_list,
     }
-    if enable_a2ui:
-        create_config_kwargs.update({
-            "enable_a2ui": True,
-            "model_config_list": model_list,
-        })
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:

@@ -3792,6 +3792,7 @@ class TestCreateAgentRunInfo:
                 tool_params=None,
                 conversation_id=None,
                 enable_planning=ANY,
+                model_config_list=["model_config"],
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -4330,6 +4331,7 @@ class TestCreateAgentRunInfo:
                 version_no=1,
                 conversation_id=None,
                 enable_planning=False,
+                model_config_list=["model_config"],
                 tool_params=None,
             )
 
@@ -4379,6 +4381,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Debug mode uses draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                model_config_list=["model_config"],
                 tool_params=None,
             )
 
@@ -4434,6 +4437,7 @@ class TestCreateAgentRunInfo:
                 version_no=0,  # Fallback to draft version 0
                 conversation_id=None,
                 enable_planning=False,
+                model_config_list=["model_config"],
                 tool_params=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
@@ -6497,17 +6501,7 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
 
 
-@pytest.mark.parametrize(
-    ("client_enabled", "is_root_agent"),
-    [
-        (False, True),
-        (True, False),
-    ],
-)
-def test_configure_a2ui_tools_requires_client_and_root_agent(
-    client_enabled,
-    is_root_agent,
-):
+def test_configure_a2ui_tools_requires_root_agent():
     tools = [
         types.SimpleNamespace(name="regular"),
         types.SimpleNamespace(name="generate_a2ui"),
@@ -6515,8 +6509,20 @@ def test_configure_a2ui_tools_requires_client_and_root_agent(
     model = types.SimpleNamespace(cite_name="main_model")
     enabled = _configure_a2ui_tools(
         tools,
-        client_enabled=client_enabled,
-        is_root_agent=is_root_agent,
+        is_root_agent=False,
+        model_name="main_model",
+        model_config_list=[model],
+    )
+    assert enabled is False
+    assert [tool.name for tool in tools] == ["regular"]
+
+
+def test_configure_a2ui_tools_requires_enabled_agent_tool():
+    tools = [types.SimpleNamespace(name="regular")]
+    model = types.SimpleNamespace(cite_name="main_model")
+    enabled = _configure_a2ui_tools(
+        tools,
+        is_root_agent=True,
         model_name="main_model",
         model_config_list=[model],
     )
@@ -6530,7 +6536,6 @@ def test_configure_a2ui_tools_injects_only_resolved_root_tool():
     model = types.SimpleNamespace(cite_name="main_model")
     enabled = _configure_a2ui_tools(
         tools,
-        client_enabled=True,
         is_root_agent=True,
         model_name="main_model",
         model_config_list=[model],
@@ -6546,7 +6551,6 @@ def test_configure_a2ui_tools_disables_when_model_is_unresolved():
     tools = [types.SimpleNamespace(name="generate_a2ui")]
     enabled = _configure_a2ui_tools(
         tools,
-        client_enabled=True,
         is_root_agent=True,
         model_name="missing",
         model_config_list=[],

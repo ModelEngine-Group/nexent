@@ -38,10 +38,13 @@ export const conversationService = {
 
   // Get conversation detail
   async getById(conversationId: string): Promise<ApiConversationDetail> {
-    const response = await fetch(API_ENDPOINTS.conversation.detail(Number(conversationId)), {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      API_ENDPOINTS.conversation.detail(Number(conversationId)),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
 
     const data = (await response.json()) as ApiConversationResponse;
     const conversationData = data.data?.[0];
@@ -91,7 +94,6 @@ export const conversationService = {
 
     throw new ApiError(data.code, data.message);
   },
-
 
   // Get conversation details
   async getDetail(
@@ -925,10 +927,13 @@ export const conversationService = {
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
       runtime_mode?: "nl2agent";
+      a2ui_action?: Record<string, unknown>;
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void
-  ): Promise<ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }> {
+  ): Promise<
+    ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
+  > {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -941,7 +946,10 @@ export const conversationService = {
       };
 
       // Only include conversation_id if it has a value
-      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+      if (
+        params.conversation_id !== undefined &&
+        params.conversation_id !== null
+      ) {
         requestParams.conversation_id = params.conversation_id;
       }
 
@@ -955,11 +963,15 @@ export const conversationService = {
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
       }
+      if (params.a2ui_action !== undefined) {
+        requestParams.a2ui_action = params.a2ui_action;
+      }
 
       // Build URL with query parameters for resume mode
-      let url = params.runtime_mode === "nl2agent"
-        ? API_ENDPOINTS.agent.nl2agentRun
-        : API_ENDPOINTS.agent.run;
+      let url =
+        params.runtime_mode === "nl2agent"
+          ? API_ENDPOINTS.agent.nl2agentRun
+          : API_ENDPOINTS.agent.run;
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");

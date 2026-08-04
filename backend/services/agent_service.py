@@ -2804,7 +2804,6 @@ async def prepare_agent_run(
         conversation_id=agent_request.conversation_id,
         context_policy=agent_request.context_policy,
         enable_planning=agent_request.enable_plan,
-        enable_a2ui=agent_request.a2ui_client_enabled,
     )
 
     historical_context = None

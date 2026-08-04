@@ -1132,7 +1132,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       history: isResume ? [] : history,
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: false,
-      a2ui_client_enabled: true,
     };
     const a2uiAction = isResume
       ? undefined
@@ -1191,6 +1190,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
           runtime_mode: isNl2Agent ? "nl2agent" : undefined,
+          a2ui_action: requestBody.a2ui_action as
+            | Record<string, unknown>
+            | undefined,
         },
         abortSignal,
         (conversationId) => {

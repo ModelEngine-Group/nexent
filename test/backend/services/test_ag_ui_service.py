@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from consts.model import NexentRunAgentInput
 from services.ag_ui_service import (
-    A2UI_BASIC_CATALOG_ID,
     AGUIEventAdapter,
     AGUIRequestValidationError,
     _content_to_text,
@@ -52,7 +51,7 @@ def test_maps_standard_input_to_legacy_request():
             "requestedOutputTokens": 4096,
             "enablePlan": True,
             "capabilities": {
-                "a2ui": {"versions": ["v0.9"], "catalogId": A2UI_BASIC_CATALOG_ID}
+                "a2ui": {"versions": ["unsupported"], "catalogId": "legacy-client"}
             },
         },
     )
@@ -69,7 +68,6 @@ def test_maps_standard_input_to_legacy_request():
     assert request.version_no == 2
     assert request.requested_output_tokens == 4096
     assert request.enable_plan is True
-    assert request.a2ui_client_enabled is True
     assert props.conversation_id == 7
     assert _content_to_text(
         [SimpleNamespace(model_dump=lambda **_: {"type": "text", "text": "ok"})]

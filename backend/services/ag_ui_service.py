@@ -33,7 +33,6 @@ from services.agent_service import run_agent_stream
 
 logger = logging.getLogger(__name__)
 
-A2UI_BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/basic_catalog.json"
 _REASONING_TYPES = {
     "model_output_thinking",
     "model_output_deep_thinking",
@@ -101,12 +100,6 @@ def map_run_input_to_agent_request(
         query = conversational[-1][1]
         conversational = conversational[:-1]
 
-    capability = nexent.capabilities.a2ui
-    a2ui_client_enabled = bool(
-        capability
-        and "v0.9" in capability.versions
-        and capability.catalog_id == A2UI_BASIC_CATALOG_ID
-    )
     history = [HistoryItem(role=role, content=content) for role, content in conversational]
     return AgentRequest(
         query=query,
@@ -121,7 +114,6 @@ def map_run_input_to_agent_request(
         tool_params=nexent.tool_params,
         context_policy=nexent.context_policy,
         enable_plan=nexent.enable_plan,
-        a2ui_client_enabled=a2ui_client_enabled,
         a2ui_action=nexent.a2ui_action,
     ), nexent
 

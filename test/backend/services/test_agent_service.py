@@ -4182,7 +4182,6 @@ async def test_prepare_agent_run(
         conversation_id=123,
         context_policy=None,
         enable_planning=False,
-        enable_a2ui=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
