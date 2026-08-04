@@ -45,7 +45,7 @@ After selecting an agent, you can send text messages in the following ways:
 
 ### Use Voice Input
 
-Nexent supports voice input (make sure you have configured the speech model under [Model Management](./model-management) beforehand) so you can interact by speaking:
+Nexent supports voice input (make sure you have configured the speech model under [Model Management](./agent-development/model-configuration.md) beforehand) so you can interact by speaking:
 
 1. **Enable Voice Input**
    - Find the microphone icon in the lower right corner of the input box

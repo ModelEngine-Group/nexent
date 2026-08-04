@@ -13,7 +13,7 @@ Configure basic app information and connect AI models:
 - **App configuration:** Set the icon, name, and description.
 - **Model configuration:** Add large language models, embedding models, and vision-language models.
 
-Learn more: [Model Management](./model-management)
+Learn more: [Model Management](./agent-development/model-configuration.md)
 
 ### Step 2: Knowledge Base
 
@@ -23,7 +23,7 @@ Create knowledge bases and upload documents:
 - **Upload files:** Support for multiple file formats.
 - **Generate summaries:** Create concise knowledge-base descriptions.
 
-Learn more: [Knowledge Base](./knowledge-base)
+Learn more: [Knowledge Base](./agent-development/knowledge-configuration.md)
 
 ### Step 3: Agent Development
 
@@ -38,7 +38,7 @@ Publish agent:
 - **Publish agent:** Published agents will be visible to selected user groups and listed in Agent Space and the Start Chat selection box.
 - **Version management:** Track iteration history of agents, support viewing, rolling back to historical versions, and creating new versions.
 
-Learn more: [Agent Development](./agent-development)
+Learn more: [Agent Development](./agent-development.md)
 
 ## 🎯 Tips
 
@@ -51,8 +51,8 @@ Learn more: [Agent Development](./agent-development)
 
 After finishing Quick Setup:
 
-1. Visit **[Agent Space](./agent-space)** to review and manage agents.
+1. Visit **[Agent Space](./agent-development.md)** to review and manage agents.
 2. Use **[Start Chat](./start-chat)** to talk to your agents.
-3. Configure **[Memory Management](./memory-management)** to give agents persistent memory.
+3. Configure **[Memory Management](./agent-development/memory-configuration.md)** to give agents persistent memory.
 
-Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

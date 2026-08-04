@@ -501,3 +501,122 @@ class TestRequirePermissionInvalidRequired:
     def test_unsupported_required_raises_value_error(self):
         with pytest.raises(ValueError, match="Unsupported required permission"):
             svc.require_permission("kb-1", "u", "t", required="INVALID")
+
+
+# ---------------------------------------------------------------------------
+# get_kds_name_to_id_map (lines 381-409)
+# ---------------------------------------------------------------------------
+
+
+class TestGetKdsNameToIdMap:
+    """Covers get_kds_name_to_id_map: mirrors get_allowed_kds_list but
+    returns {kds_name: kb_id} and skips rows with empty kds_name."""
+
+    def test_returns_empty_dict_when_no_rows(self, monkeypatch):
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: [],
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {}
+
+    def test_skips_rows_with_empty_kds_name(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-1", kds_name="", ingroup_permission="EDIT"),
+            _record(kb_id="kb-2", kds_name=None, ingroup_permission="EDIT"),
+            _record(kb_id="kb-3", ingroup_permission="EDIT"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {}
+
+    def test_management_role_includes_all_rows_with_name(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-1", kds_name="KB One", ingroup_permission="PRIVATE"),
+            _record(kb_id="kb-2", kds_name="KB Two", ingroup_permission="EDIT"),
+            _record(kb_id="kb-3", kds_name="", ingroup_permission="READ_ONLY"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {"KB One": "kb-1", "KB Two": "kb-2"}
+
+    def test_creator_own_private_record_appears_in_map(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-priv", kds_name="My KB", owner_user_id="creator",
+                    ingroup_permission="PRIVATE"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("creator", "t")
+        assert result == {"My KB": "kb-priv"}
+
+    def test_read_only_row_included_only_when_group_intersects(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-ro", kds_name="RO KB", owner_user_id="other",
+                    ingroup_permission="READ_ONLY", group_ids=[10, 20]),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [10])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {"RO KB": "kb-ro"}
+
+        # No group intersection -> excluded
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [99])
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {}
+
+    def test_private_record_excluded_for_non_creator(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-priv", kds_name="Private KB", owner_user_id="other",
+                    ingroup_permission="PRIVATE", group_ids=[1]),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result == {}
+
+    def test_returns_kds_name_to_kb_id_mapping(self, monkeypatch):
+        rows = [
+            _record(kb_id="kb-100", kds_name="Alpha", ingroup_permission="EDIT"),
+            _record(kb_id="kb-200", kds_name="Beta", ingroup_permission="READ_ONLY"),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db, "list_permissions_by_tenant",
+            lambda tenant_id, page=1, page_size=200: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        result = svc.get_kds_name_to_id_map("u", "t")
+        assert result["Alpha"] == "kb-100"
+        assert result["Beta"] == "kb-200"

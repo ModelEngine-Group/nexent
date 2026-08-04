@@ -174,6 +174,7 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
         "conversation_id": 7,
         "title": "Conversation title",
         "asset_count": 1,
+        "render_version": "legacy",
     }
     share_payload = mock_create_share.call_args.args[0]
     assert share_payload["share_token"] == "share_token"
@@ -183,6 +184,7 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
     assert share_payload["selected_message_ids"] == [1]
     assert share_payload["expire_time"] == expire_time
     assert share_payload["snapshot_json"]["conversation_title"] == "Conversation title"
+    assert share_payload["snapshot_json"]["share_render_version"] == "legacy"
     assert [msg["message_id"] for msg in share_payload["snapshot_json"]["message"]] == [1, 2]
     assert (
         share_payload["snapshot_json"]["message"][0]["minio_files"][0]["preview_url"]
@@ -248,8 +250,38 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
     assert result["asset_count"] == 0
     share_payload = mock_create_share.call_args.args[0]
     assert share_payload["mode"] == "all"
+    assert share_payload["snapshot_json"]["share_render_version"] == "legacy"
     assert [msg["message_id"] for msg in share_payload["snapshot_json"]["message"]] == [1, 2, 3]
     mock_create_assets.assert_called_once_with("share_token", [], "user_1")
+
+
+def test_create_share_snapshot_service_marks_newchat_renderer(mocker):
+    mocker.patch(
+        "services.conversation_share_service.get_conversation",
+        return_value={"conversation_id": 8, "conversation_title": "New chat"},
+    )
+    mocker.patch(
+        "services.conversation_share_service.get_conversation_history_service",
+        return_value=[{"conversation_id": 8, "message": []}],
+    )
+    mock_create_share = mocker.patch(
+        "services.conversation_share_service.create_conversation_share",
+        return_value={"title": "New chat"},
+    )
+    mocker.patch(
+        "services.conversation_share_service.create_conversation_share_assets",
+        return_value=[],
+    )
+
+    result = service.create_share_snapshot_service(
+        conversation_id=8,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        render_version="newchat",
+    )
+
+    assert result["render_version"] == "newchat"
+    assert mock_create_share.call_args.args[0]["snapshot_json"]["share_render_version"] == "newchat"
 
 
 def test_create_share_snapshot_service_rejects_missing_conversation(mocker):
@@ -300,6 +332,7 @@ def test_get_share_snapshot_service_success(mocker):
         "title": "Shared",
         "conversation_id": 7,
         "create_time": create_time,
+        "render_version": "legacy",
         "snapshot": {"message": []},
     }
 

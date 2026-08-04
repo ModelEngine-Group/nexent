@@ -260,6 +260,13 @@ def _get_user_role(user_id: str) -> str:
     return str(user_tenant.get("user_role") or "USER")
 
 
+def ensure_skill_repository_access(user_id: str) -> None:
+    """Reject ordinary users from the Skill Repository API surface."""
+    user_role = _get_user_role(user_id).upper()
+    if user_role == "USER":
+        raise ForbiddenError("User role USER is not authorized to access Skill Repository")
+
+
 def _can_publish_skill(
     *,
     skill: Dict[str, Any],
@@ -511,6 +518,9 @@ def create_skill_repository_listing_impl(
         skill_id,
         tenant_id,
     )
+    was_pending_review = bool(
+        existing and existing.get("status") == STATUS_PENDING_REVIEW
+    )
     if not existing:
         repository_id = insert_skill_repository_record(
             repository_data=repository_data,
@@ -548,18 +558,19 @@ def create_skill_repository_listing_impl(
     )
     if not record:
         raise ValueError("Failed to load repository listing after write")
-    create_repository_pending_review_notification(
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        tenant_id=tenant_id,
-        unique_id=repository_id,
-        details={
-            "name": record.get("name"),
-            "skill_repository_id": repository_id,
-            "skill_id": record.get("skill_id"),
-            "content": record.get("content") or "",
-        },
-        created_by=user_id,
-    )
+    if not was_pending_review:
+        create_repository_pending_review_notification(
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            tenant_id=tenant_id,
+            unique_id=repository_id,
+            details={
+                "name": record.get("name"),
+                "skill_repository_id": repository_id,
+                "skill_id": record.get("skill_id"),
+                "content": record.get("content") or "",
+            },
+            created_by=user_id,
+        )
     return _to_detail_item(record, is_updated=is_updated)
 
 
@@ -828,6 +839,10 @@ def install_skill_from_repository_impl(
         )
     if not copy_skill_name:
         raise ValueError("Skill name is required")
+    if len(copy_skill_name) > _MAX_COPY_NAME_LENGTH:
+        raise ValueError(
+            f"Skill name must be at most {_MAX_COPY_NAME_LENGTH} characters"
+        )
 
     try:
         created_skill = SkillService(tenant_id=tenant_id).create_skill_from_zip_bytes(

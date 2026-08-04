@@ -301,6 +301,7 @@ def create_share_snapshot_service(
     mode: str = "selected",
     selected_user_message_ids: Optional[List[int]] = None,
     expire_time: Optional[datetime] = None,
+    render_version: str = "legacy",
 ) -> Dict[str, Any]:
     conversation = get_conversation(conversation_id, user_id)
     if not conversation:
@@ -316,6 +317,9 @@ def create_share_snapshot_service(
         messages = _select_message_pairs(messages, selected_user_message_ids)
     snapshot["message"] = messages
     snapshot["conversation_title"] = conversation.get("conversation_title") or ""
+    snapshot["share_render_version"] = (
+        "newchat" if render_version == "newchat" else "legacy"
+    )
 
     share_token = _new_token()
     asset_map: Dict[str, Dict[str, Any]] = {}
@@ -345,6 +349,7 @@ def create_share_snapshot_service(
         "conversation_id": conversation_id,
         "title": share_record.get("title") or "",
         "asset_count": len(persisted_assets),
+        "render_version": snapshot["share_render_version"],
     }
 
 
@@ -352,12 +357,14 @@ def get_share_snapshot_service(share_token: str) -> Dict[str, Any]:
     share = get_active_conversation_share(share_token)
     if not share:
         raise ValueError("Share not found or expired")
+    snapshot = share.get("snapshot_json") or {}
     return {
         "share_id": share_token,
         "title": share.get("title") or "",
         "conversation_id": share.get("conversation_id"),
         "create_time": share.get("create_time"),
-        "snapshot": share.get("snapshot_json"),
+        "render_version": snapshot.get("share_render_version", "legacy"),
+        "snapshot": snapshot,
     }
 
 

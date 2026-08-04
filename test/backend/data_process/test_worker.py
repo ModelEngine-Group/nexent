@@ -278,10 +278,21 @@ def setup_mocks_for_worker(mocker, initialized=False):
             DataProcessCore=type("_Core", (), {"__init__": lambda self: None, "file_process": lambda *a, **k: []})
         )
     
-    # Stub app module
-    if "backend.data_process.app" not in sys.modules:
+    # Stub app module. Always install a fresh stub if the existing
+    # ``sys.modules['backend.data_process.app']`` lacks the
+    # ``worker_main`` attribute, because a prior test (notably
+    # ``test_tasks.py``) reloads the real ``app.py`` and ends up
+    # binding ``app.app`` to a ``Celery`` stub that has no
+    # ``worker_main``.
+    _existing_app = sys.modules.get("backend.data_process.app")
+    _needs_fake_app = (
+        _existing_app is None
+        or not hasattr(getattr(_existing_app, "app", None), "worker_main")
+        or not hasattr(_existing_app, "app")
+    )
+    if _needs_fake_app:
         app_mod = types.ModuleType("backend.data_process.app")
-        
+
         class FakeApp:
             def __init__(self):
                 self.conf = types.SimpleNamespace(
@@ -289,17 +300,17 @@ def setup_mocks_for_worker(mocker, initialized=False):
                     result_backend="redis://localhost:6379/0",
                     task_routes={}
                 )
-            
+
             def worker_main(self, args):
                 # Mock worker_main to avoid actually starting a worker
                 pass
-            
+
             def task(self, *args, **kwargs):
                 # Return a decorator that returns the function unchanged
                 def decorator(func):
                     return func
                 return decorator
-        
+
         app_mod.app = FakeApp()
         sys.modules["backend.data_process.app"] = app_mod
     

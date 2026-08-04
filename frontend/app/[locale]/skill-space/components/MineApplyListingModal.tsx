@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -27,11 +27,13 @@ export function MineApplyListingModal({
   const { t } = useTranslation("common");
   const [listingContent, setListingContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
       setListingContent("");
       setSubmitting(false);
+      submittingRef.current = false;
     }
   }, [open]);
 
@@ -43,6 +45,10 @@ export function MineApplyListingModal({
   const isBusy = loading || submitting;
 
   const handleOk = async () => {
+    if (submittingRef.current || loading) {
+      return;
+    }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       await onConfirm({
@@ -52,6 +58,7 @@ export function MineApplyListingModal({
       });
       onClose();
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -83,9 +90,7 @@ export function MineApplyListingModal({
             id="skill-repository-listing-note"
             value={listingContent}
             onChange={(event) => setListingContent(event.target.value)}
-            placeholder={t(
-              "repository.mine.applyModal.contentPlaceholder"
-            )}
+            placeholder={t("repository.mine.applyModal.contentPlaceholder")}
             rows={4}
             disabled={isBusy}
           />

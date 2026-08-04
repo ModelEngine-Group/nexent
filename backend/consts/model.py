@@ -42,8 +42,17 @@ class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
     password: str = Field(..., min_length=8)
-    invite_code: Optional[str] = None
+    invite_code: str = Field(..., min_length=1)
     auto_login: Optional[bool] = True  # Whether to return session after signup
+
+    @field_validator("invite_code")
+    @classmethod
+    def validate_invite_code(cls, value: str) -> str:
+        """Reject empty or whitespace-only invitation codes."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Invitation code is required")
+        return normalized
 
 
 class UserSignInRequest(BaseModel):
@@ -69,7 +78,7 @@ class UserUpdateRequest(BaseModel):
     """User update request model"""
     username: Optional[str] = Field(None, min_length=1, max_length=50)
     email: Optional[EmailStr] = None
-    role: Optional[str] = Field(None, pattern="^(SUPER_ADMIN|ADMIN|DEV|USER)$")
+    role: Optional[str] = Field(None, pattern="^(ADMIN|DEV|USER)$")
 
 
 class UserDeleteRequest(BaseModel):
@@ -569,6 +578,14 @@ class GenerateTitleRequest(BaseModel):
     question: str
 
 
+class AgentSkillInstanceRequest(BaseModel):
+    """Skill selection and per-agent configuration saved with an agent."""
+
+    skill_id: int
+    enabled: bool = True
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
 # used in agent/search agent/update for save agent info
 class RelatedAgentInfo(BaseModel):
     """Related agent info with pinned version."""
@@ -598,6 +615,7 @@ class AgentInfoRequest(BaseModel):
     prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
+    skill_instances: Optional[List[AgentSkillInstanceRequest]] = None
     related_agent_ids: Optional[List[int]] = None
     related_agents: Optional[List[RelatedAgentInfo]] = None  # Related agents with pinned versions
     related_external_agent_ids: Optional[List[int]] = None
@@ -809,7 +827,11 @@ class SkillRepositoryListingCreateRequest(BaseModel):
 
 class SkillRepositoryInstallRequest(BaseModel):
     """Request body for installing a repository skill into current tenant."""
-    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+    target_name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Target skill name in current tenant",
+    )
 
 
 class SkillRepositoryListingDetailResponse(BaseModel):

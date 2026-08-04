@@ -3,6 +3,7 @@ Unit tests for nexent.core.tools.read_skill_config_tool module.
 
 This test module follows the pattern from test_ragflow_search_tool.py with proper mocking.
 """
+import json
 import os
 import sys
 import types
@@ -105,6 +106,13 @@ def temp_skills_dir():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def config_file_path(skill_dir):
+    """Return the standard skill config path and create its parent directory."""
+    config_dir = os.path.join(skill_dir, "config")
+    os.makedirs(config_dir, exist_ok=True)
+    return os.path.join(config_dir, "config.yaml")
+
+
 @pytest.fixture
 def skill_with_config(temp_skills_dir):
     """Create a sample skill with config.yaml file."""
@@ -121,7 +129,7 @@ def skill_with_config(temp_skills_dir):
             "timeout": 60
         }
     }
-    config_file = os.path.join(skill_dir, "config.yaml")
+    config_file = config_file_path(skill_dir)
     with open(config_file, 'w', encoding='utf-8') as f:
         yaml.dump(config_content, f)
 
@@ -135,7 +143,7 @@ def skill_with_empty_config(temp_skills_dir):
     skill_dir = os.path.join(temp_skills_dir, skill_name)
     os.makedirs(skill_dir)
 
-    config_file = os.path.join(skill_dir, "config.yaml")
+    config_file = config_file_path(skill_dir)
     with open(config_file, 'w', encoding='utf-8') as f:
         f.write("")
 
@@ -163,7 +171,7 @@ def skill_with_invalid_yaml(temp_skills_dir):
     skill_dir = os.path.join(temp_skills_dir, skill_name)
     os.makedirs(skill_dir)
 
-    config_file = os.path.join(skill_dir, "config.yaml")
+    config_file = config_file_path(skill_dir)
     with open(config_file, 'w', encoding='utf-8') as f:
         f.write("invalid: yaml: content: [not proper")
 
@@ -177,7 +185,7 @@ def skill_with_list_yaml(temp_skills_dir):
     skill_dir = os.path.join(temp_skills_dir, skill_name)
     os.makedirs(skill_dir)
 
-    config_file = os.path.join(skill_dir, "config.yaml")
+    config_file = config_file_path(skill_dir)
     with open(config_file, 'w', encoding='utf-8') as f:
         yaml.dump(["item1", "item2"], f)
 
@@ -197,12 +205,14 @@ class TestReadSkillConfigToolInit:
             local_skills_dir="/path/to/skills",
             agent_id=42,
             tenant_id="tenant-123",
-            version_no=5
+            version_no=5,
+            config_overrides={"test-skill": {"api_key": "secret"}},
         )
         assert tool.local_skills_dir == "/path/to/skills"
         assert tool.agent_id == 42
         assert tool.tenant_id == "tenant-123"
         assert tool.version_no == 5
+        assert tool.config_overrides == {"test-skill": {"api_key": "secret"}}
 
     def test_init_with_minimal_params(self):
         """Test initialization with minimal parameters."""
@@ -211,6 +221,7 @@ class TestReadSkillConfigToolInit:
         assert tool.agent_id is None
         assert tool.tenant_id is None
         assert tool.version_no == 0
+        assert tool.config_overrides == {}
 
 
 class TestExecute:
@@ -271,6 +282,19 @@ class TestExecute:
         result = tool.execute(skill_name)
         assert result == "{}"
 
+    def test_execute_applies_instance_config_overrides(self, skill_with_config, temp_skills_dir):
+        """Test saved per-agent values override the packaged config."""
+        _, skill_name, _ = skill_with_config
+        tool = ReadSkillConfigTool(
+            local_skills_dir=temp_skills_dir,
+            config_overrides={skill_name: {"path": {"temp_skill": "/agent/tmp/"}, "token": "saved"}},
+        )
+
+        result = json.loads(tool.execute(skill_name))
+
+        assert result["path"]["temp_skill"] == "/agent/tmp/"
+        assert result["token"] == "saved"
+
     def test_execute_invalid_yaml(self, skill_with_invalid_yaml, temp_skills_dir):
         """Test execute with invalid YAML content."""
         skill_dir, skill_name = skill_with_invalid_yaml
@@ -303,7 +327,7 @@ class TestExecuteEdgeCases:
                 "key": "value with 'quotes' and \"double quotes\""
             }
         }
-        config_file = os.path.join(skill_dir, "config.yaml")
+        config_file = config_file_path(skill_dir)
         with open(config_file, 'w', encoding='utf-8') as f:
             yaml.dump(config_content, f)
 
@@ -323,7 +347,7 @@ class TestExecuteEdgeCases:
             "name": "Test Skill",
             "description": "Description with unicode: 中文 日本語 한국어"
         }
-        config_file = os.path.join(skill_dir, "config.yaml")
+        config_file = config_file_path(skill_dir)
         with open(config_file, 'w', encoding='utf-8') as f:
             yaml.dump(config_content, f)
 
@@ -347,7 +371,7 @@ multiline
 description
 """
         }
-        config_file = os.path.join(skill_dir, "config.yaml")
+        config_file = config_file_path(skill_dir)
         with open(config_file, 'w', encoding='utf-8') as f:
             yaml.dump(config_content, f)
 
@@ -373,8 +397,8 @@ description
         skill_name = "config-is-dir-skill"
         skill_dir = os.path.join(temp_skills_dir, skill_name)
         os.makedirs(skill_dir)
-        config_dir = os.path.join(skill_dir, "config.yaml")
-        os.makedirs(config_dir)
+        config_file = config_file_path(skill_dir)
+        os.makedirs(config_file)
 
         tool = ReadSkillConfigTool(local_skills_dir=temp_skills_dir)
         result = tool.execute(skill_name)

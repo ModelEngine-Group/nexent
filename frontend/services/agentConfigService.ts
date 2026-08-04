@@ -438,6 +438,11 @@ export interface UpdateAgentInfoPayload {
   prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
+  skill_instances?: Array<{
+    skill_id: number;
+    enabled?: boolean;
+    config_values?: Record<string, unknown>;
+  }>;
   related_agent_ids?: number[];
   related_agents?: { agent_id: number; version_no: number }[];
   related_external_agent_ids?: number[];
@@ -829,6 +834,7 @@ export const searchAgentInfo = async (
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
+      created_by: data.created_by ?? null,
       prompts_hidden: data.prompts_hidden === true,
       tools: data.tools
         ? data.tools.map((tool: any) => {

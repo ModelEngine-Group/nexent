@@ -13,15 +13,15 @@ from consts.model import (
     TenantCreateRequest,
     TenantUpdateRequest,
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
 from services.tenant_service import (
     create_tenant,
-    get_tenant_info,
-    get_tenants_paginated,
+    get_tenant_info_for_user,
+    get_tenants_paginated_for_user,
     update_tenant_info,
     delete_tenant,
 )
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -86,7 +86,10 @@ async def create_tenant_endpoint(
 
 
 @router.get("/{tenant_id}")
-async def get_tenant_endpoint(tenant_id: str) -> JSONResponse:
+async def get_tenant_endpoint(
+    tenant_id: str,
+    authorization: Optional[str] = Header(None),
+) -> JSONResponse:
     """
     Get tenant information by tenant ID
 
@@ -97,8 +100,12 @@ async def get_tenant_endpoint(tenant_id: str) -> JSONResponse:
         JSONResponse: Tenant information
     """
     try:
-        # Get tenant info
-        tenant_info = get_tenant_info(tenant_id)
+        _, requester_tenant_id, requester_role = get_current_user_context(authorization)
+        tenant_info = get_tenant_info_for_user(
+            tenant_id,
+            requester_tenant_id=requester_tenant_id,
+            requester_role=requester_role,
+        )
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -108,6 +115,10 @@ async def get_tenant_endpoint(tenant_id: str) -> JSONResponse:
             }
         )
 
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except NotFoundException as exc:
         logger.warning(f"Tenant not found: {tenant_id}")
         raise HTTPException(
@@ -124,7 +135,8 @@ async def get_tenant_endpoint(tenant_id: str) -> JSONResponse:
 
 @router.post("/tenant-list")
 async def get_all_tenants_endpoint(
-    pagination: PaginationRequest = Body(...)
+    pagination: PaginationRequest = Body(...),
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Get all tenants with pagination support
@@ -136,8 +148,12 @@ async def get_all_tenants_endpoint(
         JSONResponse: Paginated list of tenants with total count
     """
     try:
-        # Get paginated tenants
-        result = get_tenants_paginated(page=pagination.page, page_size=pagination.page_size)
+        _, _, requester_role = get_current_user_context(authorization)
+        result = get_tenants_paginated_for_user(
+            page=pagination.page,
+            page_size=pagination.page_size,
+            requester_role=requester_role,
+        )
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -151,6 +167,10 @@ async def get_all_tenants_endpoint(
             }
         )
 
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except Exception as exc:
         logger.error(f"Unexpected error retrieving tenants: {str(exc)}")
         raise HTTPException(

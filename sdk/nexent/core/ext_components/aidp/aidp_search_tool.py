@@ -2,10 +2,10 @@
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.
 Supports hybrid, vector, and full-text search with optional reranking.
-Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_WEB.
 """
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
@@ -33,6 +33,8 @@ _MAX_KDS = 10
 _AIDP_SEARCH_RETRY_STATUSES = {502, 503, 504}
 _AIDP_SEARCH_MAX_ATTEMPTS = 3
 _AIDP_SEARCH_RETRY_BACKOFF = (0.5, 1.5)  # seconds between retry 1 and 2
+_HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_IMAGE_MARKER_PATH = "/__aidp_image__/"
 
 
 class AidpSearchError(RuntimeError):
@@ -69,13 +71,15 @@ class AidpSearchTool(Tool):
     name = "aidp_search"
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
-        "Returns text, table, and image chunks with dual-channel delivery: "
-        "all chunks as SEARCH_CONTENT and image file_urls as PICTURE_WEB. "
+        "Returns text, table, and image chunks with title and text content. "
+        "Image chunks include a safe Markdown image marker. When an image is relevant, "
+        "copy that marker unchanged into the answer near the paragraph it illustrates; "
+        "never invent or expose an image URL. "
         "Use when users ask about domain-specific knowledge stored in AIDP knowledge bases."
     )
     description_zh = (
         "通过 AIDP FusionSearch 对知识库进行多模态检索，返回文本、表格和图片块。"
-        "双通道输出：所有块通过 SEARCH_CONTENT 发送，图片通过 PICTURE_WEB 发送。"
+        "每个块包含标题和文本内容。"
         "适用于询问 AIDP 知识库中存储的领域专业知识。"
     )
 
@@ -157,6 +161,11 @@ class AidpSearchTool(Tool):
         server_url: str = Field(exclude=True, description="AIDP API base URL"),
         api_key: str = Field(exclude=True, description="AIDP API key"),
         tenant_id: str = Field(exclude=True, description="AIDP tenant identifier"),
+        kds_name_to_id_map: dict = Field(
+            default_factory=dict,
+            exclude=True,
+            description="Mapping from kds_name to kds_id for LLM parameter conversion",
+        ),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
         search_method: str = Field(default="hybrid_search", description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
@@ -174,6 +183,7 @@ class AidpSearchTool(Tool):
         self.base_url = server_url.rstrip("/") if isinstance(server_url, str) else ""
         self.api_key = api_key if isinstance(api_key, str) else ""
         self.tenant_id = tenant_id.strip() if isinstance(tenant_id, str) else ""
+        self.kds_name_to_id_map = kds_name_to_id_map
 
         if not self.base_url:
             raise ValueError("server_url is required and must be a non-empty string")
@@ -301,21 +311,51 @@ class AidpSearchTool(Tool):
 
         for idx, chunk in enumerate(records[: self.top_k]):
             msg = self._build_chunk_message(chunk, idx)
-            search_results_json.append(msg.to_dict())
-            search_results_return.append(msg.to_model_dict())
+            ui_result = msg.to_dict()
+            ui_result["text"] = _HTML_IMAGE_TAG_PATTERN.sub("", ui_result["text"])
+            search_results_json.append(ui_result)
+            result = msg.to_model_dict()
+            # AIDP can embed relative ``/md_image/...`` tags in image and
+            # text chunks alike. Never expose those tags to the LLM: they are
+            # not valid Nexent URLs and the verified image is delivered via
+            # the PICTURE_WEB observer channel instead.
+            result["text"] = _HTML_IMAGE_TAG_PATTERN.sub("", result["text"])
             chunk_type = str(chunk.get("chunk_type", "text") or "text")
             file_url = str(chunk.get("file_url") or "")
             # Images require a fully-qualified URL that the image proxy can
             # fetch with a Bearer token; text/table chunks keep their raw
             # value because they aren't rendered as <img> tags.
             if chunk_type == "image" and file_url:
-                images_url.append(self._build_image_url(file_url))
+                full_url = self._build_image_url(file_url)
+                # Do NOT expose the image URL to the LLM: the URL is an
+                # AIDP endpoint that requires a Bearer token, so if the
+                # model embeds it in markdown the browser will GET it
+                # without credentials and get a 401. Images are delivered
+                # only via the PICTURE_WEB observer channel, which goes
+                # through image_service proxy (adds Bearer).
+                images_url.append(full_url)
+                image_key = f"{msg.tool_sign}{msg.cite_index}"
+                # Keep the marker syntax independent of document titles, which
+                # may contain Markdown delimiter characters such as `]`.
+                image_marker = f"![AIDP image]({_IMAGE_MARKER_PATH}{image_key})"
+                ui_result["image_key"] = image_key
+                result["text"] = (
+                    f"{result['text']}\n\n"
+                    f"Image marker: {image_marker}. Copy this marker unchanged into "
+                    "the final answer immediately after the paragraph that this image illustrates."
+                )
+            search_results_return.append(result)
 
         return search_results_json, search_results_return, images_url
 
     def _emit_results(self, search_results_json, images_url) -> None:
         """Forward the structured results to the observer if present."""
+        logger.info(
+            "AIDP _emit_results: %d chunks total, %d with image URL",
+            len(search_results_json), len(images_url),
+        )
         if not self.observer:
+            logger.warning("AIDP _emit_results: observer is None, skipping emit")
             return
         self.observer.add_message(
             "",
@@ -323,6 +363,11 @@ class AidpSearchTool(Tool):
             json.dumps(search_results_json, ensure_ascii=False),
         )
         if images_url:
+            logger.info(
+                "AIDP PICTURE_WEB: sending %d image URLs: %s",
+                len(images_url),
+                images_url,
+            )
             self.observer.add_message(
                 "",
                 ProcessType.PICTURE_WEB,
@@ -464,6 +509,36 @@ class AidpSearchTool(Tool):
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
+    def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
+        """Convert kds_name (display name) to kds_id if a mapping exists.
+
+        When the LLM passes a kds_name instead of the actual kds_id in the
+        ``kds_list`` parameter, this method resolves it to the real ID so
+        that downstream API calls receive valid identifiers.
+
+        Args:
+            names: List of values that could be either kds_name or kds_id.
+
+        Returns:
+            List of resolved kds_id values. Unknown names pass through unchanged.
+        """
+        kds_map = self.kds_name_to_id_map
+        if isinstance(kds_map, FieldInfo):
+            if kds_map.default_factory is not None:
+                kds_map = kds_map.default_factory()
+            else:
+                kds_map = kds_map.default
+        if not kds_map:
+            return names
+
+        converted_names = []
+        for name in names:
+            if name in kds_map:
+                converted_names.append(kds_map[name])
+            else:
+                converted_names.append(name)
+        return converted_names
+
     def forward(
         self,
         query: str,
@@ -482,6 +557,9 @@ class AidpSearchTool(Tool):
             if kds_list is not None and len(kds_list) > 0
             else self.kds_list
         )
+        # Resolve kds_name (display name) to kds_id before permission
+        # filtering so the whitelist operates on the real ID namespace.
+        base_kds = self._convert_to_kds_ids(list(base_kds))
         search_kds_list = self._filter_by_whitelist(list(base_kds))
 
         self._emit_running_prompt(query)

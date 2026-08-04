@@ -10753,6 +10753,81 @@ async def test_update_agent_info_impl_skill_unselected(
     assert mock_create_skill.call_count == 3
 
 
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.skill_db.get_valid_skill_ids')
+@patch('backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info')
+@patch('backend.services.agent_service.skill_db.query_skill_instances_by_agent_id')
+@patch('backend.services.agent_service.get_current_user_info')
+async def test_update_agent_info_impl_persists_structured_skill_config(
+    mock_get_user,
+    mock_query_skills,
+    mock_create_skill,
+    mock_get_valid_skill_ids,
+):
+    """The main agent save persists per-agent skill values in the same transaction flow."""
+    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
+    from backend.services.agent_service import update_agent_info_impl
+
+    mock_get_user.return_value = ("user_1", "tenant_1", "en")
+    mock_get_valid_skill_ids.return_value = {2}
+    mock_query_skills.return_value = [
+        {"skill_id": 1, "config_values": {"preserved": True}},
+    ]
+
+    request = MagicMock(spec=AgentInfoRequest)
+    request.agent_id = 1
+    request.name = "Test"
+    request.display_name = "Test Display"
+    request.description = "Desc"
+    request.business_description = "Biz Desc"
+    request.author = "Author"
+    request.model_id = None
+    request.model_name = None
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = 5
+    request.provide_run_summary = True
+    request.duty_prompt = "Duty"
+    request.constraint_prompt = "Constraint"
+    request.few_shots_prompt = "Few shots"
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.enabled_skill_ids = [2]
+    request.skill_instances = [
+        AgentSkillInstanceRequest(
+            skill_id=2,
+            config_values={"linkup_api_key": "saved-key", "max_results": 5},
+        )
+    ]
+    request.related_agent_ids = None
+    request.related_external_agent_ids = None
+    request.group_ids = None
+    request.ingroup_permission = None
+    request.prompt_template_id = None
+    request.prompt_template_name = None
+    request.example_questions = None
+    request.greeting_message = None
+    request.version_no = 4
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 1
+    mock_get_valid_skill_ids.assert_called_once_with(
+        tenant_id="tenant_1",
+        skill_ids=[2],
+    )
+    mock_query_skills.assert_called_once_with(1, "tenant_1", version_no=4)
+    disabled_call, enabled_call = mock_create_skill.call_args_list
+    assert disabled_call.kwargs["skill_info"].enabled is False
+    assert disabled_call.kwargs["skill_info"].config_values == {"preserved": True}
+    assert enabled_call.kwargs["skill_info"].enabled is True
+    assert enabled_call.kwargs["skill_info"].config_values == {
+        "linkup_api_key": "saved-key",
+        "max_results": 5,
+    }
+    assert enabled_call.kwargs["version_no"] == 4
+
+
 # Test for generate_stream unexpected exception (lines 1889-1896)
 @pytest.mark.asyncio
 async def test_generate_stream_unexpected_exception():
@@ -16529,6 +16604,7 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_name"] is None
 
 
+<<<<<<< HEAD
 @patch('backend.services.agent_service.batch_search_agent_display_names')
 @patch('backend.services.agent_service.batch_search_version_names')
 @patch('backend.services.agent_service.batch_query_current_version_nos')
@@ -16830,3 +16906,27 @@ async def test_update_agent_info_impl_with_related_agents_objects(
             {"agent_id": 789, "version_no": None},
         ],
     )
+=======
+@patch("backend.services.agent_service.get_user_language", return_value="en-US")
+@patch("backend.services.agent_service.get_current_user_info", return_value=("user-1", "tenant-1", "zh-CN"))
+def test_resolve_user_tenant_language_honors_explicit_identity(
+    mock_current_user_info,
+    mock_get_user_language,
+):
+    result = agent_service._resolve_user_tenant_language(
+        "Bearer token",
+        http_request=MagicMock(),
+        user_id="user-2",
+        tenant_id="tenant-2",
+    )
+
+    assert result == ("user-2", "tenant-2", "en-US")
+    mock_current_user_info.assert_not_called()
+    mock_get_user_language.assert_called_once()
+
+
+@patch("backend.services.agent_service.query_group_ids_by_user", side_effect=RuntimeError("db unavailable"))
+def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
+    assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
+    mock_query_group_ids.assert_called_once_with("user-1")
+>>>>>>> develop
