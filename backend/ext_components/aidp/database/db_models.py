@@ -60,6 +60,11 @@ class AidpKbPermission(AidpKbPermissionBase):
         doc="Primary key, auto-increment",
     )
     kb_id = Column(String(128), nullable=False, doc="AIDP kds_id")
+    kds_name = Column(
+        String(128),
+        nullable=True,
+        doc="AIDP knowledge base display name (kds_name), cached at creation time",
+    )
     owner_user_id = Column(
         String(100),
         nullable=False,

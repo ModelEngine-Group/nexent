@@ -1308,6 +1308,7 @@ async def create_tool_config_list(
         # the agent. Falls back to the configured ``kds_list`` when the
         # whitelist lookup fails (defensive path).
         _allowed_kds_set: set[str] = set()
+        _kds_name_to_id_map: dict[str, str] = {}
         if tool.get("class_name") == "AidpSearchTool":
             try:
                 from ext_components.aidp.services import (
@@ -1318,10 +1319,12 @@ async def create_tool_config_list(
                         user_id=user_id, tenant_id=tenant_id,
                     )
                 )
+                _kds_name_to_id_map = _aidp_perms.get_kds_name_to_id_map(
+                    user_id=user_id, tenant_id=tenant_id,
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Aidp permission whitelist lookup failed; "
-                    "falling back to configured kds_list: %s", exc,
+                    "Aidp permission lookup failed: %s", exc,
                 )
 
         tool_config = ToolConfig(
@@ -1344,6 +1347,7 @@ async def create_tool_config_list(
             tool_config.metadata = {
                 **existing,
                 "allowed_kds_set": _allowed_kds_set,
+                "kds_name_to_id_map": _kds_name_to_id_map,
             }
             tool_class_name = tool.get("class_name")
             for langchain_tool in langchain_tools:

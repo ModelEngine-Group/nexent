@@ -8,6 +8,8 @@
 --   - group_ids uses JSONB for type safety and indexable intersection queries.
 --   - resource_status tracks lifecycle so the API can surface UNKNOWN/ORPHANED
 --     KBs without silently hiding them.
+--   - kds_name caches the AIDP display name so the LLM tool can resolve
+--     human-readable names to kds_ids without an extra AIDP round-trip.
 -- Idempotent: every DDL uses IF NOT EXISTS so re-running this migration is safe.
 -- ============================================================
 
@@ -16,6 +18,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS nexent.aidp_kb_permission_t (
     id                  BIGSERIAL PRIMARY KEY,
     kb_id               VARCHAR(128) NOT NULL,
+    kds_name            VARCHAR(128),
     owner_user_id       VARCHAR(100) NOT NULL,
     tenant_id           VARCHAR(100) NOT NULL,
     ingroup_permission  VARCHAR(30)  NOT NULL DEFAULT 'READ_ONLY',
@@ -69,5 +72,12 @@ COMMENT ON COLUMN nexent.aidp_kb_permission_t.resource_status IS
     'Resource lifecycle status: CREATING / ACTIVE / DELETE_PENDING / ORPHANED / UNAVAILABLE.';
 COMMENT ON COLUMN nexent.aidp_kb_permission_t.delete_flag IS
     'Y / N. Active rows are N. Soft delete flips this to Y so the active uniqueness constraint releases the kb_id.';
+
+-- Migration-safe column add: covers tables created before kds_name was introduced.
+-- Changing this file's checksum causes the runner to re-execute; IF NOT EXISTS makes it safe.
+ALTER TABLE nexent.aidp_kb_permission_t ADD COLUMN IF NOT EXISTS kds_name VARCHAR(128);
+
+COMMENT ON COLUMN nexent.aidp_kb_permission_t.kds_name IS
+    'AIDP knowledge base display name (kds_name), cached at creation time so the LLM tool can resolve human-readable names to kds_ids without an AIDP round-trip.';
 
 COMMIT;
