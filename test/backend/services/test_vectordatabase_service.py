@@ -122,7 +122,9 @@ class _VectorDatabaseCore:
 
 class MockOpenAICompatibleEmbedding:
     def __init__(self, *args, **kwargs):
-        pass
+        self.model = kwargs.get("model_name", "mock-embedding-model")
+        self.embedding_dim = kwargs.get("embedding_dim", 768)
+        self.model_type = kwargs.get("model_type", "embedding")
 
 
 class MockDashScopeMultimodalEmbedding:
@@ -438,6 +440,15 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_embedding.model_type = "text"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        # Patch get_embedding_model_by_id so it returns (None, None) when model_id is None.
+        # This is critical because setUp also patches get_model_by_model_id, which would
+        # otherwise cause get_embedding_model_by_id(tenant_id, None) to return a real mock
+        # instance and populate embedding_model_name in create_index.
+        self.get_embedding_model_by_id_patcher = patch(
+            'backend.services.vectordatabase_service.get_embedding_model_by_id')
+        self.mock_get_embedding_by_id = self.get_embedding_model_by_id_patcher.start()
+        self.mock_get_embedding_by_id.return_value = (None, None)
+
         self.get_model_by_id_patcher = patch(
             'backend.services.vectordatabase_service.get_model_by_model_id')
         self.mock_get_model_by_id = self.get_model_by_id_patcher.start()
@@ -468,6 +479,7 @@ class TestElasticSearchService(unittest.TestCase):
     def tearDown(self):
         """Clean up resources after each test."""
         self.get_embedding_model_patcher.stop()
+        self.get_embedding_model_by_id_patcher.stop()
         self.get_model_by_id_patcher.stop()
         self.get_rerank_model_patcher.stop()
         if hasattr(ElasticSearchService, 'accurate_search'):
@@ -510,6 +522,7 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertIn("embedding_model_name", call_kwargs)
         self.assertIsNone(call_kwargs["embedding_model_name"])
+        self.assertIsNone(call_kwargs["embedding_model_id"])
         self.assertEqual(call_kwargs["index_name"], "test_index")
         self.assertEqual(call_kwargs["created_by"], "test_user")
         self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
