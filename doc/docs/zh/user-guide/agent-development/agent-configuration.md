@@ -153,8 +153,8 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 >
 > ⚠️ **向量化模型配置**：使用 `knowledge_base_search` 工具时，需要确保知识库已配置向量化模型。对于存量知识库，系统会提示选择向量化模型，请务必选择**创建该知识库时使用的向量化模型**。若选择的模型与知识库创建时使用的模型不一致，可能导致检索失败或结果不准确。
 >
-> 📚 想了解系统已经内置的所有本地工具能力？请参阅 [本地工具概览](./local-tools/index.md)。
-> 📚 想了解技能能力？请参阅 [技能管理](./skills.md)。
+> 📚 想了解系统已经内置的所有本地工具能力？请参阅 [本地工具概览](../local-tools/index.md)。
+> 📚 想了解技能能力？请参阅 [技能管理](../resource-repository/skill-repository.md)。
 
 ### 🔌 添加 MCP 工具
 
@@ -197,7 +197,7 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 </div>
 
 有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
-您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../backend/tools/mcp)。
+您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../../backend/tools/mcp)。
 
 **3️⃣ 存量 API 转换为 MCP 服务**
 
@@ -236,9 +236,9 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 
 您可参考以下指导文档，开发自己的工具，并接入 Nexent 使用，丰富智能体能力。
 
-- [LangChain 工具指南](../backend/tools/langchain)
-- [MCP 工具开发](../backend/tools/mcp)
-- [SDK 工具文档](../sdk/core/tools)
+- [LangChain 工具指南](../../backend/tools/langchain)
+- [MCP 工具开发](../../backend/tools/mcp)
+- [SDK 工具文档](../../sdk/core/tools.md)
 
 ### 🧪 工具测试
 
@@ -465,8 +465,8 @@ Content-Type: application/json
 
 完成智能体开发后，您可以：
 
-1. 在 **[智能体空间](./agent-space)** 中查看和管理所有智能体
-2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
-3. 在 **[记忆管理](./memory-management)** 配置记忆以提升智能体的个性化能力
+1. 在 **[智能体空间](../agent-development.md)** 中查看和管理所有智能体
+2. 在 **[开始问答](../start-chat.md)** 中与智能体进行交互
+3. 在 **[记忆管理](./memory-configuration.md)** 配置记忆以提升智能体的个性化能力
 
-如果您在使用程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您在使用程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

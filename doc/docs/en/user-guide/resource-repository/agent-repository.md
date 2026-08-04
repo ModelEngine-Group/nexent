@@ -2,8 +2,6 @@
 
 The Agent Repository is your central hub for managing all developed agents. Browse agents in card form, inspect their detailed configurations, delete or export them, and quickly start conversations with them.
 
-![Agent Space](../../assets/agent-space/agent-space.png)
-
 ## 📋 Repository Overview
 
 The Agent Repository provides complete agent management capabilities, including:
@@ -17,8 +15,6 @@ The Agent Repository provides complete agent management capabilities, including:
 ## 🔍 View Agent Details
 
 Click any agent card to view the detailed information of that agent:
-
-![Agent Details](../../assets/agent-space/agent-details.png)
 
 The details page shows the complete configuration of the agent, including:
 

@@ -152,7 +152,7 @@ Agents can use various tools to complete tasks, such as knowledge base search, f
 >
 > ⚠️ **Embedding Model Configuration**: When using the `knowledge_base_search` tool, ensure that the knowledge base has an embedding model configured. For existing knowledge bases, the system will prompt you to select an embedding model. Make sure to select **the same embedding model used when creating the knowledge base**. If the selected model differs from the one used during knowledge base creation, it may cause search failures or inaccurate results.
 >
-> 📚 Want to learn about all the built-in local tools available in the system? Please refer to [Local Tools Overview](./local-tools/index.md).
+> 📚 Want to learn about all the built-in local tools available in the system? Please refer to [Local Tools Overview](../local-tools/index.md).
 
 ### 🔌 Add MCP Tools
 
@@ -195,7 +195,7 @@ You can add MCP services to Nexent in the following two ways:
 </div>
 
 Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
-You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../backend/tools/mcp).
+You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../../backend/tools/mcp).
 
 **3️⃣ Convert Stock API to MCP Service**
 
@@ -234,9 +234,9 @@ You can also develop your own MCP services and connect them to Nexent; see [MCP 
 
 You can refer to the following guides to develop your own tools and integrate them into Nexent to enrich agent capabilities:
 
-- [LangChain Tools Guide](../backend/tools/langchain)
-- [MCP Tool Development](../backend/tools/mcp)
-- [SDK Tool Documentation](../sdk/core/tools)
+- [LangChain Tools Guide](../../backend/tools/langchain)
+- [MCP Tool Development](../../backend/tools/mcp)
+- [SDK Tool Documentation](../../sdk/core/tools.md)
 
 ### 🧪 Tool Testing
 
@@ -462,8 +462,8 @@ Delete an agent (this cannot be undone, please proceed with caution).
 
 After completing agent development, you can:
 
-1. View and manage all agents in **[Agent Space](./agent-space)**
-2. Interact with agents in **[Start Chat](./start-chat)**
-3. Configure **[Memory Management](./memory-management)** to enhance the agent's personalization capabilities
+1. View and manage all agents in **[Agent Space](../agent-development.md)**
+2. Interact with agents in **[Start Chat](../start-chat.md)**
+3. Configure **[Memory Management](./memory-configuration.md)** to enhance the agent's personalization capabilities
 
-If you encounter any issues during agent development, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues during agent development, please refer to our **[FAQ](../../quick-start/faq.md)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

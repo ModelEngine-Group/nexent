@@ -155,5 +155,5 @@ After configuring MCP services, we recommend:
 2. **[Agent Repository](./agent-repository)** — View collaboration between agents and MCP services
 3. **[Start Chat](../start-chat)** — Experience agents calling MCP tools in conversations
 
-If you encounter any issues, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues, please refer to our **[FAQ](../../quick-start/faq.md)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
 

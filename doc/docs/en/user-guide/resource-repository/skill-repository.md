@@ -37,7 +37,7 @@ A **Skill** bundles the capabilities of multiple tools into a complete workflow,
 
 ### Configuring Skills for an Agent
 
-1. Open the **[Agent Development](./agent-development)** page
+1. Open the **[Agent Development](../agent-development.md)** page
 2. On the "Select Tools" tab, find the **Skills** group
 3. Click a skill name to select it; click again to deselect
 4. After selecting a skill, click the ⚙️ button next to it to configure skill parameters
@@ -566,7 +566,7 @@ If the skill name you create conflicts with an existing skill, Nexent will autom
 
 ## Related References
 
-- [Agent Development](../agent-development)
-- [Local Tools Overview](../local-tools/index)
-- [MCP Repository Configuration](./mcp-repository)
-- [Skills System Overview](../../backend/skills/overview)
+- [Agent Development](../agent-development.md)
+- [Local Tools Overview](../local-tools/index.md)
+- [MCP Repository Configuration](./mcp-repository.md)
+- [Skills System Overview](../../backend/skills/overview.md)

@@ -34,7 +34,7 @@ title: Skill 仓库
 
 ### 为智能体配置技能
 
-1. 打开 **[智能体开发](../agent-development)** 页面
+1. 打开 **[智能体开发](../agent-development.md)** 页面
 2. 在"选择智能体的工具"页签中，找到 **技能（Skills）** 分组
 3. 点击技能名称即可选中，再次点击取消选择
 4. 保存智能体配置
@@ -470,7 +470,7 @@ NL-to-Skill 擅长生成以下类型的技能：
 
 ## 相关参考
 
-- [智能体开发](../agent-development)
-- [本地工具概览](../local-tools/index)
+- [智能体开发](../agent-development.md)
+- [本地工具概览](../local-tools/index.md)
 - [MCP 仓库配置](./mcp-repository)
-- [技能系统概览](../backend/skills/overview)
+- [技能系统概览](../../backend/skills/overview.md)

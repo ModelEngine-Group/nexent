@@ -155,4 +155,4 @@ Nexent 集成了 MCP Registry，您可以浏览并一键导入社区维护的 MC
 2. **[智能体仓库](./agent-repository)** - 查看智能体与 MCP 的协作关系
 3. **[开始问答](../start-chat)** - 在对话中体验智能体调用 MCP 工具的效果
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

@@ -157,4 +157,4 @@ Nexent采用四层记忆存储架构，不同层级的记忆有不同的作用�
 2. 在 **[智能体仓库](../resource-repository/agent-repository)** 中管理您的智能体
 3. 继续 **[智能体开发](../agent-development)** 创建更多智能体
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

@@ -86,4 +86,4 @@ Nexent支持知识库与智能体单独绑定，在创建智能体时，**启用
 1. **[智能体开发](../agent-development)** - 创建和配置智能体
 2. **[开始问答](../start-chat)** - 与智能体进行交互
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
