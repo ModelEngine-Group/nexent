@@ -368,7 +368,6 @@ export default function AgentConfigComp() {
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
         onEditSkill={(skill) => {
-          setIsSkillSelectOpen(false);
           handleOpenSkillEditor(skill);
         }}
         isCreatingMode={isCreatingMode}
@@ -386,6 +385,7 @@ export default function AgentConfigComp() {
         onCancel={handleCloseSkillModal}
         onSuccess={handleSkillBuildSuccess}
         editingSkill={editingSkill}
+        zIndex={1100}
       />
 
       {/* A2A Discovery Modal */}
