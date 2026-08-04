@@ -80,10 +80,10 @@ script_outputs:
 
 ### `script_outputs` 字段
 
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| 脚本路径 | 是 | 相对 Skill 根目录的路径。执行时必须与 `run_skill_script` 传入的路径匹配。 |
-| `kind` | 是 | 文件交付固定填写为 `file`。其他值不会生成文件 artifact。 |
+| 字段         | 必填     | 说明                                                                            |
+| ------------ | -------- | ------------------------------------------------------------------------------- |
+| 脚本路径     | 是       | 相对 Skill 根目录的路径。执行时必须与 `run_skill_script` 传入的路径匹配。       |
+| `kind`       | 是       | 文件交付固定填写为 `file`。其他值不会生成文件 artifact。                        |
 | `mime_types` | 建议必填 | 该脚本允许发布的 MIME 类型列表。运行时 artifact 的 `mime_type` 必须在此列表中。 |
 
 同一脚本可声明多个 MIME 类型，例如同时支持 CSV 与 XLSX：
@@ -129,22 +129,22 @@ run_skill_script("report-generator", "./scripts/generate_report.py", params="--o
 
 ### 顶层字段
 
-| 字段 | 必填 | 要求 |
-| --- | --- | --- |
-| `status` | 是 | 必须为字符串 `success`。其他值不会发布 artifact。 |
-| `artifacts` | 是 | 必须为数组，可包含一个或多个文件 artifact。 |
+| 字段        | 必填 | 要求                                              |
+| ----------- | ---- | ------------------------------------------------- |
+| `status`    | 是   | 必须为字符串 `success`。其他值不会发布 artifact。 |
+| `artifacts` | 是   | 必须为数组，可包含一个或多个文件 artifact。       |
 
 可在顶层添加供模型阅读的 `message`、`file_path` 等字段，但这些字段不参与附件发布。文件附件只读取 `artifacts`。
 
 ### 单个 artifact 字段
 
-| 字段 | 必填 | 要求 |
-| --- | --- | --- |
-| `kind` | 是 | 固定为字符串 `file`。 |
-| `absolute_path` | 是 | 已生成文件的绝对路径。必须位于 Nexent 允许上传的工作目录。 |
-| `file_name` | 是 | 前端显示与下载使用的文件名，不能是空字符串。 |
-| `mime_type` | 是 | 文件真实 MIME 类型，必须符合该脚本的 `mime_types` 声明。 |
-| `file_size_bytes` | 是 | 非负整数，必须等于 `absolute_path` 指向文件的实际字节大小。 |
+| 字段              | 必填 | 要求                                                        |
+| ----------------- | ---- | ----------------------------------------------------------- |
+| `kind`            | 是   | 固定为字符串 `file`。                                       |
+| `absolute_path`   | 是   | 已生成文件的绝对路径。必须位于 Nexent 允许上传的工作目录。  |
+| `file_name`       | 是   | 前端显示与下载使用的文件名，不能是空字符串。                |
+| `mime_type`       | 是   | 文件真实 MIME 类型，必须符合该脚本的 `mime_types` 声明。    |
+| `file_size_bytes` | 是   | 非负整数，必须等于 `absolute_path` 指向文件的实际字节大小。 |
 
 `file_size_bytes` 不能是布尔值、字符串或估算值。SDK 会在发布前读取磁盘文件大小并进行精确比较。
 
@@ -213,19 +213,19 @@ Use `scripts/generate_report.py` to create the final report.
 
 声明应使用标准 MIME 类型，而不是文件扩展名。常见值如下：
 
-| 文件类型 | MIME 类型 |
-| --- | --- |
-| PDF | `application/pdf` |
-| DOCX | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
-| XLSX | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
-| PPTX | `application/vnd.openxmlformats-officedocument.presentationml.presentation` |
-| CSV | `text/csv` |
-| JSON | `application/json` |
-| ZIP | `application/zip` |
-| PNG | `image/png` |
-| JPEG | `image/jpeg` |
-| Markdown | `text/markdown` |
-| Plain text | `text/plain` |
+| 文件类型   | MIME 类型                                                                   |
+| ---------- | --------------------------------------------------------------------------- |
+| PDF        | `application/pdf`                                                           |
+| DOCX       | `application/vnd.openxmlformats-officedocument.wordprocessingml.document`   |
+| XLSX       | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`         |
+| PPTX       | `application/vnd.openxmlformats-officedocument.presentationml.presentation` |
+| CSV        | `text/csv`                                                                  |
+| JSON       | `application/json`                                                          |
+| ZIP        | `application/zip`                                                           |
+| PNG        | `image/png`                                                                 |
+| JPEG       | `image/jpeg`                                                                |
+| Markdown   | `text/markdown`                                                             |
+| Plain text | `text/plain`                                                                |
 
 前端会结合 `mime_type` 与文件扩展名选择附件图标、下载和预览行为。确保扩展名、实际文件内容及 `mime_type` 三者一致。
 
@@ -233,17 +233,17 @@ Use `scripts/generate_report.py` to create the final report.
 
 下列情况会使文件不会作为附件发布：
 
-| 问题 | 结果 | 处理方式 |
-| --- | --- | --- |
-| 脚本未在 `script_outputs` 中声明 | SDK 不发布 artifact | 添加完全匹配的脚本路径及 `kind: file`。 |
-| `kind` 不是 `file` | SDK 忽略 artifact | 将脚本声明和 artifact 字段都设为 `file`。 |
-| `status` 不是 `success` | SDK 忽略 artifact | 仅在文件成功写入后返回成功状态。 |
-| 缺少必填 artifact 字段 | SDK 忽略该 artifact | 返回完整的五个字段。 |
-| 文件不存在 | SDK 忽略 artifact | 在输出 JSON 前确认文件已写入。 |
-| 文件大小不匹配 | SDK 忽略 artifact | 使用实际 `stat().st_size` 填充字段。 |
-| MIME 未声明 | SDK 忽略 artifact | 将实际 MIME 加入该脚本的 `mime_types`。 |
-| 路径不允许上传 | 后端拒绝上传 | 把输出写入 Nexent 允许的工作目录。 |
-| 仅打印路径或日志 JSON | 不会生成附件 | 返回完整 `artifacts` 数组，不依赖文本解析。 |
+| 问题                             | 结果                | 处理方式                                    |
+| -------------------------------- | ------------------- | ------------------------------------------- |
+| 脚本未在 `script_outputs` 中声明 | SDK 不发布 artifact | 添加完全匹配的脚本路径及 `kind: file`。     |
+| `kind` 不是 `file`               | SDK 忽略 artifact   | 将脚本声明和 artifact 字段都设为 `file`。   |
+| `status` 不是 `success`          | SDK 忽略 artifact   | 仅在文件成功写入后返回成功状态。            |
+| 缺少必填 artifact 字段           | SDK 忽略该 artifact | 返回完整的五个字段。                        |
+| 文件不存在                       | SDK 忽略 artifact   | 在输出 JSON 前确认文件已写入。              |
+| 文件大小不匹配                   | SDK 忽略 artifact   | 使用实际 `stat().st_size` 填充字段。        |
+| MIME 未声明                      | SDK 忽略 artifact   | 将实际 MIME 加入该脚本的 `mime_types`。     |
+| 路径不允许上传                   | 后端拒绝上传        | 把输出写入 Nexent 允许的工作目录。          |
+| 仅打印路径或日志 JSON            | 不会生成附件        | 返回完整 `artifacts` 数组，不依赖文本解析。 |
 
 ## 发布前检查清单
 
@@ -259,6 +259,5 @@ Use `scripts/generate_report.py` to create the final report.
 ## 相关文档
 
 - [官方技能](./official-skills.md)
-- [文件生成 Skill 编写指南](/zh/backend/skills/file-generation-guide)
 - [技能系统概览](/zh/backend/skills/overview)
 - [Skill 仓库](./skill-repository.md)
