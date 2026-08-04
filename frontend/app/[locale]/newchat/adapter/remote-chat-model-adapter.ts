@@ -12,6 +12,23 @@ import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 
 // Backend SSE chunk format
+interface ImageMetadata {
+  source_file?: string;
+  image_url?: string;
+}
+
+function parseImageMetadata(value: unknown): ImageMetadata | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    const metadata = JSON.parse(value) as ImageMetadata;
+    return typeof metadata.image_url === "string" ? metadata : null;
+  } catch {
+    return null;
+  }
+}
+
+// Backend SSE chunk format
 interface SseChunk {
   type: string;
   content: string;
@@ -647,7 +664,20 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: { url: string; title: string },
+  item: {
+    url: string;
+    title: string;
+    text?: string;
+    sourceType?: string;
+    filename?: string;
+    sourceFile?: string;
+    downloadUrl?: string;
+    objectName?: string;
+    citeIndex?: number;
+    toolSign?: string;
+    isImage?: boolean;
+    imageKey?: string;
+  },
   toolCallId: string | undefined = undefined
 ): boolean {
   const targetToolCall = findMostRecentToolCall(contentParts, toolCallId);
@@ -655,12 +685,19 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (
-    item.url &&
-    !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url
-    )
-  ) {
+  const hasCitationIdentity =
+    item.toolSign !== undefined && item.citeIndex !== undefined;
+  const isDuplicate = targetToolCall.searchContent.some(
+    (source: {
+      url: string;
+      toolSign?: string;
+      citeIndex?: number;
+    }) =>
+      hasCitationIdentity
+        ? source.toolSign === item.toolSign && source.citeIndex === item.citeIndex
+        : source.url === item.url,
+  );
+  if ((item.url || item.sourceFile) && !isDuplicate) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -700,6 +737,7 @@ export interface SearchSource {
   searchType?: string;
   toolSign?: string;
   filename?: string;
+  sourceFile?: string;
   downloadUrl?: string;
   objectName?: string;
   isImage?: boolean;
@@ -710,7 +748,10 @@ export const searchSourcesRegistry = new Map<string, SearchSource[]>();
 // Maps the safe marker embedded in persisted answer markdown (for example
 // /__aidp_image__/j2) to the authenticated image URL received separately via
 // PICTURE_WEB. Real AIDP URLs are never exposed to the model.
-export const searchImagesRegistry = new Map<string, Map<string, SearchSource>>();
+export const searchImagesRegistry = new Map<
+  string,
+  Map<string, SearchSource>
+>();
 
 const AIDP_IMAGE_MARKER_PATTERN = /\/__aidp_image__\/([a-z]+\d+)/gi;
 
@@ -1343,7 +1384,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let nl2a: Nl2aMessage | undefined;
     let verificationPanel: VerificationPanelPart | null = null;
 
-    const appendSearchImages = (imageUrls: string[]) => {
+    const appendSearchImages = (
+      imageUrls: string[],
+      toolCallId: string | undefined = undefined
+    ) => {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
@@ -1369,6 +1413,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               : undefined),
         };
         searchImagesAccumulator.push(imageSource);
+        attachSearchContentToTool(contentParts, imageSource, toolCallId);
       }
     };
 
@@ -1541,7 +1586,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls);
+              appendSearchImages(imageUrls, chunk.tool_call_id);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -1753,7 +1798,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const url = result.url || "";
                 const filename = result.filename || "";
                 const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
-                const title = result.title || filename || url;
+                const imageMetadata = parseImageMetadata(result.text);
+                const resolvedUrl = imageMetadata?.image_url || url;
+                const text = imageMetadata ? "" : result.text;
+                const isImage =
+                  result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
+                const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
                 // A single document URL/object can legitimately produce
                 // several independently cited retrieval results. Match the
                 // persisted history behavior by de-duplicating only repeated
@@ -1769,22 +1819,36 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 ) {
                   searchSourcesAccumulator.push({
                     citeIndex,
-                    url,
+                    url: resolvedUrl,
                     title,
-                    text: result.text,
+                    text,
                     sourceType: result.source_type,
                     searchType: result.search_type,
                     toolSign: result.tool_sign,
                     filename,
+                    sourceFile: result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
-                    isImage: result.score_details?.chunk_type === "image",
+                    isImage,
                     imageKey: result.image_key,
                   });
                 }
                 attachSearchContentToTool(
                   contentParts,
-                  { url, title },
+                  {
+                    url: resolvedUrl,
+                    title,
+                    text,
+                    sourceType: result.source_type,
+                    filename,
+                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    downloadUrl: result.download_url,
+                    objectName: result.object_name,
+                    citeIndex,
+                    toolSign: result.tool_sign,
+                    isImage,
+                    imageKey: result.image_key,
+                  },
                   chunk.tool_call_id
                 );
               }
@@ -1835,7 +1899,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              appendSearchImages(imageUrls);
+              appendSearchImages(imageUrls, chunk.tool_call_id);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -1938,7 +2002,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const url = result.url || "";
                   const filename = result.filename || "";
                   const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
-                  const title = result.title || filename || url;
+                  const imageMetadata = parseImageMetadata(result.text);
+                  const resolvedUrl = imageMetadata?.image_url || url;
+                  const text = imageMetadata ? "" : result.text;
+                  const isImage =
+                    result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
+                  const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
                   const sourceKey = `${result.tool_sign || ""}:${citeIndex}`;
                   if (
                     (url || filename || title) &&
@@ -1950,22 +2019,36 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   ) {
                     searchSourcesAccumulator.push({
                       citeIndex,
-                      url,
+                      url: resolvedUrl,
                       title,
-                      text: result.text,
+                      text,
                       sourceType: result.source_type,
                       searchType: result.search_type,
                       toolSign: result.tool_sign,
                       filename,
+                      sourceFile: result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
-                      isImage: result.score_details?.chunk_type === "image",
+                      isImage,
                       imageKey: result.image_key,
                     });
                   }
                   attachSearchContentToTool(
                     contentParts,
-                    { url, title },
+                    {
+                      url: resolvedUrl,
+                      title,
+                      text,
+                      sourceType: result.source_type,
+                      filename,
+                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      downloadUrl: result.download_url,
+                      objectName: result.object_name,
+                      citeIndex,
+                      toolSign: result.tool_sign,
+                      isImage,
+                      imageKey: result.image_key,
+                    },
                     chunk.tool_call_id
                   );
                 }
@@ -2000,18 +2083,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         contentParts.flatMap((part) =>
           part?.type === "text" && typeof part.text === "string"
             ? [part.text]
-            : [],
-        ),
+            : []
+        )
       );
       const imageMetadata = searchSourcesAccumulator.filter(
-        (source) => source.isImage,
+        (source) => source.isImage
       );
       for (const [index, image] of searchImagesAccumulator.entries()) {
-        const metadata = imageMetadata.find((source) => {
-          if (!source.url) return false;
-          const relativeUrl = source.url.replace(/^\/+/, "");
-          return image.url.endsWith(relativeUrl);
-        }) ?? imageMetadata[index];
+        const metadata =
+          imageMetadata.find((source) => {
+            if (!source.url) return false;
+            const relativeUrl = source.url.replace(/^\/+/, "");
+            return image.url.endsWith(relativeUrl);
+          }) ?? imageMetadata[index];
         const imageKey =
           metadata?.imageKey ||
           (metadata?.toolSign && metadata.citeIndex !== undefined
@@ -2076,7 +2160,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
-      const finalResult = buildStreamResult(collapseSubAgentParts(contentParts));
+      const finalResult = buildStreamResult(
+        collapseSubAgentParts(contentParts)
+      );
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);
