@@ -16728,6 +16728,66 @@ async def test_get_agent_info_impl_sub_agent_relations_no_resolved_version(
     assert rel["agent_name"] == "Sub Agent"
 
 
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_with_none_agent_id(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl handles relations with selected_agent_id=None gracefully."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456, None]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Include a relation with selected_agent_id=None alongside a normal one
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 2},
+        {"selected_agent_id": None, "selected_agent_version_no": 5},
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 2, "version_name": "v2.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 2
+    # First relation (normal) should be enriched correctly
+    rel_normal = result["sub_agent_relations"][0]
+    assert rel_normal["agent_id"] == 456
+    assert rel_normal["agent_name"] == "Sub Agent"
+    assert rel_normal["version_no"] == 2
+    assert rel_normal["version_name"] == "v2.0"
+    # Second relation (None agent_id) should have None values without crashing
+    rel_none = result["sub_agent_relations"][1]
+    assert rel_none["agent_id"] is None
+    assert rel_none["agent_name"] is None
+    assert rel_none["version_no"] == 5
+    assert rel_none["version_name"] is None
+
+
 @patch('backend.services.agent_service.update_related_agents')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.update_agent')
