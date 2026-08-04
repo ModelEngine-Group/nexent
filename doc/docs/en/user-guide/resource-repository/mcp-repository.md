@@ -1,4 +1,4 @@
-# MCP Tools
+# MCP Repository
 
 In the MCP Tools module, you can centrally manage all MCP (Model Context Protocol) servers and tools. It supports custom addition, Registry import, and Community import, covering connection configuration, tool synchronization, health monitoring, and community sharing.
 
@@ -141,7 +141,7 @@ Click a service card to view details, where you can:
 
 ## 🔗 Integrating with Agents
 
-Once an MCP service is added, its tools are automatically synced to the agent tool selection list. When configuring an agent on the **[Agent Development](./agent-development)** page:
+Once an MCP service is added, its tools are automatically synced to the agent tool selection list. When configuring an agent on the **[Agent Development](../agent-development)** page:
 
 1. In the **Select Agent Tools** tab, locate the corresponding MCP service group
 2. Click a tool name to enable it
@@ -151,9 +151,9 @@ Once an MCP service is added, its tools are automatically synced to the agent to
 
 After configuring MCP services, we recommend:
 
-1. **[Agent Development](./agent-development)** — Assign MCP tools to your agents
-2. **[Agent Space](./agent-space)** — View collaboration between agents and MCP services
-3. **[Start Chat](./start-chat)** — Experience agents calling MCP tools in conversations
+1. **[Agent Development](../agent-development)** — Assign MCP tools to your agents
+2. **[Agent Repository](./agent-repository)** — View collaboration between agents and MCP services
+3. **[Start Chat](../start-chat)** — Experience agents calling MCP tools in conversations
 
 If you encounter any issues, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
 

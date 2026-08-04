@@ -1,4 +1,4 @@
-# Knowledge Base
+# Knowledge Configuration
 
 Create and manage knowledge bases, upload documents, and generate summaries. Knowledge bases are critical information sources that let agents securely use your private data.
 
@@ -17,11 +17,11 @@ Create and manage knowledge bases, upload documents, and generate summaries. Kno
 3. Nexent automatically parses files, extracts text, and vectorizes the content
 4. Track the processing status in the list (Parsing/Ingesting/Ready)
 
-![File Upload](./assets/knowledge-base/create-knowledge-base.png)
+![File Upload](../assets/knowledge-base/create-knowledge-base.png)
 
 💡 Hover over the status to understand the progress and error reasons
 
-![File Upload](./assets/knowledge-base/tip.png)
+![File Upload](../assets/knowledge-base/tip.png)
 
 ### Supported File Formats
 
@@ -44,15 +44,15 @@ Give every knowledge base a clear summary so agents can pick the right source du
 3. Edit the generated text to improve accuracy
 4. Click **Save** to store your changes
 
-![Content Summary](./assets/knowledge-base/summary-knowledge-base.png)
+![Content Summary](../assets/knowledge-base/summary-knowledge-base.png)
 
 ## 🔧 Using Knowledge Bases
 
 Nexent supports binding knowledge bases to agents individually. When creating an agent, **enable the knowledge_base_search tool** and select the associated knowledge base.
 
-<img src="./assets/knowledge-base/knowledge-tool.png" alt="Tool 1" style="width:75%;">
+<img src="../assets/knowledge-base/knowledge-tool.png" alt="Tool 1" style="width:75%;">
 
-![Tool 2](./assets/knowledge-base/knowledge-tool2.png)
+![Tool 2](../assets/knowledge-base/knowledge-tool2.png)
 
 ## 🔍 Knowledge Base Management
 
@@ -79,7 +79,7 @@ Nexent supports binding knowledge bases to agents individually. When creating an
 
 After completing knowledge base configuration, we recommend you continue with:
 
-1. **[Agent Development](./agent-development)** – Create and configure agents
-2. **[Start Chat](./start-chat)** – Interact with your agent
+1. **[Agent Development](../agent-development)** – Create and configure agents
+2. **[Start Chat](../start-chat)** – Interact with your agent
 
 Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

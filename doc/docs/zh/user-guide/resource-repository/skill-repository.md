@@ -1,8 +1,8 @@
 ---
-title: 技能管理
+title: Skill 仓库
 ---
 
-# 技能管理
+# Skill 仓库
 
 技能（Skill）是 Nexent 为智能体扩展能力的核心机制。每个技能将多个工具与使用文档打包为一个可复用的能力单元，可以像搭积木一样为智能体赋予复杂的工作能力。
 
@@ -34,12 +34,12 @@ title: 技能管理
 
 ### 为智能体配置技能
 
-1. 打开 **[智能体开发](./agent-development)** 页面
+1. 打开 **[智能体开发](../agent-development)** 页面
 2. 在"选择智能体的工具"页签中，找到 **技能（Skills）** 分组
 3. 点击技能名称即可选中，再次点击取消选择
 4. 保存智能体配置
 
-## 技能管理
+## Skill 仓库
 
 ### 查看已安装的技能
 
@@ -470,7 +470,7 @@ NL-to-Skill 擅长生成以下类型的技能：
 
 ## 相关参考
 
-- [智能体开发](./agent-development)
-- [本地工具概览](./local-tools/index)
-- [MCP 工具配置](./mcp-tools)
+- [智能体开发](../agent-development)
+- [本地工具概览](../local-tools/index)
+- [MCP 仓库配置](./mcp-repository)
 - [技能系统概览](../backend/skills/overview)

@@ -1,4 +1,4 @@
-# 知识库
+# 知识库配置
 
 在知识库模块，您可以创建和管理知识库，上传各种格式的文件，并生成内容总结。知识库是智能体的重要信息来源，让智能体能够访问您的私有数据和文档。
 
@@ -16,11 +16,11 @@
 3. 系统会自动处理上传的文件，提取文本内容并进行向量化
 4. 可在列表中查看文件的处理状态（解析中/入库中/已就绪）
 
-![文件上传](./assets/knowledge-base/create-knowledge-base.png)
+![文件上传](../assets/knowledge-base/create-knowledge-base.png)
 
 💡 光标移动至状态，以了解进度及报错原因
 
-![文件上传](./assets/knowledge-base/tip.png)
+![文件上传](../assets/knowledge-base/tip.png)
 
 ### 支持的文件格式
 
@@ -44,13 +44,13 @@ Nexent支持多种文件格式，包括：
 3. 您可对生成的内容总结进行编辑修改，使其更准确
 4. 最后记得点击“保存”将您的修改保存
 
-![内容总结](./assets/knowledge-base/summary-knowledge-base.png)
+![内容总结](../assets/knowledge-base/summary-knowledge-base.png)
 
 ## 🔧 使用知识库
 
 Nexent支持知识库与智能体单独绑定，在创建智能体时，**启用knowledge_base_search工具**，并选择关联的知识库
-<img src="./assets/knowledge-base/knowledge-tool.png" alt="工具1" style="width:75%;">
-![工具2](./assets/knowledge-base/knowledge-tool2.png)
+<img src="../assets/knowledge-base/knowledge-tool.png" alt="工具1" style="width:75%;">
+![工具2](../assets/knowledge-base/knowledge-tool2.png)
 
 ## 🔍 知识库管理
 
@@ -63,7 +63,7 @@ Nexent支持知识库与智能体单独绑定，在创建智能体时，**启用
 
 > 点击编辑，可管理知识库的名称、可见的用户组及组内权限
 
-<img src="./assets/knowledge-base/knowledge-base-permission.png" alt="知识库权限" style="width:50%;">
+<img src="../assets/knowledge-base/knowledge-base-permission.png" alt="知识库权限" style="width:50%;">
 
 2. **知识库详情**
    - 点击知识库名称，可查看知识库中全部文档信息
@@ -83,7 +83,7 @@ Nexent支持知识库与智能体单独绑定，在创建智能体时，**启用
 
 完成知识库配置后，建议您继续配置：
 
-1. **[智能体开发](./agent-development)** - 创建和配置智能体
-2. **[开始问答](./start-chat)** - 与智能体进行交互
+1. **[智能体开发](../agent-development)** - 创建和配置智能体
+2. **[开始问答](../start-chat)** - 与智能体进行交互
 
 如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
