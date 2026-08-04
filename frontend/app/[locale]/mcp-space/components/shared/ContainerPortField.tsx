@@ -1,4 +1,4 @@
-import { InputNumber } from "antd";
+import { Button, InputNumber } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortAvailability";
@@ -20,11 +20,12 @@ export default function ContainerPortField({
   setContainerPort,
 }: ContainerPortFieldProps) {
   const { t } = useTranslation("common");
-  const { portCheckLoading, portAvailable } = useContainerPortAvailability({
-    enabled,
-    containerPort,
-    setContainerPort,
-  });
+  const { portCheckLoading, portAvailable, suggesting, suggestPort } =
+    useContainerPortAvailability({
+      enabled,
+      containerPort,
+      setContainerPort,
+    });
 
   return (
     <label className="block text-sm text-slate-500">
@@ -40,6 +41,15 @@ export default function ContainerPortField({
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
+        {enabled ? (
+          <Button
+            onClick={suggestPort}
+            loading={suggesting}
+            disabled={portCheckLoading || suggesting}
+          >
+            {t("mcpTools.addModal.suggestPort")}
+          </Button>
+        ) : null}
       </div>
       {!enabled ? (
         <p className="mt-2 text-xs text-slate-400">

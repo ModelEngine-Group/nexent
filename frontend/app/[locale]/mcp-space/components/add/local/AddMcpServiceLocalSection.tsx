@@ -58,6 +58,8 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
   enableUploadImage?: boolean;
+  /** True when nexent runs inside Docker/K8s: MCP container ports are virtual and locked. */
+  portsVirtual?: boolean;
   onAdded: () => void;
   onSubmittingChange?: (submitting: boolean) => void;
 }
@@ -65,6 +67,7 @@ interface AddMcpServiceLocalSectionProps {
 export default function AddMcpServiceLocalSection({
   active,
   enableUploadImage = false,
+  portsVirtual = false,
   onAdded,
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
@@ -93,16 +96,17 @@ export default function AddMcpServiceLocalSection({
     onSubmittingChange?.(submitting);
   }, [submitting, onSubmittingChange]);
 
-  // The container port is determined by nexent and shown read-only: when
-  // running inside Docker/K8s it is the fixed default port (e.g. 5020);
-  // otherwise the backend returns a free port. Auto-suggest it once per add
-  // flow so the field is pre-filled and the user cannot edit it.
+  // When running inside Docker/K8s (virtual ports), MCP container ports are
+  // not published to the host, so the port is a fixed default (e.g. 5020) and
+  // the user cannot edit it. Auto-suggest it once per add flow so the field is
+  // pre-filled and locked. On a host deployment the user picks the port.
   const autoSuggestedPortRef = useRef(false);
   useEffect(() => {
     const isContainerType =
       deploymentType === McpDeploymentType.CONTAINER ||
       deploymentType === McpDeploymentType.LOCAL_IMAGE;
     if (
+      portsVirtual &&
       isContainerType &&
       draft.containerPort === undefined &&
       !autoSuggestedPortRef.current
@@ -115,7 +119,7 @@ export default function AddMcpServiceLocalSection({
         }
       });
     }
-  }, [deploymentType, draft.containerPort]);
+  }, [deploymentType, draft.containerPort, portsVirtual]);
 
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -393,7 +397,7 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
-                    enabled={false}
+                    enabled={!portsVirtual}
                     readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
@@ -530,7 +534,7 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
-                    enabled={false}
+                    enabled={!portsVirtual}
                     readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
