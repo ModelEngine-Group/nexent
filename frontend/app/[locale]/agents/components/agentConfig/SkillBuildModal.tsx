@@ -102,6 +102,17 @@ function parseStreamedFrontmatter(content: string): StreamedFrontmatter | null {
   }
 }
 
+function stripLeadingSkillFrontmatter(content: string): string {
+  let normalizedContent = content;
+  const frontmatterPattern = /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/;
+
+  while (frontmatterPattern.test(normalizedContent)) {
+    normalizedContent = normalizedContent.replace(frontmatterPattern, "");
+  }
+
+  return normalizedContent;
+}
+
 function mergeGeneratedSkillTabs(
   currentTabs: SkillFileContent[],
   generatedTabs: SkillFileContent[],
@@ -452,7 +463,13 @@ export default function SkillBuildModal({
             if (content === null) {
               throw new Error(`Failed to load skill file: ${path}`);
             }
-            return { path, content };
+            return {
+              path,
+              content:
+                path === "SKILL.md"
+                  ? stripLeadingSkillFrontmatter(content)
+                  : content,
+            };
           })
         );
         if (!cancelled) {
@@ -520,7 +537,10 @@ export default function SkillBuildModal({
       setIsSubmitting(true);
 
       const skillTab = skillTabs.find((t) => t.path === "SKILL.md");
-      const content = skillTab?.content || "";
+      const rawContent = skillTab?.content || "";
+      const content = isEditMode
+        ? stripLeadingSkillFrontmatter(rawContent)
+        : rawContent;
 
       const extraFiles = skillTabs
         .filter((t) => t.path !== "SKILL.md")
