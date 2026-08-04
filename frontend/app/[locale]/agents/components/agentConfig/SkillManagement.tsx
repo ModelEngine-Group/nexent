@@ -16,6 +16,11 @@ import log from "@/lib/logger";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
 import SkillRowContent from "./skill/SkillRowContent";
+import {
+  hasMissingRequiredSkillConfig,
+  requiresSkillConfigOnSelection,
+  withEffectiveSkillConfig,
+} from "./skill/utils";
 
 interface SkillManagementProps {
   skillGroups: SkillGroup[];
@@ -120,27 +125,15 @@ export default function SkillManagement({
     } else {
       // In uninstantiated mode, skillInstanceMap is empty — preserve skill.config_values (template defaults)
       const savedConfigValues = skillInstanceMap[skill.skill_id] || null;
-      const skillWithValues: Skill = {
-        ...skill,
-        config_values:
-          savedConfigValues !== null
-            ? savedConfigValues
-            : skill.config_values || {},
-      };
-      const effectiveConfigValues =
-        savedConfigValues !== null
-          ? savedConfigValues
-          : skill.config_values || {};
-      const hasRequiredParams = (skill.config_schemas || []).some(
-        (schema: SkillParam) =>
-          schema.required &&
-          (effectiveConfigValues[schema.name] === undefined ||
-            effectiveConfigValues[schema.name] === null ||
-            effectiveConfigValues[schema.name] === "")
+      const skillWithValues = withEffectiveSkillConfig(
+        skill,
+        savedConfigValues
       );
-      const isKnowledgeBaseSkill = skill.name === "search-knowledge-base";
+      const hasRequiredParams = hasMissingRequiredSkillConfig(skillWithValues);
+      const alwaysRequiresConfig =
+        requiresSkillConfigOnSelection(skillWithValues);
 
-      if (hasRequiredParams || isKnowledgeBaseSkill) {
+      if (hasRequiredParams || alwaysRequiresConfig) {
         setConfigModalSkill(skillWithValues);
         setConfigModalOpen(true);
       } else {
@@ -190,13 +183,7 @@ export default function SkillManagement({
     e.stopPropagation();
     const savedConfigValues = skillInstanceMap[skill.skill_id] || null;
     // In uninstantiated mode, skillInstanceMap is empty — preserve skill.config_values (template defaults)
-    setConfigModalSkill({
-      ...skill,
-      config_values:
-        savedConfigValues !== null
-          ? savedConfigValues
-          : skill.config_values || {},
-    });
+    setConfigModalSkill(withEffectiveSkillConfig(skill, savedConfigValues));
     setConfigModalOpen(true);
   };
 

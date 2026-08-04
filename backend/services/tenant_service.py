@@ -33,8 +33,9 @@ from consts.const import (
     DEFAULT_TENANT_ID,
     TENANT_ID,
     TENANT_NAME,
+    IS_SPEED_MODE,
 )
-from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
 from services.skill_service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,20 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     }
 
     return tenant_info
+
+
+def get_tenant_info_for_user(
+    tenant_id: str,
+    *,
+    requester_tenant_id: str,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """Get tenant information after enforcing tenant-scoped access."""
+    role = (requester_role or "").upper()
+    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
+    if role != "SU" and not is_speed_admin and tenant_id != requester_tenant_id:
+        raise ForbiddenError("Not authorized to access this tenant")
+    return get_tenant_info(tenant_id)
 
 
 def _ensure_tenant_name_config(tenant_id: str) -> bool:
@@ -189,6 +204,19 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         "page_size": page_size,
         "total_pages": total_pages
     }
+
+
+def get_tenants_paginated_for_user(
+    page: int = 1,
+    page_size: int = 20,
+    *,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """List tenants for platform administrators only."""
+    role = (requester_role or "").upper()
+    if role != "SU" and not (IS_SPEED_MODE and role == "SPEED"):
+        raise ForbiddenError("Only super administrators can list tenants")
+    return get_tenants_paginated(page=page, page_size=page_size)
 
 
 def create_tenant(

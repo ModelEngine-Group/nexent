@@ -348,6 +348,7 @@ def _build_model_config(model: dict) -> dict:
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
+    model_type = model.get("model_type", "embedding")
     common_kwargs = {
         "api_key": model_config.get("api_key", ""),
         "base_url": model_config.get("base_url", ""),
@@ -355,13 +356,22 @@ def _create_embedding_model(model: dict) -> Any:
         "embedding_dim": model_config.get("max_tokens", 1024),
         "ssl_verify": model_config.get("ssl_verify", True),
     }
-    if model.get("model_type", "embedding") == "multi_embedding":
+
+    if model_type == "multi_embedding":
         model_factory = model.get("model_factory", "").lower()
         if model_factory == "dashscope":
             return DashScopeMultimodalEmbedding(**common_kwargs)
         if model_factory == "silicon":
             return SiliconflowMultimodalEmbedding(**common_kwargs)
         return JinaEmbedding(**common_kwargs)
+
+    if model_type != "embedding":
+        raise ValueError(
+            f"Invalid model_type '{model_type}' for model '{common_kwargs['model_name']}'. "
+            f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
+            f"Please check the model configuration in the model management page."
+        )
+
     return OpenAICompatibleEmbedding(**common_kwargs)
 
 def get_embedding_model(
@@ -803,8 +813,7 @@ class ElasticSearchService:
             tenant_id: Optional[str],
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
-            embedding_model_name: Optional[str] = None,
-            is_multimodal: Optional[bool] = None,
+            embedding_model_id: Optional[int] = None,
             preserve_source_file: Optional[bool] = None,
             quota_limit_bytes: Optional[int] = None,
     ):
@@ -824,8 +833,7 @@ class ElasticSearchService:
             tenant_id: Tenant ID
             ingroup_permission: Permission level (optional)
             group_ids: List of group IDs (optional)
-            embedding_model_name: Specific embedding model name to use (optional).
-                                   If provided, will use this model instead of tenant default.
+            embedding_model_id: Unique ID of the selected embedding model.
             preserve_source_file: Whether to preserve uploaded source documents after
                                    vectorization (optional; defaults to True when omitted).
 
@@ -833,24 +841,19 @@ class ElasticSearchService:
         with an explicit index_name.
         """
         try:
-            # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            selected_model_type = None
-            if is_multimodal is True:
-                selected_model_type = "multi_embedding"
-            elif is_multimodal is False and embedding_model_name:
-                selected_model_type = "embedding"
+            if embedding_model_id is None:
+                raise ValueError("embedding_model_id is required")
 
-            embedding_model, model_id = get_embedding_model(
-                tenant_id,
-                embedding_model_name,
-                selected_model_type
-            )
+            model = get_model_by_model_id(embedding_model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Embedding model with id {embedding_model_id} not found")
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model with id {embedding_model_id} is not an embedding model"
+                )
 
-            # Determine the embedding model name to save: use user-provided name if available,
-            # otherwise use the model's display name
-            saved_embedding_model_name = embedding_model_name
-            if not saved_embedding_model_name and embedding_model:
-                saved_embedding_model_name = embedding_model.model
+            embedding_model = _create_embedding_model(model)
+            saved_embedding_model_name = model.get("display_name") or model.get("model_name")
 
             # Create knowledge record first to obtain knowledge_id and generated index_name
             knowledge_data = {
@@ -859,7 +862,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
-                "embedding_model_id": model_id,
+                "embedding_model_id": embedding_model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -888,9 +891,13 @@ class ElasticSearchService:
                 "status": "success",
                 "message": f"Index {index_name} created successfully",
                 "id": index_name,
+                "embedding_model_name": saved_embedding_model_name,
+                "model_type": model.get("model_type"),
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except ValueError:
+            raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
 
@@ -1419,7 +1426,7 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
-                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "embedding" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
                     key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)
