@@ -34,6 +34,7 @@ export interface ApiMessage {
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;
   message_id?: number;
+  message_index?: number;
   picture?: string[];
   search?: any[];
   searchByUnitId?: Record<string, any[]>;

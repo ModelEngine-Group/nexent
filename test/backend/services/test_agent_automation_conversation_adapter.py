@@ -12,14 +12,17 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
         lambda conversation_id, user_id: [{"message": [
             {
                 "role": "user",
+                "message_index": 0,
                 "message": [{"type": "string", "content": "原始请求"}],
             },
             {
                 "role": "assistant",
+                "message_index": 1,
                 "message": [{"type": "automation_proposal", "content": "hidden"}],
             },
             {
                 "role": "assistant",
+                "message_index": 3,
                 "message": [{"type": "final_answer", "content": "上次结果"}],
             },
         ]}],
@@ -51,11 +54,89 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
         ("assistant", "上次结果"),
     ]
     assert captured["request"].conversation_id == 321
-    assert captured["request"].message_idx == 3
+    assert captured["request"].message_idx == 4
     assert captured["request"].role == "user"
     assert captured["request"].message[0].content == "整理一份项目周报"
     assert captured["owner"] == ("user", "tenant")
     assert captured["units"][0]["unit_type"] == "automation_prompt"
+
+
+def test_history_uses_latest_message_for_each_regenerated_index():
+    history = AutomationConversationAdapter._history_items([
+        {
+            "role": "user",
+            "message_index": 0,
+            "message": "原始问题",
+        },
+        {
+            "role": "user",
+            "message_index": 0,
+            "message": "原始问题",
+        },
+        {
+            "role": "assistant",
+            "message_index": 1,
+            "message": [{"type": "final_answer", "content": "旧回答"}],
+        },
+        {
+            "role": "assistant",
+            "message_index": 1,
+            "message": [{"type": "final_answer", "content": "最新回答"}],
+        },
+    ])
+
+    assert [(item.role, item.content) for item in history] == [
+        ("user", "原始问题"),
+        ("assistant", "最新回答"),
+    ]
+
+
+def test_consecutive_runs_allocate_independent_turn_indexes(monkeypatch):
+    messages = [
+        {"role": "user", "message_index": 0, "message": "创建每日任务"},
+        {
+            "role": "assistant",
+            "message_index": 1,
+            "message": [{"type": "automation_proposal", "content": "proposal"}],
+        },
+    ]
+    captured_indexes = []
+
+    monkeypatch.setattr(
+        adapter_module,
+        "get_conversation_history_service",
+        lambda *args: [{"message": list(messages)}],
+    )
+
+    def fake_save_message(request, user_id, tenant_id):
+        captured_indexes.append(request.message_idx)
+        messages.append({
+            "role": request.role,
+            "message_index": request.message_idx,
+            "message": [unit.model_dump() for unit in request.message],
+        })
+        return 100 + len(captured_indexes)
+
+    monkeypatch.setattr(adapter_module, "save_message", fake_save_message)
+    monkeypatch.setattr(adapter_module, "save_message_unit", lambda **kwargs: None)
+
+    adapter = AutomationConversationAdapter()
+    first_turn = adapter.append_run_prompt(321, "查询当天运势", "user", "tenant")
+    messages.append({
+        "role": "assistant",
+        "message_index": 3,
+        "message": [{"type": "final_answer", "content": "第一次结果"}],
+    })
+    second_turn = adapter.append_run_prompt(321, "查询当天运势", "user", "tenant")
+
+    assert captured_indexes == [2, 4]
+    assert first_turn["user_message_id"] == 101
+    assert second_turn["user_message_id"] == 102
+    assert [item.content for item in second_turn["history"]] == [
+        "创建每日任务",
+        "查询当天运势",
+        "第一次结果",
+    ]
 
 
 def test_append_proposal_exchange_persists_user_instruction_and_assistant_card(monkeypatch):

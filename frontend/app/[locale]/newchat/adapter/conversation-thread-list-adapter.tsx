@@ -22,6 +22,7 @@ import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
+import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -189,41 +190,6 @@ const buildBranchableHistory = (
   }
 
   return branchableMessages;
-};
-
-const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
-  left.role === "user" &&
-  right.role === "user" &&
-  JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) ===
-    JSON.stringify(right.minio_files ?? []);
-
-/**
- * Collapse refresh-generated duplicate user messages while preserving every
- * assistant response as a branch under the first user message.
- *
- * Assistant messages do not reset the comparison. A different user message
- * does reset it, so identical questions from separate turns remain distinct.
- */
-const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
-  const collapsed: ApiMessage[] = [];
-  let activeUserMessage: ApiMessage | undefined;
-
-  for (const message of messages) {
-    if (message.role !== "user") {
-      collapsed.push(message);
-      continue;
-    }
-
-    if (activeUserMessage && areSameUserMessages(activeUserMessage, message)) {
-      continue;
-    }
-
-    collapsed.push(message);
-    activeUserMessage = message;
-  }
-
-  return collapsed;
 };
 
 const restoreAttachments = (

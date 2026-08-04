@@ -41,7 +41,18 @@ class AutomationConversationAdapter:
     @classmethod
     def _history_items(cls, messages: List[Dict[str, Any]]) -> List[HistoryItem]:
         history: List[HistoryItem] = []
-        for message in messages:
+        latest_positions = {
+            message["message_index"]: position
+            for position, message in enumerate(messages)
+            if isinstance(message.get("message_index"), int)
+        }
+        for position, message in enumerate(messages):
+            message_index = message.get("message_index")
+            if (
+                isinstance(message_index, int)
+                and latest_positions[message_index] != position
+            ):
+                continue
             content = cls._message_content(message)
             if content:
                 history.append(
@@ -62,9 +73,21 @@ class AutomationConversationAdapter:
         """Append a new automation turn without regenerating an existing message."""
         history_payload = get_conversation_history_service(conversation_id, user_id)
         messages = history_payload[0].get("message", []) if history_payload else []
+        message_indexes = [
+            message.get("message_index")
+            for message in messages
+            if isinstance(message.get("message_index"), int)
+        ]
+        if message_indexes:
+            highest_message_index = max(message_indexes)
+            next_message_index = highest_message_index + (
+                1 if highest_message_index % 2 else 2
+            )
+        else:
+            next_message_index = len(messages)
         request = MessageRequest(
             conversation_id=conversation_id,
-            message_idx=len(messages),
+            message_idx=next_message_index,
             role="user",
             message=[MessageUnit(type="string", content=prompt)],
         )
