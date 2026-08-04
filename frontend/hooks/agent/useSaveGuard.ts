@@ -185,7 +185,6 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
-<<<<<<< HEAD
       // Build related_agents directly from sub_agent_relations.
       // sub_agent_relations is kept in sync by CollaborativeAgent when adding/removing:
       // - Newly selected agents get their current_version_no from the published list
@@ -197,12 +196,9 @@ export const useSaveGuard = () => {
           version_no: rel.version_no != null ? Number(rel.version_no) : 0,
         }));
 
-      const relatedExternalAgentIds = (currentEditedAgent.external_sub_agent_id_list || [])
-=======
       const relatedExternalAgentIds = (
         currentEditedAgent.external_sub_agent_id_list || []
       )
->>>>>>> develop
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 

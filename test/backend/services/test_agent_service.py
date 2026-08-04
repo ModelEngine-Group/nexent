@@ -16604,7 +16604,6 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_name"] is None
 
 
-<<<<<<< HEAD
 @patch('backend.services.agent_service.batch_search_agent_display_names')
 @patch('backend.services.agent_service.batch_search_version_names')
 @patch('backend.services.agent_service.batch_query_current_version_nos')
@@ -16906,7 +16905,8 @@ async def test_update_agent_info_impl_with_related_agents_objects(
             {"agent_id": 789, "version_no": None},
         ],
     )
-=======
+
+
 @patch("backend.services.agent_service.get_user_language", return_value="en-US")
 @patch("backend.services.agent_service.get_current_user_info", return_value=("user-1", "tenant-1", "zh-CN"))
 def test_resolve_user_tenant_language_honors_explicit_identity(
@@ -16929,4 +16929,3 @@ def test_resolve_user_tenant_language_honors_explicit_identity(
 def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
     assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
     mock_query_group_ids.assert_called_once_with("user-1")
->>>>>>> develop
