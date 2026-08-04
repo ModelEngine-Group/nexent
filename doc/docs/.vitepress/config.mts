@@ -93,65 +93,55 @@ export default defineConfig({
             items: [
               { text: "Home Page", link: "/en/user-guide/home-page" },
               { text: "Start Chat", link: "/en/user-guide/start-chat" },
-              {
-                text: "Quick Setup",
-                link: "/en/user-guide/quick-setup",
-              },
-              { text: "Agent Space", link: "/en/user-guide/agent-space" },
-              { text: "Agent Market", link: "/en/user-guide/agent-market" },
+              { text: "Auto Tasks", link: "/en/user-guide/auto-tasks" },
               {
                 text: "Agent Development",
                 link: "/en/user-guide/agent-development",
-              },
-              {
-                text: "Knowledge Base",
-                link: "/en/user-guide/knowledge-base",
-              },
-              { text: "MCP Tools", link: "/en/user-guide/mcp-tools" },
-              { text: "Monitoring & Ops", link: "/en/user-guide/monitor" },
-              {
-                text: "Model Management",
-                link: "/en/user-guide/model-management",
-              },
-              {
-                text: "Memory Management",
-                link: "/en/user-guide/memory-management",
-              },
-              {
-                text: "User Management",
-                link: "/en/user-guide/user-management",
-              },
-              {
-                text: "Third-party Platform Integrations",
                 items: [
-                  { text: "ModelEngine", link: "/en/user-guide/modelengine" },
+                  {
+                    text: "Model Configuration",
+                    link: "/en/user-guide/agent-development/model-configuration",
+                  },
+                  {
+                    text: "Knowledge Configuration",
+                    link: "/en/user-guide/agent-development/knowledge-configuration",
+                  },
+                  {
+                    text: "Agent Configuration",
+                    link: "/en/user-guide/agent-development/agent-configuration",
+                    items: [
+                      {
+                        text: "Local Tools",
+                        link: "/en/user-guide/local-tools/",
+                      },
+                    ],
+                  },
+                  {
+                    text: "Memory Configuration",
+                    link: "/en/user-guide/agent-development/memory-configuration",
+                  },
                 ],
               },
               {
-                text: "Local Tools",
+                text: "Resource Repository",
                 items: [
-                  { text: "Overview", link: "/en/user-guide/local-tools/" },
                   {
-                    text: "File Tools",
-                    link: "/en/user-guide/local-tools/file-tools",
+                    text: "Agent Repository",
+                    link: "/en/user-guide/resource-repository/agent-repository",
                   },
                   {
-                    text: "Email Tools",
-                    link: "/en/user-guide/local-tools/email-tools",
+                    text: "MCP Repository",
+                    link: "/en/user-guide/resource-repository/mcp-repository",
                   },
                   {
-                    text: "Search Tools",
-                    link: "/en/user-guide/local-tools/search-tools",
-                  },
-                  {
-                    text: "Multimodal Tools",
-                    link: "/en/user-guide/local-tools/multimodal-tools",
-                  },
-                  {
-                    text: "Terminal Tool",
-                    link: "/en/user-guide/local-tools/terminal-tool",
+                    text: "Skill Repository",
+                    link: "/en/user-guide/resource-repository/skill-repository",
                   },
                 ],
+              },
+              {
+                text: "Resource Management",
+                link: "/en/user-guide/resource-management",
               },
             ],
           },
@@ -320,53 +310,55 @@ export default defineConfig({
             items: [
               { text: "首页", link: "/zh/user-guide/home-page" },
               { text: "开始问答", link: "/zh/user-guide/start-chat" },
-              { text: "快速配置", link: "/zh/user-guide/quick-setup" },
-              { text: "智能体空间", link: "/zh/user-guide/agent-space" },
-              { text: "智能体市场", link: "/zh/user-guide/agent-market" },
+              { text: "自动任务", link: "/zh/user-guide/auto-tasks" },
               {
                 text: "智能体开发",
                 link: "/zh/user-guide/agent-development",
-              },
-              {
-                text: "知识库",
-                link: "/zh/user-guide/knowledge-base",
-              },
-              { text: "MCP工具", link: "/zh/user-guide/mcp-tools" },
-              { text: "监控与运维", link: "/zh/user-guide/monitor" },
-              { text: "模型管理", link: "/zh/user-guide/model-management" },
-              { text: "记忆管理", link: "/zh/user-guide/memory-management" },
-              { text: "用户管理", link: "/zh/user-guide/user-management" },
-              {
-                text: "本地工具",
                 items: [
-                  { text: "概览", link: "/zh/user-guide/local-tools/" },
                   {
-                    text: "文件工具",
-                    link: "/zh/user-guide/local-tools/file-tools",
+                    text: "模型配置",
+                    link: "/zh/user-guide/agent-development/model-configuration",
                   },
                   {
-                    text: "邮件工具",
-                    link: "/zh/user-guide/local-tools/email-tools",
+                    text: "知识库配置",
+                    link: "/zh/user-guide/agent-development/knowledge-configuration",
                   },
                   {
-                    text: "搜索工具",
-                    link: "/zh/user-guide/local-tools/search-tools",
+                    text: "智能体配置",
+                    link: "/zh/user-guide/agent-development/agent-configuration",
+                    items: [
+                      {
+                        text: "本地工具",
+                        link: "/zh/user-guide/local-tools/",
+                      },
+                    ],
                   },
                   {
-                    text: "多模态工具",
-                    link: "/zh/user-guide/local-tools/multimodal-tools",
-                  },
-                  {
-                    text: "终端工具",
-                    link: "/zh/user-guide/local-tools/terminal-tool",
+                    text: "记忆配置",
+                    link: "/zh/user-guide/agent-development/memory-configuration",
                   },
                 ],
               },
               {
-                text: "对接第三方平台",
+                text: "资源仓库",
                 items: [
-                  { text: "ModelEngine", link: "/zh/user-guide/modelengine" },
+                  {
+                    text: "智能体仓库",
+                    link: "/zh/user-guide/resource-repository/agent-repository",
+                  },
+                  {
+                    text: "MCP仓库",
+                    link: "/zh/user-guide/resource-repository/mcp-repository",
+                  },
+                  {
+                    text: "Skill仓库",
+                    link: "/zh/user-guide/resource-repository/skill-repository",
+                  },
                 ],
+              },
+              {
+                text: "资源管理",
+                link: "/zh/user-guide/resource-management",
               },
             ],
           },

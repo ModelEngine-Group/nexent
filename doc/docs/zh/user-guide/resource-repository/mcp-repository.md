@@ -1,4 +1,4 @@
-# MCP 工具
+# MCP 仓库
 
 在 MCP 工具模块中，您可以集中管理所有 MCP（Model Context Protocol）服务器与工具，支持自定义添加、注册表导入和社区导入等多种接入方式，完成连接配置、工具同步、健康监控以及社区共享。
 
@@ -141,7 +141,7 @@ Nexent 集成了 MCP Registry，您可以浏览并一键导入社区维护的 MC
 
 ## 🔗 与智能体协作
 
-添加 MCP 服务后，其提供的工具会自动同步到智能体的工具选择列表中。在 **[智能体开发](./agent-development)** 页面配置智能体时：
+添加 MCP 服务后，其提供的工具会自动同步到智能体的工具选择列表中。在 **[智能体开发](../agent-development)** 页面配置智能体时：
 
 1. 在"选择智能体的工具"页签下，找到对应 MCP 服务分组
 2. 点击工具名称即可启用该工具
@@ -151,8 +151,8 @@ Nexent 集成了 MCP Registry，您可以浏览并一键导入社区维护的 MC
 
 完成 MCP 服务配置后，建议您：
 
-1. **[智能体开发](./agent-development)** - 将 MCP 工具配置给智能体使用
-2. **[智能体空间](./agent-space)** - 查看智能体与 MCP 的协作关系
-3. **[开始问答](./start-chat)** - 在对话中体验智能体调用 MCP 工具的效果
+1. **[智能体开发](../agent-development)** - 将 MCP 工具配置给智能体使用
+2. **[智能体仓库](./agent-repository)** - 查看智能体与 MCP 的协作关系
+3. **[开始问答](../start-chat)** - 在对话中体验智能体调用 MCP 工具的效果
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

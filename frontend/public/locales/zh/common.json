@@ -73,6 +73,7 @@
   "chatInterface.updateOpinionFailed": "更新点赞/点踩失败:",
   "chatInterface.aiGeneratedContentWarning": "内容由 AI 生成，请仔细甄别",
   "chatInterface.copyShareLink": "复制链接",
+  "chatInterface.shareConversation": "分享对话",
   "chatInterface.noConversationSelected": "请先选择一个对话",
   "chatInterface.selectShareMessages": "请至少选择一组问答",
   "chatInterface.selectedShareCount": "已选择 {{count}}",

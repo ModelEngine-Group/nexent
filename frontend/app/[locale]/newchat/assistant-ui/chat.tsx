@@ -10,6 +10,7 @@ import type { Agent } from "@/types/agentConfig";
 
 export interface ChatProps {
   generatedTitle?: string;
+  conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
   onAgentSelected?: (agent: Agent) => void;
@@ -35,6 +36,7 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  conversationId,
   isLoadingAgents = false,
   selectedAgent,
   onAgentSelected,
@@ -66,6 +68,7 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      conversationId={conversationId}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}

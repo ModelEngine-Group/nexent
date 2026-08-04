@@ -18,6 +18,14 @@ import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
@@ -47,8 +55,11 @@ import {
   ArrowLeft,
   SparklesIcon,
   PencilIcon,
+  Share2Icon,
   XCircleIcon,
+  XIcon,
 } from "lucide-react";
+import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { ModelOption } from "../ui/model-selector";
@@ -83,10 +94,14 @@ import {
 import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
+import { copyToClipboard } from "@/lib/clipboard";
+import { configService } from "@/services/configService";
+import { conversationService } from "@/services/conversationService";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
+  conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
@@ -125,6 +140,7 @@ const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] =
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  conversationId,
   onBack,
   selectedModelId,
   onModelChange,
@@ -144,8 +160,16 @@ export const Thread: FC<ThreadProps> = ({
     return currentThread?.title;
   });
   const hasMessages = messages.length > 0;
+  const isRunning = useAuiState((s) => s.thread.isRunning);
   const displayName = agent.display_name || agent.name;
   const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || t("chat.thread.newChat");
+  const [isShareMode, setIsShareMode] = useState(false);
+  const [selectedShareMessageIds, setSelectedShareMessageIds] = useState<Set<number>>(new Set());
+  const [backendMessageIdsByAuiId, setBackendMessageIdsByAuiId] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
 
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
@@ -179,6 +203,108 @@ export const Thread: FC<ThreadProps> = ({
     [selection, open, toggle, close],
   );
 
+  const shareableUserMessageIds = useMemo(
+    () => Array.from(backendMessageIdsByAuiId.values()),
+    [backendMessageIdsByAuiId],
+  );
+
+  const leaveShareMode = useCallback(() => {
+    setIsShareMode(false);
+    setSelectedShareMessageIds(new Set());
+    setBackendMessageIdsByAuiId(new Map());
+  }, []);
+
+  const enterShareMode = useCallback(async () => {
+    if (!conversationId || isRunning) return;
+    const auiUserMessageIds = messages
+      .filter((item) => item.role === "user")
+      .map((item) => String(item.id));
+    const directBackendMessageIds = auiUserMessageIds.map((id) => Number(id));
+    if (
+      directBackendMessageIds.length > 0 &&
+      directBackendMessageIds.every((id) => Number.isSafeInteger(id) && id > 0) &&
+      new Set(directBackendMessageIds).size === directBackendMessageIds.length
+    ) {
+      setBackendMessageIdsByAuiId(
+        new Map(auiUserMessageIds.map((id, index) => [id, directBackendMessageIds[index]])),
+      );
+      setSelectedShareMessageIds(new Set());
+      setIsShareMode(true);
+      return;
+    }
+
+    try {
+      const response = await conversationService.getDetail(conversationId);
+      const backendUserMessageIds = (response.data?.[0]?.message ?? [])
+        .filter((item) => item.role === "user" && Number.isInteger(item.message_id))
+        .map((item) => item.message_id as number);
+      if (!backendUserMessageIds.length || backendUserMessageIds.length !== auiUserMessageIds.length) {
+        message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+        return;
+      }
+      setBackendMessageIdsByAuiId(
+        new Map(auiUserMessageIds.map((id, index) => [id, backendUserMessageIds[index]])),
+      );
+      setSelectedShareMessageIds(new Set());
+      setIsShareMode(true);
+    } catch {
+      message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+    }
+  }, [conversationId, isRunning, messages, t]);
+
+  const toggleShareMessage = useCallback((messageId: number) => {
+    setSelectedShareMessageIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
+  const toggleShareAll = useCallback(() => {
+    setSelectedShareMessageIds((previous) =>
+      previous.size === shareableUserMessageIds.length
+        ? new Set()
+        : new Set(shareableUserMessageIds),
+    );
+  }, [shareableUserMessageIds]);
+
+  const createShare = useCallback(async () => {
+    if (!conversationId) return;
+    if (!selectedShareMessageIds.size) {
+      message.warning(t("chatInterface.selectShareMessages", "请至少选择一组问答"));
+      return;
+    }
+    setIsCreatingShare(true);
+    try {
+      const result = await conversationService.createShare({
+        conversationId,
+        mode: selectedShareMessageIds.size === shareableUserMessageIds.length ? "all" : "selected",
+        selected_user_message_ids: Array.from(selectedShareMessageIds),
+        render_version: "newchat",
+      });
+      const runtimeConfig = await configService
+        .fetchRuntimeFrontendConfig()
+        .catch((): { shareBaseUrl?: string } => ({}));
+      const baseUrl = (
+        runtimeConfig.shareBaseUrl || process.env.NEXT_PUBLIC_SHARE_BASE_URL || window.location.origin
+      ).replace(/\/$/, "");
+      const locale = window.location.pathname.split("/").filter(Boolean)[0] || "zh";
+      const shareUrl = `${baseUrl}/${locale}/share/${result.share_id}`;
+      try {
+        await copyToClipboard(shareUrl);
+        message.success(t("chatInterface.shareLinkCopied", "分享链接已复制"));
+      } catch {
+        setManualShareUrl(shareUrl);
+      }
+      leaveShareMode();
+    } catch {
+      message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+    } finally {
+      setIsCreatingShare(false);
+    }
+  }, [conversationId, leaveShareMode, selectedShareMessageIds, shareableUserMessageIds, t]);
+
   return (
     <SourcesPanelProvider value={panelContextValue}>
       <ThreadView
@@ -194,9 +320,56 @@ export const Thread: FC<ThreadProps> = ({
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
+        conversationId={conversationId}
+        isRunning={isRunning}
+        isShareMode={isShareMode}
+        selectedShareMessageIds={selectedShareMessageIds}
+        backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+        isCreatingShare={isCreatingShare}
+        onEnterShareMode={enterShareMode}
+        onLeaveShareMode={leaveShareMode}
+        onToggleShareAll={toggleShareAll}
+        onToggleShareMessage={toggleShareMessage}
+        onCreateShare={createShare}
         selection={selection}
         onPanelClose={close}
       />
+      <Dialog open={Boolean(manualShareUrl)} onOpenChange={(open) => !open && setManualShareUrl(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("chatInterface.shareLinkReady", "分享链接已生成")}</DialogTitle>
+            <DialogDescription>
+              {t("chatInterface.shareCreatedCopyFailed", "分享链接已创建，但当前环境无法自动复制")}
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            value={manualShareUrl ?? ""}
+            readOnly
+            onFocus={(event) => event.currentTarget.select()}
+            className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setManualShareUrl(null)}>
+              {t("common.close", "关闭")}
+            </Button>
+            <Button
+              type="button"
+              onClick={async () => {
+                if (!manualShareUrl) return;
+                try {
+                  await copyToClipboard(manualShareUrl);
+                  message.success(t("chatInterface.shareLinkCopied", "分享链接已复制"));
+                  setManualShareUrl(null);
+                } catch {
+                  message.warning(t("chatInterface.shareManualCopyRequired", "请手动复制链接"));
+                }
+              }}
+            >
+              {t("chatInterface.copyShareLink", "复制链接")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SourcesPanelProvider>
   );
 };
@@ -214,6 +387,17 @@ interface ThreadViewProps {
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
+  conversationId?: number;
+  isRunning: boolean;
+  isShareMode: boolean;
+  selectedShareMessageIds: Set<number>;
+  backendMessageIdsByAuiId: Map<string, number>;
+  isCreatingShare: boolean;
+  onEnterShareMode: () => void;
+  onLeaveShareMode: () => void;
+  onToggleShareAll: () => void;
+  onToggleShareMessage: (messageId: number) => void;
+  onCreateShare: () => void;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
 }
@@ -231,6 +415,17 @@ const ThreadView: FC<ThreadViewProps> = ({
   hasMessages,
   displayName,
   conversationTitle,
+  conversationId,
+  isRunning,
+  isShareMode,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  isCreatingShare,
+  onEnterShareMode,
+  onLeaveShareMode,
+  onToggleShareAll,
+  onToggleShareMessage,
+  onCreateShare,
   selection,
   onPanelClose,
 }) => {
@@ -240,24 +435,86 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          {onBack && (
-            <Button variant="ghost" size="icon" onClick={onBack}>
-              <ArrowLeft className="size-4" />
-            </Button>
+          {isShareMode ? (
+            <>
+              <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                {conversationTitle}
+              </div>
+              <Button variant="ghost" size="icon" onClick={onLeaveShareMode} aria-label={t("common.close", "关闭")}>
+                <XIcon className="size-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              {onBack && (
+                <Button variant="ghost" size="icon" onClick={onBack}>
+                  <ArrowLeft className="size-4" />
+                </Button>
+              )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-medium text-foreground">
+                  {hasMessages ? conversationTitle : displayName}
+                </span>
+                {hasMessages && (
+                  <span className="text-xs text-muted-foreground">{t("chat.thread.conversation")}</span>
+                )}
+              </div>
+              {hasMessages && conversationId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("chatInterface.shareConversation", "分享对话")}
+                  disabled={isRunning}
+                  onClick={onEnterShareMode}
+                >
+                  <Share2Icon className="size-4" />
+                </Button>
+              )}
+            </>
           )}
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground">
-              {hasMessages ? conversationTitle : displayName}
-            </span>
-            {hasMessages && (
-              <span className="text-xs text-muted-foreground">{t("chat.thread.conversation")}</span>
-            )}
-          </div>
         </header>
+
+        {isShareMode && (
+          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={
+                  backendMessageIdsByAuiId.size > 0 &&
+                  selectedShareMessageIds.size === backendMessageIdsByAuiId.size
+                }
+                onChange={onToggleShareAll}
+              />
+              {t("common.selectAll", "全选")}
+            </label>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {t("chatInterface.selectedShareCount", {
+                  count: selectedShareMessageIds.size,
+                  defaultValue: "已选择 {{count}}",
+                })}
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={onLeaveShareMode}>
+                {t("common.cancel", "取消")}
+              </Button>
+              <Button type="button" size="sm" onClick={onCreateShare} disabled={isCreatingShare}>
+                {isCreatingShare
+                  ? t("common.loading", "处理中...")
+                  : t("chatInterface.copyShareLink", "复制链接")}
+              </Button>
+            </div>
+          </div>
+        )}
 
         <ThreadPrimitive.Viewport className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
           {hasMessages ? (
-            <ThreadMessages agent={agent} />
+            <ThreadMessages
+              agent={agent}
+              shareMode={isShareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              onToggleShareMessage={onToggleShareMessage}
+            />
           ) : (
             <ThreadWelcomeContent agent={agent} />
           )}
@@ -285,6 +542,52 @@ const ThreadView: FC<ThreadViewProps> = ({
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
+  );
+};
+
+export const ReadOnlyConversation: FC<{
+  agent: Agent | PublishedAgent;
+  title: string;
+}> = ({ agent, title }) => {
+  const { t } = useTranslation();
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
+  const open = useCallback((payload: SourcesPanelSelection) => setSelection(payload), []);
+  const toggle = useCallback((payload: SourcesPanelSelection) => {
+    setSelection((current) =>
+      current && current.messageId === payload.messageId && current.groupId === payload.groupId
+        ? null
+        : payload,
+    );
+  }, []);
+  const close = useCallback(() => setSelection(null), []);
+  const panelContextValue = useMemo(
+    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
+    [selection, open, toggle, close],
+  );
+
+  return (
+    <SourcesPanelProvider value={panelContextValue}>
+      <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
+        <main className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b px-6 py-4">
+            <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
+            </p>
+          </header>
+          <ThreadPrimitive.Viewport className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-8 py-6">
+            <ThreadMessages agent={agent} readOnly />
+          </ThreadPrimitive.Viewport>
+        </main>
+        <SourcesPanel
+          sources={selection?.sources ?? []}
+          images={selection?.images ?? []}
+          open={selection !== null}
+          selectedCiteIndex={selection?.selectedCiteIndex}
+          onClose={close}
+        />
+      </ThreadPrimitive.Root>
+    </SourcesPanelProvider>
   );
 };
 
@@ -349,12 +652,100 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
   );
 };
 
-const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
+export const ThreadMessages: FC<{
+  agent: Agent | PublishedAgent;
+  readOnly?: boolean;
+  shareMode?: boolean;
+  selectedShareMessageIds?: Set<number>;
+  backendMessageIdsByAuiId?: Map<string, number>;
+  onToggleShareMessage?: (messageId: number) => void;
+}> = ({
+  agent,
+  readOnly = false,
+  shareMode = false,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  onToggleShareMessage,
+}) => {
+  const { t } = useTranslation();
+  const messages = useAuiState((s) => s.thread.messages);
+  const shareMessageGroups = useMemo(() => {
+    const groups: { key: string; messageIndexes: number[]; userMessageId?: number }[] = [];
+
+    messages.forEach((message, index) => {
+      if (message.role === "user") {
+        groups.push({
+          key: String(message.id),
+          messageIndexes: [index],
+          userMessageId: backendMessageIdsByAuiId?.get(String(message.id)),
+        });
+        return;
+      }
+
+      const currentGroup = groups.at(-1);
+      if (currentGroup) currentGroup.messageIndexes.push(index);
+      else groups.push({ key: String(message.id), messageIndexes: [index] });
+    });
+
+    return groups;
+  }, [backendMessageIdsByAuiId, messages]);
+
+  const messageComponents = useMemo(
+    () => ({
+      UserMessage: () => <UserMessage readOnly={readOnly} />,
+      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} />,
+    }),
+    [agent, readOnly],
+  );
+
+  if (shareMode) {
+    return (
+      <>
+        {shareMessageGroups.map((group) => {
+          const shareSelected =
+            group.userMessageId !== undefined && (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+          return (
+            <div
+              key={group.key}
+              className={`relative mb-4 w-full rounded-xl px-2 pt-1 pb-2 ${
+                shareSelected ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]" : ""
+              }`}
+            >
+              {group.userMessageId !== undefined && (
+                <label className="absolute -left-6 top-3 z-10 flex cursor-pointer items-center justify-center">
+                  <input
+                    type="checkbox"
+                    aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+                    checked={shareSelected}
+                    onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                  />
+                </label>
+              )}
+              {group.messageIndexes.map((index) => (
+                <ThreadPrimitive.MessageByIndex key={index} index={index} components={messageComponents} />
+              ))}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
   return (
     <ThreadPrimitive.Messages>
       {({ message }) => {
-        if (message.role === "user") return <UserMessage />;
-        return <AssistantMessage agent={agent} />;
+        if (message.role === "user") {
+          return (
+            <UserMessage
+              readOnly={readOnly}
+              shareMode={shareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              onToggleShareMessage={onToggleShareMessage}
+            />
+          );
+        }
+        return <AssistantMessage agent={agent} readOnly={readOnly} />;
       }}
     </ThreadPrimitive.Messages>
   );
@@ -430,7 +821,10 @@ const AssistantCompletionIndicator: FC = () => {
   );
 };
 
-const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
+const AssistantMessage: FC<{
+  agent: Agent | PublishedAgent;
+  readOnly?: boolean;
+}> = ({ agent, readOnly = false }) => {
   const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
@@ -654,8 +1048,8 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
         data-slot="aui_assistant-message-footer"
         className={cn("ml-2 flex items-center", ACTION_BAR_HEIGHT)}
       >
-        <BranchPicker />
-        <AssistantActionBar />
+        {!readOnly && <BranchPicker />}
+        {!readOnly && <AssistantActionBar />}
       </div>
     </MessagePrimitive.Root>
   );
@@ -719,13 +1113,38 @@ const AssistantActionBar: FC = () => {
   );
 };
 
-const UserMessage: FC = () => {
+const UserMessage: FC<{
+  readOnly?: boolean;
+  shareMode?: boolean;
+  selectedShareMessageIds?: Set<number>;
+  backendMessageIdsByAuiId?: Map<string, number>;
+  onToggleShareMessage?: (messageId: number) => void;
+}> = ({
+  readOnly = false,
+  shareMode = false,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  onToggleShareMessage,
+}) => {
+  const { t } = useTranslation();
+  const auiMessageId = useAuiState((s) => String(s.message.id));
+  const backendMessageId = backendMessageIdsByAuiId?.get(auiMessageId);
   return (
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       data-role="user"
-      className="fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
+      className="relative fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
     >
+      {shareMode && backendMessageId !== undefined && (
+        <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
+          <input
+            type="checkbox"
+            aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+            checked={selectedShareMessageIds?.has(backendMessageId) ?? false}
+            onChange={() => onToggleShareMessage?.(backendMessageId)}
+          />
+        </label>
+      )}
       <div className="col-start-2 flex flex-col gap-2">
         <UserMessageAttachments />
 
@@ -736,16 +1155,20 @@ const UserMessage: FC = () => {
             </MessagePrimitive.Quote>
             <MessagePrimitive.Parts components={{ Text: DirectiveText }} />
           </div>
-          <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
-            <UserActionBar />
-          </div>
+          {!readOnly && (
+            <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
+              <UserActionBar />
+            </div>
+          )}
         </div>
       </div>
 
-      <BranchPicker
-        data-slot="aui_user-branch-picker"
-        className="col-span-full col-start-1 row-start-3 -mr-1 justify-end"
-      />
+      {!readOnly && (
+        <BranchPicker
+          data-slot="aui_user-branch-picker"
+          className="col-span-full col-start-1 row-start-3 -mr-1 justify-end"
+        />
+      )}
     </MessagePrimitive.Root>
   );
 };

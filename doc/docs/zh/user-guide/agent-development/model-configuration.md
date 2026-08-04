@@ -1,41 +1,6 @@
-# 模型管理
+# 模型配置
 
 在模型管理模块中，您可以配置应用的基本信息，并接入各类AI模型，包括大语言模型、向量化模型和视觉语言模型。Nexent支持多种模型提供商，帮助您根据实际需求灵活选择最适合的模型。
-
-## 🖼️ 应用配置
-
-应用配置是模型管理的第一步，您可以配置应用的基本信息，包括应用图标、名称和描述。合理配置有助于提升应用的辨识度和用户体验。
-
-- 应用图标和名称会展示在对话页面的左上角，帮助用户快速识别当前应用。
-- 应用的描述在生成智能体时会作为背景信息提供给模型，提升模型对应用场景的理解。
-
-### 应用图标配置
-
-点击应用图标可进行图标的配置。Nexent 提供了两种图标配置方式：
-
-- **使用预设图标**：从预设的图标库中选择，可选择图像及背景颜色，适合快速配置。
-- **上传自定义图片**：支持PNG、JPG图片格式，文件大小不超过2MB。
-
-<div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/predefined-app-icon-setting.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/customized-app-icon-setting.png" style="width: 50%; height: 80%;" />
-</div>
-
-### 应用名称及描述配置
-
-#### 应用名称
-
-- 应用名称会展示在对话页面的左上角，帮助用户快速识别当前应用。
-- 建议使用简洁明了、能体现应用功能的名称，避免使用特殊字符。
-
-#### 应用描述
-
-- 应用描述会作为背景信息提供给模型，帮助理解应用场景。
-- 建议突出应用核心功能，完整流畅且简洁明了。
-
-<div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/app-name-description-setting.png" style="width: 50%; height: auto;" />
-</div>
 
 ## 🤖 模型配置
 
@@ -43,7 +8,7 @@
 
 Nexent支持与ModelEngine平台的无缝对接
 
-👉 点击页面右上方 ***\*****ModelEngine配置*****\***，输入您的 API ，即可获取您在 ModelEgnine 上部署的所有模型
+👉 点击页面右上方 **\*\*\*\***ModelEngine配置**\***\*\*\*，输入您的 API ，即可获取您在 ModelEgnine 上部署的所有模型
 
 ### 🛠️ 添加自定义模型
 
@@ -60,6 +25,7 @@ Nexent支持与ModelEngine平台的无缝对接
    - **API Key**：输入您的API密钥。
 
 > ⚠️ **注意事项**：
+>
 > 1. 模型名称通过模型提供商获取，通常格式为`模型系列/模型名字`。以模型系列是`Qwen`，模型名字是`Qwen3-8B`为例，模型名称为`Qwen/Qwen3-8B`。
 > 2. 模型URL通过模型提供商的API文档获取。以模型提供商是硅基流动为例，大语言模型URL为`https://api.siliconflow.cn/v1` ，向量模型URL为`https://api.siliconflow.cn/v1/embeddings` ，视觉语言模型URL为`https://api.siliconflow.cn/v1` 。
 > 3. API Key通过模型提供商的API Key密钥管理页面创建并获取API Key。
@@ -70,7 +36,7 @@ Nexent支持与ModelEngine平台的无缝对接
    - 配置完成后，点击"确定"按钮，模型将被添加到可用模型列表中。
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/add-model.png" style="width: 50%; height: auto;" />
+  <img src="../assets/model-management/add-model.png" style="width: 50%; height: auto;" />
 </div>
 
 #### 批量添加模型
@@ -93,7 +59,7 @@ Nexent支持与ModelEngine平台的无缝对接
    - 配置完成后，点击"确定"按钮，所有选中的模型将被添加到可用模型列表中。
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/add-model-batch.png" style="width: 50%; height: auto;" />
+  <img src="../assets/model-management/add-model-batch.png" style="width: 50%; height: auto;" />
 </div>
 
 ### 🔧 修改自定义模型
@@ -107,18 +73,18 @@ Nexent支持与ModelEngine平台的无缝对接
 5. 如果是修改单个自定义模型，点击删除按钮 🗑️ 即可删除目标模型；想要修改相关配置，点击模型名称即可弹出修改弹窗进行修改。
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-1.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-2.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-1.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-2.png" style="width: 50%; height: 80%;" />
 </div>
 <br>
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-3.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-4.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-3.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-4.png" style="width: 50%; height: 80%;" />
 </div>
 <br>
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-5.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-6.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-5.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-6.png" style="width: 50%; height: 80%;" />
 </div>
 
 ### ⚙️ 配置系统模型
@@ -147,14 +113,14 @@ Nexent支持与ModelEngine平台的无缝对接
 根据模型能力选择合适的文档切片大小和单次请求切片量。切片越小，系统越稳定，但文件解析质量也会受到影响。
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
+  <img src="../assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
 </div>
 
 #### 重排模型
+
 重排模型用于初筛后的文档进行语义匹配与评分，确保最相关的核心答案能够排在首位，以提升检索的准确性和效率。配置合适的重排模型，可以显著提升知识库的检索效果。
 
 - 点击重排模型下拉框，从已添加的重排模型中选择一个。
-
 
 #### 多模态模型
 
@@ -163,18 +129,22 @@ Nexent支持与ModelEngine平台的无缝对接
 - 点击视觉语言模型下拉框，从已添加的视觉语言模型中选择一个。
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model-management/select-model-4.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-4.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
 </div>
 
 #### 语音合成模型
+
 语音合成模型用于将文本内容即时转换为自然流畅的语音输出，使系统能够以接近真人的方式进行语音交互与反馈。通过低延迟、高拟真度的语音生成能力，确保用户在对话过程中获得连贯、自然的听觉体验。配置合适的实时语音合成模型，可以显著提升语音交互系统的表现力和用户体验。
+
 - 点击语音合成模型下拉框，从已添加的视觉语言模型中选择一个。
 
 #### 语音识别模型
+
 语音识别模型用于将用户输入的语音内容实时转换为文本，实现对语音指令和自然语言的准确理解与解析。通过高精度的语音转写与噪声鲁棒能力，确保在复杂环境下依然能够稳定识别用户意图。配置合适的语音识别模型，可以显著提升语音交互系统的理解能力和整体响应效率。
+
 - 点击语音识别模型下拉框，从已添加的视觉语言模型中选择一个。
 
 ### ✅ 检查模型连通性
@@ -229,32 +199,34 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 使用与大语言模型相同的API Key，但模型URL一般会有所差异，一般以`/v1/embeddings`为结尾，同时指定向量模型名称，如硅基流动提供的**BAAI/bge-m3**。
 
 #### 🔃 重排模型
+
 使用与大语言模型相同的API Key，但模型URL一般会有所差异，一般以`/v1/rerank`为结尾。
+
 #### 🎤 语音模型
 
 目前支持阿里灵积和火山引擎语音模型，阿里灵积需配置与大语言模型相同的apikey，火山引擎模型需配置appid与token
 
 **火山引擎**
+
 - **网站**: [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
 - **免费额度**: 个人使用可用
 - **特色**: 高质量中英文语音合成
 - 推荐使用**豆包语音合成模型2.0和大模型流式语音识别模型**
 - **开始使用**:
-
-   1. 注册火山引擎账户
-   2. 访问语音技术服务
-   3. 创建应用并获取appid和token
-   4. 在添加模型页面中配置 TTS/STT 设置
+  1.  注册火山引擎账户
+  2.  访问语音技术服务
+  3.  创建应用并获取appid和token
+  4.  在添加模型页面中配置 TTS/STT 设置
 
 **阿里灵积**
+
 - **网站**: [aliyun.com/benefit/scene/voice](https://www.aliyun.com/benefit/scene/voice)
 - 推荐使用**千问3-TTS-Instruct-Flash-Realtime/千问3-TTS-Flash-Realtime和千问3-ASR-Flash-Realtime**
 - **开始使用**:
-
-   1. 注册阿里云账户
-   2. 访问阿里千问实时语音技术服务
-   3. 创建应用并获取 API Key
-   4. 在添加模型页面中配置 TTS/STT 设置
+  1.  注册阿里云账户
+  2.  访问阿里千问实时语音技术服务
+  3.  创建应用并获取 API Key
+  4.  在添加模型页面中配置 TTS/STT 设置
 
 ## 💡 需要帮助
 
@@ -269,7 +241,7 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 
 完成模型管理配置后，建议您继续配置：
 
-1. **[知识库](./knowledge-base)** - 创建和管理知识库。
-2. **[智能体开发](./agent-development)** - 创建和配置智能体。
+1. **[知识库配置](./knowledge-configuration)** - 创建和管理知识库。
+2. **[智能体开发](../agent-development)** - 创建和配置智能体。
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
