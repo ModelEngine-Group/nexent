@@ -10,6 +10,7 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 
 // Backend SSE chunk format
 interface SseChunk {
@@ -1305,6 +1306,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "automation_proposal") {
+            const proposal = parseAutomationProposal(chunk.content);
+            if (proposal) {
+              flushOpenReasoning();
+              contentParts.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
+              yield buildStreamResult(contentParts);
+            } else {
+              log.warn(
+                "[ChatModelAdapter] Failed to parse automation proposal"
+              );
+            }
+            continue;
+          }
+
           // Handle picture_web: accumulate image URLs and attach them to the
           // most recent tool call (matched by unit_index when available) so the
           // ToolFallback can render them inline.
@@ -1520,6 +1539,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const parsedNl2a = parseNl2aMessage(chunk);
             if (parsedNl2a) {
               nl2a = parsedNl2a;
+              yield buildStreamResult(contentParts);
+            }
+          } else if (chunk.type === "automation_proposal") {
+            const proposal = parseAutomationProposal(chunk.content);
+            if (proposal) {
+              if (currentReasoningPart) {
+                currentReasoningPart.status = { type: "done" };
+                contentParts.push(currentReasoningPart);
+                currentReasoningPart = null;
+              }
+              contentParts.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "skill_files") {

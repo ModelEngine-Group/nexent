@@ -200,6 +200,7 @@ class AgentAutomationRunner:
             model_id=runtime_snapshot.get("model_id"),
             version_no=task.get("agent_version_no"),
             tool_params=runtime_snapshot.get("tool_params"),
+            enable_automation_tool=False,
         )
         result = await run_agent_background(
             agent_request=agent_request,

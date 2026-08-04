@@ -339,6 +339,10 @@ class AgentRequest(BaseModel):
         default=False,
         description="Whether to enable the planning phase before execution"
     )
+    enable_automation_tool: bool = Field(
+        default=True,
+        description="Whether the root interactive Agent may create scheduled-task proposals",
+    )
 
 
 class NL2AgentRunRequest(BaseModel):

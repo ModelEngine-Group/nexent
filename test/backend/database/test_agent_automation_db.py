@@ -1,10 +1,18 @@
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 from database import agent_automation_db
-from database.db_models import AgentAutomationRun, AgentAutomationTask
+from database.db_models import (
+    AgentAutomationProposal,
+    AgentAutomationRun,
+    AgentAutomationTask,
+)
 
 AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4.0_0722_add_agent_automation.sql")
+AGENT_AUTOMATION_TOOL_MIGRATION = Path(
+    "deploy/sql/migrations/v2.4.0_0804_add_agent_automation_tool_idempotency.sql"
+)
 
 
 class _FakeRow:
@@ -274,6 +282,24 @@ def test_active_scheduled_occurrence_has_unique_partial_index():
     assert "status IN ('QUEUED', 'RUNNING')" in migration_sql
 
 
+def test_proposal_source_message_has_unique_partial_index():
+    index_names = {index.name for index in AgentAutomationProposal.__table__.indexes}
+    assert "uq_agent_automation_proposal_source_message" in index_names
+
+    unique_index = next(
+        index for index in AgentAutomationProposal.__table__.indexes
+        if index.name == "uq_agent_automation_proposal_source_message"
+    )
+    assert unique_index.unique is True
+    assert "source_message_id IS NOT NULL" in str(
+        unique_index.dialect_options["postgresql"]["where"]
+    )
+
+    migration_sql = AGENT_AUTOMATION_TOOL_MIGRATION.read_text()
+    assert "ADD COLUMN IF NOT EXISTS source_message_id BIGINT" in migration_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_proposal_source_message" in migration_sql
+
+
 def test_run_capability_check_column_is_removed_from_schema():
     assert "capability_check" not in AgentAutomationRun.__table__.columns
 
@@ -331,6 +357,31 @@ def test_proposal_crud_helpers_cover_pending_and_accepted_updates(monkeypatch):
         )
         is True
     )
+
+
+def test_link_proposal_message_unit_updates_private_card_references(monkeypatch):
+    proposal = SimpleNamespace(
+        proposed_task={"title": "生成日报"},
+        update_time=None,
+        updated_by=None,
+    )
+    _install_recording_session(monkeypatch, _RecordingResult(payload=proposal))
+
+    linked = agent_automation_db.link_proposal_message_unit(
+        2,
+        "tenant",
+        "user",
+        31,
+        41,
+    )
+
+    assert linked is True
+    assert proposal.proposed_task == {
+        "title": "生成日报",
+        "_conversation_message_id": 31,
+        "_conversation_unit_id": 41,
+    }
+    assert proposal.updated_by == "user"
 
 
 def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):

@@ -19,7 +19,7 @@ import type {
 } from "@assistant-ui/react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
-import type { AgentAutomationProposalData } from "@/types/agentAutomation";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiMessage } from "@/types/conversation";
 import log from "@/lib/logger";
@@ -149,22 +149,6 @@ const parseSearchImageUrls = (content: string): string[] => {
       : [];
   } catch {
     return [];
-  }
-};
-
-const parseAutomationProposal = (
-  content: string
-): AgentAutomationProposalData | null => {
-  try {
-    const value = JSON.parse(content) as unknown;
-    if (typeof value !== "object" || value === null) return null;
-
-    const proposal = value as AgentAutomationProposalData;
-    return typeof proposal.proposal_id === "number" && proposal.task
-      ? proposal
-      : null;
-  } catch {
-    return null;
   }
 };
 

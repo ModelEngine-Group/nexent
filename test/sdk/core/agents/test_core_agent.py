@@ -2927,6 +2927,61 @@ def test_scan_code_for_tool_calls_returns_empty_for_invalid_or_unconfigured_code
     assert core_agent_module._scan_code_for_tool_calls("", {"search"}) == []
 
 
+def test_automation_proposal_action_must_be_the_only_tool_call():
+    code = """create_scheduled_task_proposal(request_text='每天检查')
+search(query='status')
+"""
+    calls = core_agent_module._scan_code_for_tool_calls(
+        code,
+        {"create_scheduled_task_proposal", "search"},
+    )
+
+    with pytest.raises(ValueError, match="must be the only tool call"):
+        core_agent_module._validate_automation_proposal_action(code, calls)
+
+
+def test_automation_proposal_action_rejects_duplicate_identical_calls():
+    code = """create_scheduled_task_proposal(request_text='每天检查')
+create_scheduled_task_proposal(request_text='每天检查')
+"""
+    calls = core_agent_module._scan_code_for_tool_calls(
+        code,
+        {"create_scheduled_task_proposal"},
+    )
+
+    with pytest.raises(ValueError, match="must be the only tool call"):
+        core_agent_module._validate_automation_proposal_action(code, calls)
+
+
+def test_automation_proposal_action_allows_one_isolated_call():
+    code = "create_scheduled_task_proposal(request_text='每天检查')"
+    calls = core_agent_module._scan_code_for_tool_calls(
+        code,
+        {"create_scheduled_task_proposal"},
+    )
+
+    core_agent_module._validate_automation_proposal_action(code, calls)
+
+
+def test_automation_tool_result_forces_platform_final_answer():
+    proposal_tool = SimpleNamespace(
+        last_result={
+            "status": "proposal_ready",
+            "user_message": "Review and confirm the proposal.",
+        }
+    )
+    agent = SimpleNamespace(
+        tools={"create_scheduled_task_proposal": proposal_tool},
+    )
+
+    result = core_agent_module.CoreAgent._automation_tool_final_answer(
+        agent,
+        SimpleNamespace(output="ignored"),
+    )
+
+    assert result == "Review and confirm the proposal."
+
+
 def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch):
     """Associate every actual tool invocation with a distinct observer ID."""
     observer = MagicMock()

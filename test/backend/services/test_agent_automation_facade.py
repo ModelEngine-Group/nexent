@@ -32,6 +32,53 @@ from services.agent_automation.prompt_generator import AutomationTaskContent
 
 
 @pytest.mark.asyncio
+async def test_create_proposal_reuses_source_message_before_extraction(monkeypatch):
+    existing = {
+        "proposal_id": 77,
+        "conversation_id": 100,
+        "proposed_task": {
+            "title": "生成日报",
+            "instruction": "生成日报",
+            "_conversation_unit_id": 9,
+        },
+        "capability_resolution": {"executable": True},
+    }
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_proposal_by_source_message",
+        lambda *args: existing,
+    )
+
+    async def fail_analysis(*args, **kwargs):
+        raise AssertionError("idempotent retries must not run extraction again")
+
+    monkeypatch.setattr(
+        facade_module.automation_intent_analyzer,
+        "analyze",
+        fail_analysis,
+    )
+
+    result = await AgentAutomationFacade().create_proposal(
+        AutomationProposalCreateRequest(
+            conversation_id=100,
+            agent_id=7,
+            message="每天九点生成日报",
+        ),
+        "tenant",
+        "user",
+        source_message_id=55,
+        force_llm=True,
+    )
+
+    assert result["proposal_id"] == 77
+    assert result["task"] == {
+        "title": "生成日报",
+        "instruction": "生成日报",
+    }
+    assert result["intent_analysis_source"] == "existing"
+
+
+@pytest.mark.asyncio
 async def test_create_proposal_rejects_ambiguous_schedule_before_creating_conversation(monkeypatch):
     created = False
 

@@ -441,6 +441,15 @@ class NexentAgent:
         elif class_name == "UpdatePlanStepTool":
             from nexent.core.tools.plan_tools import UpdatePlanStepTool
             return UpdatePlanStepTool()
+        elif class_name == "CreateScheduledTaskProposalTool":
+            from nexent.core.tools.create_scheduled_task_tool import (
+                CreateScheduledTaskProposalTool,
+            )
+            metadata = tool_config.metadata or {}
+            return CreateScheduledTaskProposalTool(
+                create_proposal=metadata.get("create_proposal"),
+                observer=self.observer,
+            )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

@@ -227,6 +227,14 @@ class AgentAutomationProposal(TableBase):
             "status",
             postgresql_where=text("delete_flag = 'N'"),
         ),
+        Index(
+            "uq_agent_automation_proposal_source_message",
+            "tenant_id",
+            "user_id",
+            "source_message_id",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N' AND source_message_id IS NOT NULL"),
+        ),
         {"schema": SCHEMA},
     )
 
@@ -236,6 +244,8 @@ class AgentAutomationProposal(TableBase):
     user_id = Column(String(100), nullable=False, doc="Owner user ID")
     conversation_id = Column(BigInteger, nullable=False, doc="Source conversation ID")
     agent_id = Column(BigInteger, nullable=False, doc="Bound agent ID")
+    source_message_id = Column(BigInteger, nullable=True, doc="User message that requested the proposal")
+    idempotency_key = Column(String(255), nullable=True, doc="Stable proposal creation key")
     proposed_task = Column(JSONB, nullable=False, doc="Proposed automation task payload")
     capability_resolution = Column(JSONB, nullable=False, doc="Capability matching result")
     status = Column(String(32), nullable=False, doc="PENDING, ACCEPTED, REJECTED, or EXPIRED")

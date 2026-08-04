@@ -55,6 +55,7 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
+from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.redis_utils import get_redis_client
 from consts.const import (
@@ -758,6 +759,10 @@ async def create_agent_config(
     conversation_id: Optional[int] = None,
     request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
+    include_automation_tool: bool = False,
+    automation_user_message: Optional[str] = None,
+    automation_model_id: Optional[int] = None,
+    automation_has_attachments: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -785,6 +790,7 @@ async def create_agent_config(
             override_model_id=None,
             tool_params=normalized_tool_params,
             conversation_id=conversation_id,
+            include_automation_tool=False,
         )
         managed_agents.append(sub_agent_config)
 
@@ -813,6 +819,62 @@ async def create_agent_config(
         params={},
         source="local",
     ))
+
+    if (
+        include_automation_tool
+        and conversation_id is not None
+        and automation_user_message
+    ):
+        from services.agent_automation.tool_adapter import (
+            AutomationToolRuntimeContext,
+            agent_loop_automation_tool_adapter,
+        )
+        from services.conversation_management_service import (
+            get_current_run_user_message_id,
+        )
+
+        source_message_id = get_current_run_user_message_id(conversation_id, user_id)
+        runtime_context = AutomationToolRuntimeContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=int(conversation_id),
+            agent_id=int(agent_id),
+            user_message=automation_user_message,
+            source_message_id=source_message_id,
+            agent_version_no=version_no,
+            model_id=automation_model_id,
+            tool_params=normalized_tool_params.model_dump(mode="json"),
+            has_attachments=automation_has_attachments,
+        )
+        tool_description = (
+            "Create a pending scheduled-task proposal when the user explicitly asks "
+            "for future, delayed, or recurring execution. It does not execute the "
+            "business task, and it must be the only tool call in this action."
+            if language == LANGUAGE["EN"]
+            else (
+                "当用户明确要求未来、延迟或周期性执行任务时，创建待确认的定时任务提案。"
+                "只创建提案，不立即执行业务任务；本次代码中不得同时调用其他工具。"
+            )
+        )
+        tool_list.append(ToolConfig(
+            class_name="CreateScheduledTaskProposalTool",
+            name="create_scheduled_task_proposal",
+            description=tool_description,
+            inputs=json.dumps({
+                "request_text": {
+                    "type": "string",
+                    "description": "原样复制的用户定时执行请求",
+                }
+            }, ensure_ascii=False),
+            output_type="string",
+            params={},
+            source="builtin",
+            metadata={
+                "create_proposal": agent_loop_automation_tool_adapter.build_callback(
+                    runtime_context
+                ),
+            },
+        ))
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
@@ -1082,6 +1144,10 @@ async def create_agent_config(
         language,
         (tool.name for tool in available_tools),
     )
+    automation_tool_policy = build_automation_tool_policy(
+        language,
+        (tool.name for tool in available_tools),
+    )
     logger.info(
         "event=memory_tool_policy_context enabled=%s item_id=%s "
         "policy_char_count=%s",
@@ -1172,6 +1238,7 @@ async def create_agent_config(
         memory_list=memory_list,
         memory_search_query=last_user_query,
         memory_tool_policy=memory_tool_policy,
+        automation_tool_policy=automation_tool_policy,
         long_term_memory_prompt=long_term_memory_prompt,
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
@@ -1760,6 +1827,7 @@ async def create_agent_run_info(
     conversation_id: Optional[int] = None,
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
+    enable_automation_tool: bool = True,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1791,6 +1859,13 @@ async def create_agent_run_info(
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
     }
+    if enable_automation_tool and not is_debug and conversation_id is not None:
+        create_config_kwargs.update({
+            "include_automation_tool": True,
+            "automation_user_message": query,
+            "automation_model_id": override_model_id,
+            "automation_has_attachments": bool(minio_files),
+        })
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
