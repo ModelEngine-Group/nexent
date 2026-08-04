@@ -28,9 +28,10 @@ import type { AttachmentType } from "../utils/attachment-type";
 import {
   attachExecutionLogsToTool,
   attachSearchContentToTool,
-  attachSearchImageToTool,
   buildToolCallPart,
   conversationSourcesRegistry,
+  extractAidpImageKeys,
+  searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
   remoteChatModelAdapter,
@@ -350,6 +351,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const persistedAnswerImageKeys = extractAidpImageKeys(
+        messageParts.flatMap((part) =>
+          (part.type === "final_answer" || part.type === "text") &&
+          typeof part.content === "string"
+            ? [part.content]
+            : [],
+        ),
+      );
 
       // Collect token_count units so the per-message `SingleTurnTokenUsage`
       // can render the historical step breakdown. The streaming adapter writes
@@ -372,6 +381,11 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const title =
               (item.title as string | undefined) || filename || url;
             if (url || filename || title) {
+              const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const isImage =
+                (item.score_details as Record<string, unknown> | undefined)
+                  ?.chunk_type === "image" ||
+                persistedAnswerImageKeys.includes(derivedImageKey);
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
                 url,
@@ -383,6 +397,10 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 filename,
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
+                isImage,
+                imageKey:
+                  (item.image_key as string | undefined) ||
+                  (isImage ? derivedImageKey : undefined),
               });
             }
           }
@@ -448,6 +466,49 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (meta) reasoningPart.metadata = meta;
           content.push(reasoningPart);
           reasoningText = "";
+        };
+
+        const answerImageKeys = persistedAnswerImageKeys;
+        const persistedImageSources = Array.isArray(msg.search)
+          ? msg.search.filter(
+              (searchItem) =>
+                typeof searchItem === "object" && searchItem !== null,
+            )
+          : [];
+        const restoredImageUrls = new Set<string>();
+        const restoredImages: any[] = [];
+        const appendHistoricalImage = (
+          imageUrl: string,
+        ) => {
+          if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
+          const imageIndex = restoredImageUrls.size;
+          const imageKey = answerImageKeys[imageIndex];
+          const metadata = persistedImageSources.find((searchItem) => {
+            const item = searchItem as Record<string, unknown>;
+            return imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+          }) as Record<string, unknown> | undefined;
+          const title =
+            (metadata?.title as string | undefined) || imageUrl;
+          const imagePart: any = {
+            type: "source",
+            sourceType: "url",
+            url: imageUrl,
+            title,
+            text: metadata?.text as string | undefined,
+            citeIndex:
+              (metadata?.cite_index as number | undefined) ?? undefined,
+            isImage: true,
+            imageKey:
+              (metadata?.image_key as string | undefined) ||
+              (metadata?.tool_sign && metadata?.cite_index !== undefined
+                ? `${metadata.tool_sign}${metadata.cite_index}`
+                : undefined) ||
+              imageKey,
+          };
+          const meta = buildMetadata();
+          if (meta) imagePart.metadata = meta;
+          restoredImageUrls.add(imageUrl);
+          restoredImages.push(imagePart);
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -520,11 +581,7 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              attachSearchImageToTool(
-                content,
-                imageUrl,
-                part.tool_call_id,
-              );
+              appendHistoricalImage(imageUrl);
             }
             continue;
           }
@@ -715,21 +772,11 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         // early, etc.).
         subAgentStack.length = 0;
 
-        // Some older records only persist the message-level image list. When
-        // no picture_web unit restored images inline, associate that list with
-        // the most recent tool call so ToolFallback still shows its Sources.
+        // Some older records only persist the message-level image list.
         if (Array.isArray(msg.picture) && msg.picture.length > 0) {
-          const toolHasImages = content.some(
-            (item) =>
-              item?.type === "tool-call" &&
-              Array.isArray(item.searchImages) &&
-              item.searchImages.length > 0,
-          );
-          if (!toolHasImages) {
-            for (const imageUrl of msg.picture) {
-              if (typeof imageUrl === "string" && imageUrl) {
-                attachSearchImageToTool(content, imageUrl);
-              }
+          for (const imageUrl of msg.picture) {
+            if (typeof imageUrl === "string" && imageUrl) {
+              appendHistoricalImage(imageUrl);
             }
           }
         }
@@ -741,6 +788,20 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             .join("\n");
           if (fallbackText) content.push({ type: "text", text: fallbackText });
         }
+
+        const restoredImageMap = new Map<string, SearchSource>();
+        for (const image of restoredImages) {
+          if (image.imageKey) restoredImageMap.set(image.imageKey, image);
+        }
+        if (restoredImageMap.size > 0) {
+          searchImagesRegistry.set(messageId, restoredImageMap);
+        }
+        const restoredConversationSources =
+          conversationSourcesRegistry.get(messageId) ?? [];
+        conversationSourcesRegistry.set(messageId, [
+          ...restoredConversationSources.filter((source) => !source.isImage),
+          ...restoredImages,
+        ]);
 
         // Emit a `source` part for each persisted search result so the
         // `group-source` block renders the inline "检索结果" trigger button.
@@ -754,6 +815,14 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               searchItem !== null
             ) {
               const item = searchItem as Record<string, unknown>;
+              const scoreDetails = item.score_details as
+                | Record<string, unknown>
+                | undefined;
+              const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              if (
+                scoreDetails?.chunk_type === "image" ||
+                answerImageKeys.includes(searchImageKey)
+              ) continue;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
@@ -778,21 +847,10 @@ class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
         }
 
-        // Emit one `source` part per persisted image so the side panel's
-        // image tab has data to render. The streaming adapter emits these
-        // from `picture_web` chunks; historical loads read them from
-        // `msg.picture` which already de-duplicates by URL.
-        if (Array.isArray(msg.picture) && msg.picture.length > 0) {
-          for (const imageUrl of msg.picture) {
-            if (typeof imageUrl !== "string" || !imageUrl) continue;
-            content.push({
-              type: "source",
-              sourceType: "url",
-              url: imageUrl,
-              title: imageUrl,
-              isImage: true,
-            });
-          }
+        // Keep image sources adjacent to regular sources so GroupedParts
+        // creates one unified source button and side panel selection.
+        for (const image of restoredImages) {
+          content.push(image);
         }
       }
 

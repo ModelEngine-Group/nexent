@@ -74,12 +74,15 @@ import {
 } from "../ui/tool-group";
 import {
   getAgentRunTime,
+  searchSourcesRegistry,
+  conversationSourcesRegistry,
   skillFileUploadsRegistry,
   type Nl2aMessage,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
 import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
+import { AuthenticatedImage } from "../ui/authenticated-image";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -586,7 +589,15 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "group-default":
                 return <>{children}</>;
               case "text": {
-                const textPart = part as typeof part & { isError?: boolean; text?: string };
+                const textPart = part as typeof part & {
+                  isError?: boolean;
+                  text?: string;
+                  isSearchImage?: boolean;
+                  imageSource?: SourcePartLike;
+                };
+                if (textPart.isSearchImage && textPart.imageSource) {
+                  return <GlobalSearchImage source={textPart.imageSource} />;
+                }
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -767,6 +778,7 @@ interface SourcePartLike {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  messageId?: string;
 }
 
 /**
@@ -778,20 +790,32 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
   const imageUrl = source.url || "";
   if (!imageUrl) return null;
   return (
-    <a
-      href={imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="aui-global-search-image block overflow-hidden rounded-md border bg-muted/50"
+    <figure
+      className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
       title={imageUrl}
     >
-      <img
+      <AuthenticatedImage
         src={imageUrl}
-        alt={imageUrl}
+        alt={source.title || imageUrl}
         loading="lazy"
-        className="size-20 object-cover"
+        preview
+        className="max-h-[28rem] w-full bg-muted/50 object-contain"
       />
-    </a>
+      {source.title || source.text ? (
+        <figcaption className="border-t bg-card px-3 py-2">
+          {source.title ? (
+            <div className="text-sm font-medium text-foreground">
+              {source.title}
+            </div>
+          ) : null}
+          {source.text ? (
+            <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+              {source.text}
+            </div>
+          ) : null}
+        </figcaption>
+      ) : null}
+    </figure>
   );
 };
 
@@ -953,20 +977,33 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   const { sources, images, total } = useMemo(() => {
     const srcs: PanelSourceItem[] = [];
     const imgs: PanelSourceItem[] = [];
-    for (const index of indices) {
+    const groupedSources = indices.flatMap((index) => {
       const raw = content[index] as SourcePartLike | undefined;
-      if (!raw || raw.type !== "source") continue;
-      const item: PanelSourceItem = {
-        sourceType: raw.sourceType,
-        url: raw.url,
-        title: raw.title,
-        text: raw.text,
-        filename: raw.filename,
-        downloadUrl: raw.downloadUrl,
-        objectName: raw.objectName,
-        isImage: raw.isImage,
-        citeIndex: raw.citeIndex,
-      };
+      return raw?.type === "source" ? [raw] : [];
+    });
+    const registryMessageId =
+      groupedSources.find((source) => source.messageId)?.messageId ?? messageId;
+    const registeredSources = registryMessageId
+      ? searchSourcesRegistry.get(registryMessageId) ??
+        conversationSourcesRegistry.get(registryMessageId)
+      : undefined;
+    const displaySources: PanelSourceItem[] = registeredSources?.length
+      ? registeredSources.map((source) => ({
+          sourceType:
+            source.sourceType === "file" || source.sourceType === "document"
+              ? "document"
+              : "url",
+          url: source.url,
+          title: source.title,
+          text: source.text,
+          filename: source.filename,
+          downloadUrl: source.downloadUrl,
+          objectName: source.objectName,
+          isImage: source.isImage,
+          citeIndex: source.citeIndex,
+        }))
+      : groupedSources;
+    for (const item of displaySources) {
       if (item.isImage) {
         imgs.push(item);
       } else {
@@ -974,7 +1011,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
       }
     }
     return { sources: srcs, images: imgs, total: srcs.length + imgs.length };
-  }, [content, indices]);
+  }, [content, indices, messageId]);
 
   const { toggle, selection, isOpen } = useSourcesPanel();
   const groupId = indices.length > 0 ? indices.join(",") : "default";
@@ -997,7 +1034,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   if (total === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 pt-3 pb-2">
+    <div className="pt-3 pb-2">
       <button
         type="button"
         onClick={handleClick}

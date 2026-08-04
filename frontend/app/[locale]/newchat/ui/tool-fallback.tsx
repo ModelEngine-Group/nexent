@@ -19,6 +19,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { AuthenticatedImage } from "./authenticated-image";
 import {
   Source,
   SourceIcon,
@@ -194,20 +195,18 @@ function ToolFallbackSearchContent({
       {searchImages && searchImages.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {searchImages.map((imageUrl, index) => (
-            <a
+            <div
               key={`img-${index}`}
-              href={imageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="aui-tool-fallback-search-image block overflow-hidden rounded-md border bg-muted/50"
             >
-              <img
+              <AuthenticatedImage
                 src={imageUrl}
                 alt={imageUrl}
                 loading="lazy"
+                preview
                 className="size-20 object-cover"
               />
-            </a>
+            </div>
           ))}
         </div>
       )}

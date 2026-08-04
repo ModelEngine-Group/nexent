@@ -352,7 +352,7 @@ async def create_knowledge_base(
     try:
         perms.create_permission(
             kb_id=kds_id,
-            kds_name=aidp_result.get("kds_name") or aidp_result.get("name") or "",
+            kds_name=body.name or aidp_result.get("kds_name") or aidp_result.get("name") or "",
             owner_user_id=user_id,
             tenant_id=tenant_id,
             ingroup_permission=ingroup,

@@ -409,6 +409,15 @@ class TestAidpBuildImageUrl:
     def test_empty_file_url_returns_empty_string(self, aidp_tool):
         assert aidp_tool._build_image_url("") == ""
 
+    def test_view_image_path_is_joined_under_knowledge_bases_prefix(self, aidp_tool):
+        assert (
+            aidp_tool._build_image_url("75/ViewImage/image-id.png")
+            == (
+                "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+                "KnowledgeBases/75/ViewImage/image-id.png"
+            )
+        )
+
     def test_base_url_missing_trailing_slash_still_produces_valid_url(self, aidp_module, mock_observer):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
@@ -457,6 +466,48 @@ class TestAidpBuildImageUrl:
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/data/picture.png"
             in picture_call.args[2]
         )
+
+    def test_image_html_is_not_exposed_to_the_llm(self, aidp_tool):
+        ui_results, model_results, images_url = aidp_tool._process_records(
+            [
+                {
+                    "id": "img-1",
+                    "chunk_type": "image",
+                    "title": "Liver anatomy",
+                    "text": 'Description <img src="/md_image/76/image-id.jpg">',
+                    "file_url": "75/ViewImage/image-id.png",
+                    "metadata": {},
+                }
+            ]
+        )
+
+        assert model_results[0]["text"].startswith("Description \n\nImage marker: ")
+        assert "![AIDP image](/__aidp_image__/j1)" in model_results[0]["text"]
+        assert "aidp.example.com" not in model_results[0]["text"]
+        assert ui_results[0]["text"] == "Description "
+        assert ui_results[0]["image_key"] == "j1"
+        assert images_url == [
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+            "KnowledgeBases/75/ViewImage/image-id.png"
+        ]
+
+    def test_image_html_in_text_chunk_is_not_exposed_to_the_llm(self, aidp_tool):
+        ui_results, model_results, images_url = aidp_tool._process_records(
+            [
+                {
+                    "id": "text-1",
+                    "chunk_type": "text",
+                    "title": "Liver anatomy",
+                    "text": 'Description <img src="/md_image/76/image-id.jpg">',
+                    "file_url": "document.pdf",
+                    "metadata": {},
+                }
+            ]
+        )
+
+        assert model_results[0]["text"] == "Description "
+        assert ui_results[0]["text"] == "Description "
+        assert images_url == []
 
 
 class TestAidpSearchToolWhitelist:

@@ -711,9 +711,9 @@ async def test_proxy_image_impl_aidp_and_external_urls_use_proxy_path(external_u
 
 
 class TestIsAidpUrl:
-    """``_is_aidp_url`` recognizes AIDP image URLs by matching both host
-    and the ``/KnowledgeBase/Tenants/`` path prefix against env vars, so
-    the proxy only adds the Bearer header to the intended target."""
+    """``_is_aidp_url`` recognizes permitted AIDP image paths and the
+    proxy reconstructs them against the configured AIDP authority before
+    adding the Bearer header."""
 
     def test_matches_when_host_and_path_match(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
@@ -721,9 +721,9 @@ class TestIsAidpUrl:
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
-    def test_rejects_wrong_host(self, monkeypatch):
+    def test_accepts_alias_host_but_rewrites_to_configured_host(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        assert not image_service_module._is_aidp_url(
+        assert image_service_module._is_aidp_url(
             "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
@@ -743,6 +743,13 @@ class TestIsAidpUrl:
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com/")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+    def test_matches_view_image_path(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._is_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+            "KnowledgeBases/75/ViewImage/image-id.png"
         )
 
 
