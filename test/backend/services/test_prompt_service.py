@@ -1,4 +1,5 @@
 import json
+import inspect
 import importlib.machinery
 import types
 import unittest
@@ -402,6 +403,7 @@ class TestPromptService(unittest.TestCase):
             "zh",
             None,
             None,
+            None,  # aidp_kb_display_names
             True,  # has_selected_resources
         )
 
@@ -899,6 +901,7 @@ class TestPromptService(unittest.TestCase):
             tool_info_list=mock_tools,
             language=mock_language,
             knowledge_base_display_names=None,
+            aidp_kb_display_names=None,
             has_selected_resources=True,
         )
 
@@ -2321,10 +2324,12 @@ class TestPromptOptimizationService(unittest.TestCase):
                 ))
 
                 mock_gen.assert_called_once()
-                # has_selected_resources is passed positionally (10th arg), not as keyword
-                call_args = mock_gen.call_args[0]
+                bound_args = inspect.signature(generate_system_prompt).bind(
+                    *mock_gen.call_args.args,
+                    **mock_gen.call_args.kwargs,
+                )
                 self.assertIs(
-                    call_args[9],
+                    bound_args.arguments["has_selected_resources"],
                     False,
                     "has_selected_resources should be False when both tool and sub-agent lists are empty",
                 )
@@ -2365,10 +2370,12 @@ class TestPromptOptimizationService(unittest.TestCase):
                 ))
 
                 mock_gen.assert_called_once()
-                # has_selected_resources is passed positionally (10th arg), not as keyword
-                call_args = mock_gen.call_args[0]
+                bound_args = inspect.signature(generate_system_prompt).bind(
+                    *mock_gen.call_args.args,
+                    **mock_gen.call_args.kwargs,
+                )
                 self.assertIs(
-                    call_args[9],
+                    bound_args.arguments["has_selected_resources"],
                     True,
                     "has_selected_resources should be True when tools are present",
                 )
@@ -2409,10 +2416,12 @@ class TestPromptOptimizationService(unittest.TestCase):
                 ))
 
                 mock_gen.assert_called_once()
-                # has_selected_resources is passed positionally (10th arg), not as keyword
-                call_args = mock_gen.call_args[0]
+                bound_args = inspect.signature(generate_system_prompt).bind(
+                    *mock_gen.call_args.args,
+                    **mock_gen.call_args.kwargs,
+                )
                 self.assertIs(
-                    call_args[9],
+                    bound_args.arguments["has_selected_resources"],
                     True,
                     "has_selected_resources should be True when sub-agents are present",
                 )
