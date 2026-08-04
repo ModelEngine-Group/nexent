@@ -6,6 +6,8 @@ import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortA
 interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
+  /** i18n key for the readonly hint shown when `enabled` is false. Defaults to `portReadonlyHint`. */
+  readonlyHintKey?: string;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
 }
@@ -13,6 +15,7 @@ interface ContainerPortFieldProps {
 export default function ContainerPortField({
   scope,
   enabled = true,
+  readonlyHintKey,
   containerPort,
   setContainerPort,
 }: ContainerPortFieldProps) {
@@ -50,7 +53,7 @@ export default function ContainerPortField({
       </div>
       {!enabled ? (
         <p className="mt-2 text-xs text-slate-400">
-          {t("mcpTools.addModal.portReadonlyHint")}
+          {t(readonlyHintKey ?? "mcpTools.addModal.portReadonlyHint")}
         </p>
       ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">

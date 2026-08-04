@@ -349,6 +349,7 @@ export interface ApiMessage {
   role: "user" | "assistant";
   message: ApiMessageItem[];
   message_id: number;
+  message_index?: number;
   opinion_flag?: string;
   picture?: string[];
   search?: SearchResultItem[];

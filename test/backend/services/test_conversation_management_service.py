@@ -652,6 +652,7 @@ class TestConversationManagementService(unittest.TestCase):
             "message_records": [
                 {
                     "message_id": 1,
+                    "message_index": 0,
                     "role": "user",
                     "message_content": "What is AI?",
                     "minio_files": [],
@@ -659,6 +660,7 @@ class TestConversationManagementService(unittest.TestCase):
                 },
                 {
                     "message_id": 2,
+                    "message_index": 1,
                     "role": "assistant",
                     "message_content": "AI stands for Artificial Intelligence.",
                     "units": [],
@@ -683,9 +685,11 @@ class TestConversationManagementService(unittest.TestCase):
         user_message = result[0]["message"][0]
         self.assertEqual(user_message["role"], "user")
         self.assertEqual(user_message["message"], "What is AI?")
+        self.assertEqual(user_message["message_index"], 0)
 
         assistant_message = result[0]["message"][1]
         self.assertEqual(assistant_message["role"], "assistant")
+        self.assertEqual(assistant_message["message_index"], 1)
         # Contains final_answer unit
         self.assertEqual(len(assistant_message["message"]), 1)
         self.assertEqual(

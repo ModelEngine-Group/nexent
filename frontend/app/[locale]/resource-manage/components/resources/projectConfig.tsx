@@ -1,13 +1,20 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Form, Input, Button, message, Card, UploadFile, Upload, Radio, Row, Col } from "antd";
+import { Form, Input, Button, message, Card, UploadFile, Upload, Radio, Row, Col, Tabs } from "antd";
 import { useTranslation } from "react-i18next";
 import { useGlobalConfigStore, useGlobalConfigStoreAllLanguage } from "@/stores/global";
 import { API_ENDPOINTS, ApiError } from "@/services/api";
 import { publicAsset } from "@/lib/publicAsset";
+import { PlatformQuotaPanel } from "./PlatformQuotaPanel";
 
-export default function ProjectConfigTab() {
+interface ProjectConfigTabProps {
+  showPlatformQuota?: boolean;
+}
+
+export default function ProjectConfigTab({
+  showPlatformQuota = false,
+}: ProjectConfigTabProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -133,8 +140,7 @@ export default function ProjectConfigTab() {
     }
   }
  
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
+  const projectConfigContent = (
       <Card>
         <Form
           form={form}
@@ -208,6 +214,31 @@ export default function ProjectConfigTab() {
           </Form.Item>
         </Form>
       </Card>
+  );
+
+  if (showPlatformQuota) {
+    return (
+      <Tabs
+        defaultActiveKey="project"
+        items={[
+          {
+            key: "project",
+            label: t("project.config"),
+            children: projectConfigContent,
+          },
+          {
+            key: "platform-quota",
+            label: t("quota.platformOverview", "Platform Quota"),
+            children: <PlatformQuotaPanel showTenantAllocations={false} />,
+          },
+        ]}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {projectConfigContent}
     </div>
   );
 }

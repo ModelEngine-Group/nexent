@@ -94,7 +94,7 @@ class QuotaService {
     return data;
   }
 
-  // ── Platform-Level Quota (SU/ASSET_OWNER) ──────────────────────
+  // ── Platform-Level Quota (SU/ASSET_OWNER/SPEED) ────────────────
 
   async getPlatformOverview(): Promise<PlatformQuotaOverview> {
     const response = await fetch(API_ENDPOINTS.quota.platformOverview, {
