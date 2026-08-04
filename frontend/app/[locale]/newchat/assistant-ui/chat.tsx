@@ -10,6 +10,7 @@ import type { Agent } from "@/types/agentConfig";
 
 export interface ChatProps {
   generatedTitle?: string;
+  conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
   onAgentSelected?: (agent: Agent) => void;
@@ -17,6 +18,7 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -34,6 +36,7 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  conversationId,
   isLoadingAgents = false,
   selectedAgent,
   onAgentSelected,
@@ -41,6 +44,7 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -64,10 +68,12 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      conversationId={conversationId}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      isDictationConfigured={isDictationConfigured}
     />
   );
 };

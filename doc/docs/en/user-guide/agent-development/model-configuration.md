@@ -1,41 +1,6 @@
-# Model Management
+# Model Configuration
 
 In the Model Management module, you can configure your app’s basic information and connect every model the platform needs, including large language models, embedding models, and vision-language models. Nexent supports multiple providers so you can pick the best option for each scenario.
-
-## 🖼️ App Configuration
-
-App configuration is the first step of model management. Configure the icon, name, and description so users can instantly recognize the app and the platform can pass the proper context to models.
-
-- The icon and name appear in the upper-left corner of the chat page.
-- The description is used as background information when generating agents to improve the model’s understanding of your use case.
-
-### App Icon Configuration
-
-Click the app icon to open the configuration panel. Nexent provides two options:
-
-- **Use a preset icon**: Pick an icon from the built-in gallery and optionally change the background color for fast setup.
-- **Upload a custom image**: Supports PNG and JPG (≤2 MB).
-
-<div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/predefined-app-icon-setting.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/customized-app-icon-setting.png" style="width: 50%; height: 80%;" />
-</div>
-
-### App Name & Description
-
-#### App Name
-
-- Displayed on the chat page, helping users recognize the current app.
-- Keep it short, descriptive, and free of special characters.
-
-#### App Description
-
-- Passed to the model as background context.
-- Highlight the core capabilities and keep the text fluent and concise.
-
-<div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/app-name-description-setting.png" style="width: 50%; height: auto;" />
-</div>
 
 ## 🤖 Model Configuration
 
@@ -70,7 +35,7 @@ Nexent supports seamless integration with the ModelEngine platform.
    - Click **Add** to place the model in the available list.
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/add-model.png" style="width: 50%; height: auto;" />
+  <img src="../assets/model-management/add-model.png" style="width: 50%; height: auto;" />
 </div>
 
 #### Batch Add Models
@@ -86,7 +51,7 @@ Use batch import to speed up onboarding:
 7. Click **Add** to save every selected model at once.
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/model-management/add-model-batch.png" style="width: 50%; height: auto;" />
+  <img src="../assets/model-management/add-model-batch.png" style="width: 50%; height: auto;" />
 </div>
 
 ### 🔧 Edit Custom Models
@@ -100,18 +65,18 @@ Modify or delete models anytime:
 5. For single models, click the trash icon 🗑️ to delete, or click the model name to open the edit dialog.
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-1.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-2.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-1.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-2.png" style="width: 50%; height: 80%;" />
 </div>
 <br>
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-3.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-4.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-3.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-4.png" style="width: 50%; height: 80%;" />
 </div>
 <br>
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/edit-model-5.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model-management/edit-model-6.png" style="width: 50%; height: 80%;" />
+  <img src="../assets/model-management/edit-model-5.png" style="width: 50%; height: 100%;" />
+  <img src="../assets/model-management/edit-model-6.png" style="width: 50%; height: 80%;" />
 </div>
 
 ### ⚙️ Configure System Models
@@ -133,7 +98,7 @@ Embedding models are primarily used for vectorization processing of text, images
 Choose appropriate document chunk size and chunks per request based on model capabilities. Smaller chunks provide more stability, but may affect file parsing quality.
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
+  <img src="../assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
 </div>
 
 #### Vision-Language Model
@@ -142,9 +107,9 @@ Choose appropriate document chunk size and chunks per request based on model cap
 - Pick one of the added vision-language models.
 
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
+  <img src="../assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
 </div>
 
 ### ✅ Check Model Connectivity
@@ -224,7 +189,7 @@ If you run into provider issues:
 
 After closing the Model Management flow, continue with:
 
-1. **[Knowledge Base](./knowledge-base)** – Create and manage knowledge bases.
-2. **[Agent Development](./agent-development)** – Build and configure agents.
+1. **[Knowledge Base](./knowledge-configuration.md)** – Create and manage knowledge bases.
+2. **[Agent Development](../agent-development.md)** – Build and configure agents.
 
-Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

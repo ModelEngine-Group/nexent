@@ -53,7 +53,7 @@ This FAQ addresses common questions and issues you might encounter while install
     3. **Model name**: Confirm the model identifier is correct
     4. **Network access**: Ensure your deployment can reach the provider's servers
 
-    For model setup instruction, see [Model Management](../user-guide/model-management) in User Guide.
+    For model setup instruction, see [Model Management](../user-guide/agent-development/model-configuration.md) in User Guide.
 
 - **Q: Multi-turn chats fail when using the official DeepSeek API. How can I resolve this?**
   - A: The official DeepSeek API only accepts text payloads, but Nexent sends multimodal payloads, so multi-turn calls are rejected. Use a provider such as SiliconFlow that exposes DeepSeek models with multimodal compatibility. Our requests look like:

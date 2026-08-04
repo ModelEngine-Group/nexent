@@ -307,6 +307,7 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: `${t("document.error.upload")}. ${t("document.error.retry")}`,
         });
+        throw error;
       } finally {
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: false });
         dispatch({

@@ -2179,7 +2179,7 @@ export const ModelAddDialog = ({
                   rel="noopener noreferrer"
                 >
                   <img
-                    src={publicAsset("/modelengine-logo.png")}
+                    src={publicAsset("/modelengine.png")}
                     alt="ModelEngine"
                     className="h-4 ml-1.5 cursor-pointer"
                   />

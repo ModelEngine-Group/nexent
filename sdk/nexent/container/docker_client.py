@@ -370,7 +370,6 @@ class DockerContainerClient(ContainerClient):
         }
         if env_vars:
             container_env.update(env_vars)
-
         full_command_to_run = full_command
 
         container_config = {

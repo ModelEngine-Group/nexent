@@ -295,49 +295,77 @@ class TestMessageObserver:
 
         message_data = json.loads(observer.get_cached_message()[0])
 
-        assert message_data == {
-            "type": ProcessType.SUBAGENT_START.value,
-            "content": json.dumps(
-                {
-                    "agent_id": "agent-1",
-                    "agent_name": "Researcher",
-                    "task": "Analyze Chinese content",
-                },
-                ensure_ascii=False,
-            ),
+        # invocation_id is generated when not supplied; the start chunk must
+        # carry it on both the payload and the top-level metadata so downstream
+        # consumers can attribute every nested chunk to this run.
+        assert set(message_data.keys()) >= {
+            "type",
+            "content",
+            "agent_id",
+            "agent_name",
+            "depth",
+            "invocation_id",
+        }
+        assert message_data["type"] == ProcessType.SUBAGENT_START.value
+        content_payload = json.loads(message_data["content"])
+        assert content_payload == {
             "agent_id": "agent-1",
             "agent_name": "Researcher",
-            "depth": 1,
+            "task": "Analyze Chinese content",
+            "invocation_id": message_data["invocation_id"],
         }
+        assert message_data["agent_id"] == "agent-1"
+        assert message_data["agent_name"] == "Researcher"
+        assert message_data["depth"] == 1
+        assert message_data["invocation_id"]
         assert observer._current_depth.get() == 1
+        assert observer._current_invocation_id.get() == message_data["invocation_id"]
 
-    def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
-        """Close sub-agent events without allowing the nesting depth below zero."""
-        observer.add_subagent_end("agent-1", "Researcher")
+    def test_add_subagent_start_with_explicit_invocation_id_is_preserved(self, observer):
+        """Carry through a caller-supplied invocation_id for deterministic pairing."""
+        observer.add_subagent_start(
+            "agent-1", "Researcher", task="t", invocation_id="inv-42"
+        )
 
         message_data = json.loads(observer.get_cached_message()[0])
 
-        assert message_data == {
-            "type": ProcessType.SUBAGENT_END.value,
-            "content": json.dumps(
-                {"agent_id": "agent-1", "agent_name": "Researcher"},
-                ensure_ascii=False,
-            ),
+        assert message_data["invocation_id"] == "inv-42"
+        assert json.loads(message_data["content"])["invocation_id"] == "inv-42"
+        assert observer._current_invocation_id.get() == "inv-42"
+
+    def test_add_subagent_end_clamps_event_depth_and_decrements_depth(self, observer):
+        """Close sub-agent events without allowing the nesting depth below zero."""
+        invocation_id = observer._current_invocation_id.get()
+        observer.add_subagent_start("agent-1", "Researcher")
+        start_id = observer._current_invocation_id.get()
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id=start_id)
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+        end_message = messages[-1]
+
+        assert end_message["type"] == ProcessType.SUBAGENT_END.value
+        assert end_message["agent_id"] == "agent-1"
+        assert end_message["agent_name"] == "Researcher"
+        assert end_message["depth"] == 1
+        assert end_message["invocation_id"] == start_id
+        assert json.loads(end_message["content"]) == {
             "agent_id": "agent-1",
             "agent_name": "Researcher",
-            "depth": 1,
+            "invocation_id": start_id,
         }
         assert observer._current_depth.get() == 0
+        assert observer._current_invocation_id.get() == invocation_id
 
     def test_subagent_depth_isolated_across_threads(self, observer):
         """Keep independent sub-agent depths for concurrent tool execution."""
         barrier = threading.Barrier(2)
 
         def run_subagent(agent_id, agent_name):
-            observer.add_subagent_start(agent_id, agent_name)
+            invocation_id = f"inv-{agent_id}"
+            observer.add_subagent_start(agent_id, agent_name, invocation_id=invocation_id)
             barrier.wait(timeout=5)
             observer.add_message(agent_name, ProcessType.OTHER, "working")
-            observer.add_subagent_end(agent_id, agent_name)
+            observer.add_subagent_end(agent_id, agent_name, invocation_id=invocation_id)
 
         first = threading.Thread(
             target=run_subagent,
@@ -355,7 +383,84 @@ class TestMessageObserver:
         assert not first.is_alive()
         assert not second.is_alive()
         messages = [json.loads(message) for message in observer.get_cached_message()]
+        working_messages = [message for message in messages if message["type"] == ProcessType.OTHER.value]
+
         assert all(message["depth"] == 1 for message in messages)
+        assert {message["agent_id"] for message in working_messages} == {"agent-1", "agent-2"}
+        # Each working chunk inherits the matching invocation_id from its
+        # active sub-agent scope rather than collapsing to a single shared id.
+        working_invocation_ids = {message["invocation_id"] for message in working_messages}
+        assert working_invocation_ids == {"inv-agent-1", "inv-agent-2"}
+        assert observer._current_depth.get() == 0
+
+    def test_parallel_subagents_keep_distinct_invocation_ids(self, observer):
+        """Two siblings active simultaneously do not collapse into one invocation id."""
+        observer.add_subagent_start("agent-1", "Researcher", invocation_id="inv-a")
+        observer.add_subagent_start("agent-2", "Writer", invocation_id="inv-b")
+
+        # Both starts are still open: closing either one must only drop its
+        # own invocation from the stack and not affect the other.
+        observer.add_model_reasoning_content("inner-a")
+
+        messages = [json.loads(m) for m in observer.get_cached_message()]
+        last_reasoning = next(
+            m for m in reversed(messages)
+            if m["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        )
+        # The most recent push wins because the SDK runs reasoning chunks
+        # synchronously inside each child. Whichever child is on top is the
+        # one whose reasoning this is.
+        assert last_reasoning["invocation_id"] == "inv-b"
+        assert last_reasoning["agent_id"] == "agent-2"
+
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id="inv-a")
+
+        # After popping agent-1, agent-2 is the active scope.
+        assert observer._current_invocation_id.get() == "inv-b"
+
+        observer.add_model_reasoning_content("inner-b")
+        messages = [json.loads(m) for m in observer.get_cached_message()]
+        last_reasoning = next(
+            m for m in reversed(messages)
+            if m["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        )
+        assert last_reasoning["invocation_id"] == "inv-b"
+
+        observer.add_subagent_end("agent-2", "Writer", invocation_id="inv-b")
+        assert observer._current_invocation_id.get() is None
+
+    def test_subagent_end_clears_message_identity_context(self, observer):
+        """Do not attribute parent output to a sub-agent after it finishes."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        start_id = observer._current_invocation_id.get()
+        observer.add_subagent_end("agent-1", "Researcher", invocation_id=start_id)
+        observer.add_message("parent", ProcessType.OTHER, "parent output")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert "agent_id" not in messages[-1]
+        assert "invocation_id" not in messages[-1]
+        assert observer._current_depth.get() == 0
+
+    def test_model_reasoning_content_inherits_active_subagent_id(self, observer):
+        """Attach the active sub-agent identity to direct model reasoning output."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        observer.add_model_reasoning_content("Investigating")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert messages[-1]["type"] == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value
+        assert messages[-1]["agent_id"] == "agent-1"
+
+    def test_subagent_end_clears_message_identity_context_without_invocation_id(self, observer):
+        """Do not attribute parent output to a sub-agent after it finishes."""
+        observer.add_subagent_start("agent-1", "Researcher")
+        observer.add_subagent_end("agent-1", "Researcher")
+        observer.add_message("parent", ProcessType.OTHER, "parent output")
+
+        messages = [json.loads(message) for message in observer.get_cached_message()]
+
+        assert "agent_id" not in messages[-1]
         assert observer._current_depth.get() == 0
 
     def test_execution_logs_extract_nl2a_before_visible_content(self):

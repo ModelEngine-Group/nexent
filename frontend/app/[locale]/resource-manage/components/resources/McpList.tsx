@@ -521,12 +521,35 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       render: (_: any, record: McpServer) => {
         const isEnabled = Boolean(record.status);
         return isEnabled ? (
-          <Tag color="#229954" variant="solid">
+          <Tag
+            color="#229954"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
+            variant="solid"
+          >
             {t("mcpConfig.serverList.enabled.yes")}
           </Tag>
         ) : (
           <Tooltip title={t("mcpConfig.serverList.enabled.tooltip")}>
-            <Tag color="#AEB6BF" variant="solid" style={{ cursor: "pointer" }}>
+            <Tag
+              color="#AEB6BF"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                lineHeight: "20px",
+                height: "auto",
+                whiteSpace: "nowrap",
+                cursor: "pointer",
+              }}
+              variant="solid"
+            >
               {t("mcpConfig.serverList.enabled.no")}
             </Tag>
           </Tooltip>
@@ -543,7 +566,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         return (
           <Tag
             color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
-            className="inline-flex items-center"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
             variant="solid"
           >
             {healthCheckLoading[key] ? (
@@ -553,7 +583,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             ) : (
               <CircleX className="w-3 h-3 mr-1" />
             )}
-            {t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}
+            <span>{t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}</span>
           </Tag>
         );
       },
@@ -659,9 +689,20 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         };
         const config = statusConfig[status || ""] || { color: "#2E4053", icon: <AlertCircle className="w-3 h-3" /> };
         return (
-          <Tag color={config.color} className="inline-flex items-center" variant="solid">
+          <Tag
+            color={config.color}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              lineHeight: "20px",
+              height: "auto",
+              whiteSpace: "nowrap",
+            }}
+            variant="solid"
+          >
             <span className="mr-1">{config.icon}</span>
-            {status || "unknown"}
+            <span>{status || "unknown"}</span>
           </Tag>
         );
       },

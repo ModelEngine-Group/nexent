@@ -56,6 +56,7 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  shareSelected?: boolean;
 }
 
 // TTS playback status
@@ -75,6 +76,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  shareSelected = false,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
 
@@ -317,7 +319,7 @@ function ChatStreamFinalMessageInner({
         {/* Assistant message part - show final answer or content */}
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
-            <div className="bg-white rounded-lg w-full mt-2">
+            <div className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}>
               {/* Max steps warning - show when message is complete and has maxStepsInfo */}
               {message.isComplete &&
                 message.steps &&
@@ -530,7 +532,8 @@ function areEqualFinalMessage(
     prev.hideButtons === next.hideButtons &&
     prev.readOnly === next.readOnly &&
     prev.index === next.index &&
-    prev.currentConversationId === next.currentConversationId
+    prev.currentConversationId === next.currentConversationId &&
+    prev.shareSelected === next.shareSelected
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
     // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
   );

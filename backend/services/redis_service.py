@@ -5,7 +5,12 @@ from typing import Dict, Any, Optional, Tuple, Set, List
 
 import redis
 
-from consts.const import REDIS_URL, REDIS_BACKEND_URL
+from consts.const import (
+    REDIS_BACKEND_URL,
+    REDIS_ERROR_INFO_SCAN_COUNT,
+    REDIS_ERROR_INFO_TTL_SECONDS,
+    REDIS_URL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -635,14 +640,19 @@ class RedisService:
             logger.error(f"Redis ping failed: {str(e)}")
             return False
 
-    def save_error_info(self, task_id: str, error_reason: str, ttl_days: int = 30) -> bool:
+    def save_error_info(
+        self,
+        task_id: str,
+        error_reason: str,
+        ttl_days: Optional[int] = None,
+    ) -> bool:
         """
         Save error information to Redis for a specific task
 
         Args:
             task_id: Celery task ID
             error_reason: Short error reason summary
-            ttl_days: Time to live in days (default 30 days)
+            ttl_days: Optional TTL override in days
 
         Returns:
             True if saved successfully, False otherwise
@@ -655,7 +665,11 @@ class RedisService:
                 logger.error(f"Cannot save error info for task {task_id}: error_reason is empty")
                 return False
 
-            ttl_seconds = ttl_days * 24 * 60 * 60
+            ttl_seconds = (
+                ttl_days * 24 * 60 * 60
+                if ttl_days is not None
+                else REDIS_ERROR_INFO_TTL_SECONDS
+            )
             reason_key = f"error:reason:{task_id}"
 
             # Save error reason
@@ -663,12 +677,6 @@ class RedisService:
 
             if result:
                 logger.info(f"Successfully saved error info to Redis for task {task_id}, key: {reason_key}")
-                # Verify the save by reading it back
-                verify = self.client.get(reason_key)
-                if verify:
-                    logger.debug(f"Verified error info saved for task {task_id}: {verify[:100]}...")
-                else:
-                    logger.warning(f"Failed to verify error info save for task {task_id}")
                 return True
             else:
                 logger.error(f"Redis setex returned False for task {task_id}")
@@ -677,6 +685,94 @@ class RedisService:
             logger.error(
                 f"Failed to save error info for task {task_id}: {str(e)}", exc_info=True)
             return False
+
+    def cleanup_error_info_keys(
+        self,
+        ttl_seconds: int = REDIS_ERROR_INFO_TTL_SECONDS,
+        scan_count: int = REDIS_ERROR_INFO_SCAN_COUNT,
+    ) -> Dict[str, int]:
+        """
+        Remove orphaned error reasons and enforce retention on legacy keys.
+
+        SCAN is used instead of KEYS so maintenance does not block Redis while
+        iterating a large keyspace.
+        """
+        stats = {
+            "scanned": 0,
+            "deleted_orphans": 0,
+            "ttl_repaired": 0,
+        }
+        if ttl_seconds <= 0 or scan_count <= 0:
+            logger.warning(
+                "Skipping error info cleanup because ttl_seconds and scan_count must be positive"
+            )
+            return stats
+
+        try:
+            batch: List[str] = []
+            for key in self.client.scan_iter(
+                match="error:reason:*",
+                count=scan_count,
+            ):
+                if isinstance(key, bytes):
+                    key = key.decode("utf-8")
+                batch.append(key)
+                if len(batch) >= scan_count:
+                    self._cleanup_error_info_batch(batch, ttl_seconds, stats)
+                    batch = []
+
+            if batch:
+                self._cleanup_error_info_batch(batch, ttl_seconds, stats)
+
+            logger.info(
+                "Redis error info cleanup completed: scanned=%s, deleted_orphans=%s, ttl_repaired=%s",
+                stats["scanned"],
+                stats["deleted_orphans"],
+                stats["ttl_repaired"],
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to clean up Redis error info keys: {exc}")
+
+        return stats
+
+    def _cleanup_error_info_batch(
+        self,
+        keys: List[str],
+        ttl_seconds: int,
+        stats: Dict[str, int],
+    ) -> None:
+        """Clean one bounded batch of error reason keys."""
+        if not keys:
+            return
+
+        task_ids = [key.removeprefix("error:reason:") for key in keys]
+        backend_pipe = self.backend_client.pipeline()
+        ttl_pipe = self.client.pipeline()
+        for task_id in task_ids:
+            backend_pipe.exists(f"celery-task-meta-{task_id}")
+        for key in keys:
+            ttl_pipe.ttl(key)
+
+        task_exists = backend_pipe.execute()
+        key_ttls = ttl_pipe.execute()
+        delete_keys = []
+        expire_keys = []
+        for key, exists, current_ttl in zip(keys, task_exists, key_ttls):
+            stats["scanned"] += 1
+            if not exists:
+                delete_keys.append(key)
+            elif current_ttl == -1 or current_ttl > ttl_seconds:
+                expire_keys.append(key)
+
+        if delete_keys:
+            stats["deleted_orphans"] += int(self.client.delete(*delete_keys))
+        if expire_keys:
+            expire_pipe = self.client.pipeline()
+            for key in expire_keys:
+                expire_pipe.expire(key, ttl_seconds)
+            stats["ttl_repaired"] += sum(
+                bool(result) for result in expire_pipe.execute()
+            )
 
     def save_progress_info(self, task_id: str, processed_chunks: int, total_chunks: int, ttl_hours: int = 24) -> bool:
         """

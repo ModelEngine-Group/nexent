@@ -1,8 +1,8 @@
 ---
-title: Skill Management
+title: Skill Repository
 ---
 
-# Skill Management
+# Skill Repository
 
 A Skill is a core mechanism in Nexent for extending agent capabilities. Each skill packages multiple tools with usage documentation into a reusable unit of capability, enabling agents to handle complex tasks like assembling building blocks — without consuming excessive context space.
 
@@ -37,14 +37,14 @@ A **Skill** bundles the capabilities of multiple tools into a complete workflow,
 
 ### Configuring Skills for an Agent
 
-1. Open the **[Agent Development](./agent-development)** page
+1. Open the **[Agent Development](../agent-development.md)** page
 2. On the "Select Tools" tab, find the **Skills** group
 3. Click a skill name to select it; click again to deselect
 4. After selecting a skill, click the ⚙️ button next to it to configure skill parameters
 5. Save the agent configuration
 
 <div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/set-tool.png" style="width: 50%; height: auto;" />
+  <img src="../assets/agent-development/set-tool.png" style="width: 50%; height: auto;" />
 </div>
 
 > 💡 **Tip**: If a skill has required parameters that are not configured, a guided parameter-filling prompt will appear upon selection.
@@ -68,7 +68,7 @@ Each skill supports multi-version management:
 
 When configuring the same skill for different agents, you can set different parameter values independently.
 
-## Skill Management
+## Skill Repository
 
 ### Viewing Installed Skills
 
@@ -566,7 +566,7 @@ If the skill name you create conflicts with an existing skill, Nexent will autom
 
 ## Related References
 
-- [Agent Development](./agent-development)
-- [Local Tools Overview](./local-tools/index)
-- [MCP Tool Configuration](./mcp-tools)
-- [Skills System Overview](../backend/skills/overview)
+- [Agent Development](../agent-development.md)
+- [Local Tools Overview](../local-tools/index.md)
+- [MCP Repository Configuration](./mcp-repository.md)
+- [Skills System Overview](../../backend/skills/overview.md)
