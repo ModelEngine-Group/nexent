@@ -6472,3 +6472,14 @@ class TestLocalSkillPathSecurity:
 
         with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
             service.get_skill_file_content("safe-skill", "../../secret.txt")
+
+    def test_file_read_rechecks_containment_before_open(self, mocker, tmp_path):
+        service = self._service_for_path(tmp_path)
+        outside_file = tmp_path.parent / "secret.txt"
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(outside_file),
+        )
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service.get_skill_file_content("safe-skill", "README.md")

@@ -2265,11 +2265,18 @@ class SkillService:
         """
         try:
             effective_tenant_id = tenant_id or self.tenant_id
+            local_skills_dir = self._local_skills_dir(effective_tenant_id)
             full_path = _resolve_local_skill_path(
-                self._local_skills_dir(effective_tenant_id),
+                local_skills_dir,
                 skill_name,
                 file_path,
             )
+
+            # Keep the containment check next to the file access so static analysis and
+            # future callers can verify that user-controlled paths stay below the root.
+            local_root = os.path.realpath(local_skills_dir)
+            if not full_path.startswith(local_root + os.sep):
+                raise ForbiddenError("Unsafe local skill path")
 
             try:
                 with open(full_path, "r", encoding="utf-8") as f:
