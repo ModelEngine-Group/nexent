@@ -3753,6 +3753,7 @@
   "a2a.service.chatFailed": "Failed to send chat message",
   "collaborativeAgent.internalAgents": "Internal Agents",
   "collaborativeAgent.externalAgents": "External Agents",
+  "collaborativeAgent.noAgents": "No agents available",
   "collaborativeAgent.addExternal": "Add External Agent",
   "skillSpace.comingSoon.title": "Skill Space Coming Soon",
   "skillSpace.comingSoon.description": "A powerful marketplace to discover, install, and manage AI skills for your agents. Extend capabilities with pre-built skill packs.",

@@ -1083,18 +1083,19 @@ class UserTenant(TableBase):
 class AgentRelation(TableBase):
     """
     Agent parent-child relationship table
+    Primary key: (relation_id, version_no)
     """
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
     relation_id = Column(Integer, Sequence("ag_agent_relation_t_relation_id_seq", schema=SCHEMA),
                          primary_key=True, nullable=False, doc="Relationship ID, primary key")
+    version_no = Column(Integer, primary_key=True, default=0, nullable=False,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     selected_agent_id = Column(
-        Integer, primary_key=True, doc="Selected agent ID")
+        Integer, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
-    version_no = Column(Integer, default=0, nullable=False,
-                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     selected_agent_version_no = Column(
         Integer, nullable=True,
         doc="Pinned version of selected_agent_id. NULL = runtime fallback to child current_version_no",
