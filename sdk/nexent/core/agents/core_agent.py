@@ -384,36 +384,6 @@ def _scan_code_for_tool_calls(
     return results
 
 
-def _validate_automation_proposal_action(
-    code_action: str,
-    tool_calls: List[Dict[str, Any]],
-) -> None:
-    """Keep proposal creation isolated from business actions in one code block."""
-    automation_name = "create_scheduled_task_proposal"
-    automation_calls = [call for call in tool_calls if call.get("name") == automation_name]
-    if not automation_calls:
-        return
-    try:
-        tree = ast.parse(code_action)
-        raw_automation_call_count = sum(
-            1
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and (
-                (isinstance(node.func, ast.Name) and node.func.id == automation_name)
-                or (isinstance(node.func, ast.Attribute) and node.func.attr == automation_name)
-            )
-        )
-    except SyntaxError:
-        raw_automation_call_count = len(automation_calls)
-    if raw_automation_call_count != 1 or len(tool_calls) != 1:
-        raise ValueError(
-            "create_scheduled_task_proposal must be the only tool call in this action. "
-            "Do not execute the scheduled business task now. Call the proposal tool once "
-            "and return its result with final_answer."
-        )
-
-
 def _wrap_tool_for_observer(
     tool: Any,
     observer: "MessageObserver",
@@ -553,29 +523,6 @@ class CoreAgent(CodeAgent):
                     continue
                 names.add(str(name))
         return names
-
-    def _automation_tool_final_answer(self, code_output: Any) -> Optional[str]:
-        """Terminate the run after the platform proposal tool has handled a request."""
-        tools = getattr(self, "tools", {}) or {}
-        try:
-            tool = tools.get("create_scheduled_task_proposal")
-        except AttributeError:
-            tool = next(
-                (
-                    item
-                    for item in tools
-                    if getattr(item, "name", None) == "create_scheduled_task_proposal"
-                ),
-                None,
-            )
-        result = getattr(tool, "last_result", None)
-        if not isinstance(result, dict):
-            return None
-        message = str(result.get("user_message") or "").strip()
-        if message:
-            return message
-        output = getattr(code_output, "output", None)
-        return str(output).strip() if output is not None else ""
 
     def _wrap_visible_tool_events(self) -> None:
         """Instrument visible tools at their actual execution boundary."""
@@ -871,13 +818,6 @@ Additional Args:
                 code_action = parse_code_blobs(model_output)
             code_action = fix_final_answer_code(code_action)
             memory_step.code_action = code_action
-            try:
-                _validate_automation_proposal_action(
-                    code_action,
-                    _scan_code_for_tool_calls(code_action, self._known_tool_names())
-                )
-            except ValueError as exc:
-                raise AgentExecutionError(str(exc), self.logger) from exc
             # Record parsing results
             self.observer.add_message(
                 self.agent_name, ProcessType.PARSE, code_action)
@@ -992,8 +932,6 @@ Additional Args:
             truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
-        automation_final_answer = self._automation_tool_final_answer(code_output)
-        effective_is_final_answer = bool(code_output.is_final_answer) or automation_final_answer is not None
 
         verification_controller = getattr(self, "verification_controller", None)
         if verification_controller:
@@ -1001,7 +939,7 @@ Additional Args:
                 code_action=code_action,
                 observation=memory_step.observations,
                 step_number=memory_step.step_number,
-                is_final_answer=effective_is_final_answer,
+                is_final_answer=bool(code_output.is_final_answer),
             )
             if not postcheck.passed and postcheck.severity == "blocking":
                 self._append_verification_feedback(memory_step, postcheck)
@@ -1034,11 +972,7 @@ Additional Args:
                 ),
             ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
-        memory_step.action_output = (
-            automation_final_answer
-            if automation_final_answer is not None
-            else code_output.output
-        )
+        memory_step.action_output = code_output.output
 
         # v1.4: Plan step state advances entirely via the update_plan_step
         # tool. _implicit_advance_step is the only fallback we still run here:
@@ -1048,10 +982,7 @@ Additional Args:
         if self.enable_planning:
             self._implicit_advance_step()
 
-        yield ActionOutput(
-            output=memory_step.action_output,
-            is_final_answer=effective_is_final_answer,
-        )
+        yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
             additional_args: Optional[Dict] = None, max_steps: Optional[int] = None, return_full_result: bool | None = None):

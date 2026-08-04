@@ -288,11 +288,6 @@ class AgentAutomationFacade:
             "conversation_id": conversation_id,
             "agent_id": request.agent_id,
             "source_message_id": source_message_id,
-            "idempotency_key": (
-                f"agent-loop:{tenant_id}:{user_id}:{source_message_id}"
-                if source_message_id is not None
-                else None
-            ),
             "proposed_task": proposed_task,
             "capability_resolution": resolution.model_dump(mode="json"),
             "status": AutomationProposalStatus.PENDING.value,

@@ -1,8 +1,8 @@
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from consts.model import MessageRequest, MessageUnit
+from consts.model import HistoryItem, MessageRequest, MessageUnit
 from services.conversation_management_service import (
     get_conversation_history_service,
     save_message,
@@ -15,6 +15,72 @@ logger = logging.getLogger("agent_automation.conversation_adapter")
 
 class AutomationConversationAdapter:
     """Persist automation UI events through the existing conversation service."""
+
+    @staticmethod
+    def _message_content(message: Dict[str, Any]) -> str:
+        content = message.get("message", "")
+        if isinstance(content, list):
+            final = next(
+                (
+                    unit.get("content")
+                    for unit in reversed(content)
+                    if unit.get("type") == "final_answer"
+                ),
+                "",
+            )
+            visible_units = [
+                unit
+                for unit in content
+                if unit.get("type") != "automation_proposal"
+            ]
+            content = final or " ".join(
+                str(unit.get("content", "")) for unit in visible_units
+            )
+        return str(content or "")
+
+    @classmethod
+    def _history_items(cls, messages: List[Dict[str, Any]]) -> List[HistoryItem]:
+        history: List[HistoryItem] = []
+        for message in messages:
+            content = cls._message_content(message)
+            if content:
+                history.append(
+                    HistoryItem(
+                        role=message.get("role", "user"),
+                        content=content,
+                    )
+                )
+        return history
+
+    def append_run_prompt(
+        self,
+        conversation_id: int,
+        prompt: str,
+        user_id: str,
+        tenant_id: str,
+    ) -> Dict[str, Any]:
+        """Append a new automation turn without regenerating an existing message."""
+        history_payload = get_conversation_history_service(conversation_id, user_id)
+        messages = history_payload[0].get("message", []) if history_payload else []
+        request = MessageRequest(
+            conversation_id=conversation_id,
+            message_idx=len(messages),
+            role="user",
+            message=[MessageUnit(type="string", content=prompt)],
+        )
+        message_id = save_message(request, user_id, tenant_id)
+        save_message_unit(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            unit_index=0,
+            unit_type="automation_prompt",
+            unit_content=prompt,
+            user_id=user_id,
+        )
+        return {
+            "user_message_id": message_id,
+            "history": self._history_items(messages),
+        }
 
     def append_proposal_exchange(
         self,

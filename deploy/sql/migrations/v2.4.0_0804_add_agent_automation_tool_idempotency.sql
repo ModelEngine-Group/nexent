@@ -5,8 +5,7 @@ SET search_path TO nexent;
 BEGIN;
 
 ALTER TABLE nexent.agent_automation_proposal_t
-    ADD COLUMN IF NOT EXISTS source_message_id BIGINT,
-    ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
+    ADD COLUMN IF NOT EXISTS source_message_id BIGINT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_proposal_source_message
     ON nexent.agent_automation_proposal_t (tenant_id, user_id, source_message_id)

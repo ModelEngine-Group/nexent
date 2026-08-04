@@ -298,6 +298,8 @@ def test_proposal_source_message_has_unique_partial_index():
     migration_sql = AGENT_AUTOMATION_TOOL_MIGRATION.read_text()
     assert "ADD COLUMN IF NOT EXISTS source_message_id BIGINT" in migration_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_proposal_source_message" in migration_sql
+    assert "idempotency_key" not in AgentAutomationProposal.__table__.columns
+    assert "idempotency_key" not in migration_sql
 
 
 def test_run_capability_check_column_is_removed_from_schema():

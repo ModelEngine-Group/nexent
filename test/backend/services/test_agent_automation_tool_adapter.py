@@ -10,6 +10,32 @@ from services.agent_automation.tool_adapter import (
 )
 
 
+def test_build_tool_config_registers_scheduled_task_as_builtin(monkeypatch):
+    monkeypatch.setattr(
+        "services.conversation_management_service.get_current_run_user_message_id",
+        lambda conversation_id, user_id: 101,
+    )
+
+    tool_config = AgentLoopAutomationToolAdapter().build_tool_config(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        conversation_id=20,
+        agent_id=7,
+        user_message="每天九点生成日报",
+        agent_version_no=1,
+        model_id=3,
+        tool_params={"tools": {}},
+        has_attachments=False,
+        language="zh",
+    )
+
+    assert tool_config.class_name == "CreateScheduledTaskProposalTool"
+    assert tool_config.name == "create_scheduled_task_proposal"
+    assert tool_config.source == "builtin"
+    assert tool_config.usage == "builtin"
+    assert callable(tool_config.metadata["create_proposal"])
+
+
 @pytest.mark.asyncio
 async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(monkeypatch):
     captured = {}

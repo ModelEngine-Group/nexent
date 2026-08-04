@@ -4,6 +4,60 @@ from services.agent_automation import conversation_adapter as adapter_module
 from services.agent_automation.conversation_adapter import AutomationConversationAdapter
 
 
+def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
+    captured = {"units": []}
+    monkeypatch.setattr(
+        adapter_module,
+        "get_conversation_history_service",
+        lambda conversation_id, user_id: [{"message": [
+            {
+                "role": "user",
+                "message": [{"type": "string", "content": "原始请求"}],
+            },
+            {
+                "role": "assistant",
+                "message": [{"type": "automation_proposal", "content": "hidden"}],
+            },
+            {
+                "role": "assistant",
+                "message": [{"type": "final_answer", "content": "上次结果"}],
+            },
+        ]}],
+    )
+
+    def fake_save_message(request, user_id, tenant_id):
+        captured["request"] = request
+        captured["owner"] = (user_id, tenant_id)
+        return 31
+
+    monkeypatch.setattr(adapter_module, "save_message", fake_save_message)
+    monkeypatch.setattr(
+        adapter_module,
+        "save_message_unit",
+        lambda **kwargs: captured["units"].append(kwargs),
+    )
+
+    adapter = AutomationConversationAdapter()
+    turn = adapter.append_run_prompt(
+        321,
+        "整理一份项目周报",
+        "user",
+        "tenant",
+    )
+
+    assert turn["user_message_id"] == 31
+    assert [(item.role, item.content) for item in turn["history"]] == [
+        ("user", "原始请求"),
+        ("assistant", "上次结果"),
+    ]
+    assert captured["request"].conversation_id == 321
+    assert captured["request"].message_idx == 3
+    assert captured["request"].role == "user"
+    assert captured["request"].message[0].content == "整理一份项目周报"
+    assert captured["owner"] == ("user", "tenant")
+    assert captured["units"][0]["unit_type"] == "automation_prompt"
+
+
 def test_append_proposal_exchange_persists_user_instruction_and_assistant_card(monkeypatch):
     captured = {"requests": [], "units": []}
     monkeypatch.setattr(

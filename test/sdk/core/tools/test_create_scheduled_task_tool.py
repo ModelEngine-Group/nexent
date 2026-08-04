@@ -1,3 +1,4 @@
+import importlib
 import json
 from unittest.mock import MagicMock
 
@@ -48,3 +49,9 @@ def test_proposal_tool_does_not_emit_card_for_clarification():
 
     assert tool.forward("创建一个定时任务") == "请补充执行时间。"
     observer.add_message.assert_not_called()
+
+
+def test_proposal_tool_is_not_exported_to_the_user_tool_catalog():
+    tools_package = importlib.import_module("sdk.nexent.core.tools")
+
+    assert not hasattr(tools_package, "CreateScheduledTaskProposalTool")

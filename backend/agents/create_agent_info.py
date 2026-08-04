@@ -826,55 +826,22 @@ async def create_agent_config(
         and automation_user_message
     ):
         from services.agent_automation.tool_adapter import (
-            AutomationToolRuntimeContext,
             agent_loop_automation_tool_adapter,
         )
-        from services.conversation_management_service import (
-            get_current_run_user_message_id,
-        )
-
-        source_message_id = get_current_run_user_message_id(conversation_id, user_id)
-        runtime_context = AutomationToolRuntimeContext(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            conversation_id=int(conversation_id),
-            agent_id=int(agent_id),
-            user_message=automation_user_message,
-            source_message_id=source_message_id,
-            agent_version_no=version_no,
-            model_id=automation_model_id,
-            tool_params=normalized_tool_params.model_dump(mode="json"),
-            has_attachments=automation_has_attachments,
-        )
-        tool_description = (
-            "Create a pending scheduled-task proposal when the user explicitly asks "
-            "for future, delayed, or recurring execution. It does not execute the "
-            "business task, and it must be the only tool call in this action."
-            if language == LANGUAGE["EN"]
-            else (
-                "当用户明确要求未来、延迟或周期性执行任务时，创建待确认的定时任务提案。"
-                "只创建提案，不立即执行业务任务；本次代码中不得同时调用其他工具。"
+        tool_list.append(
+            agent_loop_automation_tool_adapter.build_tool_config(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=int(conversation_id),
+                agent_id=int(agent_id),
+                user_message=automation_user_message,
+                agent_version_no=version_no,
+                model_id=automation_model_id,
+                tool_params=normalized_tool_params.model_dump(mode="json"),
+                has_attachments=automation_has_attachments,
+                language=language,
             )
         )
-        tool_list.append(ToolConfig(
-            class_name="CreateScheduledTaskProposalTool",
-            name="create_scheduled_task_proposal",
-            description=tool_description,
-            inputs=json.dumps({
-                "request_text": {
-                    "type": "string",
-                    "description": "原样复制的用户定时执行请求",
-                }
-            }, ensure_ascii=False),
-            output_type="string",
-            params={},
-            source="builtin",
-            metadata={
-                "create_proposal": agent_loop_automation_tool_adapter.build_callback(
-                    runtime_context
-                ),
-            },
-        ))
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")

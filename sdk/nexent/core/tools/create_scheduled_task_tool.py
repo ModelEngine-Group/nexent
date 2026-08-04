@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from pydantic import Field
 from smolagents.tools import Tool
@@ -63,7 +63,6 @@ class CreateScheduledTaskProposalTool(Tool):
         super().__init__()
         self._create_proposal = create_proposal
         self.observer = observer
-        self.last_result: Optional[dict[str, Any]] = None
 
     def forward(self, request_text: str) -> str:
         if self._create_proposal is None:
@@ -76,7 +75,6 @@ class CreateScheduledTaskProposalTool(Tool):
         result = self._create_proposal(normalized)
         if not isinstance(result, dict):
             raise RuntimeError("Scheduled-task proposal service returned an invalid result.")
-        self.last_result = result
 
         if result.get("status") == "proposal_ready":
             proposal = result.get("proposal")

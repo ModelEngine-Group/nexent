@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from database import agent_automation_db
+from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.tools.create_scheduled_task_tool import (
+    CreateScheduledTaskProposalTool,
+)
 
 from .errors import (
     AgentAutomationError,
@@ -55,6 +59,60 @@ class AutomationToolRuntimeContext:
 
 
 class AgentLoopAutomationToolAdapter:
+    def build_tool_config(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: int,
+        agent_id: int,
+        user_message: str,
+        agent_version_no: Optional[int],
+        model_id: Optional[int],
+        tool_params: Optional[Dict[str, Any]],
+        has_attachments: bool,
+        language: str,
+    ) -> ToolConfig:
+        """Build the system-injected tool config for one interactive run."""
+        from services.conversation_management_service import (
+            get_current_run_user_message_id,
+        )
+
+        context = AutomationToolRuntimeContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            agent_id=agent_id,
+            user_message=user_message,
+            source_message_id=get_current_run_user_message_id(
+                conversation_id,
+                user_id,
+            ),
+            agent_version_no=agent_version_no,
+            model_id=model_id,
+            tool_params=tool_params,
+            has_attachments=has_attachments,
+        )
+        description = (
+            CreateScheduledTaskProposalTool.description
+            if language == "en"
+            else CreateScheduledTaskProposalTool.description_zh
+        )
+        return ToolConfig(
+            class_name=CreateScheduledTaskProposalTool.__name__,
+            name=CreateScheduledTaskProposalTool.name,
+            description=description,
+            inputs=json.dumps(
+                CreateScheduledTaskProposalTool.inputs,
+                ensure_ascii=False,
+            ),
+            output_type=CreateScheduledTaskProposalTool.output_type,
+            params={},
+            source="builtin",
+            usage="builtin",
+            metadata={"create_proposal": self.build_callback(context)},
+        )
+
     def build_callback(
         self,
         context: AutomationToolRuntimeContext,
