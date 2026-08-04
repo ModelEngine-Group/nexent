@@ -569,4 +569,4 @@ If the skill name you create conflicts with an existing skill, Nexent will autom
 - [Agent Development](../agent-development.md)
 - [Local Tools Overview](../local-tools/index.md)
 - [MCP Repository Configuration](./mcp-repository.md)
-- [Skills System Overview](../../backend/skills/overview.md)
+- [Skills System Overview](/en/backend/skills/overview)
