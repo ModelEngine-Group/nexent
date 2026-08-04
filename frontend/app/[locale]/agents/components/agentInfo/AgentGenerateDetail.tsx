@@ -168,7 +168,6 @@ export default function AgentGenerateDetail({}) {
 
   // Use agent generation hook
   const { handleGenerateAgent } = useAgentGeneration({
-    setActiveTab,
     onStreamUpdate: ({ type, content }) => {
       const fieldMap: Record<string, string> = {
         [GENERATE_PROMPT_STREAM_TYPES.DUTY]: 'dutyPrompt',
