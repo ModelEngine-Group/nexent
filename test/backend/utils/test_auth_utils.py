@@ -860,3 +860,64 @@ class TestGetCurrentUserContext:
         monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
 
         assert au.get_current_user_context(None) == ("speed-user", "speed-tenant", "SPEED")
+
+    def test_rejects_user_without_role(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+        monkeypatch.setattr(
+            au,
+            "get_user_tenant_by_user_id",
+            lambda user_id: {"tenant_id": "tenant-1", "user_role": ""},
+        )
+
+        with pytest.raises(UnauthorizedError, match="User role not found"):
+            au.get_current_user_context("Bearer token")
+
+
+def test_validate_timestamp_rejects_non_numeric_value():
+    assert au.validate_timestamp("not-a-timestamp") is False
+
+
+def test_verify_aksk_signature_returns_false_when_configuration_fails(monkeypatch):
+    monkeypatch.setattr(
+        au,
+        "get_aksk_config",
+        lambda tenant_id: (_ for _ in ()).throw(RuntimeError("not configured")),
+    )
+
+    assert au.verify_aksk_signature("ak", "1", "signature", "body") is False
+
+
+def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens():
+    token = au.jwt.encode({"sid": "session-1"}, "unused", algorithm="HS256")
+
+    assert au.extract_session_id_from_authorization(f"Bearer {token}") == "session-1"
+    assert au.extract_session_id_from_authorization("invalid-token") is None
+    assert au.extract_session_id_from_authorization(None) is None
+
+
+def test_get_current_user_id_rejects_blank_and_subjectless_tokens(monkeypatch):
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+
+    with pytest.raises(UnauthorizedError, match="No authorization header provided"):
+        au.get_current_user_id("   ")
+
+    monkeypatch.setattr(au, "_decode_jwt_token", lambda authorization: {})
+    with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
+        au.get_current_user_id("Bearer token")
+
+
+def test_get_user_language_falls_back_when_cookies_are_malformed():
+    class RequestWithInvalidCookies:
+        @property
+        def cookies(self):
+            raise TypeError("bad cookies")
+
+    assert au.get_user_language(RequestWithInvalidCookies()) == "zh"
+
+
+def test_get_current_user_info_combines_authentication_and_language(monkeypatch):
+    monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+    monkeypatch.setattr(au, "get_user_language", lambda request: "en")
+
+    assert au.get_current_user_info("Bearer token", object()) == ("user-1", "tenant-1", "en")

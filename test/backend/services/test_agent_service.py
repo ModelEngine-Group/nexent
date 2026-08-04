@@ -16588,3 +16588,27 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+@patch("backend.services.agent_service.get_user_language", return_value="en-US")
+@patch("backend.services.agent_service.get_current_user_info", return_value=("user-1", "tenant-1", "zh-CN"))
+def test_resolve_user_tenant_language_honors_explicit_identity(
+    mock_current_user_info,
+    mock_get_user_language,
+):
+    result = agent_service._resolve_user_tenant_language(
+        "Bearer token",
+        http_request=MagicMock(),
+        user_id="user-2",
+        tenant_id="tenant-2",
+    )
+
+    assert result == ("user-2", "tenant-2", "en-US")
+    mock_current_user_info.assert_not_called()
+    mock_get_user_language.assert_called_once()
+
+
+@patch("backend.services.agent_service.query_group_ids_by_user", side_effect=RuntimeError("db unavailable"))
+def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
+    assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
+    mock_query_group_ids.assert_called_once_with("user-1")

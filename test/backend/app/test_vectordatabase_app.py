@@ -1833,13 +1833,14 @@ async def test_delete_index_auth_exception(vdb_core_mock, auth_data):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents successfully.
     Verifies that the endpoint returns the expected response and performs Redis cleanup.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1870,6 +1871,7 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code
@@ -1923,9 +1925,10 @@ async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock, auth_data):
     """source_only scope must not trigger Redis document cleanup."""
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1945,6 +1948,7 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "source_only"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 200
@@ -1956,13 +1960,14 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents with Redis error.
     Verifies that the endpoint still succeeds with ES but reports Redis cleanup error.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -1987,6 +1992,7 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code (the operation should still succeed even with Redis errors)
@@ -2013,13 +2019,14 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_es_exception(vdb_core_mock):
+async def test_delete_documents_es_exception(vdb_core_mock, auth_data):
     """
     Test deleting documents with Elasticsearch exception.
     Verifies that the endpoint returns an appropriate error response when ES deletion fails.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -2034,6 +2041,7 @@ async def test_delete_documents_es_exception(vdb_core_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 500
@@ -2045,13 +2053,14 @@ async def test_delete_documents_es_exception(vdb_core_mock):
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock):
+async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock, auth_data):
     """
     Test deleting documents with Redis warnings.
     Verifies that the endpoint handles Redis warnings properly.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
@@ -2082,6 +2091,7 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "full"},
+            headers=auth_data["auth_header"],
         )
 
         # Verify expected 200 status code
@@ -2109,13 +2119,14 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
 
 
 @pytest.mark.asyncio
-async def test_delete_documents_validation_exception(vdb_core_mock):
+async def test_delete_documents_validation_exception(vdb_core_mock, auth_data):
     """
     Test deleting documents with validation exception.
     Verifies that the endpoint returns an appropriate error response when validation fails.
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
@@ -2130,6 +2141,7 @@ async def test_delete_documents_validation_exception(vdb_core_mock):
         response = client.delete(
             f"/indices/{index_name}/documents",
             params={"path_or_url": path_or_url, "scope": "source_only"},
+            headers=auth_data["auth_header"],
         )
 
         assert response.status_code == 400

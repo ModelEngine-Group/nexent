@@ -3021,8 +3021,6 @@ class TestGetSkillFileContentAssetOwner:
                     assert response.json() == {"content": "您无权限查看"}
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
     def test_update_skill_by_id_success(self, mocker):
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
@@ -3191,6 +3189,58 @@ if __name__ == "__main__":
                     tenant_id="tenant123",
                     user_id="user123",
                 )
+
+
+class TestSkillAppCoverageGaps:
+    def test_asset_owner_view_denied_response(self):
+        with patch('backend.apps.skill_app.can_view_skill', return_value=False):
+            response = skill_app._asset_owner_skill_view_denied_response(
+                {"tenant_id": "owner-tenant"}, "requester-tenant"
+            )
+
+        assert response.media_type == "application/json"
+        assert response.body.decode() == '{"content":"您无权限查看"}'
+
+    def test_asset_owner_view_allowed_and_missing_skill(self):
+        with patch('backend.apps.skill_app.can_view_skill', return_value=True):
+            assert skill_app._asset_owner_skill_view_denied_response(
+                {"tenant_id": "owner-tenant"}, "requester-tenant"
+            ) is None
+        assert skill_app._asset_owner_skill_view_denied_response(None, "requester-tenant") is None
+
+    def test_build_skill_update_data_includes_non_null_fields_and_files(self):
+        request = skill_app.SkillUpdateRequest(
+            name="renamed",
+            description="description",
+            tags=["tag"],
+            files=[{"path": "README.md", "content": "content"}],
+        )
+
+        assert skill_app._build_skill_update_data(request) == {
+            "name": "renamed",
+            "description": "description",
+            "tags": ["tag"],
+            "files": [{"path": "README.md", "content": "content"}],
+        }
+
+    def test_build_skill_update_data_includes_all_supported_fields(self):
+        request = skill_app.SkillUpdateRequest(
+            name="new-name",
+            group_ids=[1],
+            ingroup_permission="read",
+            config_schemas={"key": {"type": "string"}},
+            config_values={"key": "value"},
+        )
+
+        result = skill_app._build_skill_update_data(request)
+
+        assert result == {
+            "name": "new-name",
+            "group_ids": [1],
+            "ingroup_permission": "read",
+            "config_schemas": {"key": {"type": "string"}},
+            "config_values": {"key": "value"},
+        }
 
 
 if __name__ == "__main__":

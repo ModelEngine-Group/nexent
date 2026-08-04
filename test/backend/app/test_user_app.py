@@ -537,5 +537,39 @@ class TestDataValidation:
             )
 
 
+class TestUserAppCoverageGaps:
+    def test_update_user_unauthorized(self):
+        with patch("apps.user_app.get_current_user_context", side_effect=UnauthorizedError("login required")):
+            response = client.put("/users/user1", json={"role": "USER"})
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert response.json()["detail"] == "login required"
+
+    def test_update_user_not_found(self):
+        with (patch("apps.user_app.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
+              patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as update_user):
+            update_user.side_effect = NotFoundException("User user1 not found")
+            response = client.put("/users/user1", json={"role": "USER"})
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        assert response.json()["detail"] == "User user1 not found"
+
+    def test_update_user_value_error(self):
+        with (patch("apps.user_app.get_current_user_context", return_value=("admin", "tenant1", "ADMIN")),
+              patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as update_user):
+            update_user.side_effect = ValueError("role cannot be changed")
+            response = client.put("/users/user1", json={"role": "USER"})
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json()["detail"] == "role cannot be changed"
+
+    def test_delete_user_authentication_error_is_internal_error(self):
+        with patch("apps.user_app.get_current_user_id", side_effect=UnauthorizedError("invalid token")):
+            response = client.delete("/users/user1")
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert "Failed to delete user" in response.json()["detail"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

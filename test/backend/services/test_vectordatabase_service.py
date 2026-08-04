@@ -7925,5 +7925,35 @@ def test_filter_accessible_indices_handles_unexpected_exception(monkeypatch):
     assert result == ["kb1", "kb2"]
 
 
+def test_create_embedding_model_rejects_invalid_model_type():
+    from backend.services.vectordatabase_service import _create_embedding_model
+
+    with pytest.raises(ValueError, match="Invalid model_type 'chat'"):
+        _create_embedding_model({"model_name": "not-an-embedding", "model_type": "chat"})
+
+
+def test_get_embedding_model_returns_none_when_default_record_is_not_embedding(monkeypatch):
+    import backend.services.vectordatabase_service as vdb_service
+
+    monkeypatch.setattr(
+        vdb_service,
+        "get_model_records",
+        lambda *_args, **_kwargs: [{"model_id": 1, "model_type": "chat"}],
+    )
+
+    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
+
+
+def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
+    import backend.services.vectordatabase_service as vdb_service
+
+    def raise_lookup(*_args, **_kwargs):
+        raise RuntimeError("model registry unavailable")
+
+    monkeypatch.setattr(vdb_service, "get_model_records", raise_lookup)
+
+    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
+
+
 if __name__ == '__main__':
     unittest.main()

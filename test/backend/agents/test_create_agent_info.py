@@ -4857,6 +4857,99 @@ class TestPreparePromptTemplates:
             }
 
 
+class TestAdditionalAgentInfoCoverage:
+    def test_format_long_term_memory_prompt_supports_dict_and_object_entries(self):
+        context = types.SimpleNamespace(
+            tenant_long_term=[{"content": " tenant preference "}, {"content": ""}],
+            user_long_term=[types.SimpleNamespace(content="user preference")],
+        )
+
+        result = create_agent_info_module._format_long_term_memory_prompt(context, "en")
+
+        assert result == (
+            "### Tenant Long-term Memory\n- tenant preference\n\n"
+            "### User Long-term Memory\n- user preference"
+        )
+
+    def test_normalize_tool_params_rejects_non_object_payload(self):
+        with pytest.raises(ValidationError, match="must be an object"):
+            _normalize_tool_params_request("not-an-object")
+
+    def test_resolve_input_budget_uses_legacy_fallback_for_unknown_capacity(self):
+        create_agent_info_module._CAPACITY_WARNING_EMITTED.clear()
+        with patch(
+            "backend.agents.create_agent_info.resolve_capacity",
+            side_effect=MockProviderCapabilityUnknown("unknown provider"),
+        ), patch("backend.agents.create_agent_info.logger") as mock_logger:
+            result = _resolve_input_budget({"model_id": 7, "model_name": "unknown"})
+
+        assert result == (32768, None, None)
+        mock_logger.warning.assert_called_once()
+
+    def test_resolve_safe_input_budget_returns_none_for_uncertain_basis(self):
+        capacity = MockModelCapacitySnapshot(model_name="legacy-model")
+        calculator = MagicMock()
+        calculator.calculate_safe_input_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
+        with patch(
+            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            return_value=calculator,
+        ):
+            result = _resolve_safe_input_budget(
+                capacity_snapshot=capacity,
+                tenant_id="tenant-1",
+                agent_requested_output_tokens=None,
+                request_requested_output_tokens=512,
+            )
+
+        assert result is None
+
+    def test_inject_plan_tools_adds_tools_once(self):
+        tools = []
+        mock_tool_config.reset_mock()
+        first_tool = MagicMock()
+        first_tool.name = "create_plan"
+        second_tool = MagicMock()
+        second_tool.name = "update_plan_step"
+        mock_tool_config.side_effect = [first_tool, second_tool]
+
+        try:
+            create_agent_info_module._inject_plan_tools(tools, True)
+            create_agent_info_module._inject_plan_tools(tools, True)
+        finally:
+            mock_tool_config.side_effect = None
+
+        assert len(tools) == 2
+        assert mock_tool_config.call_count == 2
+
+    def test_resolve_runtime_tool_records_rejects_missing_or_unavailable_dependency(self):
+        common_patches = (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent",
+                return_value=[],
+            ),
+            patch(
+                "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+                return_value=[{"skill_id": 1, "config_values": {}}],
+            ),
+            patch(
+                "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+                return_value={"name": "skill", "tool_ids": [5]},
+            ),
+        )
+        with common_patches[0], common_patches[1], common_patches[2], patch(
+            "backend.agents.create_agent_info.query_tools_by_ids", return_value=[]
+        ):
+            with pytest.raises(ValidationError, match="missing tools"):
+                _resolve_runtime_tool_records(1, "tenant-1")
+
+        with common_patches[0], common_patches[1], common_patches[2], patch(
+            "backend.agents.create_agent_info.query_tools_by_ids",
+            return_value=[{"tool_id": 5, "name": "required", "is_available": False}],
+        ):
+            with pytest.raises(ValidationError, match="unavailable tool"):
+                _resolve_runtime_tool_records(1, "tenant-1")
+
+
 class TestExtractUrlFromCard:
     """Tests for the _extract_url_from_card function"""
 

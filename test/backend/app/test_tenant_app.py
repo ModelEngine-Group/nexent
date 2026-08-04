@@ -422,3 +422,157 @@ class TestTenantEndpointExceptionHandling:
         with pytest.raises(RuntimeError) as exc_info:
             get_tenant_info("tenant-123")
         assert "Unexpected error" in str(exc_info.value)
+
+
+class TestTenantEndpointMappings:
+    """Exercise the HTTP handlers and their service exception mappings."""
+
+    def setup_method(self):
+        auth_utils_module.get_current_user_id.reset_mock(side_effect=True)
+        auth_utils_module.get_current_user_context.reset_mock(side_effect=True)
+        tenant_service_module.create_tenant.reset_mock(side_effect=True)
+        tenant_service_module.get_tenant_info_for_user.reset_mock(side_effect=True)
+        tenant_service_module.get_tenants_paginated_for_user.reset_mock(side_effect=True)
+        tenant_service_module.update_tenant_info.reset_mock(side_effect=True)
+        tenant_service_module.delete_tenant.reset_mock(side_effect=True)
+        auth_utils_module.get_current_user_id.return_value = ("user-1", "tenant-1")
+        auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "USER")
+
+    def test_create_success_forwards_all_request_fields(self):
+        tenant_service_module.create_tenant.return_value = {"tenant_id": "new-tenant"}
+
+        response = client.post(
+            "/tenants",
+            json={
+                "tenant_name": "New tenant",
+                "skill_ids": [1, 2],
+                "skill_names": ["skill-a"],
+                "locale": "en",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["data"] == {"tenant_id": "new-tenant"}
+        tenant_service_module.create_tenant.assert_called_once_with(
+            tenant_name="New tenant",
+            created_by="user-1",
+            skill_ids=[1, 2],
+            skill_names=["skill-a"],
+            locale="en",
+        )
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (UnauthorizedError("bad token"), 401),
+            (ValidationError("invalid tenant"), 400),
+            (RuntimeError("database down"), 500),
+        ],
+    )
+    def test_create_exception_mapping(self, exception, status_code):
+        auth_utils_module.get_current_user_id.side_effect = exception
+
+        response = client.post("/tenants", json={"tenant_name": "Tenant"})
+
+        assert response.status_code == status_code
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (UnauthorizedError("bad token"), 401),
+            (ForbiddenError("not allowed"), 403),
+            (NotFoundException("missing tenant"), 404),
+            (RuntimeError("database down"), 500),
+        ],
+    )
+    def test_get_exception_mapping(self, exception, status_code):
+        auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "USER")
+        auth_utils_module.get_current_user_context.side_effect = (
+            exception if isinstance(exception, UnauthorizedError) else None
+        )
+        tenant_service_module.get_tenant_info_for_user.side_effect = (
+            None if isinstance(exception, UnauthorizedError) else exception
+        )
+
+        response = client.get("/tenants/tenant-1")
+
+        assert response.status_code == status_code
+
+    def test_list_success_returns_pagination_metadata(self):
+        tenant_service_module.get_tenants_paginated_for_user.return_value = {
+            "data": [{"tenant_id": "tenant-1"}],
+            "total": 1,
+            "page": 2,
+            "page_size": 5,
+            "total_pages": 1,
+        }
+
+        response = client.post(
+            "/tenants/tenant-list",
+            json={"page": 2, "page_size": 5},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["total_pages"] == 1
+        tenant_service_module.get_tenants_paginated_for_user.assert_called_once_with(
+            page=2, page_size=5, requester_role="USER"
+        )
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (UnauthorizedError("bad token"), 401),
+            (ForbiddenError("not allowed"), 403),
+            (RuntimeError("database down"), 500),
+        ],
+    )
+    def test_list_exception_mapping(self, exception, status_code):
+        tenant_service_module.get_tenants_paginated_for_user.side_effect = exception
+
+        response = client.post("/tenants/tenant-list", json={"page": 1, "page_size": 20})
+
+        assert response.status_code == status_code
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (NotFoundException("missing tenant"), 404),
+            (ValidationError("invalid name"), 400),
+            (UnauthorizedError("bad token"), 401),
+            (RuntimeError("database down"), 500),
+        ],
+    )
+    def test_update_exception_mapping(self, exception, status_code):
+        tenant_service_module.update_tenant_info.side_effect = exception
+
+        response = client.put("/tenants/tenant-1", json={"tenant_name": "Updated"})
+
+        assert response.status_code == status_code
+
+    def test_update_success_forwards_user(self):
+        tenant_service_module.update_tenant_info.return_value = {"tenant_name": "Updated"}
+
+        response = client.put("/tenants/tenant-1", json={"tenant_name": "Updated"})
+
+        assert response.status_code == 200
+        tenant_service_module.update_tenant_info.assert_called_once_with(
+            tenant_id="tenant-1", tenant_name="Updated", updated_by="user-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_success_and_exception_mappings(self):
+        tenant_service_module.delete_tenant.return_value = True
+        response = client.delete("/tenants/tenant-1")
+        assert response.status_code == 200
+        assert response.json()["data"] == {"tenant_id": "tenant-1"}
+
+        for exception, status_code in (
+            (NotFoundException("missing"), 404),
+            (ValidationError("invalid"), 400),
+            (UnauthorizedError("bad token"), 401),
+            (RuntimeError("database down"), 500),
+        ):
+            tenant_service_module.delete_tenant.reset_mock(side_effect=True)
+            tenant_service_module.delete_tenant.side_effect = exception
+            response = client.delete("/tenants/tenant-1")
+            assert response.status_code == status_code

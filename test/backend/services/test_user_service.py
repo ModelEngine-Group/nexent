@@ -750,6 +750,55 @@ class TestDeleteUserAndCleanup:
         await delete_user_and_cleanup(user_id, tenant_id)
 
 
+class TestCoverageGaps:
+    """Cover authorization and cleanup fallback branches."""
+
+    def test_superuser_can_list_any_tenant(self, mocker):
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        assert get_users_for_requester(
+            "tenant-2",
+            requester_tenant_id="tenant-1",
+            requester_role="SU",
+        ) == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with("tenant-2", 1, 20, "created_at", "desc")
+
+    @pytest.mark.asyncio
+    async def test_superuser_can_update_any_user(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"tenant_id": "tenant-2", "user_role": "SU"},
+        )
+        mock_update = mocker.patch(
+            "backend.services.user_service.update_user",
+            return_value={"id": "user-2", "role": "USER"},
+        )
+
+        result = await update_user_for_requester(
+            "user-2",
+            {"role": "USER"},
+            updated_by="su-1",
+            requester_tenant_id="tenant-1",
+            requester_role="SU",
+        )
+
+        assert result["id"] == "user-2"
+        mock_update.assert_awaited_once_with("user-2", {"role": "USER"}, "su-1")
+
+    @pytest.mark.asyncio
+    async def test_cleanup_handles_missing_supabase_admin_client(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            return_value=True,
+        )
+        mocker.patch("backend.services.user_service.get_supabase_admin_client", return_value=None)
+
+        await delete_user_and_cleanup("user-1", "tenant-1")
+
+
 # Run tests when executed directly
 if __name__ == "__main__":
     pytest.main([__file__])

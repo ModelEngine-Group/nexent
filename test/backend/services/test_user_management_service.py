@@ -1976,5 +1976,69 @@ class TestAssetOwnerUserManagement(unittest.IsolatedAsyncioTestCase):
         assert result["user"]["tenant_id"] == ASSET_OWNER_TENANT_ID
 
 
+class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
+    def test_validate_password_strength_boundaries(self):
+        from backend.services.user_management_service import validate_password_strength
+
+        self.assertFalse(validate_password_strength("Aa1"))
+        self.assertFalse(validate_password_strength("abcdefgh"))
+        self.assertFalse(validate_password_strength("ABCDEFGH"))
+        self.assertFalse(validate_password_strength("Abcdefgh"))
+        self.assertTrue(validate_password_strength("Abcdefg1"))
+
+    @patch("backend.services.user_management_service.get_current_user_from_client")
+    @patch("backend.services.user_management_service.set_auth_token_to_client")
+    @patch("backend.services.user_management_service.get_supabase_client")
+    @patch("backend.services.user_management_service.ensure_cas_session_active_from_authorization")
+    def test_validate_token_checks_cas_session(self, mock_cas, mock_get_client, mock_set_token, mock_get_user):
+        user = MagicMock()
+        mock_get_client.return_value = MagicMock()
+        mock_get_user.return_value = user
+
+        result = validate_token("token")
+
+        self.assertEqual(result, (True, user))
+        mock_cas.assert_called_once_with("token")
+
+    @patch("backend.services.user_management_service.get_user_tenant_by_user_id")
+    @patch("backend.services.user_management_service.get_jwt_expiry_seconds", return_value=60)
+    @patch("backend.services.user_management_service.calculate_expires_at", return_value=123)
+    @patch("backend.services.user_management_service.get_supabase_client")
+    async def test_signin_prefers_tenant_role(self, mock_get_client, mock_expires_at, mock_expiry, mock_get_tenant):
+        mock_get_tenant.return_value = {"user_role": "DEV"}
+        user = MagicMock(id="user-1", email="user@example.com", user_metadata={"role": "USER"})
+        session = MagicMock(access_token="access", refresh_token="refresh")
+        response = MagicMock(user=user, session=session)
+        client = MagicMock()
+        client.auth.sign_in_with_password.return_value = response
+        mock_get_client.return_value = client
+
+        result = await signin_user("user@example.com", "Password123")
+
+        self.assertEqual(result["data"]["user"]["role"], "DEV")
+
+    @patch("backend.services.user_management_service.aiohttp.ClientSession")
+    async def test_health_check_sends_supabase_credentials(self, session_cls):
+        response = MagicMock(ok=True)
+        response.json = AsyncMock(return_value={"name": "GoTrue"})
+        request = MagicMock()
+        request.__aenter__ = AsyncMock(return_value=response)
+        request.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
+        session.get.return_value = request
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+        session_cls.return_value = session_context
+
+        await check_auth_service_health()
+
+        session.get.assert_called_once()
+        _, kwargs = session.get.call_args
+        from backend.services import user_management_service as ums
+
+        self.assertEqual(kwargs["headers"], {"apikey": ums.SUPABASE_KEY})
+
+
 if __name__ == '__main__':
     unittest.main()

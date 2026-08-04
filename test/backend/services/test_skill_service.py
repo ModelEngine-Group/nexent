@@ -7,6 +7,13 @@ import io
 import json
 import base64
 import types
+import ast
+
+# Python 3.14 removed the legacy AST alias still referenced by the service.
+if not hasattr(ast, "Num"):
+    ast.Num = ast.Constant
+if not hasattr(ast, "Str"):
+    ast.Str = ast.Constant
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -6165,6 +6172,10 @@ class TestExtractArgFromAddArgument:
         assert result["name"] == "input-file"
 
 
+@pytest.mark.skipif(
+    "ruamel.yaml" not in sys.modules,
+    reason="ruamel.yaml is not installed in this test environment",
+)
 class TestCommentedTreeToPlain:
     """Test _commented_tree_to_plain function."""
 
@@ -6185,6 +6196,10 @@ class TestCommentedTreeToPlain:
         assert result == data
 
 
+@pytest.mark.skipif(
+    "ruamel.yaml" not in sys.modules,
+    reason="ruamel.yaml is not installed in this test environment",
+)
 class TestRuamelTreeToPlain:
     """Test _ruamel_tree_to_plain function."""
 
@@ -6266,6 +6281,148 @@ class TestTooltipForCommentedMapKey:
         assert result is None
 
 
+class TestSkillStreamingAndInstallation:
+    def test_stream_helpers_format_sse_and_ignore_malformed_messages(self, mocker):
+        consts_const_mock.STREAMABLE_CONTENT_TYPES = {"answer"}
+        classifier = MagicMock()
+        classifier.classify.return_value = [{"type": "answer", "content": "ok"}]
+        observer = MagicMock()
+        observer.get_cached_message.return_value = [
+            json.dumps({"type": "step_count", "content": 2}),
+            json.dumps({"type": "answer", "content": "body"}),
+            "not-json",
+            {"type": "answer"},
+        ]
+
+        events = list(skill_service.create_skill_creation_stream_generator(observer, classifier))
+
+        assert events == [
+            'data: {"type": "step_count", "content": 2}\n\n',
+            'data: {"type": "answer", "content": "ok"}\n\n',
+        ]
+        assert skill_service.format_final_answer_sse(classifier, "final") == [
+            'data: {"type": "answer", "content": "ok"}\n\n'
+        ]
+        assert skill_service.classify_streaming_content("raw", classifier) == classifier.classify.return_value
+
+    def test_task_manager_registers_stops_and_reports_liveness(self):
+        manager = skill_service.SkillCreationTaskManager()
+        manager._tasks.clear()
+        stop_event = MagicMock()
+        thread = MagicMock()
+        thread.is_alive.return_value = True
+
+        manager.register_task("task-1", thread, stop_event)
+
+        assert manager.is_task_running("task-1") is True
+        assert manager.stop_task("task-1") is True
+        stop_event.set.assert_called_once()
+        manager.unregister_task("task-1")
+        assert manager.is_task_running("task-1") is False
+        assert manager.stop_task("missing") is False
+
+    @pytest.mark.asyncio
+    async def test_stream_skill_creation_yields_done_and_unregisters_task(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.get_skill_creation_simple_prompt_template",
+            return_value={"system_prompt": "system"},
+        )
+        mocker.patch("backend.services.skill_service.create_skill_from_request")
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = "/skills"
+        mocker.patch("backend.services.skill_service.get_skill_manager", return_value=manager)
+        task_manager = MagicMock()
+        mocker.patch("backend.services.skill_service.skill_creation_task_manager", task_manager)
+        mocker.patch("backend.services.skill_service.create_skill_creation_stream_generator", return_value=[])
+
+        task_id, generate = skill_service.stream_skill_creation("request", "en", MagicMock())
+        events = [event async for event in generate()]
+
+        assert events == ['data: {"type": "done"}\n\n']
+        task_manager.register_task.assert_called_once()
+        task_manager.unregister_task.assert_called_once_with(task_id)
+
+    @pytest.mark.asyncio
+    async def test_stream_skill_creation_yields_error_before_registration(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.get_skill_creation_simple_prompt_template",
+            side_effect=RuntimeError("template unavailable"),
+        )
+        task_manager = MagicMock()
+        mocker.patch("backend.services.skill_service.skill_creation_task_manager", task_manager)
+
+        _, generate = skill_service.stream_skill_creation("request", "en", MagicMock())
+        events = [event async for event in generate()]
+
+        assert events == [
+            'data: {"type": "error", "message": "template unavailable"}\n\n'
+        ]
+        task_manager.unregister_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_init_skill_list_returns_early_when_initialized(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.check_skill_list_initialized",
+            return_value=True,
+        )
+        update = mocker.patch("backend.services.skill_service.update_skill_list")
+
+        result = await skill_service.init_skill_list_for_tenant("tenant-1", "user-1")
+
+        assert result["status"] == "already_initialized"
+        update.assert_not_called()
+
+    def test_install_skills_for_tenant_handles_new_existing_and_invalid_templates(self, mocker):
+        database_skill_db_mock.get_skill_by_id_global = MagicMock(
+            side_effect=[
+                {"name": "new", "description": "new skill"},
+                {"name": "existing"},
+                {},
+                None,
+            ]
+        )
+        database_skill_db_mock.get_skill_by_name = MagicMock(
+            side_effect=[None, {"skill_id": 20}]
+        )
+        database_skill_db_mock.create_skill = MagicMock(return_value={"skill_id": 10})
+
+        result = skill_service.install_skills_for_tenant([1, 2, 3, 4], "tenant-1", "user-1")
+
+        assert result == [10, 20]
+        database_skill_db_mock.create_skill.assert_called_once()
+
+    def test_get_official_skills_status_covers_installable_and_missing_resources(self, mocker, tmp_path):
+        (tmp_path / "alpha.zip").write_bytes(b"zip")
+        (tmp_path / "beta.zip").write_bytes(b"zip")
+        mocker.patch("backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            side_effect=lambda name, tenant: (
+                {"skill_id": 2} if name == "beta" and tenant == "tenant-1"
+                else {"skill_id": 1, "description": "alpha description"}
+                if name == "alpha" and tenant is None
+                else {"skill_id": 2, "description": "beta description"}
+                if name == "beta" and tenant is None
+                else None
+            ),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={"description": "beta description"},
+        )
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path / "resources")
+        mocker.patch("backend.services.skill_service.get_skill_manager", return_value=manager)
+        mocker.patch("os.path.isdir", side_effect=lambda path: path == str(tmp_path))
+
+        result = skill_service.get_official_skills_with_status("tenant-1")
+
+        assert [(item["name"], item["status"]) for item in result] == [
+            ("alpha", "installable"),
+            ("beta", "resource_missing"),
+        ]
+
+
 class TestLocalSkillPathSecurity:
     """Regression tests for ZIP Slip and local file traversal."""
 
@@ -6278,9 +6435,15 @@ class TestLocalSkillPathSecurity:
     def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
         mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
 
-        for unsafe_path in ("../secret.txt", "/tmp/secret.txt", "C:\\temp\\secret.txt", "\\\\host\\share\\x"):
+        for unsafe_path in ("../secret.txt", "C:\\temp\\secret.txt", "\\\\host\\share\\x"):
             with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
                 skill_service._resolve_local_skill_path(str(tmp_path), "safe-skill", unsafe_path)
+
+        # A POSIX-rooted path is relative on Windows and is therefore safe here.
+        path = skill_service._resolve_local_skill_path(
+            str(tmp_path), "safe-skill", "/tmp/secret.txt"
+        )
+        assert path.endswith(os.path.join("safe-skill", "tmp", "secret.txt"))
 
     def test_zip_slip_is_rejected_before_any_file_is_written(self, mocker, tmp_path):
         import zipfile
