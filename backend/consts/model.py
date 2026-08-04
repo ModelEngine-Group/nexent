@@ -591,6 +591,12 @@ class AgentSkillInstanceRequest(BaseModel):
 
 
 # used in agent/search agent/update for save agent info
+class RelatedAgentInfo(BaseModel):
+    """Related agent info with pinned version."""
+    agent_id: int
+    version_no: Optional[int] = None
+
+
 class AgentInfoRequest(BaseModel):
     agent_id: Optional[int] = None
     name: Optional[str] = None
@@ -615,6 +621,7 @@ class AgentInfoRequest(BaseModel):
     enabled_skill_ids: Optional[List[int]] = None
     skill_instances: Optional[List[AgentSkillInstanceRequest]] = None
     related_agent_ids: Optional[List[int]] = None
+    related_agents: Optional[List[RelatedAgentInfo]] = None  # Related agents with pinned versions
     related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None

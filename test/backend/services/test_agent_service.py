@@ -429,6 +429,8 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
     request.enabled_skill_ids = None
     if not hasattr(request, "related_agent_ids"):
         request.related_agent_ids = None
+    if not hasattr(request, "related_agents"):
+        request.related_agents = None
     if not hasattr(request, "enabled_tool_ids"):
         request.enabled_tool_ids = None
     if not hasattr(request, "example_questions"):
@@ -586,6 +588,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [{"skill_id": 1, "enabled": True}],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -665,6 +668,7 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -1066,6 +1070,7 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456, 789]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1076,9 +1081,9 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     mock_update_agent.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456, 789],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}, {"agent_id": 789, "version_no": None}],
     )
 
 
@@ -1151,6 +1156,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     request.agent_id = 123
     request.enabled_tool_ids = [1]
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1162,9 +1168,9 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_create_or_update_tool.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}],
     )
 
 
@@ -1227,6 +1233,7 @@ async def test_update_agent_info_impl_related_agent_update_exception(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
@@ -1789,6 +1796,7 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
@@ -1895,6 +1903,7 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -1965,6 +1974,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -2059,6 +2069,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2150,6 +2161,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2248,6 +2260,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -4061,6 +4074,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         child_agent_id=101,
         tenant_id="test_tenant",
         user_id="test_user",
+        selected_agent_version_no=1,
     )
 
 
@@ -7583,8 +7597,8 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
     relationships = []
 
-    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id):
-        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id))
+    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no=None):
+        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no))
 
     async def fake_update_tool_list(tenant_id, user_id):
         return None
@@ -7611,7 +7625,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Child (2) must be imported before parent (1)
     assert imported_ids == [2, 1]
     # Relationship should be created between new IDs 101 (child) and 100 (parent)
-    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1")]
+    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1", 1)]
 
 
 # =====================================================================
@@ -16621,6 +16635,309 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_ids"] == []
     assert result["model_names"] == []
     assert result["model_name"] is None
+
+
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_with_pinned_version(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl enriches sub_agent_relations with pinned version_no."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 2}
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 2, "version_name": "v2.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["agent_name"] == "Sub Agent"
+    assert rel["version_no"] == 2
+    assert rel["version_name"] == "v2.0"
+
+
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_null_version_fallback(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl resolves null version_no via batch_query_current_version_nos."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": None}
+    ]
+    mock_batch_query_current_version_nos.return_value = {456: 3}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 3, "version_name": "v3.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["version_no"] == 3
+    assert rel["version_name"] == "v3.0"
+
+
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_zero_version_fallback(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl resolves version_no=0 via batch_query_current_version_nos."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 0}
+    ]
+    mock_batch_query_current_version_nos.return_value = {456: 1}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 1, "version_name": "v1.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["version_no"] == 1
+    assert rel["version_name"] == "v1.0"
+
+
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_no_resolved_version(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl handles when no published version exists for sub-agent."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": None}
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = []
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["version_no"] is None
+    assert rel["version_name"] is None
+    assert rel["agent_name"] == "Sub Agent"
+
+
+@patch('backend.services.agent_service.batch_search_agent_display_names')
+@patch('backend.services.agent_service.batch_search_version_names')
+@patch('backend.services.agent_service.batch_query_current_version_nos')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_with_none_agent_id(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl handles relations with selected_agent_id=None gracefully."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456, None]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Include a relation with selected_agent_id=None alongside a normal one
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 2},
+        {"selected_agent_id": None, "selected_agent_version_no": 5},
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 2, "version_name": "v2.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 2
+    # First relation (normal) should be enriched correctly
+    rel_normal = result["sub_agent_relations"][0]
+    assert rel_normal["agent_id"] == 456
+    assert rel_normal["agent_name"] == "Sub Agent"
+    assert rel_normal["version_no"] == 2
+    assert rel_normal["version_name"] == "v2.0"
+    # Second relation (None agent_id) should have None values without crashing
+    rel_none = result["sub_agent_relations"][1]
+    assert rel_none["agent_id"] is None
+    assert rel_none["agent_name"] is None
+    assert rel_none["version_no"] == 5
+    assert rel_none["version_name"] is None
+
+
+@patch('backend.services.agent_service.update_related_agents')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_with_related_agents_objects(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_sub_agents_id_list,
+    mock_update_related_agents
+):
+    """Test update_agent_info_impl passes related_agents dicts when RelatedAgentInfo objects are provided."""
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_query_sub_agents_id_list.return_value = []
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = None
+    request.related_agent_ids = [456, 789]
+
+    mock_ra1 = MagicMock()
+    mock_ra1.agent_id = 456
+    mock_ra1.version_no = 2
+    mock_ra2 = MagicMock()
+    mock_ra2.agent_id = 789
+    mock_ra2.version_no = None
+    request.related_agents = [mock_ra1, mock_ra2]
+
+    apply_default_prompt_template_request_fields(request)
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 123
+    mock_update_related_agents.assert_called_once_with(
+        parent_agent_id=123,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        related_agents=[
+            {"agent_id": 456, "version_no": 2},
+            {"agent_id": 789, "version_no": None},
+        ],
+    )
 
 
 @patch("backend.services.agent_service.get_user_language", return_value="en-US")
