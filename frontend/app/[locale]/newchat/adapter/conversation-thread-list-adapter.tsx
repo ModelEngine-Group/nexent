@@ -119,18 +119,57 @@ const toAttachmentType = (rawType: string): AttachmentType => {
   return "file";
 };
 
-const toToolSearchItem = (
-  value: unknown
-): { url: string; title: string } | null => {
+const parseImageMetadata = (value: unknown) => {
+  if (typeof value !== "string") return null;
+
+  try {
+    const metadata = JSON.parse(value) as {
+      source_file?: string;
+      image_url?: string;
+    };
+    return typeof metadata.image_url === "string" ? metadata : null;
+  } catch {
+    return null;
+  }
+};
+
+const toToolSearchItem = (value: unknown) => {
   if (typeof value !== "object" || value === null) return null;
 
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
+  const filename = typeof item.filename === "string" ? item.filename : "";
+  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const imageMetadata = parseImageMetadata(item.text);
+  const resolvedUrl = imageMetadata?.image_url || url;
   const title =
     (typeof item.title === "string" && item.title) ||
-    (typeof item.filename === "string" && item.filename) ||
-    url;
-  return url ? { url, title } : null;
+    filename ||
+    sourceFile ||
+    imageMetadata?.source_file ||
+    resolvedUrl;
+  const citeIndex =
+    typeof item.cite_index === "number"
+      ? item.cite_index
+      : typeof item.citeIndex === "number"
+        ? item.citeIndex
+        : undefined;
+  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+
+  return resolvedUrl || sourceFile
+    ? {
+        url: resolvedUrl,
+        title,
+        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
+        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        filename: filename || undefined,
+        sourceFile: sourceFile || imageMetadata?.source_file || undefined,
+        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        citeIndex,
+        toolSign,
+        isImage: Boolean(imageMetadata),
+      }
+    : null;
 };
 
 const parseSearchPlaceholderUnitId = (content: string): string | null => {
@@ -505,6 +544,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (meta) imagePart.metadata = meta;
           restoredImageUrls.add(imageUrl);
           restoredImages.push(imagePart);
+          return imagePart;
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -569,7 +609,20 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              appendHistoricalImage(imageUrl);
+              const imagePart = appendHistoricalImage(imageUrl);
+              if (imagePart) {
+                attachSearchContentToTool(
+                  content,
+                  {
+                    url: imagePart.url,
+                    title: imagePart.title,
+                    text: imagePart.text,
+                    isImage: true,
+                    imageKey: imagePart.imageKey,
+                  },
+                  part.tool_call_id,
+                );
+              }
             }
             continue;
           }

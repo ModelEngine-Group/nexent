@@ -219,6 +219,7 @@
   "chat.sources.noSources": "暂无来源。",
   "chat.sources.noImages": "暂无图片。",
   "chat.sources.download": "下载 {{name}}",
+  "chat.sources.preview": "预览 {{name}}",
   "chat.sources.document": "文档",
   "chat.sources.knowledgeBase": "知识库",
   "chat.sources.untitled": "未命名来源",

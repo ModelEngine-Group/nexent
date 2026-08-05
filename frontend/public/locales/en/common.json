@@ -219,6 +219,7 @@
   "chat.sources.noSources": "No sources available.",
   "chat.sources.noImages": "No images available.",
   "chat.sources.download": "Download {{name}}",
+  "chat.sources.preview": "Preview {{name}}",
   "chat.sources.document": "Document",
   "chat.sources.knowledgeBase": "Knowledge base",
   "chat.sources.untitled": "Untitled source",

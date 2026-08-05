@@ -473,4 +473,4 @@ NL-to-Skill 擅长生成以下类型的技能：
 - [智能体开发](../agent-development.md)
 - [本地工具概览](../local-tools/index.md)
 - [MCP 仓库配置](./mcp-repository)
-- [技能系统概览](../../backend/skills/overview.md)
+- [技能系统概览](/zh/backend/skills/overview)

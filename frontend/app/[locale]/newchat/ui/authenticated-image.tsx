@@ -10,15 +10,15 @@ import {
 import { createPortal } from "react-dom";
 import { ImageIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchImageBlob } from "@/services/storageService";
+import {
+  fetchImageBlob,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
 
 /**
  * Detect whether a given URL points to an AIDP KnowledgeBase image that
  * requires a Bearer token to access. AIDP image URLs always include
  * `/KnowledgeBase/Tenants/` in their path and use the http(s) scheme.
- *
- * Non-AIDP URLs (e.g. MinIO /api/file/*, external CDNs, duckduckgo favicons)
- * do NOT require backend authentication and will be rendered as plain <img src>.
  */
 const isAidpImageUrl = (url: string): boolean => {
   return (
@@ -29,15 +29,17 @@ const isAidpImageUrl = (url: string): boolean => {
 };
 
 /**
- * Image component that automatically fetches AIDP-hosted images through the
- * backend proxy (which adds the Bearer token the AIDP API requires).
- *
- * - AIDP URLs  -> fetched via `fetchImageBlob` -> base64 data URL rendered in <img>.
- * - Other URLs -> rendered directly as plain <img src={url}>.
- *
- * This component is a drop-in replacement for <img>, accepts the same props,
- * and transparently handles the authentication for any image that needs it
- * without affecting the rendering of non-authenticated images.
+ * Detect images returned from the local knowledge base. The retrieval result
+ * contains either an S3 URL or an object path instead of a browser-accessible URL.
+ */
+const isLocalKnowledgeBaseImageUrl = (url: string): boolean => {
+  return isLocalStorageObjectUrl(url);
+};
+
+/**
+ * Image component that keeps separate handling for AIDP and local knowledge
+ * base images. Both protected image types are fetched through the backend
+ * before rendering, while public HTTP URLs continue to render directly.
  */
 export const AuthenticatedImage: React.FC<
   ComponentProps<"img"> & {
@@ -47,9 +49,13 @@ export const AuthenticatedImage: React.FC<
     preview?: boolean;
   }
 > = ({ src, alt, className, fallback, preview = false, ...imgProps }) => {
-  const needsAuth = src ? isAidpImageUrl(src) : false;
+  const isAidpImage = src ? isAidpImageUrl(src) : false;
+  const isLocalKnowledgeBaseImage = src
+    ? isLocalKnowledgeBaseImageUrl(src)
+    : false;
+  const needsAuth = isAidpImage || isLocalKnowledgeBaseImage;
 
-  // Non-AIDP image: render directly, no fetch required.
+  // Public image: render directly, no fetch required.
   if (!needsAuth) {
     return (
       <PlainPreviewableImage
@@ -62,9 +68,9 @@ export const AuthenticatedImage: React.FC<
     );
   }
 
-  // AIDP image: go through the authed proxy path.
+  // Protected image: go through the authenticated backend path.
   return (
-    <AuthedAidpImage
+    <AuthenticatedRemoteImage
       src={src!}
       alt={alt}
       className={className}
@@ -105,7 +111,7 @@ const PlainPreviewableImage: React.FC<
   );
 };
 
-const AuthedAidpImage: React.FC<
+const AuthenticatedRemoteImage: React.FC<
   ComponentProps<"img"> & {
     src: string;
     fallback?: React.ReactNode;
