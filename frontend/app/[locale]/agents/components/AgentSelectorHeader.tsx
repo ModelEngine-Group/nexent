@@ -587,6 +587,14 @@ export default function AgentSelectorHeader({
     router.push(`/${locale}/agent-space?tab=mine`);
   };
 
+  const handleCreateAgent = () => {
+    enterCreateMode();
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("agent_id");
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
+
   return (
     <>
       <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -715,7 +723,7 @@ export default function AgentSelectorHeader({
               <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                 <Button
                   size="middle"
-                  onClick={enterCreateMode}
+                  onClick={handleCreateAgent}
                   className="flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
