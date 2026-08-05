@@ -53,7 +53,7 @@ export default function ContainerPortField({
       </div>
       {!enabled ? (
         <p className="mt-2 text-xs text-slate-400">
-          {t(readonlyHintKey ?? "mcpTools.addModal.portReadonlyHint")}
+          {t("mcpTools.addModal.portReadonlyHint")}
         </p>
       ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">

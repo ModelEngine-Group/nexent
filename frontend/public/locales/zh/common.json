@@ -2736,7 +2736,6 @@
   "mcpTools.addModal.portAvailable": "端口 {{port}} 可用。",
   "mcpTools.addModal.portOccupied": "端口 {{port}} 已被占用。",
   "mcpTools.addModal.portReadonlyHint": "如需修改端口，需删除 MCP 后重新部署。",
-  "mcpTools.addModal.portUnifiedHint": "Docker/K8s 部署下,所有 MCP 服务统一使用该端口,由系统自动分配,无需手动填写。",
   "mcpTools.addModal.renameBeforeInstallHint": "请先修改名称后再安装",
   "mcpTools.addModal.tags": "标签",
   "mcpTools.addModal.removeTagAria": "删除标签 {{tag}}",
