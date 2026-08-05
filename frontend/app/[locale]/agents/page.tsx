@@ -12,7 +12,6 @@ import AgentInfoComp from "./components/AgentInfoComp";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import AgentVersionManage from "./AgentVersionManage";
 import AgentSelectorHeader from "./components/AgentSelectorHeader";
-import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 
@@ -42,14 +41,6 @@ export default function AgentSetupOrchestrator() {
   // Local UI state for version panel
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
-  const [isGenerationAssistantOpen, setIsGenerationAssistantOpen] =
-    useState(false);
-
-  const handleOpenGenerationAssistant = () => {
-    enterCreateMode();
-    setIsShowVersionManagePanel(false);
-    setIsGenerationAssistantOpen(true);
-  };
 
   // Handle auto-create mode from URL params
   useEffect(() => {
@@ -115,8 +106,6 @@ export default function AgentSetupOrchestrator() {
             onOpenVersionManage={() => setIsShowVersionManagePanel(true)}
             isShowVersionManagePanel={isShowVersionManagePanel}
             onCloseVersionManagePanel={() => setIsShowVersionManagePanel(false)}
-            onOpenGenerationAssistant={handleOpenGenerationAssistant}
-            isGenerationAssistantOpen={isGenerationAssistantOpen}
           />
         </Header>
         <motion.div
@@ -151,34 +140,12 @@ export default function AgentSetupOrchestrator() {
                   align="stretch"
                   style={{ height: '100%' }}
                 >
-                  {isGenerationAssistantOpen && (
-                    <Col
-                      xs={24}
-                      sm={24}
-                      md={24}
-                      lg={8}
-                      className="flex flex-col h-full"
-                    >
-                      <Card
-                        className="h-full"
-                        styles={{
-                          body: {
-                            height: "100%",
-                            padding: 0,
-                            overflow: "hidden",
-                          },
-                        }}
-                      >
-                        <Nl2AgentChatPanel />
-                      </Card>
-                    </Col>
-                  )}
                   {/* Left column: Agent Config */}
                   <Col
                     xs={24}
                     sm={24}
                     md={24}
-                    lg={isGenerationAssistantOpen ? 8 : 12}
+                    lg={12}
                     className="flex flex-col h-full"
                   >
                     <Card className="h-full" styles={{ body: { height: '100%' } }}>
@@ -190,7 +157,7 @@ export default function AgentSetupOrchestrator() {
                     xs={24}
                     sm={24}
                     md={24}
-                    lg={isGenerationAssistantOpen ? 8 : 12}
+                    lg={12}
                     className="flex flex-col h-full"
                   >
                     <Card className="h-full" styles={{ body: { height: '100%' } }}>
