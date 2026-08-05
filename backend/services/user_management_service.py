@@ -104,7 +104,7 @@ async def sync_sso_after_login(user_id: str, email: str) -> Optional[Dict[str, A
     }
 
 
-logging.getLogger("user_management_service").setLevel(logging.DEBUG)
+logging.getLogger("user_management_service").setLevel(logging.INFO)
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:
@@ -277,12 +277,8 @@ async def signup_user_with_invitation(email: EmailStr,
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
         # Create user tenant relationship
-        logging.debug(
-            f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
             user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        logging.debug(
-            f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id
         if invitation_info:

@@ -31,10 +31,6 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
-  configuredEmbeddingModels?: Array<{
-    displayName: string;
-    type: string;
-  }>;
   isLoading?: boolean;
   syncLoading?: boolean;
   onClick: (kb: KnowledgeBase) => void;
@@ -59,7 +55,6 @@ interface KnowledgeBaseListProps {
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
-  configuredEmbeddingModels = [],
   isLoading = false,
   syncLoading = false,
   onClick,
@@ -128,30 +123,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get permission tooltip key
   const getPermissionTooltipKey = (permission: string) => {
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
-  };
-
-  const configuredModelTypesByName = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    configuredEmbeddingModels.forEach((model) => {
-      const modelName = (model.displayName || "").trim();
-      const modelType = (model.type || "").trim().toLowerCase();
-      if (!modelName) return;
-      if (modelType !== "embedding" && modelType !== "multi_embedding") return;
-      if (!map.has(modelName)) {
-        map.set(modelName, new Set<string>());
-      }
-      map.get(modelName)!.add(modelType);
-    });
-    return map;
-  }, [configuredEmbeddingModels]);
-
-  const isModelMismatch = (kb: KnowledgeBase) => {
-    if (kb.embeddingModel === "unknown") return false;
-    if (kb.source === "datamate") return false;
-    const modelTypes = configuredModelTypesByName.get(
-      (kb.embeddingModel || "").trim()
-    );
-    return !modelTypes;
   };
 
   const hasIndexedDocumentsAndChunks = (kb: KnowledgeBase) => {
@@ -616,13 +587,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 multimodal
                               </span>
                             )}
-                            {isModelMismatch(kb) && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
-                              >
-                                {t("knowledgeBase.tag.modelMismatch")}
-                              </span>
-                            )}
+
+                            {/* Model mismatch is shown in the knowledge-base detail header only. */}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">

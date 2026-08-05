@@ -1,6 +1,8 @@
 "use client";
 
 import { memo } from "react";
+import { useSourcesPanel } from "./sources-panel-context";
+import type { PanelSourceItem } from "./sources-panel";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -20,11 +22,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "./authenticated-image";
-import {
-  Source,
-  SourceIcon,
-  SourceTitle,
-} from "./sources";
+import { SourceIcon, SourceTitle } from "./sources";
 
 const statusIconMap: Record<string, typeof LoaderIcon> = {
   running: LoaderIcon,
@@ -80,10 +78,10 @@ function ToolFallbackTrigger({
         )}
         {...props}
       >
-        <Icon
-          className={cn("size-4", isRunning && "animate-spin")}
-        />
-        <span>{label}: {toolName}</span>
+        <Icon className={cn("size-4", isRunning && "animate-spin")} />
+        <span>
+          {label}: {toolName}
+        </span>
         {isRunning && (
           <span className="ml-auto text-xs text-muted-foreground">
             {label}: {toolName}
@@ -101,7 +99,10 @@ function ToolFallbackContent({
 }: React.ComponentProps<"div">) {
   return (
     <CollapsibleContent>
-      <div className={cn("rounded-b-lg border border-t-0 p-4", className)} {...props}>
+      <div
+        className={cn("rounded-b-lg border border-t-0 p-4", className)}
+        {...props}
+      >
         {children}
       </div>
     </CollapsibleContent>
@@ -119,8 +120,12 @@ function ToolFallbackArgs({
 
   return (
     <div className={cn("mb-2", className)} {...props}>
-      <div className="mb-1 text-xs font-medium text-muted-foreground">Arguments:</div>
-      <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">{argsText}</pre>
+      <div className="mb-1 text-xs font-medium text-muted-foreground">
+        Arguments:
+      </div>
+      <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
+        {argsText}
+      </pre>
     </div>
   );
 }
@@ -136,7 +141,9 @@ function ToolFallbackResult({
 
   return (
     <div className={cn("", className)} {...props}>
-      <div className="mb-1 text-xs font-medium text-muted-foreground">Result:</div>
+      <div className="mb-1 text-xs font-medium text-muted-foreground">
+        Result:
+      </div>
       <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
         {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
       </pre>
@@ -168,10 +175,25 @@ function ToolFallbackError({
   return (
     <div className={cn("mt-2 text-destructive", className)} {...props}>
       <div className="mb-1 text-xs font-medium">{headerText}</div>
-      <pre className="overflow-x-auto rounded bg-destructive/10 p-2 text-xs">{errorText}</pre>
+      <pre className="overflow-x-auto rounded bg-destructive/10 p-2 text-xs">
+        {errorText}
+      </pre>
     </div>
   );
 }
+
+type ToolSearchSource = {
+  url?: string;
+  title?: string;
+  text?: string;
+  sourceType?: string;
+  filename?: string;
+  sourceFile?: string;
+  objectName?: string;
+  citeIndex?: number;
+  toolSign?: string;
+  isImage?: boolean;
+};
 
 function ToolFallbackSearchContent({
   searchContent,
@@ -179,12 +201,32 @@ function ToolFallbackSearchContent({
   className,
   ...props
 }: React.ComponentProps<"div"> & {
-  searchContent?: Array<{ url?: string; title?: string }>;
+  searchContent?: ToolSearchSource[];
   searchImages?: string[];
 }) {
-  const hasContent =
-    (searchContent && searchContent.length > 0) ||
-    (searchImages && searchImages.length > 0);
+  const { open } = useSourcesPanel();
+  const imageSources = [
+    ...(searchImages ?? []).map((url) => ({ url, title: url, isImage: true })),
+    ...(searchContent ?? []).filter((item) => item.isImage),
+  ].filter(
+    (item, index, items) =>
+      item.url &&
+      items.findIndex((candidate) => candidate.url === item.url) === index
+  );
+  const regularSources = (searchContent ?? []).filter((item) => !item.isImage);
+  const panelSources: PanelSourceItem[] = regularSources.map((item, index) => ({
+    sourceType:
+      item.sourceType === "file" || item.sourceType === "document" || item.filename || item.objectName
+        ? "document"
+        : "url",
+    url: item.url,
+    title: item.title || item.filename || item.sourceFile || item.url,
+    text: item.text,
+    filename: item.filename || item.sourceFile,
+    objectName: item.objectName,
+    citeIndex: item.citeIndex ?? index,
+  }));
+  const hasContent = imageSources.length > 0 || regularSources.length > 0;
   if (!hasContent) return null;
 
   return (
@@ -192,16 +234,17 @@ function ToolFallbackSearchContent({
       <div className="mb-1 text-xs font-medium text-muted-foreground">
         Sources:
       </div>
-      {searchImages && searchImages.length > 0 && (
+      {imageSources.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
-          {searchImages.map((imageUrl, index) => (
+          {imageSources.map((item, index) => (
             <div
-              key={`img-${index}`}
+              key={`img-${item.url}-${index}`}
               className="aui-tool-fallback-search-image block overflow-hidden rounded-md border bg-muted/50"
+              title={item.title || item.url}
             >
               <AuthenticatedImage
-                src={imageUrl}
-                alt={imageUrl}
+                src={item.url!}
+                alt={item.title || item.url}
                 loading="lazy"
                 preview
                 className="size-20 object-cover"
@@ -210,18 +253,31 @@ function ToolFallbackSearchContent({
           ))}
         </div>
       )}
-      {searchContent && searchContent.length > 0 && (
+      {regularSources.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {searchContent.map((item, index) => (
-            <Source
-              key={`src-${index}`}
-              href={item.url || "#"}
-              title={item.title || item.url || "Source"}
-            >
-              <SourceIcon url={item.url || ""} />
-              <SourceTitle>{item.title || item.url || "Source"}</SourceTitle>
-            </Source>
-          ))}
+          {regularSources.map((item, index) => {
+            return (
+              <button
+                key={`src-${item.url}-${index}`}
+                type="button"
+                className="inline-flex"
+                onClick={() =>
+                  open({
+                    messageId: "tool-search",
+                    groupId: `tool-search-${index}`,
+                    sources: panelSources,
+                    images: [],
+                    selectedCiteIndex: item.citeIndex ?? index,
+                  })
+                }
+              >
+                <span className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border bg-secondary px-2 py-1 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80">
+                  <SourceIcon url={item.url || ""} />
+                  <SourceTitle>{item.title || item.url || "Source"}</SourceTitle>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -236,7 +292,7 @@ const ToolFallbackImpl = ({
   searchContent,
   searchImages,
 }: ToolCallMessagePartProps & {
-  searchContent?: Array<{ url?: string; title?: string }>;
+  searchContent?: ToolSearchSource[];
   searchImages?: string[];
 }) => {
   const isCancelled =
@@ -261,7 +317,7 @@ const ToolFallbackImpl = ({
 };
 
 const ToolFallback = memo(
-  ToolFallbackImpl,
+  ToolFallbackImpl
 ) as unknown as ToolCallMessagePartComponent & {
   Root: typeof ToolFallbackRoot;
   Trigger: typeof ToolFallbackTrigger;
