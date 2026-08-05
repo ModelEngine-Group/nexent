@@ -45,6 +45,15 @@ class ProcessType(Enum):
     SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
     SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
 
+    # A2UI (Agent-to-UI) related types for card and form generation
+    A2UI_SURFACE = "a2ui_surface"  # create new A2UI surface
+    A2UI_COMPONENTS = "a2ui_components"  # update components in surface
+    A2UI_DATA_MODEL = "a2ui_data_model"  # update data model for bindings
+    A2UI_DELETE_SURFACE = "a2ui_delete_surface"  # delete existing surface
+    HITL_FORM = "hitl_form"  # human-in-the-loop form request
+    HITL_FORM_RESPONSE = "hitl_form_response"  # form response from user
+    HITL_TIMEOUT = "hitl_timeout"  # form interaction timeout
+
 
 # message transformer base class
 class MessageTransformer:
@@ -224,6 +233,13 @@ class MessageObserver:
             ProcessType.PLAN: default_transformer,
             ProcessType.PLAN_STEP_UPDATE: default_transformer,
             ProcessType.AUTOMATION_PROPOSAL: default_transformer,
+            ProcessType.A2UI_SURFACE: default_transformer,
+            ProcessType.A2UI_COMPONENTS: default_transformer,
+            ProcessType.A2UI_DATA_MODEL: default_transformer,
+            ProcessType.A2UI_DELETE_SURFACE: default_transformer,
+            ProcessType.HITL_FORM: default_transformer,
+            ProcessType.HITL_FORM_RESPONSE: default_transformer,
+            ProcessType.HITL_TIMEOUT: default_transformer,
         }
 
     def _active_subagent(self) -> tuple | None:

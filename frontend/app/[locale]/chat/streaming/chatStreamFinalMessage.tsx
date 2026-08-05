@@ -43,6 +43,7 @@ import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import { AuthenticatedImage } from "../../newchat/ui/authenticated-image";
+import { A2UIChatMessage } from "../a2ui/A2UIRenderer";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -358,6 +359,13 @@ function ChatStreamFinalMessageInner({
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
                 trustedImageUrls={message.images}
+              />
+
+              {/* A2UI surfaces - render interactive cards and forms */}
+              <A2UIChatMessage
+                surfaces={message.a2uiSurfaces}
+                pendingInteractions={message.pendingInteractions}
+                messageId={message.id}
               />
 
               {message.images && message.images.length > 0 && (

@@ -24,3 +24,5 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info")
 
 
+requirements.txt
+requirements.txt

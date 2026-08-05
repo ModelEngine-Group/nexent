@@ -33,6 +33,7 @@ from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
 from apps.notification_app import router as notification_router
 from apps.a2a_client_app import router as a2a_client_router
+from apps.a2ui_app import a2ui_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
@@ -110,6 +111,7 @@ app.include_router(group_router)
 app.include_router(user_router)
 app.include_router(invitation_router)
 app.include_router(notification_router)
+app.include_router(a2ui_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)

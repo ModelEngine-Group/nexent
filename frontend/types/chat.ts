@@ -45,7 +45,13 @@ export interface StepContent {
     | typeof chatConfig.messageTypes.PREPROCESS
     | typeof chatConfig.messageTypes.VERIFICATION
     | typeof chatConfig.messageTypes.HISTORY_SUMMARY
-    | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
+    | typeof chatConfig.messageTypes.MAX_STEPS_REACHED
+    | typeof chatConfig.messageTypes.A2UI_SURFACE
+    | typeof chatConfig.messageTypes.A2UI_COMPONENTS
+    | typeof chatConfig.messageTypes.A2UI_DATA_MODEL
+    | typeof chatConfig.messageTypes.A2UI_DELETE_SURFACE
+    | typeof chatConfig.messageTypes.HITL_FORM
+    | typeof chatConfig.messageTypes.HITL_FORM_RESPONSE;
   content: string;
   expanded: boolean;
   timestamp: number;
@@ -210,6 +216,8 @@ export interface ChatMessageType {
   attachments?: FileAttachment[];
   thinking?: any[];
   automationProposal?: AgentAutomationProposalData;
+  a2uiSurfaces?: A2UISurface[];
+  pendingInteractions?: HITLInteraction[];
 }
 
 // Message processing structure
@@ -444,4 +452,42 @@ export interface StorageUploadResult {
     presigned_url?: string;
     error?: string;
   }[];
+}
+
+// A2UI (Agent-to-UI) Component interface
+export interface A2UIComponent {
+  id: string;
+  component: string;
+  children?: A2UIComponent[];
+  child?: A2UIComponent;
+  text?: string;
+  variant?: string;
+  label?: string;
+  placeholder?: string;
+  value?: string;
+  checked?: boolean;
+  action?: string;
+  dataBinding?: string;
+  required?: boolean;
+  distribution?: "start" | "center" | "end" | "between" | "around";
+  alignment?: "start" | "center" | "end" | "stretch";
+  spacing?: number;
+  wrap?: boolean;
+  [key: string]: any;
+}
+
+// A2UI Surface interface - represents a UI surface with components and data model
+export interface A2UISurface {
+  surfaceId: string;
+  catalog?: string;
+  components: A2UIComponent[];
+  dataModel?: Record<string, any>;
+}
+
+// HITL (Human-In-The-Loop) Interaction interface
+export interface HITLInteraction {
+  interaction_id: string;
+  prompt?: string;
+  timeout?: number;
+  [key: string]: any;
 }

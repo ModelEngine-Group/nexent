@@ -1265,6 +1265,222 @@ export const handleStreamResponse = async (
                   }
                   break;
 
+                case chatConfig.messageTypes.A2UI_SURFACE: {
+                  try {
+                    const surfaceData = JSON.parse(messageContent);
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg) return newMessages;
+
+                      const surfaces = lastMsg.a2uiSurfaces
+                        ? [...lastMsg.a2uiSurfaces]
+                        : [];
+                      const existingIndex = surfaces.findIndex(
+                        (s) => s.surfaceId === surfaceData.surfaceId
+                      );
+                      if (existingIndex >= 0) {
+                        surfaces[existingIndex] = {
+                          ...surfaces[existingIndex],
+                          ...surfaceData,
+                        };
+                      } else {
+                        surfaces.push(surfaceData);
+                      }
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        a2uiSurfaces: surfaces,
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.A2UI_COMPONENTS: {
+                  try {
+                    const componentsData = JSON.parse(messageContent);
+                    const { surfaceId, components, dataModel } = componentsData;
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg) return newMessages;
+
+                      const surfaces = lastMsg.a2uiSurfaces
+                        ? [...lastMsg.a2uiSurfaces]
+                        : [];
+                      const existingIndex = surfaces.findIndex(
+                        (s) => s.surfaceId === surfaceId
+                      );
+                      if (existingIndex >= 0) {
+                        surfaces[existingIndex] = {
+                          ...surfaces[existingIndex],
+                          components: components || surfaces[existingIndex].components,
+                          dataModel: dataModel || surfaces[existingIndex].dataModel,
+                        };
+                      } else {
+                        surfaces.push({
+                          surfaceId,
+                          components: components || [],
+                          dataModel: dataModel || {},
+                        });
+                      }
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        a2uiSurfaces: surfaces,
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.A2UI_DATA_MODEL: {
+                  try {
+                    const modelData = JSON.parse(messageContent);
+                    const { surfaceId, dataModel } = modelData;
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg) return newMessages;
+
+                      const surfaces = lastMsg.a2uiSurfaces
+                        ? [...lastMsg.a2uiSurfaces]
+                        : [];
+                      const existingIndex = surfaces.findIndex(
+                        (s) => s.surfaceId === surfaceId
+                      );
+                      if (existingIndex >= 0) {
+                        surfaces[existingIndex] = {
+                          ...surfaces[existingIndex],
+                          dataModel: {
+                            ...surfaces[existingIndex].dataModel,
+                            ...dataModel,
+                          },
+                        };
+                        newMessages[newMessages.length - 1] = {
+                          ...lastMsg,
+                          a2uiSurfaces: surfaces,
+                        };
+                      }
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.A2UI_DELETE_SURFACE: {
+                  try {
+                    const deleteData = JSON.parse(messageContent);
+                    const { surfaceId } = deleteData;
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg || !lastMsg.a2uiSurfaces) return newMessages;
+
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        a2uiSurfaces: lastMsg.a2uiSurfaces.filter(
+                          (s) => s.surfaceId !== surfaceId
+                        ),
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.HITL_FORM: {
+                  try {
+                    const formData = JSON.parse(messageContent);
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg) return newMessages;
+
+                      const interactions = lastMsg.pendingInteractions
+                        ? [...lastMsg.pendingInteractions]
+                        : [];
+                      const existingIndex = interactions.findIndex(
+                        (i) => i.interaction_id === formData.interaction_id
+                      );
+                      if (existingIndex >= 0) {
+                        interactions[existingIndex] = {
+                          ...interactions[existingIndex],
+                          ...formData,
+                        };
+                      } else {
+                        interactions.push(formData);
+                      }
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        pendingInteractions: interactions,
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.HITL_FORM_RESPONSE: {
+                  try {
+                    const responseData = JSON.parse(messageContent);
+                    const { interaction_id } = responseData;
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg || !lastMsg.pendingInteractions) return newMessages;
+
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        pendingInteractions: lastMsg.pendingInteractions.filter(
+                          (i) => i.interaction_id !== interaction_id
+                        ),
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
+                case chatConfig.messageTypes.HITL_TIMEOUT: {
+                  try {
+                    const timeoutData = JSON.parse(messageContent);
+                    const { interaction_id } = timeoutData;
+                    setMessages((prev) => {
+                      const newMessages = [...prev];
+                      const lastMsg = newMessages[newMessages.length - 1];
+                      if (!lastMsg || !lastMsg.pendingInteractions) return newMessages;
+
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        pendingInteractions: lastMsg.pendingInteractions.map(
+                          (i) =>
+                            i.interaction_id === interaction_id
+                              ? { ...i, timedOut: true }
+                              : i
+                        ),
+                      };
+                      return newMessages;
+                    });
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
+                  }
+                  break;
+                }
+
                 default:
                   // Process other types of messages
                   break;

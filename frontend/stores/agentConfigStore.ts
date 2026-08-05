@@ -50,7 +50,6 @@ export type EditableAgent = Pick<
   | "prompt_template_name"
   | "verification_config"
   | "sub_agent_id_list"
-  | "sub_agent_relations"
   | "group_ids"
   | "ingroup_permission"
   | "enable_context_manager"
@@ -115,11 +114,6 @@ interface AgentConfigStoreState {
    * Update sub_agent_id_list (Component B).
    */
   updateSubAgentIds: (ids: number[]) => void;
-
-  /**
-   * Update sub_agent_relations (synced with sub_agent_id_list).
-   */
-  updateSubAgentRelations: (relations: Array<{ agent_id: number; version_no: number | null; version_name?: string }>) => void;
 
   /**
    * Update external_sub_agent_id_list.
@@ -207,7 +201,6 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
       guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
     },
     sub_agent_id_list: [],
-    sub_agent_relations: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
     greeting_message: "",
@@ -243,7 +236,6 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         prompt_template_name: agent.prompt_template_name || "system_default",
         verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
         sub_agent_id_list: agent.sub_agent_id_list || [],
-        sub_agent_relations: agent.sub_agent_relations || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
@@ -510,14 +502,6 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     const nextIds = normalizeArray(ids);
     set((state) => {
       const editedAgent = { ...state.editedAgent, sub_agent_id_list: nextIds };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateSubAgentRelations: (relations) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, sub_agent_relations: relations };
       const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
       return { editedAgent, hasUnsavedChanges };
     });

@@ -27,6 +27,7 @@ from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
+from .a2ui_card_tool import OutputCardTool
 
 __all__ = [
     "MySqlTool",
@@ -61,4 +62,5 @@ __all__ = [
     "SearchMemoryTool",
     "CreatePlanTool",
     "UpdatePlanStepTool",
+    "OutputCardTool",
 ]

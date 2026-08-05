@@ -149,6 +149,13 @@ export const chatConfig = {
     PREPROCESS: "preprocess" as const,
     SKILL_FILES: "skill_files" as const,
     HISTORY_SUMMARY: "history_summary" as const,
+    A2UI_SURFACE: "a2ui_surface" as const,
+    A2UI_COMPONENTS: "a2ui_components" as const,
+    A2UI_DATA_MODEL: "a2ui_data_model" as const,
+    A2UI_DELETE_SURFACE: "a2ui_delete_surface" as const,
+    HITL_FORM: "hitl_form" as const,
+    HITL_FORM_RESPONSE: "hitl_form_response" as const,
+    HITL_TIMEOUT: "hitl_timeout" as const,
   },
 
   // Content type constants for last content type tracking
@@ -164,6 +171,13 @@ export const chatConfig = {
     MEMORY_SEARCH: "memory_search" as const,
     VERIFICATION: "verification" as const,
     PREPROCESS: "preprocess" as const,
+    A2UI_SURFACE: "a2ui_surface" as const,
+    A2UI_COMPONENTS: "a2ui_components" as const,
+    A2UI_DATA_MODEL: "a2ui_data_model" as const,
+    A2UI_DELETE_SURFACE: "a2ui_delete_surface" as const,
+    HITL_FORM: "hitl_form" as const,
+    HITL_FORM_RESPONSE: "hitl_form_response" as const,
+    HITL_TIMEOUT: "hitl_timeout" as const,
   },
 
   // TTS status constants
