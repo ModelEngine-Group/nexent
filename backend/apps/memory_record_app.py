@@ -41,7 +41,7 @@ from utils.auth_utils import get_current_user_id
 
 
 logger = logging.getLogger("memory_record_app")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 router = APIRouter(prefix="/memory")
 
 
@@ -142,13 +142,6 @@ def create_record(
     except MemoryRecordError as exc:
         raise HTTPException(
             status_code=HTTPStatus.NOT_ACCEPTABLE, detail=str(exc)
-        )
-
-    if not result.get("indexed") and result.get("layer") == "agent":
-        logger.debug(
-            "Created agent short-term memory memory_id=%s without ES indexing; "
-            "check tenant embedding model configuration.",
-            result.get("memory_id"),
         )
 
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
