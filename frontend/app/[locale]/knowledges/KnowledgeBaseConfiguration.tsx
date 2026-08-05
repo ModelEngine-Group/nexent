@@ -316,15 +316,16 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Open warning modal only when neither embedding nor multi-embedding is configured.
   useEffect(() => {
-    const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
+    const singleEmbeddingModelName =
+      modelConfig?.embedding?.displayName?.trim();
     const multiEmbeddingModelName =
-      modelConfig?.multiEmbedding?.modelName?.trim();
+      modelConfig?.multiEmbedding?.displayName?.trim();
     setShowEmbeddingWarning(
       !singleEmbeddingModelName && !multiEmbeddingModelName
     );
   }, [
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
   ]);
 
   // Add event listener for selecting new knowledge base
@@ -401,9 +402,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     if (kbState.isLoading) return; // avoid running during list loading
     if (hasCleanedRef.current) return; // run once per entry
 
-    const embeddingName = modelConfig?.embedding?.modelName?.trim() || "";
+    const embeddingName = modelConfig?.embedding?.displayName?.trim() || "";
     const multiEmbeddingName =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
 
     const allowedModels = new Set<string>();
     if (embeddingName) allowedModels.add(embeddingName);
@@ -414,8 +415,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     isActive,
     kbState.isLoading,
     kbState.knowledgeBases,
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
     kbDispatch,
   ]);
 
@@ -749,10 +750,11 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbPreserveSourceFile(true);
     // Set default embedding model:
     // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
+    // Use displayName to match availableEmbeddingModels and KB embeddingModel.
     const configEmbeddingModel =
-      modelConfig?.embedding?.modelName?.trim() || "";
+      modelConfig?.embedding?.displayName?.trim() || "";
     const configMultiEmbeddingModel =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
     const preferredModel = [
       { modelName: configEmbeddingModel, type: "embedding" },
       { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
@@ -1171,8 +1173,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 )}
                 currentModel={
                   kbState.activeKnowledgeBase?.is_multimodal
-                    ? modelConfig?.multiEmbedding?.modelName?.trim() || ""
-                    : modelConfig?.embedding?.modelName?.trim() || ""
+                    ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
+                    : modelConfig?.embedding?.displayName?.trim() || ""
                 }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
