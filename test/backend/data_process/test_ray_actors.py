@@ -40,7 +40,7 @@ class FakeRedisClient:
         self.expirations = {}
 
     @classmethod
-    def from_url(cls, url, decode_responses=False):
+    def from_url(cls, url, decode_responses=False, **kwargs):
         return cls()
 
     def set(self, key, value):
@@ -64,6 +64,7 @@ def stub_consts(monkeypatch):
     fake_consts_const = types.ModuleType("consts.const")
     fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
     fake_consts_const.REDIS_BACKEND_URL = ""
+    fake_consts_const.DP_SPLIT_STATE_TTL_S = 7200
     # New defaults required by ray_actors import
     fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
@@ -191,6 +192,7 @@ def import_module(monkeypatch):
         )
 
     # Import module under test
+    monkeypatch.delitem(sys.modules, "backend.data_process.ray_actors", raising=False)
     import backend.data_process.ray_actors as ray_actors
     return ray_actors
 
@@ -558,10 +560,10 @@ def test_store_chunks_in_redis_handles_none_and_serialization_error(monkeypatch)
     assert ok_none is True
     assert json.loads(fake_client.get("k-none")) == []
 
-    # Non-serializable -> fallback []
+    # Non-serializable payloads must fail instead of publishing empty success.
     ok_bad = actor.store_chunks_in_redis("k-bad", [{"s": {1, 2, 3}}])
-    assert ok_bad is True
-    assert json.loads(fake_client.get("k-bad")) == []
+    assert ok_bad is False
+    assert fake_client.get("k-bad") is None
 
 
 def test_store_chunks_in_redis_no_url_returns_false(monkeypatch):
@@ -715,4 +717,3 @@ def test_split_file_returns_empty_when_no_parts(monkeypatch):
     monkeypatch.setattr(ray_actors, "DataProcessCore", CoreNoParts)
     actor = ray_actors.DataProcessorRayActor()
     assert actor.split_file("x.txt", "local", file_data=b"abc") == []
-

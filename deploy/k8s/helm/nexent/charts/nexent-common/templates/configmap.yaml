@@ -107,12 +107,22 @@ data:
   RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
   RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
   RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
+  RAY_GLOBAL_ACTOR_POOL_SIZE: {{ .Values.config.dataProcess.rayGlobalActorPoolSize | quote }}
   DISABLE_RAY_DASHBOARD: {{ .Values.config.dataProcess.disableRayDashboard | quote }}
   DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
   DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
   ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
   CELERY_WORKER_PREFETCH_MULTIPLIER: {{ .Values.config.dataProcess.celeryWorkerPrefetchMultiplier | quote }}
   CELERY_TASK_TIME_LIMIT: {{ .Values.config.dataProcess.celeryTaskTimeLimit | quote }}
+  CELERY_RESULT_EXPIRES: {{ .Values.config.dataProcess.celeryResultExpires | quote }}
+  DP_MAX_FILE_SIZE_BYTES: {{ .Values.config.dataProcess.maxFileSizeBytes | quote }}
+  DP_MAX_CHUNKS_PER_FILE: {{ .Values.config.dataProcess.maxChunksPerFile | quote }}
+  DP_RAY_OPERATION_TIMEOUT_S: {{ .Values.config.dataProcess.rayOperationTimeoutS | quote }}
+  DP_FORWARD_REQUEST_TIMEOUT_S: {{ .Values.config.dataProcess.forwardRequestTimeoutS | quote }}
+  DP_FORWARD_FILE_TIMEOUT_S: {{ .Values.config.dataProcess.forwardFileTimeoutS | quote }}
+  DP_SPLIT_STATE_TTL_S: {{ .Values.config.dataProcess.splitStateTtlS | quote }}
+  DP_MAX_PROCESS_CONCURRENCY: {{ .Values.config.dataProcess.maxProcessConcurrency | quote }}
+  DP_MAX_FORWARD_CONCURRENCY: {{ .Values.config.dataProcess.maxForwardConcurrency | quote }}
   ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
   QUEUES: {{ .Values.config.dataProcess.queues | quote }}
   WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}

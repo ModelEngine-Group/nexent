@@ -6,7 +6,14 @@ import logging
 from celery import Celery
 from celery.backends.base import DisabledBackend
 
-from consts.const import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
+from consts.const import (
+    CELERY_RESULT_EXPIRES,
+    CELERY_TASK_TIME_LIMIT,
+    CELERY_WORKER_PREFETCH_MULTIPLIER,
+    ELASTICSEARCH_SERVICE,
+    REDIS_BACKEND_URL,
+    REDIS_URL,
+)
 
 # Configure logging
 logger = logging.getLogger("data_process.app")
@@ -60,14 +67,15 @@ app.conf.update(
     task_store_eager_result=True,  # Store results for eager tasks
     result_backend_always_retry=True,  # Always retry backend operations
     result_backend_max_retries=10,  # Max retries for backend operations
-    task_time_limit=3600,      # 1 hour time limit per task
-    worker_prefetch_multiplier=1,  # Fair scheduling; avoid batchy prefetch
+    task_time_limit=CELERY_TASK_TIME_LIMIT,
+    worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
     worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
-    task_acks_late=False,
+    task_acks_late=True,
+    task_acks_on_failure_or_timeout=True,
     task_reject_on_worker_lost=False,
     # Result storage settings
-    result_expires=None,       # Results never expire
+    result_expires=CELERY_RESULT_EXPIRES,
     result_persistent=True,    # Persist results to backend
     # Monitoring and task events for Flower
     task_send_sent_event=True,  # Send task-sent events

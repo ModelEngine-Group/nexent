@@ -17,10 +17,9 @@ import re
 import ray
 from celery import Task, chain, states, group, chord
 from celery.exceptions import Retry
-from celery.result import allow_join_result
 
 from utils.file_management_utils import get_file_size
-from database.attachment_db import get_file_stream
+from database.attachment_db import get_file_stream_raw
 from database.knowledge_db import get_knowledge_record
 from services.redis_service import get_redis_service
 from .app import app
@@ -41,7 +40,13 @@ from consts.const import (
     RAY_GLOBAL_ACTOR_POOL_SIZE,
     RAY_ACTOR_WARM_TIMEOUT_S,
     RAY_GLOBAL_ACTOR_POOL_NAME,
-    RAY_GLOBAL_ACTOR_POOL_NAMESPACE
+    RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
+    DP_RAY_OPERATION_TIMEOUT_S,
+    DP_FORWARD_REQUEST_TIMEOUT_S,
+    DP_FORWARD_FILE_TIMEOUT_S,
+    DP_SPLIT_STATE_TTL_S,
+    MAX_CHUNKS_PER_FILE,
+    MAX_DATA_PROCESS_FILE_SIZE_BYTES,
 )
 
 
@@ -50,6 +55,118 @@ ASYNC_SPLIT_RETRY_MAX = max(
     FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
+REDIS_SOCKET_TIMEOUT_SECONDS = 5
+
+
+def _processing_limit_error(message: str, error_code: str) -> RuntimeError:
+    return RuntimeError(json.dumps({
+        "message": message,
+        "error_code": error_code,
+    }, ensure_ascii=False))
+
+
+def _validate_file_size(file_size_bytes: int, source: str) -> None:
+    if file_size_bytes > MAX_DATA_PROCESS_FILE_SIZE_BYTES:
+        raise _processing_limit_error(
+            (
+                f"File '{source}' is {file_size_bytes / 1024 / 1024:.2f}MB; "
+                f"the data-process limit is "
+                f"{MAX_DATA_PROCESS_FILE_SIZE_BYTES / 1024 / 1024:.0f}MB"
+            ),
+            "file_too_large",
+        )
+
+
+def _validate_chunk_count(chunk_count: int, filename: str) -> None:
+    if chunk_count > MAX_CHUNKS_PER_FILE:
+        raise _processing_limit_error(
+            (
+                f"File '{filename}' produced {chunk_count} chunks; "
+                f"the safety limit is {MAX_CHUNKS_PER_FILE}"
+            ),
+            "too_many_chunks",
+        )
+
+
+def _split_state_keys(redis_key: str) -> Tuple[str, str, str]:
+    return (
+        f"{redis_key}:ready",
+        f"{redis_key}:error",
+        f"{redis_key}:cancelled",
+    )
+
+
+def _get_split_redis_client():
+    if not REDIS_BACKEND_URL:
+        raise RuntimeError("REDIS_BACKEND_URL not configured")
+
+    import redis
+
+    return redis.Redis.from_url(
+        REDIS_BACKEND_URL,
+        decode_responses=True,
+        socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+    )
+
+
+def _mark_split_failed(redis_key: str, error: str) -> None:
+    """Publish a terminal failure so the file-level parent stops waiting."""
+    client = _get_split_redis_client()
+    ready_key, error_key, cancelled_key = _split_state_keys(redis_key)
+    payload = json.dumps({
+        "status": "failed",
+        "message": str(error),
+    }, ensure_ascii=False)
+    for key, value in (
+        (error_key, payload),
+        (cancelled_key, "1"),
+        (ready_key, "1"),
+    ):
+        client.set(key, value)
+        client.expire(key, DP_SPLIT_STATE_TTL_S)
+
+
+def _is_split_cancelled(redis_key: str) -> bool:
+    try:
+        _, _, cancelled_key = _split_state_keys(redis_key)
+        return bool(_get_split_redis_client().get(cancelled_key))
+    except Exception as exc:
+        logger.warning("Failed to check split cancellation for '%s': %s", redis_key, exc)
+        return False
+
+
+def _cleanup_split_payloads(redis_key: str, keep_cancelled: bool = False) -> None:
+    """Best-effort cleanup scoped to one file's split state."""
+    try:
+        client = _get_split_redis_client()
+        ready_key, error_key, cancelled_key = _split_state_keys(redis_key)
+        keys_to_delete = [redis_key, ready_key, error_key]
+        if not keep_cancelled:
+            keys_to_delete.append(cancelled_key)
+        client.delete(*keys_to_delete)
+
+        part_prefix = redis_key.rsplit(":chunks", 1)[0]
+        part_keys = list(client.scan_iter(match=f"{part_prefix}:part:*", count=100))
+        if part_keys:
+            client.delete(*part_keys)
+    except Exception as exc:
+        logger.warning("Failed to clean split payloads for '%s': %s", redis_key, exc)
+
+
+def _claim_process_attempt(task_id: str) -> int:
+    """Detect redelivery after a worker/container loss without retrying poison work."""
+    if not task_id:
+        return 1
+    try:
+        client = _get_split_redis_client()
+        attempt_key = f"dp:{task_id}:attempts"
+        attempt = int(client.incr(attempt_key))
+        client.expire(attempt_key, DP_SPLIT_STATE_TTL_S)
+        return attempt
+    except Exception as exc:
+        logger.warning("Failed to claim process attempt for '%s': %s", task_id, exc)
+        return 1
 
 
 def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int) -> int:
@@ -61,13 +178,27 @@ def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int)
     if not REDIS_BACKEND_URL:
         raise RuntimeError("REDIS_BACKEND_URL not configured")
 
-    import redis
-
-    client = redis.Redis.from_url(REDIS_BACKEND_URL, decode_responses=True)
-    ready_key = f"{redis_key}:ready"
+    client = _get_split_redis_client()
+    ready_key, error_key, cancelled_key = _split_state_keys(redis_key)
     deadline = time.time() + timeout_s
 
     while time.time() < deadline:
+        error_payload = client.get(error_key)
+        if error_payload:
+            try:
+                parsed_error = json.loads(error_payload)
+                error_message = (
+                    parsed_error.get("message", error_payload)
+                    if isinstance(parsed_error, dict)
+                    else error_payload
+                )
+            except Exception:
+                error_message = error_payload
+            raise RuntimeError(f"Async split processing failed: {error_message}")
+
+        if client.get(cancelled_key):
+            raise RuntimeError("Async split processing was cancelled")
+
         if client.get(ready_key):
             cached = client.get(redis_key)
             if cached:
@@ -96,8 +227,10 @@ def _estimate_parallel_parts() -> int:
 def _compute_split_wait_timeout(parts_count: int) -> int:
     base_timeout = DP_REDIS_CHUNKS_WAIT_TIMEOUT_S
     waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
-    dynamic_timeout = base_timeout + \
-        max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
+    dynamic_timeout = base_timeout + waves * max(
+        DP_RAY_OPERATION_TIMEOUT_S,
+        PER_WAVE_TIMEOUT,
+    )
     return min(MAX_TIMEOUT, dynamic_timeout)
 
 
@@ -476,10 +609,13 @@ def _load_forward_chunks(
                 "original_filename": filename
             }, ensure_ascii=False))
         try:
-            import redis
-            client = redis.Redis.from_url(
-                REDIS_BACKEND_URL, decode_responses=True)
-            ready_key = f"{redis_key}:ready"
+            client = _get_split_redis_client()
+            ready_key, error_key, cancelled_key = _split_state_keys(redis_key)
+            terminal_error = client.get(error_key)
+            if terminal_error or client.get(cancelled_key):
+                raise RuntimeError(
+                    f"Process payload reached a terminal failure: {terminal_error or 'cancelled'}"
+                )
             if split_async:
                 ready_flag = client.get(ready_key)
                 if not ready_flag:
@@ -592,6 +728,22 @@ def _load_forward_chunks(
     return chunks, split_async, original_source, original_index_name, filename
 
 
+def _cleanup_forward_chunks(processed_data: Dict[str, Any]) -> None:
+    """Remove the process payload after a forward task reaches a terminal state."""
+    redis_key = (processed_data or {}).get("redis_key")
+    if redis_key:
+        _cleanup_split_payloads(str(redis_key), keep_cancelled=False)
+        try:
+            task_prefix = str(redis_key).rsplit(":chunks", 1)[0]
+            _get_split_redis_client().delete(f"{task_prefix}:attempts")
+        except Exception as exc:
+            logger.warning(
+                "Failed to clean process attempt state for '%s': %s",
+                redis_key,
+                exc,
+            )
+
+
 def _extract_error_code_from_es_response(
     parsed_body: Optional[Dict[str, Any]],
     text: str,
@@ -626,6 +778,7 @@ def _send_chunks_to_es(
     source: str = "",
     original_filename: str = "",
     large_mode: bool = False,
+    timeout_s: Optional[float] = None,
 ) -> Dict[str, Any]:
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
@@ -645,7 +798,12 @@ def _send_chunks_to_es(
             headers["X-Task-Id"] = task_id
         try:
             connector = aiohttp.TCPConnector(verify_ssl=False)
-            timeout = aiohttp.ClientTimeout(total=600)
+            effective_timeout = (
+                DP_FORWARD_REQUEST_TIMEOUT_S
+                if timeout_s is None
+                else max(1.0, min(float(timeout_s), DP_FORWARD_REQUEST_TIMEOUT_S))
+            )
+            timeout = aiohttp.ClientTimeout(total=effective_timeout)
 
             request_params: Dict[str, str] = {}
 
@@ -747,6 +905,37 @@ class GlobalRayActorPoolManager:
                 self.actors.append(actor)
         return len(self.actors)
 
+    @staticmethod
+    def _actor_identity(actor: Any) -> str:
+        actor_id = getattr(actor, "_actor_id", None)
+        if actor_id is not None:
+            hex_method = getattr(actor_id, "hex", None)
+            if callable(hex_method):
+                return str(hex_method())
+            return str(actor_id)
+        return str(id(actor))
+
+    def replace_actor(
+        self,
+        failed_actor_id: str,
+        desired: int,
+        max_allowed: int,
+    ) -> int:
+        """Remove one failed actor and restore the bounded pool size."""
+        retained: List[Any] = []
+        for actor in self.actors:
+            if self._actor_identity(actor) != failed_actor_id:
+                retained.append(actor)
+                continue
+            try:
+                ray.kill(actor, no_restart=True)
+            except Exception:
+                pass
+
+        self.actors = retained
+        self.rr_index = self.rr_index % len(self.actors) if self.actors else 0
+        return self.ensure_pool(desired=desired, max_allowed=max_allowed)
+
     def get_actor(self) -> Any:
         if not self.actors:
             actor = self._create_and_warm_actor()
@@ -801,7 +990,8 @@ def prewarm_ray_actors(target_size: Optional[int] = None) -> int:
     manager = _get_or_create_global_pool_manager()
     current_after = ray.get(
         manager.ensure_pool.remote(
-            desired=desired, max_allowed=_estimate_parallel_parts())
+            desired=desired, max_allowed=_estimate_parallel_parts()),
+        timeout=RAY_ACTOR_WARM_TIMEOUT_S,
     )
     logger.info(
         f"Global Ray actor pool ready: current={current_after}, desired={desired}"
@@ -814,7 +1004,104 @@ def get_ray_actor() -> Any:
     Return a warm actor from the global shared pool with round-robin selection.
     """
     manager = _get_or_create_global_pool_manager()
-    return ray.get(manager.get_actor.remote())
+    current_after = ray.get(
+        manager.ensure_pool.remote(
+            desired=RAY_GLOBAL_ACTOR_POOL_SIZE,
+            max_allowed=_estimate_parallel_parts(),
+        ),
+        timeout=RAY_ACTOR_WARM_TIMEOUT_S,
+    )
+    if current_after < 1:
+        raise RuntimeError("Global Ray actor pool has no available actors")
+    return ray.get(
+        manager.get_actor.remote(),
+        timeout=RAY_ACTOR_WARM_TIMEOUT_S,
+    )
+
+
+def _actor_identity(actor: Any) -> str:
+    actor_id = getattr(actor, "_actor_id", None)
+    if actor_id is not None:
+        hex_method = getattr(actor_id, "hex", None)
+        if callable(hex_method):
+            return str(hex_method())
+        return str(actor_id)
+    return str(id(actor))
+
+
+def _is_fatal_ray_error(exc: Exception) -> bool:
+    name = exc.__class__.__name__.lower()
+    message = str(exc).lower()
+    return isinstance(exc, (TimeoutError, MemoryError)) or any(
+        marker in name
+        for marker in (
+            "gettimeouterror",
+            "rayactorerror",
+            "outofmemoryerror",
+            "workercrashederror",
+        )
+    ) or any(
+        marker in message
+        for marker in (
+            "out of memory",
+            "outofmemory",
+            "oom killed",
+            "worker died",
+            "actor died",
+        )
+    )
+
+
+def _replace_failed_ray_actor(actor: Any, operation: str, error: Exception) -> None:
+    """Best-effort removal and replacement after a fatal Ray failure."""
+    logger.warning(
+        "Ray actor failed during %s; replacing it before later files: %s",
+        operation,
+        error,
+    )
+    try:
+        try:
+            ray.kill(actor, no_restart=True)
+        except Exception:
+            pass
+
+        manager = _get_or_create_global_pool_manager()
+        ray.get(
+            manager.replace_actor.remote(
+                failed_actor_id=_actor_identity(actor),
+                desired=RAY_GLOBAL_ACTOR_POOL_SIZE,
+                max_allowed=_estimate_parallel_parts(),
+            ),
+            timeout=RAY_ACTOR_WARM_TIMEOUT_S,
+        )
+    except Exception as repair_exc:
+        logger.error(
+            "Failed to restore Ray actor pool after %s failure: %s",
+            operation,
+            repair_exc,
+        )
+
+
+def _get_ray_result(
+    ref: Any,
+    actor: Any,
+    operation: str,
+    timeout_s: Optional[int] = None,
+) -> Any:
+    """Wait for one Ray operation with a hard deadline."""
+    effective_timeout = DP_RAY_OPERATION_TIMEOUT_S if timeout_s is None else max(
+        1, min(int(timeout_s), DP_RAY_OPERATION_TIMEOUT_S)
+    )
+    try:
+        return ray.get(ref, timeout=effective_timeout)
+    except Exception as exc:
+        if _is_fatal_ray_error(exc):
+            try:
+                ray.cancel(ref, force=True)
+            except Exception:
+                pass
+            _replace_failed_ray_actor(actor, operation, exc)
+        raise
 
 
 def _get_split_actor() -> Any:
@@ -857,6 +1144,7 @@ def process_part(
         filename: str,
         chunking_strategy: str,
         part_redis_key: str,
+        split_redis_key: Optional[str] = None,
         source: Optional[str] = None,
         source_type: Optional[str] = None,
         model_id: Optional[int] = None,
@@ -877,26 +1165,49 @@ def process_part(
             tenant_id=tenant_id,
             **params
         )
-        chunks = ray.get(chunks_ref) or []
+        chunks = _get_ray_result(
+            chunks_ref,
+            actor,
+            operation=f"process part '{filename}'",
+        ) or []
+        _validate_chunk_count(len(chunks), filename)
 
         if not REDIS_BACKEND_URL:
             raise RuntimeError("REDIS_BACKEND_URL not configured")
 
-        import redis
-        client = redis.Redis.from_url(REDIS_BACKEND_URL, decode_responses=True)
+        client = _get_split_redis_client()
+        if split_redis_key and _is_split_cancelled(split_redis_key):
+            return {
+                "success": False,
+                "part_redis_key": part_redis_key,
+                "chunks_count": 0,
+                "error": "Parent split task was cancelled",
+            }
         client.set(part_redis_key, json.dumps(chunks, ensure_ascii=False))
-        client.expire(part_redis_key, 2 * 60 * 60)
+        client.expire(part_redis_key, DP_SPLIT_STATE_TTL_S)
 
         return {
+            "success": True,
             "part_redis_key": part_redis_key,
             "chunks_count": len(chunks),
         }
     except Exception as e:
         logger.error(
             f"[process_part] Failed to process part for '{filename}': {str(e)}")
+        if split_redis_key and not _is_split_cancelled(split_redis_key):
+            try:
+                _mark_split_failed(split_redis_key, str(e))
+            except Exception as marker_exc:
+                logger.error(
+                    "Failed to publish split failure for '%s': %s",
+                    split_redis_key,
+                    marker_exc,
+                )
         return {
+            "success": False,
             "part_redis_key": part_redis_key,
             "chunks_count": 0,
+            "error": str(e),
         }
 
 
@@ -945,39 +1256,95 @@ def aggregate_store_chunks(
         }, ensure_ascii=False))
 
     try:
-        import redis
-        client = redis.Redis.from_url(
-            REDIS_BACKEND_URL, decode_responses=True)
+        client = _get_split_redis_client()
+        ready_key, _, cancelled_key = _split_state_keys(redis_key)
+        if client.get(cancelled_key):
+            _cleanup_split_payloads(redis_key, keep_cancelled=True)
+            return {
+                "success": False,
+                "chunks_count": 0,
+                "redis_key": redis_key,
+                "source": source,
+                "index_name": index_name,
+                "original_filename": original_filename,
+                "error": "Parent split task was cancelled",
+            }
+
+        failed_results = [
+            result for result in (parts_results or [])
+            if not result or not result.get("success", False)
+        ]
+        if failed_results:
+            error = next(
+                (
+                    str(result.get("error"))
+                    for result in failed_results
+                    if result and result.get("error")
+                ),
+                "One or more split parts failed",
+            )
+            _mark_split_failed(redis_key, error)
+            _cleanup_split_payloads(redis_key, keep_cancelled=True)
+            return {
+                "success": False,
+                "chunks_count": 0,
+                "redis_key": redis_key,
+                "source": source,
+                "index_name": index_name,
+                "original_filename": original_filename,
+                "error": error,
+            }
+
+        reported_chunk_count = sum(
+            int((result or {}).get("chunks_count", 0) or 0)
+            for result in (parts_results or [])
+        )
+        _validate_chunk_count(
+            reported_chunk_count,
+            original_filename or source or redis_key,
+        )
 
         merged: List[Dict[str, Any]] = []
         for part_result in parts_results or []:
             part_key = (part_result or {}).get("part_redis_key")
             if not part_key:
-                continue
+                raise RuntimeError("Split part result is missing its Redis key")
             cached = client.get(part_key)
             if not cached:
-                continue
+                raise RuntimeError(
+                    f"Split part payload is missing at key '{part_key}'")
             try:
                 part_chunks = json.loads(cached)
                 if isinstance(part_chunks, list):
                     merged.extend(part_chunks)
-            except Exception:
-                continue
+                else:
+                    raise RuntimeError(
+                        f"Split part payload at key '{part_key}' is not a list")
+            except Exception as exc:
+                _mark_split_failed(redis_key, str(exc))
+                raise
             # best-effort cleanup for part payload key
             try:
                 client.delete(part_key)
             except Exception:
                 pass
 
+        _validate_chunk_count(
+            len(merged),
+            original_filename or source or redis_key,
+        )
         serialized = json.dumps(merged, ensure_ascii=False)
         client.set(redis_key, serialized)
-        client.expire(redis_key, 2 * 60 * 60)
-        ready_key = f"{redis_key}:ready"
+        client.expire(redis_key, DP_SPLIT_STATE_TTL_S)
         client.set(ready_key, "1")
-        client.expire(ready_key, 2 * 60 * 60)
+        client.expire(ready_key, DP_SPLIT_STATE_TTL_S)
         logger.info(
             f"[{self.request.id}] PROCESS TASK: Stored aggregated chunks in Redis at key '{redis_key}', count={len(merged)}")
     except Exception as exc:
+        try:
+            _mark_split_failed(redis_key, str(exc))
+        except Exception:
+            pass
         raise Exception(json.dumps({
             "message": f"Failed to store chunks to Redis: {str(exc)}",
             "index_name": index_name,
@@ -987,6 +1354,7 @@ def aggregate_store_chunks(
         }, ensure_ascii=False))
 
     return {
+        "success": True,
         "chunks_count": len(merged),
         "redis_key": redis_key,
         "source": source,
@@ -1140,7 +1508,11 @@ def _split_file_for_processing(
         split_kwargs["file_data"] = file_data
 
     parts_ref = split_actor.split_file.remote(**split_kwargs)
-    parts = ray.get(parts_ref)
+    parts = _get_ray_result(
+        parts_ref,
+        split_actor,
+        operation=f"split file '{source}'",
+    )
     split_call_elapsed = time.perf_counter() - split_call_start
     logger.info(
         f"[{request_id}] PROCESS TASK: split_file RPC done in {split_call_elapsed:.3f}s "
@@ -1189,7 +1561,13 @@ def _run_processing_for_parts(
         )
         logger.info(
             f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
-        return False, ray.get(chunks_ref), None
+        chunks = _get_ray_result(
+            chunks_ref,
+            process_actor,
+            operation=f"process file '{filename_for_processing}'",
+        )
+        _validate_chunk_count(len(chunks or []), filename_for_processing)
+        return False, chunks, None
 
     if len(parts) == 1:
         process_actor = get_ray_actor()
@@ -1204,7 +1582,13 @@ def _run_processing_for_parts(
         )
         logger.info(
             f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
-        return False, ray.get(chunks_ref), None
+        chunks = _get_ray_result(
+            chunks_ref,
+            process_actor,
+            operation=f"process file part '{filename_for_processing}'",
+        )
+        _validate_chunk_count(len(chunks or []), filename_for_processing)
+        return False, chunks, None
 
     redis_key = f"dp:{task_id}:chunks"
     group_tasks = group(
@@ -1213,6 +1597,7 @@ def _run_processing_for_parts(
             filename=filename_for_processing,
             chunking_strategy=chunking_strategy,
             part_redis_key=f"dp:{task_id}:part:{idx}",
+            split_redis_key=redis_key,
             source=source,
             source_type=source_type,
             model_id=embedding_model_id,
@@ -1228,17 +1613,40 @@ def _run_processing_for_parts(
     ).set(queue='process_part_q')
     logger.info(
         f"[{request_id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
-    chord(group_tasks)(callback)
+    chord_result = chord(group_tasks)(callback)
 
     split_wait_timeout = _compute_split_wait_timeout(len(parts))
     logger.info(
         f"[{request_id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
         f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
-    split_chunk_count = _wait_for_split_ready(
-        redis_key=redis_key,
-        timeout_s=split_wait_timeout,
-        poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-    )
+    try:
+        split_chunk_count = _wait_for_split_ready(
+            redis_key=redis_key,
+            timeout_s=split_wait_timeout,
+            poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+        )
+    except Exception as exc:
+        if not _is_split_cancelled(redis_key):
+            try:
+                _mark_split_failed(redis_key, str(exc))
+            except Exception as marker_exc:
+                logger.warning(
+                    "Failed to publish split cancellation for '%s': %s",
+                    redis_key,
+                    marker_exc,
+                )
+        try:
+            group_result = getattr(chord_result, "parent", None)
+            if group_result is not None:
+                group_result.revoke(terminate=False)
+        except Exception as revoke_exc:
+            logger.warning(
+                "Failed to revoke split tasks for '%s': %s",
+                redis_key,
+                revoke_exc,
+            )
+        _cleanup_split_payloads(redis_key, keep_cancelled=True)
+        raise
     return True, None, split_chunk_count
 
 
@@ -1286,10 +1694,19 @@ def _process_source_with_split(
         logger.info(
             f"[{request_id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
 
-    if not split_async:
+    if not split_async and chunks:
         redis_key = f"dp:{task_id}:chunks"
         process_actor = get_ray_actor()
-        process_actor.store_chunks_in_redis.remote(redis_key, chunks)
+        store_ref = process_actor.store_chunks_in_redis.remote(redis_key, chunks)
+        stored = _get_ray_result(
+            store_ref,
+            process_actor,
+            operation=f"store chunks for '{filename_for_processing}'",
+        )
+        if not stored:
+            raise RuntimeError(
+                f"Failed to store processed chunks for '{filename_for_processing}'"
+            )
         logger.info(
             f"[{request_id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
 
@@ -1362,6 +1779,16 @@ def process(
         }
     )
     try:
+        attempt = _claim_process_attempt(task_id)
+        if attempt > 1:
+            raise _processing_limit_error(
+                (
+                    "This file task was redelivered after its worker terminated; "
+                    "it is being failed to protect later uploads"
+                ),
+                "worker_lost",
+            )
+
         # Process the file based on the source type
         file_size_mb = 0
         split_chunk_count = None
@@ -1376,7 +1803,8 @@ def process(
                 raise FileNotFoundError(f"File does not exist: {source}")
 
             file_size = os.path.getsize(source)
-            file_size_mb = file_size / (5 * 1024 * 1024)
+            _validate_file_size(file_size, source)
+            file_size_mb = file_size / (1024 * 1024)
 
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
@@ -1403,13 +1831,25 @@ def process(
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: Processing from URL: {source}")
 
+            reported_file_size = get_file_size(source_type, source)
+            if reported_file_size > 0:
+                _validate_file_size(reported_file_size, source)
+
             # Measure MinIO fetch time in process worker logs for observability
             fetch_start = time.perf_counter()
-            file_stream = get_file_stream(source)
+            file_stream = get_file_stream_raw(source)
             if file_stream is None:
                 raise FileNotFoundError(
                     f"Unable to fetch file from URL: {source}")
-            file_data = file_stream.read()
+            try:
+                file_data = file_stream.read(MAX_DATA_PROCESS_FILE_SIZE_BYTES + 1)
+            finally:
+                try:
+                    file_stream.close()
+                except Exception:
+                    pass
+            _validate_file_size(len(file_data), source)
+            file_size_mb = len(file_data) / (1024 * 1024)
             fetch_elapsed = time.perf_counter() - fetch_start
             logger.info(
                 f"[{self.request.id}] PROCESS TASK: MinIO fetch done in {fetch_elapsed:.3f}s, "
@@ -1473,6 +1913,11 @@ def process(
                 )
             image_metadata_chunk_count = _count_image_metadata_chunks(chunks)
 
+        _validate_chunk_count(
+            chunk_count,
+            original_filename or source,
+        )
+
         logger.info(
             f"[{self.request.id}] PROCESS TASK: Chunk composition: total={chunk_count}, "
             f"image_metadata={image_metadata_chunk_count}, text={max(0, chunk_count - image_metadata_chunk_count)}")
@@ -1513,6 +1958,17 @@ def process(
 
     except Exception as e:
         logger.error(f"Error processing file {source}: {str(e)}")
+        redis_key = f"dp:{task_id}:chunks"
+        try:
+            if not _is_split_cancelled(redis_key):
+                _mark_split_failed(redis_key, str(e))
+        except Exception as marker_exc:
+            logger.warning(
+                "Failed to publish terminal process failure for '%s': %s",
+                redis_key,
+                marker_exc,
+            )
+        _cleanup_split_payloads(redis_key, keep_cancelled=True)
         # task_id is already defined at the start of the function
         try:
             # Try to parse the exception as JSON (it might be our custom JSON error)
@@ -1674,6 +2130,7 @@ def forward(
                 f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
                 f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
             )
+            _cleanup_forward_chunks(processed_data)
             return _build_forward_cancelled_result(ctx)
 
         chunks, split_async, original_source, original_index_name, filename = _load_forward_chunks(
@@ -1730,6 +2187,15 @@ def forward(
 
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Starting ES indexing for {len(formatted_chunks)} chunks to index '{original_index_name}'...")
+        forward_deadline = time.monotonic() + DP_FORWARD_FILE_TIMEOUT_S
+
+        def _remaining_forward_time() -> float:
+            remaining = forward_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Forward task exceeded the {DP_FORWARD_FILE_TIMEOUT_S}s file deadline"
+                )
+            return remaining
 
         # Update task state with total chunks before starting vectorization
         self.update_state(
@@ -1763,6 +2229,7 @@ def forward(
                 source=original_source,
                 original_filename=original_filename,
                 large_mode=False,
+                timeout_s=_remaining_forward_time(),
             )
         else:
             batches = _build_balanced_batches(
@@ -1785,29 +2252,68 @@ def forward(
                 f"[{self.request.id}] FORWARD TASK: Batch distribution ready: total_batches={total_batches}, "
                 f"batch_size={FORWARD_ES_CHUNK_BATCH_SIZE}, image_metadata_total={image_chunks_total}, "
                 f"image_per_batch={image_distribution}")
-            group_tasks = group(
-                forward_part.s(
+            total_indexed = 0
+            total_submitted = 0
+            for idx, batch in enumerate(batches, start=1):
+                if _is_forward_task_cancelled(ctx):
+                    raise RuntimeError(
+                        f"Forward task {task_id} was cancelled while indexing"
+                    )
+                batch_result = _send_chunks_to_es(
                     chunks=batch,
                     index_name=original_index_name,
                     authorization=authorization,
-                    parent_task_id=task_id,
-                    parent_total_chunks=total_chunks,
+                    task_id=None,
                     source=original_source,
                     original_filename=original_filename,
-                    batch_index=idx + 1,
-                    total_batches=total_batches,
-                    # If request was split into multiple groups, force all groups to use large path.
                     large_mode=True,
-                ).set(queue='forward_q') for idx, batch in enumerate(batches)
-            )
-            callback = aggregate_forward_parts.s(
-                source=original_source,
-                index_name=original_index_name,
-                original_filename=original_filename
-            ).set(queue='forward_q')
-            result = chord(group_tasks)(callback)
-            with allow_join_result():
-                es_result = result.get()
+                    timeout_s=_remaining_forward_time(),
+                )
+                if not isinstance(batch_result, dict) or not batch_result.get("success"):
+                    error_message = (
+                        batch_result.get("message", "Unknown error from main_server")
+                        if isinstance(batch_result, dict)
+                        else "Unexpected API response"
+                    )
+                    raise _build_forward_error(
+                        message=f"Batch {idx}/{total_batches} failed: {error_message}",
+                        index_name=original_index_name,
+                        source=original_source,
+                        original_filename=original_filename,
+                    )
+                batch_indexed = int(batch_result.get("total_indexed", 0) or 0)
+                batch_submitted = int(
+                    batch_result.get("total_submitted", len(batch)) or 0
+                )
+                if batch_indexed < batch_submitted:
+                    raise _build_forward_error(
+                        message=(
+                            f"Batch {idx}/{total_batches} indexed "
+                            f"{batch_indexed}/{batch_submitted} chunks"
+                        ),
+                        index_name=original_index_name,
+                        source=original_source,
+                        original_filename=original_filename,
+                    )
+                total_indexed += batch_indexed
+                total_submitted += batch_submitted
+                try:
+                    get_redis_service().save_progress_info(
+                        task_id,
+                        total_indexed,
+                        total_chunks,
+                    )
+                except Exception as progress_exc:
+                    logger.warning(
+                        "[%s] FORWARD TASK: Failed updating batch progress: %s",
+                        self.request.id,
+                        progress_exc,
+                    )
+            es_result = {
+                "success": True,
+                "total_indexed": total_indexed,
+                "total_submitted": total_submitted,
+            }
         logger.debug(
             f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
 
@@ -1877,6 +2383,7 @@ def forward(
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Successfully stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
 
+        _cleanup_forward_chunks(processed_data)
         return {
             'task_id': task_id,
             'source': original_source,
@@ -1892,6 +2399,7 @@ def forward(
         if isinstance(e, Retry):
             raise
 
+        _cleanup_forward_chunks(processed_data)
         task_id = self.request.id
         try:
             error_info = json.loads(str(e))
@@ -2209,6 +2717,9 @@ def process_sync(
     try:
         # Process the file based on the source type
         if source_type == "local":
+            if not os.path.exists(source):
+                raise FileNotFoundError(f"File does not exist: {source}")
+            _validate_file_size(os.path.getsize(source), source)
             # The unified actor call, mapping 'file' source_type to 'local' destination
             chunks_ref = actor.process_file.remote(
                 source,
@@ -2218,7 +2729,13 @@ def process_sync(
                 **params
             )
 
-            chunks = ray.get(chunks_ref)
+            chunks = _get_ray_result(
+                chunks_ref,
+                actor,
+                operation=f"synchronously process '{source}'",
+                timeout_s=timeout,
+            )
+            _validate_chunk_count(len(chunks or []), source)
         else:
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet implemented")

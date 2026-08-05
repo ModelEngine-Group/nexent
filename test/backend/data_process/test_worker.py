@@ -74,7 +74,24 @@ def setup_mocks_for_worker(mocker, initialized=False):
         const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
+        const_mod.DP_RAY_OPERATION_TIMEOUT_S = 300
+        const_mod.DP_FORWARD_REQUEST_TIMEOUT_S = 300
+        const_mod.DP_FORWARD_FILE_TIMEOUT_S = 1800
+        const_mod.DP_SPLIT_STATE_TTL_S = 7200
+        const_mod.MAX_CHUNKS_PER_FILE = 10000
+        const_mod.MAX_DATA_PROCESS_FILE_SIZE_BYTES = 50 * 1024 * 1024
+        const_mod.CELERY_RESULT_EXPIRES = 7 * 24 * 60 * 60
+        const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+        const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+        const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
+        const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
         sys.modules["consts.const"] = const_mod
+    const_mod = sys.modules["consts.const"]
+    const_mod.QUEUES = "process_q,process_part_q,forward_q"
+    const_mod.WORKER_CONCURRENCY = 4
+    const_mod.WORKER_NAME = None
+    const_mod.RAY_ADDRESS = "auto"
+    const_mod.RAY_preallocate_plasma = False
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
     if "celery.backends.base" not in sys.modules:
@@ -178,8 +195,17 @@ def setup_mocks_for_worker(mocker, initialized=False):
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
             get_file_stream=lambda object_name, bucket=None: None,
+            get_file_stream_raw=lambda object_name, bucket=None: None,
+            build_s3_url=lambda object_name: f"s3://bucket/{object_name}",
+            upload_fileobj=lambda *args, **kwargs: {"success": True},
         )
         setattr(sys.modules["database"], "attachment_db", sys.modules["database.attachment_db"])
+    if not hasattr(sys.modules["database.attachment_db"], "get_file_stream_raw"):
+        setattr(
+            sys.modules["database.attachment_db"],
+            "get_file_stream_raw",
+            lambda object_name, bucket=None: None,
+        )
     if "database.model_management_db" not in sys.modules:
         sys.modules["database.model_management_db"] = types.SimpleNamespace(
             get_model_by_model_id=lambda model_id, tenant_id=None: None

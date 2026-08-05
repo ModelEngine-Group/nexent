@@ -633,6 +633,20 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_task())
 
+    @patch('backend.services.data_process_service.get_task_details')
+    @pytest.mark.asyncio
+    async def async_test_get_task_details(self, mock_get_task_details):
+        task_data = {"id": "task1", "status": "SUCCESS", "result": {"ok": True}}
+        mock_get_task_details.return_value = task_data
+
+        result = await self.service.get_task_details("task1")
+
+        self.assertEqual(result, task_data)
+        mock_get_task_details.assert_called_once_with("task1")
+
+    def test_get_task_details(self):
+        asyncio.run(self.async_test_get_task_details())
+
     @patch('backend.services.data_process_service.celery_app')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')

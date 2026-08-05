@@ -26,7 +26,7 @@ from database.attachment_db import delete_file, file_exists, get_file_size_from_
 from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
-from data_process.utils import get_task_info, get_all_task_ids_from_redis
+from data_process.utils import get_task_details, get_task_info, get_all_task_ids_from_redis
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
 _conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
@@ -130,6 +130,10 @@ class DataProcessService:
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task by ID (async)"""
         return await get_task_info(task_id)
+
+    async def get_task_details(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed task result by ID (async)."""
+        return await get_task_details(task_id)
 
     async def get_all_tasks(self, filter: bool = True) -> List[Dict[str, Any]]:
         """Get all tasks

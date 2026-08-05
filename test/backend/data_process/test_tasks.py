@@ -21,7 +21,7 @@ class FakeRay:
         self._initialized = True
         self.inits.append(kwargs)
 
-    def get(self, ref):
+    def get(self, ref, **kwargs):
         if ref == "__split_parts__":
             return []
         if isinstance(self.get_returns, dict):
@@ -281,10 +281,17 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     if "database.attachment_db" not in sys.modules:
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
+            get_file_stream_raw=lambda source: io.BytesIO(b"stub-bytes"),
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
             # NOSONAR
             build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",
             upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
+        )
+    if not hasattr(sys.modules["database.attachment_db"], "get_file_stream_raw"):
+        setattr(
+            sys.modules["database.attachment_db"],
+            "get_file_stream_raw",
+            lambda source: io.BytesIO(b"stub-bytes"),
         )
     if "database.knowledge_db" not in sys.modules:
         sys.modules["database.knowledge_db"] = types.SimpleNamespace(
@@ -374,6 +381,10 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.FORWARD_REDIS_RETRY_MAX = 1
         const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
         const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 200
+        const_mod.DP_RAY_OPERATION_TIMEOUT_S = 300
+        const_mod.DP_SPLIT_STATE_TTL_S = 7200
+        const_mod.MAX_CHUNKS_PER_FILE = 10000
+        const_mod.MAX_DATA_PROCESS_FILE_SIZE_BYTES = 50 * 1024 * 1024
         const_mod.PER_WAVE_TIMEOUT = 30
         const_mod.MAX_TIMEOUT = 1800
         const_mod.RAY_GLOBAL_ACTOR_POOL_SIZE = 3
@@ -381,6 +392,9 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "nexent_global_data_processor_pool"
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent-data-process"
         const_mod.DISABLE_RAY_DASHBOARD = False
+        const_mod.CELERY_RESULT_EXPIRES = 7 * 24 * 60 * 60
+        const_mod.CELERY_TASK_TIME_LIMIT = 3600
+        const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
         # New defaults required by ray_actors import
         const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
         const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
@@ -395,6 +409,23 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         # Existing stub already has Redis URLs — just make sure the
         # dashboard flag is set to the value tests expect.
         sys.modules["consts.const"].DISABLE_RAY_DASHBOARD = False
+    for name, value in {
+        "DP_RAY_OPERATION_TIMEOUT_S": 300,
+        "DP_FORWARD_REQUEST_TIMEOUT_S": 300,
+        "DP_FORWARD_FILE_TIMEOUT_S": 1800,
+        "DP_SPLIT_STATE_TTL_S": 7200,
+        "MAX_CHUNKS_PER_FILE": 10000,
+        "MAX_DATA_PROCESS_FILE_SIZE_BYTES": 50 * 1024 * 1024,
+        "CELERY_RESULT_EXPIRES": 7 * 24 * 60 * 60,
+        "CELERY_TASK_TIME_LIMIT": 3600,
+        "CELERY_WORKER_PREFETCH_MULTIPLIER": 1,
+        "QUEUES": "process_q,process_part_q,forward_q",
+        "RAY_ADDRESS": "auto",
+        "RAY_preallocate_plasma": False,
+        "WORKER_CONCURRENCY": 2,
+        "WORKER_NAME": "test-worker",
+    }.items():
+        setattr(sys.modules["consts.const"], name, value)
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
         model_mod = types.ModuleType("consts.model")
@@ -902,13 +933,15 @@ def test_get_ray_actor_returns_actor(monkeypatch):
 
     class _ManagerHandle:
         def __init__(self, actor):
+            self.ensure_pool = types.SimpleNamespace(
+                remote=lambda **kwargs: "__pool_ref__")
             self.get_actor = types.SimpleNamespace(
                 remote=lambda: "__actor_ref__")
             self._actor = actor
 
     monkeypatch.setattr(
         tasks, "_get_or_create_global_pool_manager", lambda: _ManagerHandle(actor_obj))
-    fake_ray.get_returns = {"__actor_ref__": actor_obj}
+    fake_ray.get_returns = {"__pool_ref__": 1, "__actor_ref__": actor_obj}
     actor = tasks.get_ray_actor()
     assert actor is actor_obj
 
@@ -1091,7 +1124,7 @@ def test_forward_redis_cached_invalid_json_raises(monkeypatch):
             return "not-json"
 
     fake_redis_mod = types.SimpleNamespace(Redis=types.SimpleNamespace(
-        from_url=lambda url, decode_responses=True: FakeRedisClient()))
+        from_url=lambda url, decode_responses=True, **kwargs: FakeRedisClient()))
     monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
 
     self = FakeSelf("r3")
@@ -1533,7 +1566,7 @@ def test_forward_loads_chunks_from_redis(monkeypatch):
             return self.kv.get(k)
 
     fake_redis_mod = types.SimpleNamespace(Redis=types.SimpleNamespace(
-        from_url=lambda url, decode_responses=True: FakeRedisClient()))
+        from_url=lambda url, decode_responses=True, **kwargs: FakeRedisClient()))
     monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
 
     # run_async returns success for 1 chunk
@@ -1719,7 +1752,7 @@ def test_process_error_truncates_reason_when_no_error_code(monkeypatch, tmp_path
                 remote=lambda *a, **k: None)
 
     monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
-    fake_ray.get = lambda *_: (_ for _ in ()).throw(Exception(error_json))
+    fake_ray.get = lambda *_, **__: (_ for _ in ()).throw(Exception(error_json))
     # Force extract_error_code to return None so truncation path executes
     monkeypatch.setattr(tasks, "extract_error_code", lambda *a, **k: None)
 
@@ -2093,7 +2126,7 @@ def test_forward_error_fallback_when_json_loads_fails(monkeypatch):
     )
 
 
-def test_process_sync_local_returns(monkeypatch):
+def test_process_sync_local_returns(monkeypatch, tmp_path):
     tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch, initialized=True)
 
     class FakeActor:
@@ -2103,9 +2136,11 @@ def test_process_sync_local_returns(monkeypatch):
 
     monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
     fake_ray.get_returns = [{"content": "a"}, {"content": "b"}]
+    source = tmp_path / "a.txt"
+    source.write_text("content")
 
     self = FakeSelf("s1")
-    out = tasks.process_sync(self, source="/a.txt", source_type="local")
+    out = tasks.process_sync(self, source=str(source), source_type="local")
     assert out["chunks_count"] == 2
     assert "a\n\nb" in out["text"]
 
@@ -2155,7 +2190,7 @@ def test_compute_split_wait_timeout_respects_waves_and_cap(monkeypatch):
     assert tasks._compute_split_wait_timeout(5) == 20
 
 
-def test_forward_large_chunks_uses_chord_batches(monkeypatch):
+def test_forward_large_chunks_uses_bounded_inline_batches(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "https://api")
     monkeypatch.setattr(tasks, "get_file_size", lambda *args, **kwargs: 0)
@@ -2169,41 +2204,19 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
 
     monkeypatch.setattr(tasks, "get_redis_service", lambda: _RedisSvc())
 
-    class _Sig:
-        def __init__(self, kwargs):
-            self.kwargs = kwargs
+    calls = []
 
-        def set(self, **_kw):
-            return self
+    def _send(**kwargs):
+        calls.append(kwargs)
+        count = len(kwargs["chunks"])
+        return {"success": True, "total_indexed": count, "total_submitted": count}
 
-    captured = {"group_sigs": None}
-    monkeypatch.setattr(tasks, "forward_part", types.SimpleNamespace(
-        s=lambda **kwargs: _Sig(kwargs)))
-    monkeypatch.setattr(tasks, "aggregate_forward_parts",
-                        types.SimpleNamespace(s=lambda **kwargs: _Sig(kwargs)))
-
-    def _fake_group(sig_iter):
-        sigs = list(sig_iter)
-        captured["group_sigs"] = sigs
-        return sigs
-
-    def _fake_chord(group_tasks):
-        def _runner(_callback):
-            total = sum(len(sig.kwargs.get("chunks", []))
-                        for sig in group_tasks)
-            return types.SimpleNamespace(
-                get=lambda: {"success": True, "total_indexed": total,
-                             "total_submitted": total, "message": "ok"}
-            )
-        return _runner
-
-    @contextmanager
-    def _fake_allow_join_result():
-        yield
-
-    monkeypatch.setattr(tasks, "group", _fake_group)
-    monkeypatch.setattr(tasks, "chord", _fake_chord)
-    monkeypatch.setattr(tasks, "allow_join_result", _fake_allow_join_result)
+    monkeypatch.setattr(tasks, "_send_chunks_to_es", _send)
+    monkeypatch.setattr(
+        tasks,
+        "chord",
+        lambda *_a, **_k: pytest.fail("forward must not create a same-queue chord"),
+    )
 
     self = FakeSelf("forward-batch")
     large_chunks = [{"content": f"content-{i}", "metadata": {}}
@@ -2218,10 +2231,8 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     )
 
     assert out["chunks_stored"] == 70
-    assert captured["group_sigs"] is not None
-    assert len(captured["group_sigs"]) == 2
-    assert all(sig.kwargs.get("large_mode")
-               is True for sig in captured["group_sigs"])
+    assert len(calls) == 2
+    assert all(call.get("large_mode") is True for call in calls)
 
 
 def test_process_sync_unsupported_raises_and_updates_state(monkeypatch):
@@ -2262,7 +2273,7 @@ def test_forward_redis_retry_when_value_absent(monkeypatch):
             return None
 
     fake_redis_mod = types.SimpleNamespace(Redis=types.SimpleNamespace(
-        from_url=lambda url, decode_responses=True: FakeRedisClient()))
+        from_url=lambda url, decode_responses=True, **kwargs: FakeRedisClient()))
     monkeypatch.setitem(sys.modules, "redis", fake_redis_mod)
 
     self = FakeSelf("r2")
@@ -2451,9 +2462,11 @@ def test_wait_for_split_ready_branches(monkeypatch):
 
         def get(self, key):
             self.calls += 1
-            if key.endswith(":ready"):
-                return "1" if self.calls >= 1 else None
-            return '["a", "b"]'
+            if key in ("dp:k:error", "dp:k:cancelled"):
+                return None
+            if key == "dp:k:ready":
+                return "1"
+            return '["a", "b"]' if key == "dp:k" else None
 
     fake_redis_mod = types.SimpleNamespace(
         Redis=types.SimpleNamespace(from_url=lambda *a, **k: FakeClient())
@@ -2473,7 +2486,9 @@ def test_wait_for_split_ready_timeout_and_bad_json(monkeypatch):
 
     class ClientBadJson:
         def get(self, key):
-            return "1" if key.endswith(":ready") else "{bad"
+            if key in ("dp:k:error", "dp:k:cancelled"):
+                return None
+            return "1" if key == "dp:k:ready" else "{bad"
 
     fake_redis_mod = types.SimpleNamespace(
         Redis=types.SimpleNamespace(from_url=lambda *a, **k: ClientBadJson())
@@ -2613,7 +2628,7 @@ def test_prewarm_ray_actors(monkeypatch):
     monkeypatch.setattr(
         tasks, "_get_or_create_global_pool_manager", lambda: manager)
     monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 4)
-    monkeypatch.setattr(fake_ray, "get", lambda ref: 3)
+    monkeypatch.setattr(fake_ray, "get", lambda ref, **kwargs: 3)
     assert tasks.prewarm_ray_actors(target_size=3) == 3
 
 
@@ -2665,7 +2680,7 @@ def test_aggregate_store_chunks_paths(monkeypatch):
     monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
     kv = {
         "part1": '[{"a":1}]',
-        "part2": "bad-json",
+        "part2": '[{"a":2}]',
     }
     written = {}
 
@@ -2679,15 +2694,21 @@ def test_aggregate_store_chunks_paths(monkeypatch):
         def expire(self, *a, **k):
             return True
 
-        def delete(self, k):
-            kv.pop(k, None)
+        def delete(self, *keys):
+            for key in keys:
+                kv.pop(key, None)
+
+        def scan_iter(self, **kwargs):
+            return iter(())
 
     monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(
         Redis=types.SimpleNamespace(from_url=lambda *a, **k: Client())))
     res = tasks.aggregate_store_chunks(
         self,
-        parts_results=[{"part_redis_key": "part1"},
-                       {"part_redis_key": "part2"}],
+        parts_results=[
+            {"success": True, "part_redis_key": "part1", "chunks_count": 1},
+            {"success": True, "part_redis_key": "part2", "chunks_count": 1},
+        ],
         redis_key="maink",
         source="s",
         index_name="idx",
@@ -2695,6 +2716,21 @@ def test_aggregate_store_chunks_paths(monkeypatch):
     )
     assert res["redis_key"] == "maink"
     assert "maink" in written and "maink:ready" in written
+
+    kv["part-bad"] = "bad-json"
+    with pytest.raises(Exception):
+        tasks.aggregate_store_chunks(
+            self,
+            parts_results=[{
+                "success": True,
+                "part_redis_key": "part-bad",
+                "chunks_count": 1,
+            }],
+            redis_key="bad-main",
+            source="s",
+            index_name="idx",
+            original_filename="a.txt",
+        )
 
 
 def test_forward_part_success_and_progress(monkeypatch):
@@ -2983,3 +3019,310 @@ def test_get_all_task_ids_uses_scan_instead_of_keys(monkeypatch):
         "task-1",
         "task-2",
     ]
+
+
+def test_ray_timeout_cancels_reference_and_replaces_actor(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class GetTimeoutError(Exception):
+        pass
+
+    actor = object()
+    calls = {"cancel": [], "replace": []}
+
+    def _get(_ref, **kwargs):
+        assert kwargs["timeout"] == 300
+        raise GetTimeoutError("operation timed out")
+
+    monkeypatch.setattr(fake_ray, "get", _get)
+    monkeypatch.setattr(
+        fake_ray,
+        "cancel",
+        lambda ref, force=False: calls["cancel"].append((ref, force)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tasks,
+        "_replace_failed_ray_actor",
+        lambda failed_actor, operation, error: calls["replace"].append(
+            (failed_actor, operation, str(error))
+        ),
+    )
+
+    with pytest.raises(GetTimeoutError):
+        tasks._get_ray_result("ray-ref", actor, "extract file")
+
+    assert calls["cancel"] == [("ray-ref", True)]
+    assert calls["replace"] == [(actor, "extract file", "operation timed out")]
+
+
+def test_split_wait_failure_revokes_only_current_group(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    captured = {"signatures": [], "revoke": [], "marked": [], "cleaned": []}
+
+    class Signature:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+
+        def set(self, **kwargs):
+            return self
+
+    class Parent:
+        def revoke(self, **kwargs):
+            captured["revoke"].append(kwargs)
+
+    result = types.SimpleNamespace(parent=Parent())
+    monkeypatch.setattr(
+        tasks,
+        "process_part",
+        types.SimpleNamespace(s=lambda **kwargs: Signature(kwargs)),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "aggregate_store_chunks",
+        types.SimpleNamespace(s=lambda **kwargs: Signature(kwargs)),
+    )
+    monkeypatch.setattr(tasks, "group", lambda signatures: list(signatures))
+
+    def _chord(signatures):
+        captured["signatures"] = signatures
+        return lambda _callback: result
+
+    monkeypatch.setattr(tasks, "chord", _chord)
+    monkeypatch.setattr(
+        tasks,
+        "_wait_for_split_ready",
+        lambda **kwargs: (_ for _ in ()).throw(TimeoutError("split timeout")),
+    )
+    monkeypatch.setattr(tasks, "_is_split_cancelled", lambda _key: False)
+    monkeypatch.setattr(
+        tasks,
+        "_mark_split_failed",
+        lambda key, error: captured["marked"].append((key, error)),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "_cleanup_split_payloads",
+        lambda key, keep_cancelled=False: captured["cleaned"].append(
+            (key, keep_cancelled)
+        ),
+    )
+
+    with pytest.raises(TimeoutError):
+        tasks._run_processing_for_parts(
+            request_id="request-1",
+            source="/big.xlsx",
+            source_type="local",
+            task_id="file-task-1",
+            chunking_strategy="basic",
+            filename_for_processing="big.xlsx",
+            parts=[b"a", b"b", b"c"],
+            index_name="idx",
+            original_filename="big.xlsx",
+            embedding_model_id=1,
+            tenant_id="tenant",
+            params={},
+        )
+
+    assert len(captured["signatures"]) == 3
+    assert all(
+        signature.kwargs["split_redis_key"] == "dp:file-task-1:chunks"
+        for signature in captured["signatures"]
+    )
+    assert captured["revoke"] == [{"terminate": False}]
+    assert captured["marked"][0][0] == "dp:file-task-1:chunks"
+    assert captured["cleaned"] == [("dp:file-task-1:chunks", True)]
+
+
+def test_minio_unknown_size_read_is_bounded_and_stream_is_closed(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "MAX_DATA_PROCESS_FILE_SIZE_BYTES", 8)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *_a, **_k: 0)
+    monkeypatch.setattr(tasks, "_is_split_cancelled", lambda _key: False)
+    monkeypatch.setattr(tasks, "_mark_split_failed", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "_cleanup_split_payloads", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "save_error_to_redis", lambda *_a, **_k: None)
+
+    class Stream:
+        closed = False
+        requested = None
+
+        def read(self, size):
+            self.requested = size
+            return b"x" * size
+
+        def close(self):
+            self.closed = True
+
+    stream = Stream()
+    monkeypatch.setattr(tasks, "get_file_stream_raw", lambda _source: stream)
+    monkeypatch.setattr(
+        tasks,
+        "get_ray_actor",
+        lambda: pytest.fail("oversized payload must be rejected before Ray"),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        tasks.process(
+            FakeSelf("oversized-minio"),
+            source="s3://bucket/oversized.bin",
+            source_type="minio",
+            index_name="idx",
+        )
+
+    assert stream.requested == 9
+    assert stream.closed is True
+    assert "file_too_large" in str(exc_info.value)
+
+
+def test_chunk_limit_has_stable_terminal_error_code(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "MAX_CHUNKS_PER_FILE", 3)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tasks._validate_chunk_count(4, "explosive.csv")
+
+    assert json.loads(str(exc_info.value))["error_code"] == "too_many_chunks"
+
+
+def test_process_attempt_guard_detects_worker_redelivery(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://test")
+
+    class Client:
+        value = 0
+        ttl = None
+
+        def incr(self, key):
+            assert key == "dp:file-task:attempts"
+            self.value += 1
+            return self.value
+
+        def expire(self, key, ttl):
+            assert key == "dp:file-task:attempts"
+            self.ttl = ttl
+
+    client = Client()
+    monkeypatch.setattr(tasks, "_get_split_redis_client", lambda: client)
+
+    assert tasks._claim_process_attempt("file-task") == 1
+    assert tasks._claim_process_attempt("file-task") == 2
+    assert client.ttl == tasks.DP_SPLIT_STATE_TTL_S
+
+
+def test_forward_failure_does_not_block_later_small_file(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *_a, **_k: 0)
+
+    class RedisService:
+        def is_task_cancelled(self, _task_id):
+            return False
+
+        def save_progress_info(self, *_a, **_k):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("injected ES failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="injected ES failure"):
+        tasks.forward(
+            FakeSelf("failed-large"),
+            processed_data={
+                "chunks": [
+                    {"content": f"large-{index}", "metadata": {}}
+                    for index in range(70)
+                ]
+            },
+            index_name="idx",
+            source="/large.txt",
+            source_type="local",
+        )
+
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **kwargs: {
+            "success": True,
+            "total_indexed": len(kwargs["chunks"]),
+            "total_submitted": len(kwargs["chunks"]),
+        },
+    )
+    result = tasks.forward(
+        FakeSelf("later-small"),
+        processed_data={"chunks": [{"content": "small", "metadata": {}}]},
+        index_name="idx",
+        source="/small.txt",
+        source_type="local",
+    )
+
+    assert result["chunks_stored"] == 1
+
+
+def test_parallel_large_file_failures_do_not_block_later_small_file(
+    monkeypatch,
+    tmp_path,
+):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from threading import Barrier
+
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    barrier = Barrier(6)
+    monkeypatch.setattr(tasks, "_claim_process_attempt", lambda _task_id: 1)
+    monkeypatch.setattr(tasks, "_is_split_cancelled", lambda _key: False)
+    monkeypatch.setattr(tasks, "_mark_split_failed", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "_cleanup_split_payloads", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "save_error_to_redis", lambda *_a, **_k: None)
+
+    def _process_source(**kwargs):
+        source = kwargs["source"]
+        if "mock-large" in source:
+            barrier.wait(timeout=3)
+        if "fail" in source:
+            raise MemoryError("injected OOM")
+        return False, [{"content": "chunk", "metadata": {}}], None
+
+    monkeypatch.setattr(tasks, "_process_source_with_split", _process_source)
+
+    sources = []
+    for index in range(6):
+        suffix = "fail" if index in (1, 4) else "ok"
+        path = tmp_path / f"mock-large-{index}-{suffix}.txt"
+        path.write_text("mock payload")
+        sources.append(path)
+
+    outcomes = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(
+                tasks.process,
+                FakeSelf(f"parallel-{index}"),
+                source=str(path),
+                source_type="local",
+                index_name="idx",
+                original_filename=path.name,
+            ): path
+            for index, path in enumerate(sources)
+        }
+        for future in as_completed(futures):
+            try:
+                outcomes.append(("success", future.result()))
+            except Exception as exc:
+                outcomes.append(("failure", str(exc)))
+
+    assert sum(status == "success" for status, _ in outcomes) == 4
+    assert sum(status == "failure" for status, _ in outcomes) == 2
+
+    small_file = tmp_path / "later-small.txt"
+    small_file.write_text("small payload")
+    later_result = tasks.process(
+        FakeSelf("later-small-process"),
+        source=str(small_file),
+        source_type="local",
+        index_name="idx",
+        original_filename=small_file.name,
+    )
+    assert later_result["redis_key"] == "dp:later-small-process:chunks"

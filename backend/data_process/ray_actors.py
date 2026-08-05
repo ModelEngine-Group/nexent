@@ -9,6 +9,7 @@ import ray
 from consts.const import (
     RAY_ACTOR_NUM_CPUS,
     REDIS_BACKEND_URL,
+    DP_SPLIT_STATE_TTL_S,
     DEFAULT_EXPECTED_CHUNK_SIZE,
     DEFAULT_MAXIMUM_CHUNK_SIZE,
     TABLE_TRANSFORMER_MODEL_PATH,
@@ -373,7 +374,11 @@ class DataProcessorRayActor:
         try:
             import redis
             client = redis.Redis.from_url(
-                REDIS_BACKEND_URL, decode_responses=True)
+                REDIS_BACKEND_URL,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+            )
             # Use a compact JSON for storage
             if chunks is None:
                 logger.error(
@@ -385,11 +390,9 @@ class DataProcessorRayActor:
                 except Exception as ser_exc:
                     logger.error(
                         f"[RayActor] JSON serialization failed for key '{redis_key}': {ser_exc}")
-                    # Fallback to empty list to avoid poisoning Redis with invalid data
-                    serialized = json.dumps([])
+                    return False
             client.set(redis_key, serialized)
-            # Optionally set an expiration to avoid leaks (e.g., 2 hours)
-            client.expire(redis_key, 2 * 60 * 60)
+            client.expire(redis_key, DP_SPLIT_STATE_TTL_S)
             try:
                 count_logged = len(chunks) if isinstance(chunks, list) else 0
             except Exception:

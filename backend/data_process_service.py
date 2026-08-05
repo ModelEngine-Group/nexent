@@ -19,7 +19,8 @@ from utils.logging_utils import configure_logging
 from consts.const import (
     REDIS_URL, REDIS_PORT, FLOWER_PORT, RAY_DASHBOARD_PORT, RAY_DASHBOARD_HOST,
     RAY_ACTOR_NUM_CPUS, RAY_NUM_CPUS, DISABLE_RAY_DASHBOARD, DISABLE_CELERY_FLOWER,
-    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR
+    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR,
+    DP_MAX_FORWARD_CONCURRENCY, DP_MAX_PROCESS_CONCURRENCY,
 )
 
 # Load environment variables
@@ -198,11 +199,18 @@ class ServiceManager:
             
             # Calculate concurrency for the process-worker. Each worker will spawn an actor,
             # so we limit concurrency to avoid oversubscribing Ray's CPU resources.
-            process_worker_concurrency = max(1, total_cpus // ray_actor_num_cpus)
+            ray_process_capacity = max(1, total_cpus // ray_actor_num_cpus)
+            process_worker_concurrency = max(
+                1,
+                min(ray_process_capacity, DP_MAX_PROCESS_CONCURRENCY),
+            )
             
             # For forward-worker, it's I/O bound. A higher concurrency is fine, but we can cap it
             # relative to CPU count to avoid creating excessive threads on small machines.
-            forward_worker_concurrency = min(8, total_cpus * 2)
+            forward_worker_concurrency = max(
+                1,
+                min(DP_MAX_FORWARD_CONCURRENCY, total_cpus * 2),
+            )
 
             logger.debug(f"Total available CPUs: {total_cpus}")
             logger.debug(f"CPUs per processing actor (RAY_ACTOR_NUM_CPUS): {ray_actor_num_cpus}")
