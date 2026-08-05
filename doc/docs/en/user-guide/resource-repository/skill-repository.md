@@ -178,7 +178,7 @@ The queue shows information such as the Skill name, submitter, listing note, and
 6. Save the agent configuration.
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/resource-repository/skill_using_en.png" style="width: 80%; height: auto;" alt="Review confirmation" />
+  <img src="../assets/resource-repository/skill_using_en.png" style="width: 80%; height: auto;" alt="Skills tab in agent configuration" />
 </div>
 
 ### Viewing Installed Skills
@@ -186,7 +186,7 @@ The queue shows information such as the Skill name, submitter, listing note, and
 The **Skills** tab in **Select Skills** lists the official and custom Skills available to the current tenant. You can add them to the current agent from this tab.
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/resource-repository/skill_select_en.png" style="width: 80%; height: auto;" alt="Review confirmation" />
+  <img src="../assets/resource-repository/skill_select_en.png" style="width: 80%; height: auto;" alt="Select Skills dialog" />
 </div>
 
 > Different agents can save separate parameter configurations for the same Skill.
@@ -452,6 +452,10 @@ In simple terms:
 
 > You say "I want a skill that can search GitHub repositories and extract Star counts," and the system automatically generates a complete, usable skill for you.
 
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_create_en.png" style="width: 80%; height: auto;" alt="NL-to-Skill creation interface" />
+</div>
+
 ### Quick Start
 
 #### Step 1: Describe Your Requirement
@@ -595,9 +599,9 @@ When encountering requirements that cannot be fulfilled, the system will provide
 
 #### Modifying Skills
 
-In the NL-to-Skill interface, you can select an existing skill. After selecting, the skill information loads automatically. You can then use natural language to attempt updating the skill in the left dialog.
+In **My Skills**, find the Skill you want to change and click **Edit**. On the agent configuration page, you can also click the pencil icon for a Skill that you are allowed to edit. The system loads its basic information, `SKILL.md` body, and additional files. You can use the interactive creation view to refine the content with natural language, or edit the files directly and save your changes.
 
-If the skill name you create conflicts with an existing skill, Nexent will automatically switch from skill creation mode to skill update mode. All content will overwrite the original skill.
+When creating or uploading a Skill, if its name already exists, the system prompts you to change the name before submitting again.
 
 ## Official Skills Overview
 

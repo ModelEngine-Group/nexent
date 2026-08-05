@@ -176,7 +176,7 @@ title: Skill 仓库
 6. 保存智能体配置。
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/resource-repository/skill_using.jpg" style="width: 80%; height: auto;" alt="审核确认" />
+  <img src="../assets/resource-repository/skill_using.jpg" style="width: 80%; height: auto;" alt="智能体配置中的 Skills 页签" />
 </div>
 
 ### 查看已安装的技能
@@ -184,7 +184,7 @@ title: Skill 仓库
 在「选择技能」的 **Skills** 页签中，可查看当前租户可用的官方 Skill 和自定义 Skill，并将其添加到当前智能体。
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/resource-repository/skill_select.png" style="width: 80%; height: auto;" alt="审核确认" />
+  <img src="../assets/resource-repository/skill_select.png" style="width: 80%; height: auto;" alt="选择 Skill 弹窗" />
 </div>
 
 > 不同智能体可以为同一个 Skill 分别保存不同的参数配置。
@@ -442,6 +442,10 @@ NL-to-Skill 是 Nexent 提供的一项智能创建功能。您只需要用**自�
 
 > 您说"我想要一个能搜索 GitHub 仓库并提取 Star 数的技能"，系统就自动为您生成一个完整可用的技能。
 
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_create.png" style="width: 80%; height: auto;" alt="NL-to-Skill 创建界面" />
+</div>
+
 ### 快速上手
 
 #### 第一步：描述您的需求
@@ -585,9 +589,9 @@ NL-to-Skill 擅长生成以下类型的技能：
 
 #### 技能修改
 
-在 NL-to-Skill 界面可以选中已经存在的技能。选中技能后，该技能信息将自动加载。您可以在左侧对话框中使用自然语言尝试对该技能进行更新。
+在「我的 Skill」中找到需要修改的 Skill，点击「编辑」。在智能体配置页面的 Skills 列表中，对具有编辑权限的 Skill 也可点击右侧铅笔图标进入编辑。系统会加载该 Skill 的基本信息、`SKILL.md` 正文和附属文件；您可以通过交互式创建页使用自然语言完善内容，也可以直接编辑文件后保存。
 
-如果您创建的技能名与已有技能重名，Nexent 将自动从技能创建模式切换为技能更新模式。所有内容将覆盖更新至原有技能。
+新建或上传 Skill 时，如名称与已有 Skill 重名，系统会提示修改名称后再提交。
 
 ## 安全与最佳实践
 
