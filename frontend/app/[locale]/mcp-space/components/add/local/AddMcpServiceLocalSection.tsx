@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Select, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
@@ -10,8 +10,6 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
-import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
-import { isValidPort } from "@/lib/mcpTools";
 import ContainerPortField from "../../shared/ContainerPortField";
 import TagEditor from "../../shared/TagEditor";
 
@@ -58,8 +56,6 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
   enableUploadImage?: boolean;
-  /** True when nexent runs inside Docker/K8s: MCP container ports are virtual and locked. */
-  portsVirtual?: boolean;
   onAdded: () => void;
   onSubmittingChange?: (submitting: boolean) => void;
 }
@@ -67,7 +63,6 @@ interface AddMcpServiceLocalSectionProps {
 export default function AddMcpServiceLocalSection({
   active,
   enableUploadImage = false,
-  portsVirtual = false,
   onAdded,
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
@@ -95,31 +90,6 @@ export default function AddMcpServiceLocalSection({
   useEffect(() => {
     onSubmittingChange?.(submitting);
   }, [submitting, onSubmittingChange]);
-
-  // When running inside Docker/K8s (virtual ports), MCP container ports are
-  // not published to the host, so the port is a fixed default (e.g. 5020) and
-  // the user cannot edit it. Auto-suggest it once per add flow so the field is
-  // pre-filled and locked. On a host deployment the user picks the port.
-  const autoSuggestedPortRef = useRef(false);
-  useEffect(() => {
-    const isContainerType =
-      deploymentType === McpDeploymentType.CONTAINER ||
-      deploymentType === McpDeploymentType.LOCAL_IMAGE;
-    if (
-      portsVirtual &&
-      isContainerType &&
-      draft.containerPort === undefined &&
-      !autoSuggestedPortRef.current
-    ) {
-      autoSuggestedPortRef.current = true;
-      suggestMcpContainerPortService().then((res) => {
-        if (res.success && isValidPort(res.data.port)) {
-          patchDraft({ containerPort: res.data.port });
-          form.setFieldValue("containerPort", res.data.port);
-        }
-      });
-    }
-  }, [deploymentType, draft.containerPort, portsVirtual]);
 
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -397,8 +367,6 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
-                    enabled={!portsVirtual}
-                    readonlyHintKey="mcpTools.addModal.portUnifiedHint"
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });
@@ -534,8 +502,7 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
-                    enabled={!portsVirtual}
-                    readonlyHintKey="mcpTools.addModal.portUnifiedHint"
+                    showSuggestButton={false}
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });
