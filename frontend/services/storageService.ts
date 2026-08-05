@@ -28,12 +28,14 @@ export function extractObjectNameFromUrl(url: string): string | null {
       const parts = withoutProtocol.split("/").filter(Boolean);
 
       // Find attachments in path
-      const attachmentsIndex = parts.indexOf("attachments");
-      if (attachmentsIndex >= 0) {
-        return parts.slice(attachmentsIndex).join("/");
+      const storageIndex = parts.findIndex(
+        (part) => part === "attachments" || part === "knowledge_base",
+      );
+      if (storageIndex >= 0) {
+        return parts.slice(storageIndex).join("/");
       }
 
-      // If no attachments found but has bucket and path, return the path after bucket
+      // If no storage prefix was found but has bucket and path, return the path after bucket
       if (parts.length > 1) {
         return parts.slice(1).join("/");
       }
@@ -55,12 +57,18 @@ export function extractObjectNameFromUrl(url: string): string | null {
         return null;
       }
 
-      const attachmentsIndex = normalized.indexOf("attachments/");
-      if (attachmentsIndex >= 0) {
-        return normalized.slice(attachmentsIndex);
+      const storageIndex = ["attachments/", "knowledge_base/"].reduce(
+        (firstIndex, prefix) => {
+          const index = normalized.indexOf(prefix);
+          return index >= 0 && (firstIndex < 0 || index < firstIndex) ? index : firstIndex;
+        },
+        -1,
+      );
+      if (storageIndex >= 0) {
+        return normalized.slice(storageIndex);
       }
 
-      // If there is no "attachments" segment but this is a plain path,
+      // If there is no storage prefix but this is a plain path,
       // treat the whole normalized path as object_name
       return normalized;
     }
@@ -69,11 +77,13 @@ export function extractObjectNameFromUrl(url: string): string | null {
     if (url.startsWith("/")) {
       // Remove leading slash and extract path after /nexent/ or /attachments/
       const parts = url.split("/").filter(Boolean);
-      const attachmentsIndex = parts.indexOf("attachments");
-      if (attachmentsIndex >= 0) {
-        return parts.slice(attachmentsIndex).join("/");
+      const storageIndex = parts.findIndex(
+        (part) => part === "attachments" || part === "knowledge_base",
+      );
+      if (storageIndex >= 0) {
+        return parts.slice(storageIndex).join("/");
       }
-      // If no attachments found, try to find the last part
+      // If no storage prefix was found, try to find the last part
       if (parts.length > 0) {
         return parts.join("/");
       }
@@ -84,13 +94,14 @@ export function extractObjectNameFromUrl(url: string): string | null {
     const pathname = urlObj.pathname;
     const parts = pathname.split("/").filter(Boolean);
 
-    // Find attachments in path
-    const attachmentsIndex = parts.indexOf("attachments");
-    if (attachmentsIndex >= 0) {
-      return parts.slice(attachmentsIndex).join("/");
+    const storageIndex = parts.findIndex(
+      (part) => part === "attachments" || part === "knowledge_base",
+    );
+    if (storageIndex >= 0) {
+      return parts.slice(storageIndex).join("/");
     }
 
-    // If no attachments found, return the last meaningful part
+    // If no storage prefix was found, return the last meaningful part
     if (parts.length > 0) {
       return parts.join("/");
     }
@@ -99,6 +110,27 @@ export function extractObjectNameFromUrl(url: string): string | null {
   } catch (error) {
     return null;
   }
+}
+
+export function isLocalStorageObjectUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  if (url.startsWith("s3://")) return true;
+
+  const objectName = extractObjectNameFromUrl(url);
+  return Boolean(objectName && /(^|\/)(knowledge_base|attachments)\//.test(objectName));
+}
+
+export function getLocalFilePreviewUrl(
+  url: string | undefined,
+  filename?: string,
+  objectName?: string,
+): string | undefined {
+  const resolvedObjectName = objectName || (url ? extractObjectNameFromUrl(url) : null);
+  if (!resolvedObjectName || !isLocalStorageObjectUrl(url ?? resolvedObjectName)) {
+    return undefined;
+  }
+
+  return API_ENDPOINTS.storage.preview(resolvedObjectName, filename);
 }
 
 /**
@@ -300,30 +332,46 @@ export const storageService = {
    */
   async downloadFile(objectName: string, filename?: string): Promise<void> {
     try {
-      // Use direct link download for better performance
-      // Browser will handle the download stream directly
-      // Pass filename to backend so it can set the correct Content-Disposition header
       const downloadUrl = API_ENDPOINTS.storage.file(
         objectName,
         "stream",
         filename
       );
-
-      // Create download link and trigger download
-      // Using direct link allows browser to handle download stream efficiently
       const link = document.createElement("a");
       link.href = downloadUrl;
-      // Set download attribute as fallback (browser will use Content-Disposition header if available)
       link.download = filename || objectName.split("/").pop() || "download";
       link.style.display = "none";
       document.body.appendChild(link);
-
-      // Trigger download
       link.click();
-
-      // Clean up after a short delay to ensure download starts
       setTimeout(() => {
         document.body.removeChild(link);
+      }, 100);
+    } catch (error) {
+      throw new Error(
+        `Failed to download file: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  },
+
+  async downloadFileWithAuth(objectName: string, filename?: string): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.storage.file(objectName, "stream", filename)
+      );
+      if (!response.ok) {
+        throw new Error(`File download failed: ${response.status}`);
+      }
+
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename || objectName.split("/").pop() || "download";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
       }, 100);
     } catch (error) {
       throw new Error(

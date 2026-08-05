@@ -162,3 +162,34 @@
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+.vp-doc img:not([src$='.svg']) {
+  cursor: zoom-in;
+}
+
+.image-preview {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inset: 0;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.82);
+  cursor: zoom-out;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.image-preview.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: default;
+}
+

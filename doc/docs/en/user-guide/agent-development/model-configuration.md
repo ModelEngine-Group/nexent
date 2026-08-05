@@ -1,23 +1,17 @@
 # Model Configuration
 
-In the Model Management module, you can configure your app’s basic information and connect every model the platform needs, including large language models, embedding models, and vision-language models. Nexent supports multiple providers so you can pick the best option for each scenario.
+The Model Configuration module lets you add and configure AI models — large language models, embedding models, rerank models, multimodal models, and voice models. Nexent supports multiple providers so you can pick the best option for each scenario.
 
 ## 🤖 Model Configuration
-
-### 🔄 Sync ModelEngine Models
-
-Nexent supports seamless integration with the ModelEngine platform.
-
-👉 Click **Edit ModelEngine Configuration** in the upper right corner of the page, enter your API key, and you can retrieve all models deployed on ModelEngine.
 
 ### 🛠️ Add Custom Models
 
 #### Add a Single Model
 
 1. **Add a custom model**
-   - Click **Add Custom Model** to open the dialog.
+   - Click **Add Model** to open the dialog.
 2. **Select model type**
-   - Choose Large Language Model, Embedding Model, or Vision Language Model.
+   - Choose Large Language Model, Embedding Model, Image Understanding Model, Image Generation Model, Video Understanding Model, Rerank Model, Speech-to-Text Model or Text-to-Speech Model.
 3. **Configure model parameters**
    - **Model Name (required):** The name you send in API requests.
    - **Display Name:** Optional label shown in the UI (defaults to the model name).
@@ -27,7 +21,7 @@ Nexent supports seamless integration with the ModelEngine platform.
 > ⚠️ **Notes**
 > 1. Model names usually follow `series/model`. Example: `Qwen/Qwen3-8B`.
 > 2. API endpoints come from the provider docs. For SiliconFlow, examples include `https://api.siliconflow.cn/v1` (LLM, VLM) and `https://api.siliconflow.cn/v1/embeddings` (embedding).
-> 3. Generate API keys from the provider’s key management console.
+> 3. Generate API keys from the provider's key management console.
 
 4. **Connectivity verification**
    - Click **Verify** to send a test request and confirm connectivity.
@@ -44,7 +38,7 @@ Use batch import to speed up onboarding:
 
 1. Enable the **Batch Add Models** toggle in the dialog.
 2. Select a **model provider**.
-3. Choose the **model type** (LLM/Embedding/Vision).
+3. Choose the **model type** (LLM/Embedding/VLM/Rerank/STT/TTS).
 4. Enter the **API Key** (required).
 5. Click **Fetch Models** to retrieve the provider list.
 6. Toggle on the models you need (disabled by default).
@@ -59,7 +53,7 @@ Use batch import to speed up onboarding:
 Modify or delete models anytime:
 
 1. Click **Edit Custom Models**.
-2. Select the model type (LLM/Embedding/Vision).
+2. Select the model type (LLM/Embedding/VLM/Rerank/STT/TTS).
 3. Choose between batch editing or single-model editing.
 4. For batch edits, toggle models on/off or click **Edit Config** in the upper-right to change settings in bulk.
 5. For single models, click the trash icon 🗑️ to delete, or click the model name to open the edit dialog.
@@ -88,6 +82,12 @@ After adding models, assign the platform-level defaults. These models handle sys
 - Used for core platform features (title generation, real-time file access, basic text processing).
 - Choose any added large language model from the dropdown.
 
+#### Large Language Model
+
+The large language model serves as the system's core reasoning engine, responsible for processing users' natural language requests, generating responses, executing code, analyzing data, and other complex tasks. Choosing an appropriate large language model can significantly improve the agent's conversational quality and task-handling capabilities.
+
+- Click the Large Language Model dropdown and select one from the added large language models.
+
 #### Embedding Model
 
 Embedding models are primarily used for vectorization processing of text, images, and other data in knowledge bases, forming the foundation for efficient retrieval and semantic understanding. Configuring an appropriate embedding model can significantly improve knowledge base search accuracy and multimodal data processing capabilities.
@@ -101,15 +101,33 @@ Choose appropriate document chunk size and chunks per request based on model cap
   <img src="../assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
 </div>
 
-#### Vision-Language Model
+#### Rerank Model
 
-- Required for multimodal chat scenarios (for example, when users upload images).
-- Pick one of the added vision-language models.
+The rerank model performs semantic matching and scoring on initially filtered documents to ensure the most relevant answers are ranked first, improving retrieval accuracy and efficiency. Configuring an appropriate rerank model can significantly improve knowledge base retrieval effectiveness.
 
-<div style="display: flex; gap: 8px;">
-  <img src="../assets/model-management/select-model-1.png" style="width: 30%; height: 100%;" />
-  <img src="../assets/model-management/select-model-2.png" style="width: 30%; height: 100%;" />
-  <img src="../assets/model-management/select-model-3.png" style="width: 30%; height: 100%;" />
+- Click the Rerank Model dropdown to select one from the added rerank models.
+
+#### Multimodal Models
+
+Multimodal models combine visual and language capabilities to handle complex scenarios containing text, images, and other types of information.
+
+- **Image Understanding Model**: Can analyze and understand image content, extract key information, and answer questions related to images. Click the Image Understanding Model dropdown to select one from the added models.
+- **Image Generation Model**: Can generate images based on text descriptions, supporting creative design, content creation, and other scenarios. Click the Image Generation Model dropdown to select one from the added models.
+- **Video Understanding Model**: Can analyze and understand video content, extract key information, generate summaries, or answer questions related to videos. Click the Video Understanding Model dropdown to select one from the added models.
+
+#### Voice Models
+
+Voice models enable bidirectional conversion between speech and text, supporting voice interaction scenarios.
+
+- **Text-to-Speech Model**: Converts text content into natural, fluent speech output in real-time, enabling the system to interact with users in a near-human voice. With low latency and high-fidelity speech generation capabilities, it ensures a smooth and natural auditory experience during conversations. Click the Text-to-Speech Model dropdown to select one from the added models.
+- **Speech-to-Text Model**: Converts user voice input into text in real-time, enabling accurate understanding and parsing of voice commands and natural language. With high-precision speech transcription and noise robustness, it ensures stable recognition of user intent even in complex environments. Click the Speech-to-Text Model dropdown to select one from the added models.
+
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+  <img src="../assets/model-management/select-model-1.png" style="width: 30%; height: auto;" />
+  <img src="../assets/model-management/select-model-2.png" style="width: 30%; height: auto;" />
+  <img src="../assets/model-management/select-model-3.png" style="width: 30%; height: auto;" />
+  <img src="../assets/model-management/select-model-4.png" style="width: 30%; height: auto;" />
+  <img src="../assets/model-management/select-model-5.png" style="width: 30%; height: auto;" />
 </div>
 
 ### ✅ Check Model Connectivity
@@ -129,7 +147,7 @@ Troubleshooting tips:
 
 - Confirm network stability.
 - Ensure the API key is valid and not expired.
-- Check the provider’s service status.
+- Check the provider's service status.
 - Review firewall and security policies.
 
 ### 🤖 Supported Providers
@@ -148,12 +166,12 @@ Nexent supports any **OpenAI-compatible** provider, including:
 
 Getting started:
 
-1. Sign up at the provider’s portal.
+1. Sign up at the provider's portal.
 2. Create and copy an API key.
 3. Locate the API endpoint (usually ending with `/v1`).
 4. Click **Add Custom Model** in Nexent and fill in the required fields.
 
-#### Multimodal Vision Models
+#### Multimodal Models
 
 Use the same API key and URL as LLMs but specify a multimodal model name, for example **Qwen/Qwen2.5-VL-32B-Instruct** on SiliconFlow.
 
@@ -161,35 +179,50 @@ Use the same API key and URL as LLMs but specify a multimodal model name, for ex
 
 Use the same API key as LLMs but typically a different endpoint (often `/v1/embeddings`), for example **BAAI/bge-m3** from SiliconFlow.
 
+#### Rerank Models
+
+Use the same API key as LLMs but typically a different endpoint (often `/v1/rerank`).
+
 #### Speech Models
 
-Currently only **VolcEngine Voice** is supported and must be configured via `.env`:
+Currently supports VolcEngine Voice and Aliyun Bailian voice models. VolcEngine requires `appid` and `token`, while Aliyun Bailian uses the same API key as the large language model.
 
-- **Website:** [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
-- **Free tier:** Available for individual use
-- **Highlights:** High-quality Chinese/English TTS
+**VolcEngine**
+- **Website**: [volcengine.com/product/voice-tech](https://www.volcengine.com/product/voice-tech)
+- **Free tier**: Available for individual use
+- **Highlights**: High-quality Chinese/English TTS
+- Recommended models: **Doubao Text-to-Speech Model 2.0** and **Large Model Streaming Speech Recognition**
+- **Getting started**:
 
-Steps:
+  1. Register a VolcEngine account.
+  2. Enable the Voice Technology service.
+  3. Create an app and generate `appid` and `token`.
+  4. Configure the TTS/STT settings in the Add Model page.
 
-1. Register a VolcEngine account.
-2. Enable the Voice Technology service.
-3. Create an app and generate an API key.
-4. Configure the TTS/STT settings in your environment.
+**Aliyun Bailian**
+- **Website**: [aliyun.com/benefit/scene/voice](https://www.aliyun.com/benefit/scene/voice)
+- Recommended models: **Qwen3-TTS-Instruct-Flash-Realtime / Qwen3-TTS-Flash-Realtime** and **Qwen3-ASR-Flash-Realtime**
+- **Getting started**:
+
+  1. Register an Aliyun account.
+  2. Enable the Qwen real-time voice service.
+  3. Create an app and generate an API Key.
+  4. Configure the TTS/STT settings in the Add Model page.
 
 ## 💡 Need Help
 
 If you run into provider issues:
 
-1. Review the provider’s documentation.
+1. Review the provider's documentation.
 2. Check API key permissions and quotas.
-3. Test with the provider’s official samples.
+3. Test with the provider's official samples.
 4. Ask the community in our [Discord server](https://discord.gg/tb5H3S3wyv).
 
 ## 🚀 Next Steps
 
-After closing the Model Management flow, continue with:
+After closing the Model Configuration flow, continue with:
 
-1. **[Knowledge Base](./knowledge-configuration.md)** – Create and manage knowledge bases.
-2. **[Agent Development](../agent-development.md)** – Build and configure agents.
+1. **[Knowledge Base](./knowledge-configuration)** – Create and manage knowledge bases.
+2. **[Agent Configuration](./agent-configuration)** – Build and configure agents.
 
-Need help? Check the **[FAQ](../../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

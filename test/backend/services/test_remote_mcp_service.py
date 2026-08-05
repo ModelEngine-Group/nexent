@@ -118,7 +118,6 @@ from backend.consts.model import MCPConfigRequest
 from backend.services.remote_mcp_service import (
     mcp_server_health,
     _is_container_record,
-    mcp_ports_are_virtual,
     check_container_port_conflict_records,
     check_runtime_host_port_available,
     check_container_port_conflict,
@@ -1556,47 +1555,14 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
 
 
 # ============================================================================
-# mcp_ports_are_virtual() detection
-# ============================================================================
-
-class TestMcpPortsAreVirtual(unittest.TestCase):
-    """Test the mcp_ports_are_virtual() detection helper.
-
-    Covers both branches of ``IS_DEPLOYED_BY_KUBERNETES or
-    Path('/.dockerenv').exists()``.
-    """
-
-    @patch('backend.services.remote_mcp_service.IS_DEPLOYED_BY_KUBERNETES', False)
-    @patch('backend.services.remote_mcp_service.Path')
-    def test_false_on_host(self, mock_path):
-        """Returns False when neither Kubernetes nor a Docker container is detected."""
-        mock_path.return_value.exists.return_value = False
-        self.assertIs(mcp_ports_are_virtual(), False)
-        mock_path.assert_called_once_with("/.dockerenv")
-
-    @patch('backend.services.remote_mcp_service.IS_DEPLOYED_BY_KUBERNETES', True)
-    def test_true_on_kubernetes(self):
-        """Returns True when deployed by Kubernetes (short-circuits the Path check)."""
-        self.assertIs(mcp_ports_are_virtual(), True)
-
-    @patch('backend.services.remote_mcp_service.IS_DEPLOYED_BY_KUBERNETES', False)
-    @patch('backend.services.remote_mcp_service.Path')
-    def test_true_inside_docker(self, mock_path):
-        """Returns True when running inside a Docker container (/.dockerenv exists)."""
-        mock_path.return_value.exists.return_value = True
-        self.assertIs(mcp_ports_are_virtual(), True)
-
-
-# ============================================================================
 # add_container_mcp_service deploy-time port conflict guard
 # ============================================================================
 
 class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
     """Test the port-conflict guard in add_container_mcp_service.
 
-    In Docker/K8s (virtual) mode multiple MCPs may share the same internal port
-    and the conflict check is skipped; on a host deployment the check runs and
-    an occupied port is rejected.
+    The conflict check always runs: an occupied port is rejected before the
+    container is started, and a free port allows deployment to proceed.
     """
 
     def _make_mcp_config(self):
@@ -1608,44 +1574,10 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
     @patch('backend.services.remote_mcp_service.check_container_port_conflict')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.mcp_ports_are_virtual')
-    async def test_virtual_mode_skips_conflict_check(
-        self, mock_virtual, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    async def test_rejects_in_use_port(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
-        """Virtual mode skips the conflict check so multiple MCPs can share a port."""
-        mock_virtual.return_value = True
-        mock_check_name.return_value = False
-        mock_port_check.return_value = False  # would block on a host; ignored in virtual mode
-        mock_mgr = MagicMock()
-        mock_mgr.start_mcp_container = AsyncMock(return_value={
-            "container_id": "cid",
-            "mcp_url": "https://localhost:5020/mcp",
-            "host_port": 5020,
-            "container_name": "test-svc-xyz",
-        })
-        mock_mgr_cls.return_value = mock_mgr
-
-        await add_container_mcp_service(
-            tenant_id='tid', user_id='uid', name='test-svc',
-            description='desc', source='local', tags=[],
-            authorization_token=None, registry_json=None,
-            market_id=None, port=5020, mcp_config=self._make_mcp_config(),
-        )
-
-        mock_port_check.assert_not_called()
-        mock_mgr.start_mcp_container.assert_awaited_once()
-        mock_add.assert_awaited_once()
-
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.mcp_ports_are_virtual')
-    async def test_host_mode_rejects_in_use_port(
-        self, mock_virtual, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
-    ):
-        """Host deployment rejects an occupied port before starting the container."""
-        mock_virtual.return_value = False
+        """An occupied port is rejected before starting the container."""
         mock_check_name.return_value = False
         mock_port_check.return_value = False  # port already in use
 
@@ -1665,12 +1597,10 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
     @patch('backend.services.remote_mcp_service.check_container_port_conflict')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.mcp_ports_are_virtual')
-    async def test_host_mode_proceeds_when_port_free(
-        self, mock_virtual, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    async def test_proceeds_when_port_free(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
-        """Host deployment with a free port passes the conflict check and deploys."""
-        mock_virtual.return_value = False
+        """A free port passes the conflict check and deploys."""
         mock_check_name.return_value = False
         mock_port_check.return_value = True
         mock_mgr = MagicMock()

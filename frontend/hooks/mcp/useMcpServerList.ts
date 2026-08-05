@@ -25,15 +25,11 @@ export function useMcpServerList(options?: { enabled?: boolean; staleTime?: numb
 
   const serverList = (query.data?.data ?? []) as McpServer[];
   const enableUploadImage = Boolean(query.data?.enable_upload_image);
-  // True when running inside a container (Docker/K8s): MCP container ports are
-  // not published to the host, so they never conflict and can be fixed/locked.
-  const mcpPortsVirtual = Boolean(query.data?.mcp_ports_virtual);
 
   return {
     ...query,
     serverList,
     enableUploadImage,
-    mcpPortsVirtual,
     invalidate: () => queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY }),
   };
 }

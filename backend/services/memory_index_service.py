@@ -33,7 +33,7 @@ from consts.const import VectorDatabaseType
 
 
 logger = logging.getLogger("memory_index_service")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def _memory_chunk_payload(
@@ -223,13 +223,6 @@ class MemoryIndexService:
             ``metadata.tenant_id`` would never match. We therefore query
             the auto-generated ``.keyword`` sub-field for exact equality.
         """
-        logger.debug(
-            "[ES_SEARCH] index=%s tenant_id=%s user_id=%s agent_id=%s top_k=%s "
-            "embedding_len=%d hybrid=%s weight_accurate=%s",
-            index_name, tenant_id, user_id, agent_id, top_k, len(embedding),
-            hybrid, weight_accurate,
-        )
-
         if not index_name or not embedding:
             return []
 
@@ -303,23 +296,15 @@ class MemoryIndexService:
             },
             "size": max(1, int(top_k)),
         }
-        logger.debug("[ES_QUERY] knn_query=%s", json.dumps(query, indent=2))
 
         try:
             response = self.vdb_core.search(index_name=index_name, query=query)
             response_body = response.body if hasattr(response, "body") else response
-            logger.debug(
-                "[ES_RESPONSE] response_type=%s hits=%s score_min=%s",
-                type(response).__name__,
-                (response_body or {}).get("hits", {}).get("total", {}).get("value"),
-                _safe_score_preview(response_body),
-            )
         except Exception:
             logger.exception("search_similar failed for %s", index_name)
             return []
 
         hits = (response_body or {}).get("hits", {}).get("hits", []) or []
-        logger.debug("[ES_HITS] hit_count=%d", len(hits))
 
         return [_hit_to_memory_result(hit) for hit in hits]
 
@@ -359,11 +344,6 @@ class MemoryIndexService:
                 top_k=top_k,
             )
 
-        logger.debug(
-            "[ES_HYBRID] weight_accurate=%s filter_terms=%d query_text=%r",
-            weight_accurate, len(isolation_filter), query_text,
-        )
-
         try:
             raw = vdb_core.hybrid_search(
                 index_names=[index_name],
@@ -397,14 +377,6 @@ class MemoryIndexService:
         for item in raw or []:
             document = item.get("document") or {}
             metadata = document.get("metadata") or {}
-            hit_id = item.get("index", index_name) + ":" + str(
-                document.get("id") or metadata.get("memory_id") or ""
-            )
-            logger.debug(
-                "[ES_HYBRID_HIT] doc_id=%s combined_score=%s",
-                hit_id,
-                item.get("score"),
-            )
             results.append({
                 "memory_id": document.get("id") or metadata.get("memory_id"),
                 "content": document.get("content", ""),
@@ -416,7 +388,7 @@ class MemoryIndexService:
                 "metadata": metadata,
                 "score_details": item.get("scores", {}),
             })
-        logger.debug("[ES_HYBRID] combined_hit_count=%d", len(results))
+
         return results
 
 
@@ -438,11 +410,7 @@ def _hit_to_memory_result(hit: Dict[str, Any]) -> Dict[str, Any]:
     """Translate a raw ES hit into the normalized memory result shape."""
     source = hit.get("_source") or {}
     metadata = source.get("metadata") or {}
-    logger.debug("[ES_HIT] id=%s memory_id=%s score=%s layer=%s",
-                 hit.get("_id"),
-                 metadata.get("memory_id"),
-                 hit.get("_score"),
-                 metadata.get("layer"))
+
     return {
         "memory_id": hit.get("_id") or source.get("id"),
         "content": source.get("content", ""),
