@@ -238,7 +238,7 @@ Nexent 支持任何 **遵循OpenAI API规范** 的大语言模型供应商，包
 
 完成模型配置后，建议您继续配置：
 
-1. **[知识库](./knowledge-base)** - 创建和管理知识库。
-2. **[智能体开发](./agent-development)** - 创建和配置智能体。
+1. **[知识库](./knowledge-configuration)** - 创建和管理知识库。
+2. **[智能体配置](./agent-configuration)** - 创建和配置智能体。
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
