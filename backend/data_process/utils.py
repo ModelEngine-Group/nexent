@@ -142,13 +142,13 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
 
                         if 'original_filename' in metadata:
                             status_info['original_filename'] = metadata['original_filename']
-                        
+
                         # Get progress info from metadata
                         if 'total_chunks' in metadata:
                             status_info['total_chunks'] = metadata['total_chunks']
                         if 'processed_chunks' in metadata:
                             status_info['processed_chunks'] = metadata['processed_chunks']
-                        
+
                         # Always try to get latest progress from Redis (real-time updates during vectorization)
                         # Redis progress takes precedence over metadata for active tasks
                         try:
@@ -161,6 +161,19 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                                 status_info['total_chunks'] = progress_info.get('total_chunks', status_info.get('total_chunks'))
                         except Exception as e:
                             logger.debug(f"Failed to get progress from Redis for task {task_id}: {str(e)}")
+                # RETRY is used for bounded file-slot waiting. Preserve its
+                # source metadata so queued files stay visible in list_files.
+                if result.status == "RETRY":
+                    retry_info, _ = _parse_failure_info(result.info)
+                    if retry_info:
+                        status_info['index_name'] = retry_info.get(
+                            'index_name', status_info['index_name'])
+                        status_info['task_name'] = retry_info.get(
+                            'task_name', status_info['task_name'])
+                        status_info['path_or_url'] = retry_info.get(
+                            'source', status_info['path_or_url'])
+                        status_info['original_filename'] = retry_info.get(
+                            'original_filename', status_info['original_filename'])
                 # Add error information for failed tasks
                 if result.failed():
                     try:

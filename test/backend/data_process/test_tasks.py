@@ -5,7 +5,9 @@ import types
 import json
 from contextlib import contextmanager
 from typing import Optional
+
 import pytest
+from celery.exceptions import Retry
 
 
 class FakeRay:
@@ -383,6 +385,9 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 200
         const_mod.DP_RAY_OPERATION_TIMEOUT_S = 300
         const_mod.DP_SPLIT_STATE_TTL_S = 7200
+        const_mod.DP_MAX_FILE_CONCURRENCY = 0
+        const_mod.DP_FILE_SLOT_LEASE_S = 300
+        const_mod.DP_FILE_SLOT_RETRY_DELAY_S = 10
         const_mod.MAX_CHUNKS_PER_FILE = 10000
         const_mod.MAX_DATA_PROCESS_FILE_SIZE_BYTES = 50 * 1024 * 1024
         const_mod.PER_WAVE_TIMEOUT = 30
@@ -414,6 +419,9 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         "DP_FORWARD_REQUEST_TIMEOUT_S": 300,
         "DP_FORWARD_FILE_TIMEOUT_S": 1800,
         "DP_SPLIT_STATE_TTL_S": 7200,
+        "DP_MAX_FILE_CONCURRENCY": 0,
+        "DP_FILE_SLOT_LEASE_S": 300,
+        "DP_FILE_SLOT_RETRY_DELAY_S": 10,
         "MAX_CHUNKS_PER_FILE": 10000,
         "MAX_DATA_PROCESS_FILE_SIZE_BYTES": 50 * 1024 * 1024,
         "CELERY_RESULT_EXPIRES": 7 * 24 * 60 * 60,
@@ -3208,6 +3216,129 @@ def test_process_attempt_guard_detects_worker_redelivery(monkeypatch):
     assert tasks._claim_process_attempt("file-task") == 1
     assert tasks._claim_process_attempt("file-task") == 2
     assert client.ttl == tasks.DP_SPLIT_STATE_TTL_S
+
+
+def test_file_slot_uses_atomic_redis_lease_and_release(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks, "DP_FILE_SLOT_LEASE_S", 300)
+
+    class Client:
+        def __init__(self):
+            self.eval_args = None
+            self.released = None
+
+        def eval(self, *args):
+            self.eval_args = args
+            return [1, 1]
+
+        def zrem(self, key, token):
+            self.released = (key, token)
+            return 1
+
+    client = Client()
+    monkeypatch.setattr(tasks, "_get_split_redis_client", lambda: client)
+
+    acquired, active = tasks._try_acquire_file_slot("task-a")
+    tasks._release_file_slot("task-a", "test")
+
+    assert acquired is True
+    assert active == 1
+    assert client.eval_args[2] == tasks.FILE_SLOT_KEY
+    assert client.eval_args[4] == "task-a"
+    assert client.released == (tasks.FILE_SLOT_KEY, "task-a")
+
+
+def test_process_without_file_slot_retries_before_processing(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks, "_try_acquire_file_slot", lambda _task_id: (False, 1))
+    monkeypatch.setattr(
+        tasks,
+        "_claim_process_attempt",
+        lambda _task_id: pytest.fail("queued file must not start processing"),
+    )
+
+    with pytest.raises(Retry):
+        tasks.process(
+            FakeSelf("queued-file"),
+            source="/not-yet-read.txt",
+            source_type="local",
+            index_name="idx",
+            original_filename="not-yet-read.txt",
+        )
+
+
+def test_process_failure_releases_file_slot(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks, "_try_acquire_file_slot", lambda _task_id: (True, 1))
+    monkeypatch.setattr(tasks._FileSlotHeartbeat, "start", lambda _self: None)
+    monkeypatch.setattr(tasks._FileSlotHeartbeat, "stop", lambda _self: None)
+    monkeypatch.setattr(tasks, "_claim_process_attempt", lambda _task_id: 1)
+    monkeypatch.setattr(tasks, "_is_split_cancelled", lambda _key: False)
+    monkeypatch.setattr(tasks, "_mark_split_failed", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "_cleanup_split_payloads", lambda *_a, **_k: None)
+    saved_errors = []
+    monkeypatch.setattr(
+        tasks,
+        "save_error_to_redis",
+        lambda *args, **_kwargs: saved_errors.append(args),
+    )
+    released = []
+    monkeypatch.setattr(
+        tasks,
+        "_release_file_slot",
+        lambda token, reason: released.append((token, reason)),
+    )
+
+    with pytest.raises(Exception):
+        tasks.process(
+            FakeSelf("failed-process"),
+            source="/missing.txt",
+            source_type="local",
+            index_name="idx",
+            original_filename="missing.txt",
+        )
+
+    assert released == [("failed-process", "process_failed")]
+    assert len(saved_errors) == 1
+
+
+def test_forward_failure_releases_process_file_slot(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "DP_MAX_FILE_CONCURRENCY", 1)
+    monkeypatch.setattr(tasks._FileSlotHeartbeat, "start", lambda _self: None)
+    monkeypatch.setattr(tasks._FileSlotHeartbeat, "stop", lambda _self: None)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *_a, **_k: 0)
+    monkeypatch.setattr(tasks, "save_error_to_redis", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "_cleanup_forward_chunks", lambda *_a, **_k: None)
+    monkeypatch.setattr(tasks, "_is_forward_task_cancelled", lambda _ctx: False)
+    monkeypatch.setattr(
+        tasks,
+        "_send_chunks_to_es",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("injected failure")),
+    )
+    released = []
+    monkeypatch.setattr(
+        tasks,
+        "_release_file_slot",
+        lambda token, reason: released.append((token, reason)),
+    )
+
+    with pytest.raises(RuntimeError, match="injected failure"):
+        tasks.forward(
+            FakeSelf("forward-task"),
+            processed_data={
+                "chunks": [{"content": "chunk", "metadata": {}}],
+                "file_slot_token": "process-task",
+            },
+            index_name="idx",
+            source="/file.txt",
+            source_type="local",
+        )
+
+    assert released == [("process-task", "forward_finished")]
 
 
 def test_forward_failure_does_not_block_later_small_file(monkeypatch):

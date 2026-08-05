@@ -45,6 +45,9 @@ from consts.const import (
     DP_FORWARD_REQUEST_TIMEOUT_S,
     DP_FORWARD_FILE_TIMEOUT_S,
     DP_SPLIT_STATE_TTL_S,
+    DP_MAX_FILE_CONCURRENCY,
+    DP_FILE_SLOT_LEASE_S,
+    DP_FILE_SLOT_RETRY_DELAY_S,
     MAX_CHUNKS_PER_FILE,
     MAX_DATA_PROCESS_FILE_SIZE_BYTES,
 )
@@ -56,6 +59,140 @@ ASYNC_SPLIT_RETRY_MAX = max(
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
 REDIS_SOCKET_TIMEOUT_SECONDS = 5
+FILE_SLOT_KEY = "dp:file-processing-slots"
+FILE_SLOT_HEARTBEAT_INTERVAL_S = max(1, DP_FILE_SLOT_LEASE_S // 3)
+
+
+_ACQUIRE_FILE_SLOT_SCRIPT = """
+local now = tonumber(ARGV[1])
+local token = ARGV[2]
+local expires_at = tonumber(ARGV[3])
+local max_slots = tonumber(ARGV[4])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+if redis.call('ZSCORE', KEYS[1], token) then
+    redis.call('ZADD', KEYS[1], expires_at, token)
+    redis.call('EXPIRE', KEYS[1], math.max(1, math.ceil((expires_at - now) * 2)))
+    return {1, redis.call('ZCARD', KEYS[1])}
+end
+local active = redis.call('ZCARD', KEYS[1])
+if active < max_slots then
+    redis.call('ZADD', KEYS[1], expires_at, token)
+    redis.call('EXPIRE', KEYS[1], math.max(1, math.ceil((expires_at - now) * 2)))
+    return {1, active + 1}
+end
+return {0, active}
+"""
+
+
+_REFRESH_FILE_SLOT_SCRIPT = """
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+    return 1
+end
+return 0
+"""
+
+
+def _try_acquire_file_slot(task_id: str) -> Tuple[bool, int]:
+    """Atomically acquire or renew one global file-processing slot."""
+    if DP_MAX_FILE_CONCURRENCY <= 0:
+        return True, 0
+    if not task_id:
+        raise RuntimeError("Cannot acquire a file-processing slot without a task ID")
+
+    now = time.time()
+    client = _get_split_redis_client()
+    result = client.eval(
+        _ACQUIRE_FILE_SLOT_SCRIPT,
+        1,
+        FILE_SLOT_KEY,
+        now,
+        task_id,
+        now + DP_FILE_SLOT_LEASE_S,
+        DP_MAX_FILE_CONCURRENCY,
+    )
+    acquired, active = int(result[0]), int(result[1])
+    return acquired == 1, active
+
+
+def _refresh_file_slot(task_id: str) -> bool:
+    """Extend a slot lease only while the same task still owns it."""
+    if DP_MAX_FILE_CONCURRENCY <= 0 or not task_id:
+        return True
+    client = _get_split_redis_client()
+    expires_at = time.time() + DP_FILE_SLOT_LEASE_S
+    return bool(client.eval(
+        _REFRESH_FILE_SLOT_SCRIPT,
+        1,
+        FILE_SLOT_KEY,
+        task_id,
+        expires_at,
+        max(1, DP_FILE_SLOT_LEASE_S * 2),
+    ))
+
+
+def _release_file_slot(task_id: Optional[str], reason: str) -> None:
+    """Best-effort release; an unclean worker exit is covered by the lease."""
+    if DP_MAX_FILE_CONCURRENCY <= 0 or not task_id:
+        return
+    try:
+        removed = int(_get_split_redis_client().zrem(FILE_SLOT_KEY, task_id))
+        logger.info(
+            "[FILE CONCURRENCY] released task=%s removed=%s reason=%s",
+            task_id,
+            removed,
+            reason,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[FILE CONCURRENCY] failed releasing task=%s reason=%s error=%s; "
+            "lease expires within %ss",
+            task_id,
+            reason,
+            exc,
+            DP_FILE_SLOT_LEASE_S,
+        )
+
+
+class _FileSlotHeartbeat:
+    """Keep a slot alive during blocking Ray and HTTP operations."""
+
+    def __init__(self, task_id: Optional[str]):
+        self.task_id = task_id
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if DP_MAX_FILE_CONCURRENCY <= 0 or not self.task_id:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"file-slot-{self.task_id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(FILE_SLOT_HEARTBEAT_INTERVAL_S):
+            try:
+                if not _refresh_file_slot(self.task_id):
+                    logger.error(
+                        "[FILE CONCURRENCY] heartbeat lost ownership task=%s",
+                        self.task_id,
+                    )
+                    return
+            except Exception as exc:
+                logger.warning(
+                    "[FILE CONCURRENCY] heartbeat failed task=%s error=%s",
+                    self.task_id,
+                    exc,
+                )
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1)
 
 
 def _processing_limit_error(message: str, error_code: str) -> RuntimeError:
@@ -1734,7 +1871,13 @@ def _build_no_valid_chunks_error(
     }, ensure_ascii=False))
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
+@app.task(
+    bind=True,
+    base=LoggingTask,
+    name='data_process.tasks.process',
+    queue='process_q',
+    max_retries=None,
+)
 def process(
         self,
         source: str,
@@ -1763,8 +1906,9 @@ def process(
     task_id = self.request.id
     # _warn_if_queue_mismatch("PROCESS TASK", "process_q", self.request)
 
-    logger.info(
-        f"[{self.request.id}] PROCESS TASK: source_type: {source_type}")
+    if getattr(self.request, 'retries', 0) == 0:
+        logger.info(
+            f"[{self.request.id}] PROCESS TASK: source_type: {source_type}")
 
     self.update_state(
         state=states.STARTED,
@@ -1778,6 +1922,53 @@ def process(
             'stage': 'extracting_text'
         }
     )
+    file_slot_token = task_id if DP_MAX_FILE_CONCURRENCY > 0 else None
+    slot_heartbeat = _FileSlotHeartbeat(file_slot_token)
+    if file_slot_token:
+        slot_error = None
+        try:
+            slot_acquired, active_slots = _try_acquire_file_slot(file_slot_token)
+        except Exception as exc:
+            slot_acquired, active_slots = False, -1
+            slot_error = exc
+
+        if not slot_acquired:
+            retry_message = (
+                f"File is queued for a processing slot ({active_slots}/"
+                f"{DP_MAX_FILE_CONCURRENCY} active)"
+                if slot_error is None
+                else f"File slot service is temporarily unavailable: {slot_error}"
+            )
+            logger.info(
+                "[%s] [FILE CONCURRENCY] queued active=%s limit=%s retry_in=%ss source=%s",
+                task_id,
+                active_slots,
+                DP_MAX_FILE_CONCURRENCY,
+                DP_FILE_SLOT_RETRY_DELAY_S,
+                source,
+            )
+            raise self.retry(
+                countdown=DP_FILE_SLOT_RETRY_DELAY_S,
+                exc=Exception(json.dumps({
+                    "message": retry_message,
+                    "index_name": index_name,
+                    "task_name": "process",
+                    "source": source,
+                    "original_filename": original_filename,
+                    "stage": "queued_for_file_slot",
+                }, ensure_ascii=False)),
+            )
+
+        logger.info(
+            "[%s] [FILE CONCURRENCY] acquired active=%s limit=%s lease=%ss source=%s",
+            task_id,
+            active_slots,
+            DP_MAX_FILE_CONCURRENCY,
+            DP_FILE_SLOT_LEASE_S,
+            source,
+        )
+        slot_heartbeat.start()
+
     try:
         attempt = _claim_process_attempt(task_id)
         if attempt > 1:
@@ -1952,11 +2143,15 @@ def process(
             'task_id': task_id,
             'split_async': split_async,
             'image_metadata_chunk_count': image_metadata_chunk_count,
+            'file_slot_token': file_slot_token,
         }
 
+        slot_heartbeat.stop()
         return returned_data
 
     except Exception as e:
+        slot_heartbeat.stop()
+        _release_file_slot(file_slot_token, "process_failed")
         logger.error(f"Error processing file {source}: {str(e)}")
         redis_key = f"dp:{task_id}:chunks"
         try:
@@ -2031,7 +2226,6 @@ def process(
                     "stage": "text_extraction_failed",
                 }
             )
-            raise Exception(json.dumps(error_info, ensure_ascii=False))
         except Exception as ex:
             logger.error(f"Error serializing process exception: {str(ex)}")
             # Try to save error even if serialization fails
@@ -2080,6 +2274,7 @@ def process(
                 }
             )
             raise
+        raise Exception(json.dumps(error_info, ensure_ascii=False))
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward', queue='forward_q')
@@ -2112,6 +2307,14 @@ def forward(
     original_source = source
     original_index_name = index_name
     filename = original_filename
+    file_slot_token = (
+        processed_data.get('file_slot_token')
+        if isinstance(processed_data, dict)
+        else None
+    )
+    slot_heartbeat = _FileSlotHeartbeat(file_slot_token)
+    release_file_slot = True
+    slot_heartbeat.start()
 
     try:
         ctx = _init_forward_context(
@@ -2397,6 +2600,7 @@ def forward(
         # If it's an Exception, all go here (including our custom JSON message)
         # Important: if this is a Celery Retry, re-raise immediately without recording error_code
         if isinstance(e, Retry):
+            release_file_slot = False
             raise
 
         _cleanup_forward_chunks(processed_data)
@@ -2465,6 +2669,10 @@ def forward(
                 }
             )
         raise
+    finally:
+        slot_heartbeat.stop()
+        if release_file_slot:
+            _release_file_slot(file_slot_token, "forward_finished")
 
 
 @app.task(

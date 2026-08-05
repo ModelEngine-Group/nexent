@@ -1,9 +1,11 @@
 import asyncio
 import base64
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -11,6 +13,131 @@ from ...monitor.monitoring import record_model_call
 
 # Path to test assets directory
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets")
+
+logger = logging.getLogger(__name__)
+
+_EMBEDDING_ERROR_FIELDS = {
+    "code",
+    "detail",
+    "error",
+    "error_code",
+    "message",
+    "msg",
+    "param",
+    "request_id",
+    "status",
+    "status_code",
+    "type",
+}
+_EMBEDDING_SENSITIVE_FIELDS = {
+    "access_token",
+    "api_key",
+    "authorization",
+    "content",
+    "data",
+    "embedding",
+    "embeddings",
+    "input",
+    "inputs",
+    "prompt",
+    "prompts",
+    "token",
+}
+
+
+def _safe_embedding_endpoint(url: str) -> str:
+    """Return an endpoint without query parameters or credentials."""
+    try:
+        parsed = urlsplit(url)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    except Exception:
+        return "<invalid-url>"
+
+
+def _embedding_input_diagnostics(inputs: Any) -> Dict[str, Any]:
+    """Describe embedding inputs without logging their content."""
+    items = inputs if isinstance(inputs, list) else [inputs]
+    lengths: List[int] = []
+    item_types = set()
+    empty_count = 0
+
+    for item in items:
+        item_types.add(type(item).__name__)
+        if isinstance(item, str):
+            length = len(item)
+            empty_count += int(not item.strip())
+        else:
+            try:
+                length = len(json.dumps(item, ensure_ascii=False, default=str))
+            except Exception:
+                length = len(str(item))
+        lengths.append(length)
+
+    return {
+        "input_count": len(items),
+        "input_types": sorted(item_types),
+        "empty_count": empty_count,
+        "total_chars": sum(lengths),
+        "min_chars": min(lengths, default=0),
+        "max_chars": max(lengths, default=0),
+        "char_lengths": lengths[:20],
+        "char_lengths_truncated": len(lengths) > 20,
+    }
+
+
+def _sanitize_embedding_error_value(value: Any, secrets: List[str], depth: int = 0) -> Any:
+    """Keep provider error metadata while redacting request payloads and credentials."""
+    if depth > 4:
+        return "<max-depth>"
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if normalized_key in _EMBEDDING_SENSITIVE_FIELDS:
+                sanitized[str(key)] = "<redacted>"
+            elif normalized_key in _EMBEDDING_ERROR_FIELDS:
+                sanitized[str(key)] = _sanitize_embedding_error_value(item, secrets, depth + 1)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_embedding_error_value(item, secrets, depth + 1) for item in value[:10]]
+    if isinstance(value, str):
+        sanitized = value
+        for secret in secrets:
+            if secret:
+                sanitized = sanitized.replace(secret, "<redacted>")
+        return sanitized[:1000]
+    return value
+
+
+def _embedding_error_response_summary(response: Any, inputs: Any, api_key: Optional[str]) -> Dict[str, Any]:
+    """Extract a safe provider error summary without exposing source text or credentials."""
+    input_items = inputs if isinstance(inputs, list) else [inputs]
+    secrets = [api_key or ""] + [item for item in input_items if isinstance(item, str)]
+    summary: Dict[str, Any] = {
+        "status_code": getattr(response, "status_code", None),
+    }
+
+    headers = getattr(response, "headers", {}) or {}
+    for header_name in ("x-request-id", "request-id", "x-trace-id", "trace-id"):
+        request_id = headers.get(header_name)
+        if request_id:
+            summary["provider_request_id"] = str(request_id)[:200]
+            break
+
+    try:
+        payload = response.json()
+    except Exception:
+        response_text = getattr(response, "text", "") or ""
+        summary["response_format"] = "non-json"
+        summary["response_body_chars"] = len(response_text)
+        return summary
+
+    sanitized_payload = _sanitize_embedding_error_value(payload, secrets)
+    if sanitized_payload:
+        summary["provider_error"] = sanitized_payload
+    elif isinstance(payload, dict):
+        summary["response_keys"] = sorted(str(key) for key in payload.keys())[:20]
+    return summary
 
 
 def _detect_image_mime(img_bytes: bytes) -> str:
@@ -198,7 +325,7 @@ class JinaEmbedding(MultimodalEmbedding):
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
         self.model_type = model_type
-        
+
         # Create a session with trust_env=False to ignore proxy environment variables
         self.session = requests.Session()
         self.session.trust_env = False
@@ -679,8 +806,29 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = self.session.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
-        response.raise_for_status()
+        response = self.session.post(
+            self.api_url,
+            headers=self.headers,
+            json=data,
+            timeout=timeout,
+            verify=self.ssl_verify,
+        )
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.error(
+                "[EMBEDDING HTTP ERROR] endpoint=%s model=%s timeout=%s input=%s response=%s",
+                _safe_embedding_endpoint(self.api_url),
+                self.model,
+                timeout,
+                _embedding_input_diagnostics(data.get("input", [])),
+                _embedding_error_response_summary(
+                    response,
+                    data.get("input", []),
+                    self.api_key,
+                ),
+            )
+            raise
         return response.json()
 
     def get_embeddings(

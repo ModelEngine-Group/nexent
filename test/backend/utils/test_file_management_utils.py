@@ -13,7 +13,7 @@ class _ProcessParams:
         self.source_type = source_type
         self.chunking_strategy = chunking_strategy
         self.index_name = index_name
-        self.model_id = model_id  
+        self.model_id = model_id
         self.tenant_id = tenant_id
 
 
@@ -442,10 +442,12 @@ def test_convert_to_custom_state_local_mappings(fmu):
     assert fmu._convert_to_custom_state_local("", "") == "WAIT_FOR_PROCESSING"
     # forward-only mapping
     assert fmu._convert_to_custom_state_local("", "PENDING") == "WAIT_FOR_FORWARDING"
+    assert fmu._convert_to_custom_state_local("", "RETRY") == "WAIT_FOR_FORWARDING"
     assert fmu._convert_to_custom_state_local("", "STARTED") == "FORWARDING"
     assert fmu._convert_to_custom_state_local("", "SUCCESS") == "COMPLETED"
     # process-only mapping
     assert fmu._convert_to_custom_state_local("PENDING", "") == "WAIT_FOR_PROCESSING"
+    assert fmu._convert_to_custom_state_local("RETRY", "") == "WAIT_FOR_PROCESSING"
     assert fmu._convert_to_custom_state_local("STARTED", "") == "PROCESSING"
     assert fmu._convert_to_custom_state_local("SUCCESS", "") == "WAIT_FOR_FORWARDING"
 

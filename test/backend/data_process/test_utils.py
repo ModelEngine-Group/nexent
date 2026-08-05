@@ -13,6 +13,7 @@ versions of the celery.* submodules.
 """
 import asyncio
 import importlib
+import json
 import sys
 import types
 from contextlib import contextmanager
@@ -361,6 +362,30 @@ def test_get_task_info_pending_uses_provided_status(monkeypatch, patch_async_res
     with patch_async_result(fake) as utils:
         result = asyncio.run(utils.get_task_info("task-1"))
     assert result["status"] == "STARTED"
+
+
+def test_get_task_info_retry_preserves_queued_file_metadata(
+    monkeypatch,
+    patch_async_result,
+):
+    fake = _FakeAsyncResult(
+        status="RETRY",
+        info=Exception(json.dumps({
+            "message": "queued",
+            "index_name": "idx",
+            "task_name": "process",
+            "source": "s3://bucket/file.xlsx",
+            "original_filename": "file.xlsx",
+        })),
+    )
+    with patch_async_result(fake) as utils:
+        result = asyncio.run(utils.get_task_info("task-1"))
+
+    assert result["status"] == "RETRY"
+    assert result["index_name"] == "idx"
+    assert result["task_name"] == "process"
+    assert result["path_or_url"] == "s3://bucket/file.xlsx"
+    assert result["original_filename"] == "file.xlsx"
 
 
 def test_get_task_info_disabled_backend_error(monkeypatch, patch_async_result):

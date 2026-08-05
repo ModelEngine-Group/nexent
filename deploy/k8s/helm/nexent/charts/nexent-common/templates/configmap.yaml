@@ -123,6 +123,9 @@ data:
   DP_SPLIT_STATE_TTL_S: {{ .Values.config.dataProcess.splitStateTtlS | quote }}
   DP_MAX_PROCESS_CONCURRENCY: {{ .Values.config.dataProcess.maxProcessConcurrency | quote }}
   DP_MAX_FORWARD_CONCURRENCY: {{ .Values.config.dataProcess.maxForwardConcurrency | quote }}
+  DP_MAX_FILE_CONCURRENCY: {{ .Values.config.dataProcess.maxFileConcurrency | quote }}
+  DP_FILE_SLOT_LEASE_S: {{ .Values.config.dataProcess.fileSlotLeaseS | quote }}
+  DP_FILE_SLOT_RETRY_DELAY_S: {{ .Values.config.dataProcess.fileSlotRetryDelayS | quote }}
   ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
   QUEUES: {{ .Values.config.dataProcess.queues | quote }}
   WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}

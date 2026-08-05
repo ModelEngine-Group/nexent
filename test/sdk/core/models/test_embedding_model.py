@@ -1,7 +1,8 @@
-import pytest
-import requests
 import sys
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+import requests
 
 from nexent.core.models.embedding_model import (
     DashScopeMultimodalEmbedding,
@@ -657,6 +658,93 @@ def test_openai_make_request_raises_http_error(monkeypatch):
     data = emb._prepare_input("hello")
     with pytest.raises(requests.HTTPError):
         emb._make_request(data, timeout=2)
+
+
+def test_openai_make_request_logs_sanitized_provider_error(monkeypatch):
+    """HTTP failures log provider diagnostics without source text or credentials."""
+
+    class BadResp:
+        def __init__(self):
+            self.status_code = 400
+            self.headers = {"x-request-id": "provider-request-123"}
+            self.text = '{"code": 20015, "message": "invalid input"}'
+
+        def json(self):
+            return {
+                "code": 20015,
+                "message": "invalid input: private document text",
+                "data": {"input": "private document text"},
+            }
+
+        def raise_for_status(self):
+            raise requests.HTTPError("Bad Request", response=self)
+
+    monkeypatch.setattr("requests.Session.post", lambda *args, **kwargs: BadResp())
+
+    emb = OpenAICompatibleEmbedding(
+        model_name="m",
+        base_url="https://api.example.com/embeddings?api_key=query-secret",
+        api_key="credential-secret",
+        embedding_dim=16,
+        ssl_verify=False,
+    )
+    data = emb._prepare_input(["private document text", "second input"])
+
+    with (
+        patch("nexent.core.models.embedding_model.logger.error") as mock_error,
+        pytest.raises(requests.HTTPError),
+    ):
+        emb._make_request(data, timeout=2)
+
+    log_format, *log_args = mock_error.call_args.args
+    log_text = log_format % tuple(log_args)
+    assert "[EMBEDDING HTTP ERROR]" in log_text
+    assert "https://api.example.com/embeddings" in log_text
+    assert "provider-request-123" in log_text
+    assert "20015" in log_text
+    assert "input_count': 2" in log_text
+    assert "char_lengths': [21, 12]" in log_text
+    assert "private document text" not in log_text
+    assert "credential-secret" not in log_text
+    assert "query-secret" not in log_text
+
+
+def test_openai_make_request_logs_non_json_error_metadata_only(monkeypatch):
+    """Non-JSON provider errors expose only body size, never the raw body."""
+
+    class BadResp:
+        def __init__(self):
+            self.status_code = 502
+            self.headers = {}
+            self.text = "upstream returned private document text"
+
+        def json(self):
+            raise ValueError("not json")
+
+        def raise_for_status(self):
+            raise requests.HTTPError("Bad Gateway", response=self)
+
+    monkeypatch.setattr("requests.Session.post", lambda *args, **kwargs: BadResp())
+    emb = OpenAICompatibleEmbedding(
+        model_name="m",
+        base_url="https://api.example.com/embeddings",
+        api_key="credential-secret",
+        embedding_dim=16,
+        ssl_verify=False,
+    )
+
+    with (
+        patch("nexent.core.models.embedding_model.logger.error") as mock_error,
+        pytest.raises(requests.HTTPError),
+    ):
+        emb._make_request(emb._prepare_input("private document text"), timeout=2)
+
+    log_format, *log_args = mock_error.call_args.args
+    log_text = log_format % tuple(log_args)
+    assert "response_format': 'non-json'" in log_text
+    assert "response_body_chars': 39" in log_text
+    assert "private document text" not in log_text
+    assert "upstream returned" not in log_text
 
 
 def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):

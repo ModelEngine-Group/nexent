@@ -1391,7 +1391,7 @@ class ElasticSearchService:
                     "languages": metadata.get("languages", []),
                     "embedding_model_name": embedding_model_name
                 }
-                
+
                 image_url = metadata.get("image_url", "")
                 if len(image_url) > 0:
                     # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)
@@ -1453,6 +1453,18 @@ class ElasticSearchService:
                         f"Failed to initialize progress tracking for task {task_id}: {str(e)}")
 
             try:
+                logger.info(
+                    "[EMBEDDING INDEX REQUEST] index=%s task_id=%s model_id=%s model=%s "
+                    "model_type=%s chunks=%s embedding_batch_size=%s large_mode=%s",
+                    index_name,
+                    task_id,
+                    model_id,
+                    getattr(embedding_model, "model", None),
+                    getattr(embedding_model, "model_type", None),
+                    total_submitted,
+                    embedding_batch_size,
+                    large_mode,
+                )
                 total_indexed = vdb_core.vectorize_documents(
                     index_name=index_name,
                     embedding_model=embedding_model,
@@ -1489,7 +1501,21 @@ class ElasticSearchService:
                     "total_submitted": total_submitted
                 }
             except Exception as e:
-                logger.error(f"Error during indexing: {str(e)}")
+                logger.error(
+                    "[DOCUMENT INDEX ERROR] index=%s task_id=%s model_id=%s model=%s "
+                    "model_type=%s chunks=%s embedding_batch_size=%s large_mode=%s "
+                    "error_type=%s error=%s",
+                    index_name,
+                    task_id,
+                    model_id,
+                    getattr(embedding_model, "model", None),
+                    getattr(embedding_model, "model_type", None),
+                    total_submitted,
+                    embedding_batch_size,
+                    large_mode,
+                    type(e).__name__,
+                    str(e),
+                )
                 _rethrow_or_plain(e)
 
         except Exception as e:

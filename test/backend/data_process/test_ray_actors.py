@@ -65,6 +65,9 @@ def stub_consts(monkeypatch):
     fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
     fake_consts_const.REDIS_BACKEND_URL = ""
     fake_consts_const.DP_SPLIT_STATE_TTL_S = 7200
+    fake_consts_const.DP_MAX_FILE_CONCURRENCY = 0
+    fake_consts_const.DP_FILE_SLOT_LEASE_S = 300
+    fake_consts_const.DP_FILE_SLOT_RETRY_DELAY_S = 10
     # New defaults required by ray_actors import
     fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536

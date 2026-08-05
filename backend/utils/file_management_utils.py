@@ -154,12 +154,12 @@ async def get_all_files_status(index_name: str):
         except Exception as e:
             logger.error(f"Failed to connect to data process service: {str(e)}")
             return {}
-        
+
         logging.debug(f"Found {len(tasks_list)} tasks for index '{index_name}'")
         if not tasks_list:
             logger.warning(f"No tasks found for index '{index_name}'")
             return {}
-        
+
         # Dictionary to store file statuses:
         # {path_or_url: {process_state, forward_state, timestamps, progress fields}}
         file_states = {}
@@ -282,6 +282,7 @@ def _convert_to_custom_state_local(process_celery_state: str, forward_celery_sta
     failure = "FAILURE"
     pending = "PENDING"
     started = "STARTED"
+    retry = "RETRY"
     unknown = "UNKNOWN"
 
     if process_celery_state == failure:
@@ -294,18 +295,20 @@ def _convert_to_custom_state_local(process_celery_state: str, forward_celery_sta
         return "WAIT_FOR_PROCESSING"
 
     # Check if states are known Celery states
-    known_states = {success, failure, pending, started, ""}
+    known_states = {success, failure, pending, started, retry, ""}
     if process_celery_state not in known_states or forward_celery_state not in known_states:
         return unknown
 
     forward_state_map = {
         pending: "WAIT_FOR_FORWARDING",
+        retry: "WAIT_FOR_FORWARDING",
         started: "FORWARDING",
         success: "COMPLETED",
         failure: "FORWARD_FAILED",
     }
     process_state_map = {
         pending: "WAIT_FOR_PROCESSING",
+        retry: "WAIT_FOR_PROCESSING",
         started: "PROCESSING",
         success: "WAIT_FOR_FORWARDING",
         failure: "PROCESS_FAILED",
@@ -345,12 +348,12 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
 async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
     """
     Convert Office document to PDF using LibreOffice.
-    
+
     Args:
         input_path: Path to input Office file
         output_dir: Directory for output PDF file
         timeout: Conversion timeout in seconds (default: 30s)
-        
+
     Returns:
         str: Path to generated PDF file
     """
@@ -382,34 +385,33 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
             text=True,
             timeout=timeout
         )
-    
+
     try:
         # Run blocking subprocess in thread executor to avoid blocking event loop
         result = await asyncio.to_thread(_run_libreoffice_conversion)
-        
+
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "Unknown conversion error"
             logger.error(f"LibreOffice conversion failed: {error_msg}")
             raise RuntimeError(f"Office to PDF conversion failed: {error_msg}")
-        
+
         # Find generated PDF file
         input_filename = os.path.basename(input_path)
         pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
         pdf_path = os.path.join(output_dir, pdf_filename)
-        
+
         if not os.path.exists(pdf_path):
             raise RuntimeError(f"Converted PDF not found: {pdf_path}")
-        
+
         return pdf_path
-        
+
     except subprocess.TimeoutExpired:
         logger.error(f"Office to PDF conversion timeout after {timeout}s: {input_path}")
         raise TimeoutError(f"Office to PDF conversion timeout (>{timeout}s)")
-        
+
     except FileNotFoundError as e:
         # LibreOffice executable not found in PATH
         logger.error(f"LibreOffice not available: {str(e)}")
         raise FileNotFoundError(
             "LibreOffice is not installed or not available in PATH. "
         ) from e
-

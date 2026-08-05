@@ -58,7 +58,12 @@ DP_SPLIT_STATE_TTL_S = int(os.getenv("DP_SPLIT_STATE_TTL_S", "7200"))
 DP_MAX_PROCESS_CONCURRENCY = int(
     os.getenv("DP_MAX_PROCESS_CONCURRENCY", "2"))
 DP_MAX_FORWARD_CONCURRENCY = int(
-    os.getenv("DP_MAX_FORWARD_CONCURRENCY", "4"))
+    os.getenv("DP_MAX_FORWARD_CONCURRENCY", "1"))
+DP_MAX_FILE_CONCURRENCY = int(
+    os.getenv("DP_MAX_FILE_CONCURRENCY", "1"))
+DP_FILE_SLOT_LEASE_S = int(os.getenv("DP_FILE_SLOT_LEASE_S", "300"))
+DP_FILE_SLOT_RETRY_DELAY_S = int(
+    os.getenv("DP_FILE_SLOT_RETRY_DELAY_S", "10"))
 
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
