@@ -279,7 +279,7 @@ const AttachmentPreview: FC<{
           fileName={name}
           fileType={contentType || attachment.type}
           fileSize={attachment.size}
-          previewUrl={attachment.preview_url}
+          previewUrl={''}
           downloadUrl={attachment.download_url}
           onClose={() => setIsRemotePreviewOpen(false)}
         />

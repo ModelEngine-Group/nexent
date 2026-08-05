@@ -178,6 +178,18 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     dataMateSyncError: undefined,
   });
 
+  // Keep currentEmbeddingModel aligned with configured embedding displayName
+  // (KB embeddingModel is stored as display_name).
+  useEffect(() => {
+    const displayName = modelConfig?.embedding?.displayName?.trim() || null;
+    if (displayName !== state.currentEmbeddingModel) {
+      dispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
+        payload: displayName,
+      });
+    }
+  }, [modelConfig?.embedding?.displayName, state.currentEmbeddingModel]);
+
   // Check if knowledge base is selectable - memoized with useCallback
   const isKnowledgeBaseSelectable = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -201,7 +213,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
       const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
       const currentMultiEmbeddingModel =
-        modelConfig?.multiEmbedding?.modelName?.trim() || "";
+        modelConfig?.multiEmbedding?.displayName?.trim() || "";
 
       if (kb.is_multimodal) {
         // Multimodal KB is selectable as long as current multimodal model is configured.
@@ -211,10 +223,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       // Text KB is selectable as long as current embedding model is configured.
       return !!currentEmbeddingModel;
     },
-    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
+    [modelConfig?.multiEmbedding?.displayName, state.currentEmbeddingModel]
   );
 
-  // Check if knowledge base has model mismatch (for display purposes)
+  // Check if knowledge base has model mismatch (for display purposes).
+  // Compare configured displayName with KB embeddingModel (stored as display_name).
   const hasKnowledgeBaseModelMismatch = useCallback(
     (kb: KnowledgeBase): boolean => {
       if (kb.embeddingModel === "unknown") {
@@ -226,15 +239,14 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
       if (kb.is_multimodal) {
         const multiEmbeddingModel =
-          modelConfig?.multiEmbedding?.modelName?.trim() || "";
-        // Only show warning when the required current model is not configured.
-        return !multiEmbeddingModel;
+          modelConfig?.multiEmbedding?.displayName?.trim() || "";
+        return multiEmbeddingModel !== kb.embeddingModel.trim();
       }
 
-      // Only show warning when the required current model is not configured.
-      return !state.currentEmbeddingModel;
+      const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
+      return currentEmbeddingModel !== kb.embeddingModel.trim();
     },
-    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
+    [modelConfig?.multiEmbedding?.displayName, state.currentEmbeddingModel]
   );
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
@@ -376,7 +388,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         return null;
       }
     },
-    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel, t]
+    [t]
   );
 
   // Delete knowledge base - memoized with useCallback
@@ -542,12 +554,12 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     // Use ref to track if data has been loaded to avoid duplicate loading
     let initialDataLoaded = false;
 
-    // Get current model config at initial load
+    // Get current model config at initial load (use displayName to match KB embeddingModel)
     const loadInitialData = async () => {
-      if (modelConfig?.embedding?.modelName) {
+      if (modelConfig?.embedding?.displayName) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: modelConfig.embedding.modelName,
+          payload: modelConfig.embedding.displayName,
         });
       }
 
@@ -556,7 +568,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
     loadInitialData();
 
-    // Listen for embedding model change event
+    // Listen for embedding model change event (detail.model is displayName)
     const handleEmbeddingModelChange = (e: CustomEvent) => {
       const newModel = e.detail.model || null;
 
@@ -575,10 +587,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     // Listen for env config change event
     const handleEnvConfigChanged = () => {
       // Reload env related config
-      if (modelConfig?.embedding?.modelName !== state.currentEmbeddingModel) {
+      if (modelConfig?.embedding?.displayName !== state.currentEmbeddingModel) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: modelConfig?.embedding?.modelName || null,
+          payload: modelConfig?.embedding?.displayName || null,
         });
 
         // Reload knowledge base list when model changes

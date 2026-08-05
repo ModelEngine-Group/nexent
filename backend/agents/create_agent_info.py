@@ -74,7 +74,7 @@ from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def _create_fixed_search_memory_tool():
@@ -266,7 +266,7 @@ def _resolve_safe_input_budget(
             exc,
         )
         return None
-    logger.info(
+    logger.debug(
         "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
         tenant_id,
@@ -545,7 +545,6 @@ def _get_external_a2a_agents(
     Returns:
         List of ExternalA2AAgentConfig for external A2A sub-agents
     """
-    logger.info(f"[_get_external_a2a_agents] START - agent_id={agent_id}, tenant_id={tenant_id}")
     try:
         from database import a2a_agent_db
 
@@ -554,26 +553,21 @@ def _get_external_a2a_agents(
             tenant_id=tenant_id,
             version_no=version_no,
         )
-        logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents")
-        logger.debug(f"[_get_external_a2a_agents] agent details: {external_agents}")
 
         result = []
         for agent in external_agents:
             agent_url = agent.get("agent_url", "") or _extract_url_from_card(agent.get("raw_card"))
             if not agent_url:
                 logger.warning(
-                    f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available"
+                    f"Skipping agent '{agent.get('name')}' - no URL available"
                 )
                 continue
 
             result.append(_build_external_agent_config(agent, agent_url))
 
-        logger.info(f"[_get_external_a2a_agents] returning {len(result)} ExternalA2AAgentConfig")
-        for i, config in enumerate(result):
-            logger.info(f"  [{i}] name={config.name}, description={config.description}")
         return result
     except Exception as e:
-        logger.error(f"[_get_external_a2a_agents] FAILED: {e}", exc_info=True)
+        logger.error(f"Get external A2A agents failed: {e}", exc_info=True)
         return []
 
 
@@ -616,6 +610,23 @@ def _get_skill_script_tools(
         }
     except Exception as exc:
         logger.debug("Failed to resolve effective skill configuration: %s", exc)
+
+    skill_config_values: Dict[str, Dict[str, Any]] = {}
+    try:
+        from services.skill_service import SkillService
+
+        enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        skill_config_values = {
+            skill.get("name", ""): dict(skill.get("config_values") or {})
+            for skill in enabled_skills
+            if skill.get("name")
+        }
+    except Exception as exc:
+        logger.warning(f"Failed to resolve effective skill configuration: {exc}", exc_info=True)
 
     try:
         return [
@@ -921,19 +932,26 @@ async def create_agent_config(
             # and dispatches persistence/retrieval to
             # ``services.memory_record_service`` /
             # ``services.memory_retrieval_service``.
+            memory_service = None
             try:
                 from services.memory_backend_adapter import build_memory_service_for_agent
-                memory_metadata["memory_service"] = (
-                    build_memory_service_for_agent(
-                        tenant_id=memory_context.tenant_id,
-                        user_id=memory_context.user_id,
-                        agent_id=str(memory_context.agent_id or ""),
-                    )
+
+                memory_service = build_memory_service_for_agent(
+                    tenant_id=memory_context.tenant_id,
+                    user_id=memory_context.user_id,
+                    agent_id=str(memory_context.agent_id or ""),
                 )
+                if memory_service is None:
+                    raise RuntimeError("MemoryService builder returned no service")
+                memory_metadata["memory_service"] = memory_service
             except Exception as exc:
                 logger.warning(
-                    "Failed to build MemoryService for agent: %s. "
-                    "Memory tools will fall back to legacy path.", exc
+                    "event=memory_service_init_failed tenant_id=%s user_id=%s "
+                    "agent_id=%s error_type=%s",
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    type(exc).__name__,
                 )
 
             # Hand the internal fixed SearchMemoryTool a backend
@@ -942,100 +960,118 @@ async def create_agent_config(
             # decay / MMR / token-budget selection) instead of
             # bypassing it. The service is reused for prompt injection,
             # so a single instance per agent is sufficient.
+            memory_context_service = None
             try:
                 from services.memory_context_service import get_memory_context_service
 
-                memory_metadata["memory_context_service"] = (
-                    get_memory_context_service()
-                )
-                logger.debug(
-                    "MemoryContextService attached to memory tools "
-                    "for agent_id=%s", memory_context.agent_id
-                )
-                long_term_search_context = await memory_metadata[
-                    "memory_context_service"
-                ].build_context(
-                    tenant_id=str(memory_context.tenant_id or ""),
-                    user_id=str(memory_context.user_id or ""),
-                    agent_id=str(memory_context.agent_id or "") or None,
-                    conversation_id=(
-                        str(conversation_id)
-                        if conversation_id is not None
-                        else None
-                    ),
-                    query=None,
-                    layers=["tenant", "user"],
-                )
-                long_term_memory_prompt = _format_long_term_memory_prompt(
-                    long_term_search_context,
-                    language,
-                )
-                logger.info(
-                    "event=long_term_memory_prompt_loaded tenant_id=%s "
-                    "user_id=%s agent_id=%s context_char_count=%d",
+                memory_context_service = get_memory_context_service()
+                if memory_context_service is None:
+                    raise RuntimeError(
+                        "MemoryContextService provider returned no service"
+                    )
+                memory_metadata["memory_context_service"] = memory_context_service
+            except Exception as exc:
+                logger.warning(
+                    "event=memory_context_service_init_failed tenant_id=%s "
+                    "user_id=%s agent_id=%s error_type=%s",
                     tenant_id,
                     user_id,
                     agent_id,
-                    len(long_term_memory_prompt),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to attach MemoryContextService to memory "
-                    "tools: %s. Fixed search_memory will fall back to "
-                    "the legacy MemoryService path.", exc
+                    type(exc).__name__,
                 )
 
-            store_tool_config = ToolConfig(
-                class_name="StoreMemoryTool",
-                name="store_memory",
-                description=(
-                    "Store one model-selected and summarized short-term memory extracted only "
-                    "from the conversation between the user and the current agent. Eligible "
-                    "information is limited to user preferences, task goals, action plans and "
-                    "latest progress, or reflections on user feedback and errors. Consider the "
-                    "user question, tool or code execution results, and the final answer. Do not "
-                    "store whole conversations, transient calculations, unverified guesses, "
-                    "duplicates, secrets, or information the user asks to forget. Before every "
-                    "final answer, assess whether an eligible memory was added or updated; if so, "
-                    "calling this tool is mandatory."
-                ),
-                inputs=json.dumps({
-                    "content": {
-                        "type": "string",
-                        "description": (
-                            "One concise, reusable short-term memory entry already judged, "
-                            "summarized, and deduplicated by the model"
+            if memory_context_service is not None:
+                try:
+                    long_term_search_context = await memory_context_service.build_context(
+                        tenant_id=str(memory_context.tenant_id or ""),
+                        user_id=str(memory_context.user_id or ""),
+                        agent_id=str(memory_context.agent_id or "") or None,
+                        conversation_id=(
+                            str(conversation_id)
+                            if conversation_id is not None
+                            else None
                         ),
-                        "description_zh": (
-                            "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                        )
-                    }
-                }, ensure_ascii=False),
-                output_type="string",
-                params={},
-                source="local",
-                usage=None,
-                metadata=memory_metadata,
-            )
-            tool_list.append(store_tool_config)
+                        query=None,
+                        layers=["tenant", "user"],
+                    )
+                    long_term_memory_prompt = _format_long_term_memory_prompt(
+                        long_term_search_context,
+                        language,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "event=long_term_memory_load_failed tenant_id=%s "
+                        "user_id=%s agent_id=%s error_type=%s",
+                        tenant_id,
+                        user_id,
+                        agent_id,
+                        type(exc).__name__,
+                    )
 
-            fixed_search_tool = _create_fixed_search_memory_tool()
-            fixed_search_tool.memory_service = memory_metadata.get("memory_service")
-            fixed_search_tool.memory_context_service = memory_metadata.get(
-                "memory_context_service"
-            )
-            fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
-            fixed_search_tool.user_id = str(memory_context.user_id or "")
-            fixed_search_tool.agent_id = str(memory_context.agent_id or "")
-            fixed_search_tool.conversation_id = (
-                str(conversation_id) if conversation_id is not None else ""
-            )
-            fixed_search_tool.embedding_configured = embedding_configured
-            fixed_search_result = await asyncio.to_thread(
-                fixed_search_tool.forward,
-                last_user_query or "",
-                5,
-            )
+            if memory_service is not None:
+                store_tool_config = ToolConfig(
+                    class_name="StoreMemoryTool",
+                    name="store_memory",
+                    description=(
+                        "Store one model-selected and summarized short-term memory extracted only "
+                        "from the conversation between the user and the current agent. Eligible "
+                        "information is limited to user preferences, task goals, action plans and "
+                        "latest progress, or reflections on user feedback and errors. Consider the "
+                        "user question, tool or code execution results, and the final answer. Do not "
+                        "store whole conversations, transient calculations, unverified guesses, "
+                        "duplicates, secrets, or information the user asks to forget. Before every "
+                        "final answer, assess whether an eligible memory was added or updated; if so, "
+                        "calling this tool is mandatory."
+                    ),
+                    inputs=json.dumps({
+                        "content": {
+                            "type": "string",
+                            "description": (
+                                "One concise, reusable short-term memory entry already judged, "
+                                "summarized, and deduplicated by the model"
+                            ),
+                            "description_zh": (
+                                "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                            )
+                        }
+                    }, ensure_ascii=False),
+                    output_type="string",
+                    params={},
+                    source="local",
+                    usage=None,
+                    metadata=memory_metadata,
+                )
+                tool_list.append(store_tool_config)
+
+            if memory_context_service is not None:
+                fixed_search_tool = _create_fixed_search_memory_tool()
+                fixed_search_tool.memory_context_service = memory_context_service
+                fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
+                fixed_search_tool.user_id = str(memory_context.user_id or "")
+                fixed_search_tool.agent_id = str(memory_context.agent_id or "")
+                fixed_search_tool.conversation_id = (
+                    str(conversation_id) if conversation_id is not None else ""
+                )
+                fixed_search_tool.embedding_configured = embedding_configured
+                fixed_search_result = await asyncio.to_thread(
+                    fixed_search_tool.forward,
+                    last_user_query or "",
+                    5,
+                )
+            else:
+                fixed_search_result = (
+                    "Memory search unavailable: retrieval pipeline is not configured. "
+                    "Continuing without memory results."
+                )
+                logger.warning(
+                    "event=memory_presearch_skipped tenant_id=%s user_id=%s "
+                    "agent_id=%s conversation_id=%s "
+                    "reason=context_service_unavailable",
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    conversation_id,
+                )
             pre_run_tool_events.extend([
                 {
                     "type": "tool",
@@ -1056,38 +1092,8 @@ async def create_agent_config(
                     "memory": fixed_search_result,
                     "memory_level": "agent",
                 })
-
-            loaded_memory_tools = [store_tool_config.name]
-            logger.info(
-                "event=memory_tools_loaded tenant_id=%s user_id=%s agent_id=%s "
-                "conversation_id=%s tool_names=%s fixed_search_enabled=true "
-                "pipeline_enabled=%s",
-                tenant_id,
-                user_id,
-                agent_id,
-                conversation_id,
-                loaded_memory_tools,
-                "memory_context_service" in memory_metadata,
-            )
         except Exception as e:
-            logger.warning(
-                "event=memory_tools_load_failed tenant_id=%s user_id=%s "
-                "agent_id=%s conversation_id=%s error_type=%s",
-                tenant_id,
-                user_id,
-                agent_id,
-                conversation_id,
-                type(e).__name__,
-            )
-    else:
-        logger.info(
-            "event=memory_tools_skipped tenant_id=%s user_id=%s agent_id=%s "
-            "conversation_id=%s reason=memory_disabled",
-            tenant_id,
-            user_id,
-            agent_id,
-            conversation_id,
-        )
+            logger.error(f"Failed to load memory tools: {e}", exc_info=True)
 
     # Build knowledge base summary
     knowledge_base_summary = ""
@@ -1136,13 +1142,6 @@ async def create_agent_config(
     automation_tool_policy = build_automation_tool_policy(
         language,
         (tool.name for tool in available_tools),
-    )
-    logger.info(
-        "event=memory_tool_policy_context enabled=%s item_id=%s "
-        "policy_char_count=%s",
-        bool(memory_tool_policy),
-        "system:memory_tool_policy" if memory_tool_policy else None,
-        len(memory_tool_policy),
     )
 
     render_kwargs = {
@@ -1202,14 +1201,6 @@ async def create_agent_config(
         else input_budget
     )
 
-    logger.info(
-        "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
-        agent_id,
-        model_id_to_use,
-        model_info.get("display_name") if model_info else model_name,
-        model_info.get("model_name") if model_info else model_name,
-    )
-
     context_items = build_context_inputs(
         duty=duty_prompt,
         constraint=constraint_prompt,
@@ -1233,7 +1224,7 @@ async def create_agent_config(
         kb_ids=kb_ids,
     )
 
-    logger.info(
+    logger.debug(
         f"Agent {agent_id} context assembly: "
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
@@ -1294,16 +1285,6 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
-    )
-    logger.info(
-        "Agent metadata | name=%s | tool_list=%s | managed_agents=%s | model_name=%s | max_steps=%s | enable_planning=%s | has_plan_tools=%s",
-        agent_config.name,
-        [t.name for t in agent_config.tools],
-        [a.name for a in agent_config.managed_agents],
-        agent_config.model_name,
-        agent_config.max_steps,
-        agent_config.enable_planning,
-        any(t.name in {"create_plan", "update_plan_step"} for t in agent_config.tools),
     )
     return agent_config
 
@@ -1528,16 +1509,9 @@ async def create_tool_config_list(
             # so the tool, its display-name mapping, and the injected KB summary all honour
             # the per-KB ACL.
             if index_names:
-                original_count = len(index_names)
                 index_names = ElasticSearchService.filter_accessible_indices(
                     index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                filtered_count = original_count - len(index_names)
-                if filtered_count > 0:
-                    logger.info(
-                        "Filtered %d inaccessible knowledge base(s) for user '%s' in agent '%s'",
-                        filtered_count, user_id, agent_name or agent_id,
-                    )
                 # Persist the filtered list back into params so downstream consumers
                 # (knowledge_base_summary builder, metadata) see only accessible indices.
                 tool_config.params["index_names"] = index_names
@@ -1750,7 +1724,7 @@ async def join_minio_file_description_to_query(
     # Enforce file count limit (keep most recent files by truncating from the end)
     if len(all_files) > max_files:
         all_files = all_files[:max_files]
-        logger.debug(f"File list truncated from {len(all_files)} to {max_files} files")
+        logger.info(f"File list truncated from {len(all_files)} to {max_files} files")
 
     if all_files:
         file_descriptions: list[str] = []
@@ -1780,7 +1754,7 @@ async def join_minio_file_description_to_query(
 
             # Check if adding this description would exceed the character limit
             if total_len > max_chars:
-                logger.debug(
+                logger.info(
                     f"File descriptions truncated at {len(file_descriptions)} files "
                     f"to stay within {max_chars} character limit"
                 )

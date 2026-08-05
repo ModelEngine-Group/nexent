@@ -56,7 +56,7 @@ from services.tool_configuration_service import init_tool_list_for_tenant
 from services.skill_service import init_skill_list_for_tenant
 
 
-logging.getLogger("user_management_service").setLevel(logging.DEBUG)
+logging.getLogger("user_management_service").setLevel(logging.INFO)
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:
@@ -229,12 +229,8 @@ async def signup_user_with_invitation(email: EmailStr,
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
         # Create user tenant relationship
-        logging.debug(
-            f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
             user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        logging.debug(
-            f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id
         if invitation_info:
@@ -272,8 +268,6 @@ async def signup_user_with_invitation(email: EmailStr,
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}, auto_login={auto_login}")
 
-        if user_role == "ADMIN":
-            await generate_tts_stt_4_admin(tenant_id, user_id)
 
         # Initialize tool list for the new tenant (only once per tenant)
         if not is_asset_owner_registration:
@@ -310,38 +304,6 @@ async def parse_supabase_response(is_admin, response, user_role, auto_login: boo
         "session": session_data,
         "registration_type": "admin" if is_admin else "user"
     }
-
-
-async def generate_tts_stt_4_admin(tenant_id, user_id):
-    tts_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_tts",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "tts",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_tts",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    stt_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_stt",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "stt",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_stt",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    create_model_record(tts_model_data, user_id, tenant_id)
-    create_model_record(stt_model_data, user_id, tenant_id)
-
 
 async def verify_invite_code(invite_code):
     logging.info(

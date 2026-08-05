@@ -4,16 +4,18 @@ title: Skill 仓库
 
 # Skill 仓库
 
-技能（Skill）是 Nexent 为智能体扩展能力的核心机制。每个技能将多个工具与使用文档打包为一个可复用的能力单元，可以像搭积木一样为智能体赋予复杂的工作能力。
+技能（Skill）是 Nexent 为智能体扩展能力的核心机制。Skill 仓库用于在同一租户内浏览、复制、管理和审核 Skill；每个 Skill 可以将工具、配置和使用文档打包为可复用的能力单元。
 
 ## 目录
 
-- [技能与工具的关系](#-技能与工具的关系)：理解技能的核心概念
+- [技能与工具的关系](#技能与工具的关系)：理解技能的核心概念
+- [管理员与开发者的界面差异](#-管理员与开发者的界面差异)：了解不同角色的可用功能
+- [仓库](#-仓库)：浏览、复制和下架已上架 Skill
+- [我的 Skill](#-我的-skill)：创建、编辑和申请上架
+- [审核中心](#-审核中心)：管理员审核 Skill 上架申请
 - [技能使用指南](#-技能使用指南)：如何在智能体开发中使用技能
-- [技能管理](#-技能管理)：创建、编辑、安装外部技能
 - [技能上传指南](#-技能上传指南)：SKILL.md 格式、ZIP 结构、特殊标签与书写规范
 - [NL-to-Skill](#-nl-to-skill)：通过自然语言描述自动生成技能
-- [官方技能一览](#-官方技能一览)：预置技能及其能力说明
 
 ## 技能与工具的关系
 
@@ -30,37 +32,162 @@ title: Skill 仓库
 | 参数 | 固定参数 schema | 可自定义参数模板 |
 | 分发 | 代码级 | ZIP 包分发，即插即用 |
 
+## 👥 管理员与开发者的界面差异
+
+进入 **Skill 仓库** 后，页面顶部会按角色显示不同页签：
+
+| 角色 | 可见页签 | 额外能力 |
+|------|----------|----------|
+| **开发者** | 仓库、我的 Skill | 浏览同租户已上架 Skill、复制为自己的 Skill、管理有编辑权限的 Skill、申请上架 |
+| **管理员** | 仓库、我的 Skill、审核中心 | 在开发者能力基础上，审核上架申请，并可下架仓库中的 Skill |
+
+> 提示：审核中心仅对管理员可见；开发者可在「我的 Skill」中查看自己申请的审核进度。
+
+**开发者视图**（仓库 / 我的 Skill）：
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_dev.png" style="width: 80%; height: auto;" alt="开发者页签界面" />
+</div>
+
+**管理员视图**（仓库 / 我的 Skill / 审核中心）：
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_admin.png" style="width: 80%; height: auto;" alt="管理员页签界面" />
+</div>
+
+---
+
+## 📦 仓库
+
+「仓库」页签展示当前租户内已上架并可共享的 Skill。当前租户的开发者和管理员可以浏览、查看详情，并复制到自己的 Skill 列表后再编辑。
+
+> 同租户共享的 Skill 必须先「复制为我的 Skill」才能编辑。
+
+### 浏览与搜索
+
+- 使用卡片浏览已上架 Skill
+- 支持按 **Skill 名称、描述或标签** 搜索
+- 卡片展示名称、描述、标签、来源、下载次数等摘要信息
+
+ <div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_repo_search.png" style="width: 80%; height: auto;" alt="仓库列表" />
+</div>
+
+### 查看详情
+
+点击卡片上的「详情」可查看 Skill 的基本信息，包括名称、创建者、描述、标签、安装次数和更新时间。详情仅用于查看；如需修改，请先复制到「我的 Skill」。
+
+ <div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_repo_detail.png" style="width: 80%; height: auto;" alt="Skill详情" />
+</div>
+
+### 复制为我的 Skill
+
+1. 在目标 Skill 卡片上点击「复制」
+2. 填写新的 Skill 名称；如系统提示名称冲突，请修改名称后重试
+3. 复制成功后，该 Skill 会出现在「我的 Skill」中，可继续编辑、配置和申请上架
+
+### 管理员下架
+
+管理员可在仓库 Skill 卡片的更多操作菜单中选择「下架」。下架后，该 Skill 不再对当前租户的开发者和管理员开放浏览或复制；原有的个人副本不受影响。
+
+---
+
+## 🧑 我的 Skill
+
+「我的 Skill」用于管理您有权限编辑的 Skill，包括自己创建的 Skill，以及被授予编辑权限的其他 Skill。
+
+### 筛选与搜索
+
+- **全部 / 我创建的 / 其他人的**：按归属筛选
+- 支持按 Skill 名称、描述或标签搜索
+- 列表以卡片形式展示，并支持分页浏览
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_mine.png" style="width: 80%; height: auto;" alt="我的 Skill 列表" />
+</div>
+
+### 创建、上传与编辑
+
+在「我的 Skill」页签中点击「创建 Skill」，可选择：
+
+- **交互式创建**：通过自然语言与 Skill 构建助手协作生成或完善 Skill
+- **上传技能文件**：上传单个 `SKILL.md` 或包含完整文件结构的 ZIP 包
+
+创建后可通过卡片上的「编辑」修改名称、描述、标签、组内权限、`SKILL.md` 正文及附属文件。详细的文件格式和上传规则见后文的[技能上传指南](#-技能上传指南)。
+
+### 申请上架
+
+有权限编辑的 Skill 可以申请上架到租户仓库：
+
+1. 在 Skill 卡片上点击「上架」
+2. 可选填写上架说明，帮助管理员了解本次申请
+3. 点击「提交申请」，等待管理员审核
+
+提交后，卡片会显示「审核中」状态；同一个 Skill 同时只会有一条待审核的上架记录。
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_list.png" style="width: 80%; height: auto;" alt="申请上架" />
+</div>
+
+### 查看审核进度
+
+在已提交申请的 Skill 卡片上打开审核状态，可查看当前状态、提交时间、上架说明和审核意见（如有）。
+
+- **审核中**：可取消上架申请
+- **已上架**：可下架该 Skill
+- **已驳回**：先编辑 Skill 进行修改；随后取消当前上架申请，再重新点击「上架」提交
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_under_review.png" style="width: 80%; height: auto;" alt="审核进度" />
+</div>
+
+---
+
+## ✅ 审核中心
+
+「审核中心」仅对管理员可见，用于处理当前租户开发者提交的 Skill 上架申请。
+
+### 待审核队列
+
+待审核列表会展示 Skill 名称、申请人、上架说明和提交时间等信息；页签上的角标显示当前待处理数量。
+
+### 审核操作
+
+1. 点击「详情」查看 Skill 的基本信息
+2. 点击「通过」并确认后，Skill 将上架到「仓库」
+3. 点击「驳回」时可填写审核意见；提交者可在「我的 Skill」中查看意见、修改后重新申请
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_approve.png" style="width: 80%; height: auto;" alt="审核确认" />
+</div>
+
+---
+
 ## 技能使用指南
 
 ### 为智能体配置技能
 
-1. 打开 **[智能体开发](../agent-development.md)** 页面
-2. 在"选择智能体的工具"页签中，找到 **技能（Skills）** 分组
-3. 点击技能名称即可选中，再次点击取消选择
-4. 保存智能体配置
+1. 打开 **[智能体开发](../agent-development.md)** 页面。
+2. 在「选择智能体的工具」中切换到 **Skills** 页签，点击「选择 Skill」。
+3. 选择需要配置的 Skill；再次选择可取消。
+4. 若 Skill 存在必填参数，选择时会自动打开参数配置窗口。完成填写并保存后，Skill 才会加入当前智能体。
+5. 已添加的 Skill 可点击右侧齿轮图标，修改该智能体使用的参数。
+6. 保存智能体配置。
 
-## Skill 仓库
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_using.jpg" style="width: 80%; height: auto;" alt="智能体配置中的 Skills 页签" />
+</div>
 
 ### 查看已安装的技能
 
-在"选择智能体的工具"技能分组中，系统会展示所有已安装的技能列表，包括：
-- 官方技能
-- 自定义技能
+在「选择技能」的 **Skills** 页签中，可查看当前租户可用的官方 Skill 和自定义 Skill，并将其添加到当前智能体。
 
-### 创建自定义技能
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_select.png" style="width: 80%; height: auto;" alt="选择 Skill 弹窗" />
+</div>
 
-Nexent 支持两种方式创建自定义技能：上传技能包文件，或通过自然语言描述自动生成。
-
-#### 方式一：上传 SKILL.md 或 ZIP
-
-1. 进入技能配置界面
-2. 点击"上传技能"按钮
-3. 选择 `SKILL.md` 文件（单文件）或 `.zip` 压缩包（完整技能包）
-4. 系统自动解析并创建技能
-
-#### 方式二：NL-to-Skill 自然语言创建
-
-在技能管理页面，点击"**NL 创建技能**"按钮即可进入。具体用法详见下方 [NL-to-Skill](#-nl-to-skill) 专区。
+> 不同智能体可以为同一个 Skill 分别保存不同的参数配置。
 
 ## 技能上传指南
 
@@ -315,6 +442,10 @@ NL-to-Skill 是 Nexent 提供的一项智能创建功能。您只需要用**自�
 
 > 您说"我想要一个能搜索 GitHub 仓库并提取 Star 数的技能"，系统就自动为您生成一个完整可用的技能。
 
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_create.png" style="width: 80%; height: auto;" alt="NL-to-Skill 创建界面" />
+</div>
+
 ### 快速上手
 
 #### 第一步：描述您的需求
@@ -458,9 +589,9 @@ NL-to-Skill 擅长生成以下类型的技能：
 
 #### 技能修改
 
-在 NL-to-Skill 界面可以选中已经存在的技能。选中技能后，该技能信息将自动加载。您可以在左侧对话框中使用自然语言尝试对该技能进行更新。
+在「我的 Skill」中找到需要修改的 Skill，点击「编辑」。在智能体配置页面的 Skills 列表中，对具有编辑权限的 Skill 也可点击右侧铅笔图标进入编辑。系统会加载该 Skill 的基本信息、`SKILL.md` 正文和附属文件；您可以通过交互式创建页使用自然语言完善内容，也可以直接编辑文件后保存。
 
-如果您创建的技能名与已有技能重名，Nexent 将自动从技能创建模式切换为技能更新模式。所有内容将覆盖更新至原有技能。
+新建或上传 Skill 时，如名称与已有 Skill 重名，系统会提示修改名称后再提交。
 
 ## 安全与最佳实践
 
