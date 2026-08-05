@@ -111,14 +111,14 @@
   "chatInput.unsupportedFileTypeSimple": "Unsupported file type",
   "chatInput.dragAndDropFilesHere": "Drag and drop files here to upload",
   "chatInput.supportedFileFormats": "Supported formats: images, documents (PDF, Word, Excel, PPT, EPUB), text files, CSV/TSV, Markdown、JSON、HTML、XML",
-  "chatInput.sendMessageTo": "Send message to {{appName}}",
+  "chatInput.sendMessageTo": "Send message to {productName} Agent",
   "chatInput.stopRecording": "Stop Recording",
   "chatInput.startRecording": "Start Recording",
   "chatInput.uploadFiles": "Upload Files",
   "chatInput.stopGenerating": "Stop Generating",
   "chatInput.recording": "Recording...",
   "chatInput.recordingError": "Recording error, please try again",
-  "chatInput.helloIm": "Hello, I'm {{appName}}",
+  "chatInput.helloIm": "Hello, I'm {productName} Agent",
   "chatInput.introMessage": "I can help you with coding, reading, searching, and comprehensive tasks. Feel free to ask!",
   "chatInput.close": "Close",
   "chatInput.send": "Send",
@@ -4040,5 +4040,6 @@
   "project.config.page.subtitle": "Subtitle",
   "project.config.page.description": "Page description",
   "project.config.page.complete.logo": "Full logo",
-  "project.config.page.simple.log": "System logo"
+  "project.config.page.simple.log": "System logo",
+  "project.config.description": "{productName} is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 }
