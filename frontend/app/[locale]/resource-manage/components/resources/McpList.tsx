@@ -47,7 +47,6 @@ import {
   importOpenApiService,
   deleteOpenApiService,
 } from "@/services/mcpService";
-import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -63,7 +62,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     loading,
     containerList,
     enableUploadImage,
-    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
     loadServerList,
@@ -125,22 +123,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
-
-  // When running inside a container (Docker/K8s), MCP ports are not published
-  // to the host, so a fixed default port is used and the user cannot change it.
-  // Auto-suggest the port when the add modal opens (backend returns the default).
-  useEffect(() => {
-    if (!mcpPortsVirtual || !addModalVisible) return;
-    if (containerPort === undefined || uploadPort === undefined) {
-      suggestMcpContainerPortService().then((res) => {
-        if (res.success && res.data?.port) {
-          const p = res.data.port;
-          if (containerPort === undefined) setContainerPort(p);
-          if (uploadPort === undefined) setUploadPort(p);
-        }
-      });
-    }
-  }, [addModalVisible, mcpPortsVirtual, containerPort, uploadPort]);
 
   // Load OpenAPI services on mount
   useEffect(() => {
@@ -954,7 +936,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         min={1}
                         max={65535}
                         style={{ width: 120 }}
-                        disabled={actionsLocked || mcpPortsVirtual}
+                        disabled={actionsLocked}
                         controls={false}
                       />
                       <div className="flex-1" />
@@ -1004,7 +986,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                             setUploadPort(value === null ? undefined : value);
                         }}
                         style={{ width: 150 }}
-                        disabled={actionsLocked || mcpPortsVirtual}
+                        disabled={actionsLocked}
                         min={1}
                         max={65535}
                         controls={false}

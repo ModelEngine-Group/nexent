@@ -6,8 +6,8 @@ import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortA
 interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
-  /** i18n key for the readonly hint shown when `enabled` is false. Defaults to `portReadonlyHint`. */
-  readonlyHintKey?: string;
+  /** When false, hide the "Suggest Port" button; the user types the port directly. */
+  showSuggestButton?: boolean;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
 }
@@ -15,7 +15,7 @@ interface ContainerPortFieldProps {
 export default function ContainerPortField({
   scope,
   enabled = true,
-  readonlyHintKey,
+  showSuggestButton = true,
   containerPort,
   setContainerPort,
 }: ContainerPortFieldProps) {
@@ -41,7 +41,7 @@ export default function ContainerPortField({
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
-        {enabled ? (
+        {enabled && showSuggestButton ? (
           <Button
             onClick={suggestPort}
             loading={suggesting}
@@ -53,7 +53,7 @@ export default function ContainerPortField({
       </div>
       {!enabled ? (
         <p className="mt-2 text-xs text-slate-400">
-          {t(readonlyHintKey ?? "mcpTools.addModal.portReadonlyHint")}
+          {t("mcpTools.addModal.portReadonlyHint")}
         </p>
       ) : containerPort && portCheckLoading ? (
         <p className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">

@@ -23,7 +23,7 @@ export default function AddMcpServiceModal({
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
   const [tab, setTab] = useState<McpSource>(initialTab);
-  const { enableUploadImage, mcpPortsVirtual } = useMcpServerList({ enabled: open });
+  const { enableUploadImage } = useMcpServerList({ enabled: open });
   const submittingRef = useRef(false);
 
   useEffect(() => {
@@ -98,13 +98,11 @@ export default function AddMcpServiceModal({
           <AddMcpServiceLocalSection
             active={tab === McpSource.LOCAL}
             enableUploadImage={enableUploadImage}
-            portsVirtual={mcpPortsVirtual}
             onAdded={onClose}
             onSubmittingChange={setSubmitting}
           />
           <AddMcpServiceRegistrySection
             active={tab === McpSource.REGISTRY}
-            portsVirtual={mcpPortsVirtual}
             onAdded={onClose}
           />
           <AddMcpServiceCommunitySection

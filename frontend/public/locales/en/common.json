@@ -2638,7 +2638,6 @@
   "mcpTools.addModal.portAvailable": "Port {{port}} is available.",
   "mcpTools.addModal.portOccupied": "Port {{port}} is occupied.",
   "mcpTools.addModal.portReadonlyHint": "To change the port, delete this MCP and redeploy.",
-  "mcpTools.addModal.portUnifiedHint": "Under Docker/K8s deployment, all MCP services share this unified port, assigned automatically by the system.",
   "mcpTools.addModal.renameBeforeInstallHint": "Please rename before installing",
   "mcpTools.addModal.tags": "Tags",
   "mcpTools.addModal.removeTagAria": "Remove tag {{tag}}",

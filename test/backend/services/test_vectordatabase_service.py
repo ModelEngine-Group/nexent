@@ -1431,6 +1431,45 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_hides_private_knowledge_base_from_group_member(
+        self,
+        mock_get_knowledge,
+        mock_get_user_tenant,
+        mock_get_group_ids,
+    ):
+        self.mock_vdb_core.get_user_indices.return_value = ["private-index"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "private-index",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other-user",
+                "ingroup_permission": "PRIVATE",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch",
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "DEV",
+            "tenant_id": "test_tenant",
+        }
+        mock_get_group_ids.return_value = [1]
+
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=False,
+            target_tenant_id="test_tenant",
+            user_id="dev-user",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                                    mock_get_group_ids):
         """
@@ -7741,6 +7780,7 @@ def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
+        ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
         ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
     ],
 )
@@ -7766,6 +7806,28 @@ def test_resolve_knowledge_base_permission_user_group_rules(
     assert (
         ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
         == expected
+    )
+
+
+def test_resolve_knowledge_base_permission_private_dev_creator_ignores_groups(monkeypatch):
+    record = {
+        "index_name": "kb",
+        "knowledge_sources": "elasticsearch",
+        "tenant_id": "tenant-1",
+        "created_by": "dev-user",
+        "group_ids": "9",
+        "ingroup_permission": "PRIVATE",
+    }
+    _patch_kb_permission_context(
+        monkeypatch,
+        record=record,
+        user_tenant={"user_role": "DEV", "tenant_id": "tenant-1"},
+        user_group_ids=[],
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "dev-user", "tenant-1")
+        == ElasticSearchService.CREATOR_PERMISSION
     )
 
 
