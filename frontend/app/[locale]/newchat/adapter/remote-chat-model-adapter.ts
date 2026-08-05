@@ -686,22 +686,7 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  const hasCitationIdentity =
-    item.toolSign !== undefined && item.citeIndex !== undefined;
-  const isDuplicate = targetToolCall.searchContent.some(
-    (source: {
-      url: string;
-      sourceFile?: string;
-      toolSign?: string;
-      citeIndex?: number;
-    }) =>
-      hasCitationIdentity
-        ? source.toolSign === item.toolSign && source.citeIndex === item.citeIndex
-        : item.url
-          ? source.url === item.url
-          : source.sourceFile === item.sourceFile,
-  );
-  if ((item.url || item.sourceFile) && !isDuplicate) {
+  if (item.url || item.sourceFile) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -1398,9 +1383,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
       for (const imageUrl of imageUrls) {
         if (!imageUrl) continue;
-        if (searchImagesAccumulator.some((image) => image.url === imageUrl)) {
-          continue;
-        }
 
         const metadata = imageMetadata[searchImagesAccumulator.length];
         const imageSource: SearchSource = {
@@ -1827,19 +1809,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const isImage =
                   result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
                 const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
-                // A single document URL/object can legitimately produce
-                // several independently cited retrieval results. Match the
-                // persisted history behavior by de-duplicating only repeated
-                // SSE delivery of the same citation, not by file identity.
-                const sourceKey = `${result.tool_sign || ""}:${citeIndex}`;
-                if (
-                  (url || filename || title) &&
-                  !searchSourcesAccumulator.some(
-                    (source) =>
-                      `${source.toolSign || ""}:${source.citeIndex}` ===
-                      sourceKey
-                  )
-                ) {
+                if (url || filename || title) {
                   searchSourcesAccumulator.push({
                     citeIndex,
                     url: resolvedUrl,
@@ -2046,15 +2016,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const isImage =
                     result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
                   const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
-                  const sourceKey = `${result.tool_sign || ""}:${citeIndex}`;
-                  if (
-                    (url || filename || title) &&
-                    !searchSourcesAccumulator.some(
-                      (source) =>
-                        `${source.toolSign || ""}:${source.citeIndex}` ===
-                        sourceKey
-                    )
-                  ) {
+                  if (url || filename || title) {
                     searchSourcesAccumulator.push({
                       citeIndex,
                       url: resolvedUrl,
