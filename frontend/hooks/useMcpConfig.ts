@@ -61,7 +61,6 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   const {
     serverList: rawServerList,
     enableUploadImage,
-    mcpPortsVirtual,
     isLoading: loadingServers,
     refetch: refetchMcpServers,
     invalidate: invalidateMcpServers,
@@ -414,7 +413,6 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     loading,
     containerList,
     enableUploadImage,
-    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
 
