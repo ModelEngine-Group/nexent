@@ -9,10 +9,8 @@ from database.db_models import (
     AgentAutomationTask,
 )
 
-AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4.0_0722_add_agent_automation.sql")
-AGENT_AUTOMATION_TOOL_MIGRATION = Path(
-    "deploy/sql/migrations/v2.4.0_0804_add_agent_automation_tool_idempotency.sql"
-)
+AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4_merged_migrations.sql")
+AGENT_AUTOMATION_TOOL_MIGRATION = AGENT_AUTOMATION_MIGRATION
 
 
 class _FakeRow:
@@ -299,7 +297,16 @@ def test_proposal_source_message_has_unique_partial_index():
     assert "ADD COLUMN IF NOT EXISTS source_message_id BIGINT" in migration_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_proposal_source_message" in migration_sql
     assert "idempotency_key" not in AgentAutomationProposal.__table__.columns
-    assert "idempotency_key" not in migration_sql
+    proposal_table_sql = migration_sql.split(
+        "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t",
+        maxsplit=1,
+    )[1].split(");", maxsplit=1)[0]
+    assert "idempotency_key" not in proposal_table_sql
+    assert (
+        "ALTER TABLE nexent.agent_automation_proposal_t\n"
+        "    ADD COLUMN IF NOT EXISTS idempotency_key"
+        not in migration_sql
+    )
 
 
 def test_run_capability_check_column_is_removed_from_schema():
