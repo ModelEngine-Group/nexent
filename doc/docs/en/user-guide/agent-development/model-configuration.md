@@ -1,6 +1,6 @@
-# Model Management
+# Model Configuration
 
-The Model Management module lets you add and configure AI models — large language models, embedding models, rerank models, multimodal models, and voice models. Nexent supports multiple providers so you can pick the best option for each scenario.
+The Model Configuration module lets you add and configure AI models — large language models, embedding models, rerank models, multimodal models, and voice models. Nexent supports multiple providers so you can pick the best option for each scenario.
 
 ## 🤖 Model Configuration
 
@@ -220,7 +220,7 @@ If you run into provider issues:
 
 ## 🚀 Next Steps
 
-After closing the Model Management flow, continue with:
+After closing the Model Configuration flow, continue with:
 
 1. **[Knowledge Base](./knowledge-base)** – Create and manage knowledge bases.
 2. **[Agent Development](./agent-development)** – Build and configure agents.
