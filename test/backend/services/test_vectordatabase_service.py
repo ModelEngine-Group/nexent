@@ -1431,6 +1431,45 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_hides_private_knowledge_base_from_group_member(
+        self,
+        mock_get_knowledge,
+        mock_get_user_tenant,
+        mock_get_group_ids,
+    ):
+        self.mock_vdb_core.get_user_indices.return_value = ["private-index"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "private-index",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other-user",
+                "ingroup_permission": "PRIVATE",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch",
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "DEV",
+            "tenant_id": "test_tenant",
+        }
+        mock_get_group_ids.return_value = [1]
+
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=False,
+            target_tenant_id="test_tenant",
+            user_id="dev-user",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                                    mock_get_group_ids):
         """
