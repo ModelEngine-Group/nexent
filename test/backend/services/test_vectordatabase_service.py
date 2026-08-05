@@ -7741,6 +7741,7 @@ def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
         ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
         ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
+        ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
         ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
     ],
 )
@@ -7766,6 +7767,28 @@ def test_resolve_knowledge_base_permission_user_group_rules(
     assert (
         ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
         == expected
+    )
+
+
+def test_resolve_knowledge_base_permission_private_dev_creator_ignores_groups(monkeypatch):
+    record = {
+        "index_name": "kb",
+        "knowledge_sources": "elasticsearch",
+        "tenant_id": "tenant-1",
+        "created_by": "dev-user",
+        "group_ids": "9",
+        "ingroup_permission": "PRIVATE",
+    }
+    _patch_kb_permission_context(
+        monkeypatch,
+        record=record,
+        user_tenant={"user_role": "DEV", "tenant_id": "tenant-1"},
+        user_group_ids=[],
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "dev-user", "tenant-1")
+        == ElasticSearchService.CREATOR_PERMISSION
     )
 
 
