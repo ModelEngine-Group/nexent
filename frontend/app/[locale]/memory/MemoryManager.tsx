@@ -46,6 +46,7 @@ import {
   createMemoryRecord,
   deleteMemoryRecord,
   listMemoryRecords,
+  synchronizeMemoryRecordStatuses,
   updateMemoryRecord,
   type MemoryRecord,
   type MemoryScope,
@@ -143,10 +144,14 @@ export function MemoryManager() {
       setLoadingByScope((current) => ({ ...current, [targetScope]: true }));
       try {
         const nextRecords = await listMemoryRecords(targetScope);
+        const syncResult = await synchronizeMemoryRecordStatuses(nextRecords);
         setRecordsByScope((current) => ({
           ...current,
-          [targetScope]: nextRecords,
+          [targetScope]: syncResult.records,
         }));
+        if (syncResult.failedCount > 0) {
+          message.warning("部分记忆状态同步失败，请稍后重试");
+        }
       } catch {
         message.error("记忆列表加载失败");
       } finally {
@@ -374,7 +379,7 @@ export function MemoryManager() {
             render: (value: string | null, record: MemoryRecord) =>
               record.conversation_id ? (
                 <Link
-                  href={`/newchat?conversation_id=${encodeURIComponent(
+                  href={`/newchat?thread_id=${encodeURIComponent(
                     record.conversation_id
                   )}`}
                   className="memory-conversation-link"

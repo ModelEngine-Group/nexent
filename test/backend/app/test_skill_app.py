@@ -1370,10 +1370,11 @@ class TestGetSkillInstanceEndpointExtended:
                 assert data.get("skill_description") == "Test description"
                 assert data.get("skill_content") == "# Test content"
                 assert data.get("config_schemas") == [{"name": "key", "type": "string"}]
-                # Endpoint uses template config_values as base, then merges instance params
-                # Since instance_params comes from instance's config_values (which was overwritten by template),
-                # the result is the template values
-                assert data.get("config_values") == {"template_key": "template_value"}
+                # Template defaults are returned together with saved per-agent values.
+                assert data.get("config_values") == {
+                    "template_key": "template_value",
+                    "instance_key": "instance_value",
+                }
 
     def test_get_instance_unauthorized(self, mocker):
         """Test instance retrieval without authorization."""
@@ -1818,6 +1819,24 @@ class TestGetSkillFileContentEndpointExtended:
             response = client.get("/skills/test_skill/files/README.md")
 
             assert response.status_code == 500
+
+    def test_get_file_content_traversal_returns_forbidden(self):
+        """Unsafe file paths should map to HTTP 403 without leaking local paths."""
+        from backend.apps.skill_app import ForbiddenError
+
+        with patch("backend.apps.skill_app.get_current_user_id", return_value=("user-1", "tenant-1")), \
+                patch("backend.apps.skill_app.SkillService") as mock_service_class:
+            mock_service = MagicMock()
+            mock_service_class.return_value = mock_service
+            mock_service.get_skill.return_value = {"name": "test_skill", "tenant_id": "tenant-1"}
+            mock_service.get_skill_file_content.side_effect = ForbiddenError("Unsafe local skill path")
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            response = TestClient(app).get("/skills/test_skill/files/scripts/secret.txt")
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Unsafe local skill path"
 
 
 # ===== Update Skill From File Endpoint Additional Tests =====
@@ -2621,6 +2640,10 @@ class TestUpdateSkillInstanceWithConfigMerge:
                 assert response.status_code == 200
                 data = response.json()
                 assert "instance" in data
+                assert data["instance"]["config_values"] == {
+                    "template_key": "template_value",
+                    "instance_key": "instance_value",
+                }
 
 
 # ===== Update Skill with config_schemas tests =====
@@ -2998,8 +3021,6 @@ class TestGetSkillFileContentAssetOwner:
                     assert response.json() == {"content": "您无权限查看"}
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
     def test_update_skill_by_id_success(self, mocker):
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
@@ -3168,6 +3189,58 @@ if __name__ == "__main__":
                     tenant_id="tenant123",
                     user_id="user123",
                 )
+
+
+class TestSkillAppCoverageGaps:
+    def test_asset_owner_view_denied_response(self):
+        with patch('backend.apps.skill_app.can_view_skill', return_value=False):
+            response = skill_app._asset_owner_skill_view_denied_response(
+                {"tenant_id": "owner-tenant"}, "requester-tenant"
+            )
+
+        assert response.media_type == "application/json"
+        assert response.body.decode() == '{"content":"您无权限查看"}'
+
+    def test_asset_owner_view_allowed_and_missing_skill(self):
+        with patch('backend.apps.skill_app.can_view_skill', return_value=True):
+            assert skill_app._asset_owner_skill_view_denied_response(
+                {"tenant_id": "owner-tenant"}, "requester-tenant"
+            ) is None
+        assert skill_app._asset_owner_skill_view_denied_response(None, "requester-tenant") is None
+
+    def test_build_skill_update_data_includes_non_null_fields_and_files(self):
+        request = skill_app.SkillUpdateRequest(
+            name="renamed",
+            description="description",
+            tags=["tag"],
+            files=[{"path": "README.md", "content": "content"}],
+        )
+
+        assert skill_app._build_skill_update_data(request) == {
+            "name": "renamed",
+            "description": "description",
+            "tags": ["tag"],
+            "files": [{"path": "README.md", "content": "content"}],
+        }
+
+    def test_build_skill_update_data_includes_all_supported_fields(self):
+        request = skill_app.SkillUpdateRequest(
+            name="new-name",
+            group_ids=[1],
+            ingroup_permission="read",
+            config_schemas={"key": {"type": "string"}},
+            config_values={"key": "value"},
+        )
+
+        result = skill_app._build_skill_update_data(request)
+
+        assert result == {
+            "name": "new-name",
+            "group_ids": [1],
+            "ingroup_permission": "read",
+            "config_schemas": {"key": {"type": "string"}},
+            "config_values": {"key": "value"},
+        }
 
 
 if __name__ == "__main__":

@@ -647,7 +647,7 @@ class SiliconflowMultimodalEmbedding(MultimodalEmbedding):
 
 
 class OpenAICompatibleEmbedding(TextEmbedding):
-    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "text", ssl_verify: bool = True):
+    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "embedding", ssl_verify: bool = True):
         """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
         self.api_key = api_key
         self.api_url = base_url

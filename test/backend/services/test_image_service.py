@@ -1,6 +1,7 @@
 import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -711,9 +712,9 @@ async def test_proxy_image_impl_aidp_and_external_urls_use_proxy_path(external_u
 
 
 class TestIsAidpUrl:
-    """``_is_aidp_url`` recognizes AIDP image URLs by matching both host
-    and the ``/KnowledgeBase/Tenants/`` path prefix against env vars, so
-    the proxy only adds the Bearer header to the intended target."""
+    """``_is_aidp_url`` recognizes permitted AIDP image paths and the
+    proxy reconstructs them against the configured AIDP authority before
+    adding the Bearer header."""
 
     def test_matches_when_host_and_path_match(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
@@ -721,9 +722,9 @@ class TestIsAidpUrl:
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
-    def test_rejects_wrong_host(self, monkeypatch):
+    def test_accepts_alias_host_but_rewrites_to_configured_host(self, monkeypatch):
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        assert not image_service_module._is_aidp_url(
+        assert image_service_module._is_aidp_url(
             "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
@@ -743,6 +744,13 @@ class TestIsAidpUrl:
         monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com/")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+
+    def test_matches_view_image_path(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._is_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+            "KnowledgeBases/75/ViewImage/image-id.png"
         )
 
 
@@ -854,3 +862,173 @@ class TestProxyImageImplAidpPath:
             await image_service_module.proxy_image_impl("https://other.host/img.png")
 
         aidp_spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# SSRF protection tests for _validate_and_reconstruct_aidp_url
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAndReconstructAidpUrl:
+    """Validate that ``_validate_and_reconstruct_aidp_url`` enforces path,
+    scheme, traversal, and authority replacement rules."""
+
+    def test_returns_none_when_env_empty(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        ) is None
+
+    def test_returns_none_for_non_http_scheme(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "ftp://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        ) is None
+
+    def test_returns_none_when_path_outside_prefix(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/other/path.png"
+        ) is None
+
+    def test_returns_none_when_path_contains_traversal_segments(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/../evil/img.png"
+        ) is None
+
+    def test_returns_none_when_path_ends_with_dotdot(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/.."
+        ) is None
+
+    def test_returns_none_when_query_present(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png?foo=bar"
+        ) is None
+
+    def test_returns_none_when_fragment_present(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png#frag"
+        ) is None
+
+    def test_returns_reconstructed_url_with_configured_authority(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        result = image_service_module._validate_and_reconstruct_aidp_url(
+            "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+        assert result is not None
+        # Host must be replaced with the configured authority, NOT the original host
+        parsed_result = urlparse(result)
+        assert parsed_result.netloc == "aidp.example.com"
+        assert parsed_result.netloc != "other.host"
+
+    def test_preserves_same_host_url(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        input_url = "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        result = image_service_module._validate_and_reconstruct_aidp_url(input_url)
+        assert result is not None
+        parsed_result = urlparse(result)
+        assert parsed_result.netloc == "aidp.example.com"
+        assert parsed_result.path == "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+
+    def test_returns_none_when_parsed_path_is_none(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        # Empty string has no scheme/netloc/path -> must return None
+        assert image_service_module._validate_and_reconstruct_aidp_url("") is None
+        # Malformed input with no netloc -> must return None
+        assert image_service_module._validate_and_reconstruct_aidp_url(":not-a-url") is None
+
+    def test_returns_reconstructed_url_with_base_scheme_and_netloc(self, monkeypatch):
+        # Input uses http, base uses https -> output must use base scheme
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        result = image_service_module._validate_and_reconstruct_aidp_url(
+            "http://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        )
+        assert result is not None
+        parsed_result = urlparse(result)
+        assert parsed_result.scheme == "https"
+        assert parsed_result.netloc == "aidp.example.com"
+
+    def test_returns_none_when_base_parsed_netloc_is_empty(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "file:///x")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        ) is None
+
+    def test_returns_none_when_base_scheme_not_http(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "ftp://aidp.example.com")
+        assert image_service_module._validate_and_reconstruct_aidp_url(
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+        ) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for _fetch_aidp_image host replacement at the point of use
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAidpImageHostReplacement:
+    """``_fetch_aidp_image`` must reconstruct the URL at the point of use so
+    that the Bearer token is only sent to the configured AIDP authority."""
+
+    @pytest.mark.asyncio
+    async def test_uses_reconstructed_url_with_configured_host(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "test-api-key")
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=b"fake-image-bytes")
+        mock_response.headers = {"Content-Type": "image/jpeg"}
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        input_url = (
+            "https://alias.host/KnowledgeBase/Tenants/aidp/"
+            "KnowledgeBases/kb-1/img.png"
+        )
+
+        with patch.object(
+            image_service_module.aiohttp, "ClientSession", return_value=mock_session
+        ):
+            result = await image_service_module._fetch_aidp_image(input_url)
+
+        assert result["success"] is True
+
+        # The actual GET must use the reconstructed URL with the configured host
+        call_args = mock_session.get.call_args
+        called_url = call_args.args[0]
+        parsed_called = urlparse(called_url)
+        assert parsed_called.netloc == "aidp.example.com"
+        assert parsed_called.netloc != "alias.host"
+        assert parsed_called.path == "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
+
+        # Bearer header must use AIDP_API_KEY
+        assert call_args.kwargs["headers"] == {"Authorization": "Bearer test-api-key"}
+        # Redirects must be disabled
+        assert call_args.kwargs["allow_redirects"] is False
+
+    @pytest.mark.asyncio
+    async def test_rejects_url_with_path_traversal(self, monkeypatch):
+        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "test-api-key")
+
+        traversal_url = (
+            "https://aidp.example.com/KnowledgeBase/Tenants/../evil/img.png"
+        )
+
+        # _validate_and_reconstruct_aidp_url rejects traversal, so
+        # _fetch_aidp_image returns a failure without making any HTTP call.
+        result = await image_service_module._fetch_aidp_image(traversal_url)
+
+        assert result["success"] is False
+        assert result["error"] == "URL does not match configured AIDP host or KB path"

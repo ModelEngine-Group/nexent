@@ -922,8 +922,15 @@ const GuardrailConfigContent = forwardRef<
           gap: 6,
           marginBottom: 12,
         }}>
-          <div style={{ width: 3, height: 14, background: "#185FA5", borderRadius: 2 }} />
-          <Text strong style={{ fontSize: 13, color: "#042C53" }}>
+          <div
+            style={{
+              width: 3,
+              height: 14,
+              background: token.colorPrimary,
+              borderRadius: 2,
+            }}
+          />
+          <Text strong style={{ fontSize: 13, color: token.colorText }}>
             {t("agent.guardrail.ai.title") || "Smart Generation"}
           </Text>
           <Tag
@@ -1043,8 +1050,15 @@ const GuardrailConfigContent = forwardRef<
           gap: 6,
           marginBottom: 12,
         }}>
-          <div style={{ width: 3, height: 14, background: "#185FA5", borderRadius: 2 }} />
-          <Text strong style={{ fontSize: 13, color: "#042C53" }}>
+          <div
+            style={{
+              width: 3,
+              height: 14,
+              background: token.colorPrimary,
+              borderRadius: 2,
+            }}
+          />
+          <Text strong style={{ fontSize: 13, color: token.colorText }}>
             {t("agent.guardrail.ruleList") || "Rule List"}
           </Text>
           <Tooltip

@@ -40,6 +40,7 @@ class ProcessType(Enum):
     VERIFICATION = "verification"  # layered ReAct self-verification status
     PLAN = "plan"  # structured plan JSON for planning feature
     PLAN_STEP_UPDATE = "plan_step_update"  # single plan step status update
+    AUTOMATION_PROPOSAL = "automation_proposal"  # scheduled-task proposal card payload
 
     SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
     SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
@@ -221,7 +222,8 @@ class MessageObserver:
             ProcessType.VERIFICATION: default_transformer,
             ProcessType.MAX_STEPS_REACHED: default_transformer,
             ProcessType.PLAN: default_transformer,
-            ProcessType.PLAN_STEP_UPDATE: default_transformer
+            ProcessType.PLAN_STEP_UPDATE: default_transformer,
+            ProcessType.AUTOMATION_PROPOSAL: default_transformer,
         }
 
     def _active_subagent(self) -> tuple | None:

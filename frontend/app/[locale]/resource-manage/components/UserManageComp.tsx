@@ -33,7 +33,6 @@ import {
   CircleOff,
   CircleDot,
   LoaderCircle,
-  HardDrive,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -57,7 +56,6 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
-import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
@@ -1071,18 +1069,11 @@ export default function UserManageComp() {
   // For non-super admins, automatically select their own tenant based on user.tenantId
   // This must be declared before useQuery that uses tenantId
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [showPlatformQuota, setShowPlatformQuota] = useState(isSuperAdmin);
   useEffect(() => {
     if (!isSuperAdmin && user?.tenantId && !tenantId) {
       setTenantId(user.tenantId);
     }
   }, [isSuperAdmin, tenantId, user?.tenantId]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) {
-      setShowPlatformQuota(false);
-    }
-  }, [isSuperAdmin]);
 
   // For non-super-admin users, directly fetch their tenant details
   // This ensures they always get the correct tenant info regardless of pagination
@@ -1223,13 +1214,6 @@ export default function UserManageComp() {
             <Button type="default" onClick={showModal}>
               {t("project.config")}
             </Button>
-            <Button
-              type="default"
-              icon={<HardDrive className="h-4 w-4" />}
-              onClick={() => setShowPlatformQuota(true)}
-            >
-              {t("quota.platformOverview", "Platform Quota Overview")}
-            </Button>
             <Modal
               title={t("project.config")}
               open={open}
@@ -1238,7 +1222,7 @@ export default function UserManageComp() {
               footer={null}
               width={800}
             >
-              <ProjectConfigTab />
+              <ProjectConfigTab showPlatformQuota />
             </Modal>
           </div>
         )}
@@ -1254,7 +1238,6 @@ export default function UserManageComp() {
                       selected={tenantId}
                       onSelect={(id) => {
                         setTenantId(id);
-                        setShowPlatformQuota(false);
                       }}
                       tenants={tenantData?.data || []}
                       total={tenantData?.total}
@@ -1281,15 +1264,10 @@ export default function UserManageComp() {
               </div>
             </Col>
           </Can>
-          <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <Col className="flex-1 flex flex-col px-6 pb-6 overflow-hidden">
             <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
-              {/* Platform overview / tenant name header */}
               <div className="flex items-center justify-between gap-4">
-                {showPlatformQuota ? (
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {t("quota.platformOverview", "Platform Quota Overview")}
-                  </h2>
-                ) : !hasSelectedTenant ? (
+                {!hasSelectedTenant ? (
                   <div />
                 ) : isEditingTenantName ? (
                   <Input
@@ -1320,9 +1298,7 @@ export default function UserManageComp() {
               <div className="flex-1 min-h-0 h-full">
                 <Divider size="small" />
                 <div className="flex h-full w-full">
-                  {isSuperAdmin && showPlatformQuota ? (
-                    <PlatformQuotaPanel />
-                  ) : tenantId ? (
+                  {tenantId ? (
                     <Tabs
                       defaultActiveKey="users"
                       className="h-full flex flex-col tenant-resource-tabs w-full overflow-hidden"

@@ -2470,6 +2470,7 @@ class TestCreateBuiltinTool:
             agent_id=31,
             tenant_id="tenant_config",
             version_no=9,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -2506,6 +2507,7 @@ class TestCreateBuiltinTool:
             agent_id=None,
             tenant_id=None,
             version_no=0,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -4260,6 +4262,7 @@ class TestCreateBuiltinTool:
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 version_no=1,
+                config_overrides=None,
             )
 
     def test_create_builtin_tool_unknown_tool(self, nexent_agent_instance):
@@ -5179,6 +5182,35 @@ class TestCreateBuiltinToolPlanTools:
 
         assert result is mock_tool_instance
         mock_tool_class.assert_called_once_with()
+
+    def test_create_builtin_tool_scheduled_task_proposal(self, nexent_agent_instance):
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+        create_proposal = MagicMock()
+        tool_config = ToolConfig(
+            class_name="CreateScheduledTaskProposalTool",
+            name="create_scheduled_task_proposal",
+            description="Create a scheduled-task proposal",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+            metadata={"create_proposal": create_proposal},
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.create_scheduled_task_tool": MagicMock(
+                CreateScheduledTaskProposalTool=mock_tool_class,
+            ),
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with(
+            create_proposal=create_proposal,
+            observer=nexent_agent_instance.observer,
+        )
 
 
 # ----------------------------------------------------------------------------

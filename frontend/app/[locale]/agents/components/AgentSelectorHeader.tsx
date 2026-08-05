@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
-import { Sparkles } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
@@ -44,16 +43,12 @@ interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
-  onOpenGenerationAssistant: () => void;
-  isGenerationAssistantOpen?: boolean;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
-  onOpenGenerationAssistant,
-  isGenerationAssistantOpen = false,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -734,24 +729,12 @@ export default function AgentSelectorHeader({
                   <FileInput className="w-4 h-4" />
                   <span>{t("agentConfig.button.import")}</span>
                 </Button>
-                <Button
-                  size="middle"
-                  onClick={onOpenGenerationAssistant}
-                  disabled={isGenerationAssistantOpen}
-                  className="flex shrink-0 items-center gap-1 whitespace-nowrap"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="whitespace-nowrap">
-                    {t("agentConfig.button.generationAssistant")}
-                  </span>
-                </Button>
               </Flex>
 
               <Button
                 icon={<GitBranch size={16} />}
                 onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
                 type={isShowVersionManagePanel ? "primary" : "default"}
-                disabled={isGenerationAssistantOpen}
               >
                 {t("agent.version.manage")}
               </Button>

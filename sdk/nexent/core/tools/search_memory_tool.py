@@ -8,11 +8,11 @@ the new Memory architecture it is not exposed for model-directed calls:
   the backend ``memory_context_service``); the tool surfaces a stable prompt
   contract regardless of which retrieval backend is in use.
 - When the backend wires a ``memory_context_service`` into the tool
-  metadata, the tool routes results through the Phase 4 retrieval pipeline
-  (``MemoryContextService.build_context``) so that score fusion,
-  temporal decay, MMR deduplication, and token-budget selection are all
-  applied. Otherwise it falls back to the legacy direct
-  ``MemoryService.search_memory`` call.
+  metadata, the tool routes results exclusively through the Phase 4 retrieval
+  pipeline (``MemoryContextService.build_context``) so that score fusion,
+  temporal decay, MMR deduplication, and token-budget selection are always
+  applied. Callers that explicitly configure only ``memory_service`` retain
+  the direct SDK retrieval mode.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ class SearchMemoryTool(Tool):
                 "delegates retrieval to its ``build_context`` so that "
                 "Phase 4 pipeline stages (normalize / score fusion / "
                 "temporal decay / MMR / token-budget selection) are "
-                "applied. Falls back to ``memory_service`` when absent."
+                "applied. Pipeline failures do not switch retrieval modes."
             ),
             default=None,
             exclude=True,
@@ -149,7 +149,7 @@ class SearchMemoryTool(Tool):
         automatic prompt path or from an active ``search_memory`` call.
         """
         # Lazy import: avoids forcing the heavy retrieval stack onto callers
-        # that only exercise the legacy direct ``memory_service`` path.
+        # that explicitly use the direct ``memory_service`` mode.
         from ...memory.models import MemoryLayer
 
         layer_labels = {
@@ -251,9 +251,9 @@ class SearchMemoryTool(Tool):
             try:
                 return self._search_via_context_service(query=query, top_k=top_k)
             except Exception as exc:
-                logger.warning(
-                    "event=memory_tool_degraded tool=search_memory tenant_id=%s user_id=%s "
-                    "agent_id=%s conversation_id=%s path=pipeline fallback=memory_service "
+                logger.error(
+                    "event=memory_tool_failed tool=search_memory tenant_id=%s user_id=%s "
+                    "agent_id=%s conversation_id=%s path=pipeline "
                     "error_type=%s",
                     self.tenant_id,
                     self.user_id,
@@ -261,8 +261,9 @@ class SearchMemoryTool(Tool):
                     self.conversation_id,
                     type(exc).__name__,
                 )
-                # Fall through to the legacy direct path so that a broken
-                # pipeline does not break the agent.
+                return (
+                    "Memory search failed. Continuing without memory results."
+                )
 
         if self.memory_service is None:
             logger.error(

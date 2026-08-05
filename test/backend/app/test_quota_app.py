@@ -62,7 +62,7 @@ def mock_auth_su():
          patch("apps.quota_app.get_user_tenant_by_user_id") as mock_tenant, \
          patch("apps.quota_app._get_user_role") as mock_role, \
          patch("apps.quota_app._require_admin_or_su") as mock_require_admin, \
-         patch("apps.quota_app._require_su_or_asset_owner") as mock_require_su:
+         patch("apps.quota_app._require_platform_quota_manager") as mock_require_su:
         mock_auth.return_value = ("su-user-id", "asset_owner_tenant_id")
         mock_tenant.return_value = {"user_role": "SU", "tenant_id": "asset_owner_tenant_id"}
         mock_role.return_value = "SU"
@@ -374,6 +374,19 @@ class TestPlatformEndpoints:
         resp = client.get("/api/platform/quota/overview")
         assert resp.status_code == 403
 
+    def test_get_overview_allows_speed_role(self, client, mock_platform_static):
+        mock_platform_static["get_platform_overview"].return_value = {
+            "platform_capacity_bytes": None,
+            "tenants": [],
+        }
+        with patch(
+            "apps.quota_app.get_current_user_id",
+            return_value=("speed-user-id", "speed-tenant"),
+        ), patch("apps.quota_app._get_user_role", return_value="SPEED"):
+            resp = client.get("/api/platform/quota/overview")
+
+        assert resp.status_code == 200
+
     def test_put_capacity_requires_su(self, client, mock_auth_su, mock_platform_static):
         mock_platform_static["set_platform_capacity"].return_value = {
             "capacity_bytes": 500 * GB,
@@ -489,11 +502,14 @@ class TestQuotaRoleHelpers:
         with patch("apps.quota_app._get_user_role", return_value="ADMIN"):
             assert quota_app._require_admin_or_su("token") == "ADMIN"
             with pytest.raises(HTTPException) as raised:
-                quota_app._require_su_or_asset_owner("token")
+                quota_app._require_platform_quota_manager("token")
             assert raised.value.status_code == 403
 
         with patch("apps.quota_app._get_user_role", return_value="SU"):
-            assert quota_app._require_su_or_asset_owner("token") == "SU"
+            assert quota_app._require_platform_quota_manager("token") == "SU"
+
+        with patch("apps.quota_app._get_user_role", return_value="SPEED"):
+            assert quota_app._require_platform_quota_manager("token") == "SPEED"
 
     def test_manageable_indices_only_include_edit_permissions(self):
         with patch(
