@@ -4,16 +4,18 @@ title: Skill Repository
 
 # Skill Repository
 
-A Skill is a core mechanism in Nexent for extending agent capabilities. Each skill packages multiple tools with usage documentation into a reusable unit of capability, enabling agents to handle complex tasks like assembling building blocks — without consuming excessive context space.
+A Skill is a core mechanism in Nexent for extending agent capabilities. The Skill Repository lets people in the same tenant browse, copy, manage, and review Skills. Each Skill can package tools, configuration, and usage documentation into a reusable unit of capability.
 
 ## Table of Contents
 
-- [Skills vs. Tools](#-skills-vs-tools): Understanding the core concepts
+- [Skills vs. Tools](#the-relationship-between-skills-and-tools): Understanding the core concepts
+- [UI Differences Between Admins and Developers](#-ui-differences-between-admins-and-developers): Available features by role
+- [Repository](#-repository): Browse, copy, and take down listed Skills
+- [My Skills](#-my-skills): Create, edit, and apply to list Skills
+- [Review Center](#-review-center): Admin review of Skill listing requests
 - [Using Skills](#-using-skills): How to use skills in agent development
-- [Skill Management](#-skill-management): Create, edit, import, and export skills
 - [Skill Upload Guide](#-skill-upload-guide): SKILL.md format, ZIP structure, special tags, and writing standards
 - [NL-to-Skill](#-nl-to-skill): Automatically generate skills from natural language descriptions
-- [Official Skills Overview](#-official-skills-overview): Built-in skills and their capabilities
 
 ## The Relationship Between Skills and Tools
 
@@ -28,82 +30,166 @@ A **Skill** bundles the capabilities of multiple tools into a complete workflow,
 | Granularity | Single atomic operation | Bundle of multiple tools + configuration + documentation |
 | Token consumption | Occupies context on every turn | Loaded only when activated |
 | Parameters | Fixed parameter schema | Customizable parameter templates |
-| Versioning | No version management | Supports draft/published versions |
 | Distribution | Code-level | ZIP package distribution, plug-and-play |
 
 **Analogy**: Tools are individual items like a screwdriver, hammer, or saw. A Skill is a toolbox — with tools pre-matched for a work scenario and accompanied by usage instructions. Open the right toolbox for the task at hand.
+
+## 👥 UI Differences Between Admins and Developers
+
+The tabs shown at the top of **Skill Repository** depend on your role:
+
+| Role | Visible tabs | Additional capabilities |
+|------|--------------|-------------------------|
+| **Developer** | Repository, My Skills | Browse shared Skills, copy a Skill, manage Skills they can edit, and apply for listing |
+| **Admin** | Repository, My Skills, Review Center | All developer capabilities, plus reviewing listing requests and taking down repository Skills |
+
+> The Review Center is available only to admins. Developers track their own requests from **My Skills**.
+
+**Developer view** (Repository / My Skills):
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_dev_en.png" style="width: 80%; height: auto;" alt="Developer tabs" />
+</div>
+
+**Admin view** (Repository / My Skills / Review Center):
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_admin_en.png" style="width: 80%; height: auto;" alt="Admin tabs" />
+</div>
+
+---
+
+## 📦 Repository
+
+The **Repository** tab lists Skills that have been listed and shared within the current tenant. Developers and admins in the current tenant can browse them, view their details, and copy them to **My Skills** before editing.
+
+> A shared Skill must be copied to **My Skills** before it can be edited.
+
+### Browse and Search
+
+- Browse listed Skills as cards
+- Search by **Skill name, description, or tag**
+- Cards show a summary such as name, description, tags, source, and download count
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_repo_search_en.png" style="width: 80%; height: auto;" alt="Repository list" />
+</div>
+
+### View Details
+
+Click **Details** on a Skill card to view its basic information, including its name, creator, description, tags, install count, and last updated time. Details are read-only; copy the Skill to **My Skills** to make changes.
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_repo_detail_en.png" style="width: 80%; height: auto;" alt="Skill details" />
+</div>
+
+### Copy a Skill
+
+1. Click **Copy** on the target Skill card.
+2. Enter a new Skill name. If the name already exists, choose another name and try again.
+3. After copying, the Skill appears in **My Skills**, where you can edit it, configure it, or apply for listing.
+
+### Admin Take-Down
+
+Admins can choose **Take Down** from the more-actions menu on a repository Skill card. The Skill is then no longer available for developers and admins in the current tenant to browse or copy. Existing personal copies are not affected.
+
+---
+
+## 🧑 My Skills
+
+Use **My Skills** to manage Skills that you can edit, including Skills you created and Skills for which you have been granted edit permission.
+
+### Filter and Search
+
+- **All / Created by me / Others** filters Skills by ownership
+- Search by Skill name, description, or tag
+- Browse Skills as cards with pagination
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_mine_en.png" style="width: 80%; height: auto;" alt="My Skills list" />
+</div>
+
+### Create, Upload, and Edit
+
+Click **Create Skill** from **My Skills** to choose one of the following:
+
+- **Interactive creation**: Work with the Skill builder through natural language to generate or improve a Skill.
+- **Upload a Skill file**: Upload a single `SKILL.md` file or a ZIP archive containing the complete Skill structure.
+
+Use **Edit** on a Skill card to update its name, description, tags, group permissions, `SKILL.md` body, and additional files. See the [Skill Upload Guide](#-skill-upload-guide) for file-format and upload rules.
+
+### Apply for Listing
+
+You can apply to list a Skill that you are allowed to edit in the tenant repository:
+
+1. Click **List** on the Skill card.
+2. Optionally provide a listing note to help the admin understand the request.
+3. Click **Submit request** and wait for an admin review.
+
+The card shows **Pending review** after submission. A Skill has only one pending listing record at a time.
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_list_en.png" style="width: 80%; height: auto;" alt="Apply for listing" />
+</div>
+
+### View Review Progress
+
+Open the review-status dialog from a Skill with a submitted request to view its status, submission time, listing note, and reviewer comment (when provided).
+
+- **Pending review**: You can cancel the listing request.
+- **Listed**: You can take the Skill down.
+- **Rejected**: Edit the Skill first, then cancel the current listing request and click **List** again to resubmit.
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_under_review_en.png" style="width: 80%; height: auto;" alt="Review progress" />
+</div>
+
+---
+
+## ✅ Review Center
+
+The **Review Center** is available only to admins and is used to process Skill listing requests submitted by developers in the current tenant.
+
+### Pending Review Queue
+
+The queue shows information such as the Skill name, submitter, listing note, and submission time. The tab badge shows the number of requests waiting for review.
+
+### Review Actions
+
+1. Click **Details** to inspect the Skill's basic information.
+2. Click **Approve** and confirm to list the Skill in the **Repository**.
+3. Click **Reject** to optionally add a review comment. The submitter can view the comment in **My Skills**, update the Skill, and submit a new request.
+
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_approve_en.png" style="width: 80%; height: auto;" alt="Review confirmation" />
+</div>
+
+---
 
 ## Using Skills
 
 ### Configuring Skills for an Agent
 
-1. Open the **[Agent Development](../agent-development.md)** page
-2. On the "Select Tools" tab, find the **Skills** group
-3. Click a skill name to select it; click again to deselect
-4. After selecting a skill, click the ⚙️ button next to it to configure skill parameters
-5. Save the agent configuration
+1. Open the **[Agent Development](../agent-development.md)** page.
+2. In **Select Tools**, switch to the **Skills** tab and click **Select Skills**.
+3. Select the Skill you want to configure; select it again to remove it.
+4. If the Skill has required parameters, its configuration dialog opens automatically. Complete and save the parameters before the Skill is added to the current agent.
+5. For an added Skill, click the gear icon to update the parameters used by the current agent.
+6. Save the agent configuration.
 
 <div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/set-tool.png" style="width: 50%; height: auto;" />
+  <img src="../assets/resource-repository/skill_using_en.png" style="width: 80%; height: auto;" alt="Skills tab in agent configuration" />
 </div>
-
-> 💡 **Tip**: If a skill has required parameters that are not configured, a guided parameter-filling prompt will appear upon selection.
-
-### Skill Parameters
-
-Each skill's parameter definitions come from the `config/schema.yaml` file in the skill package. The configuration interface auto-generates a parameter form based on the schema, including:
-
-- **Parameter name and description** (bilingual: English and Chinese)
-- **Required/optional markers**
-- **Default values**
-- **Parameter types** (string, number, boolean, array, object)
-- **YAML comment auto-mapped tooltips**
-
-### Skill Versions
-
-Each skill supports multi-version management:
-
-- **Draft version (version=0)**: Development and debugging stage; changes take effect immediately
-- **Published version (version>=1)**: Production use; parameters are locked
-
-When configuring the same skill for different agents, you can set different parameter values independently.
-
-## Skill Repository
 
 ### Viewing Installed Skills
 
-The "Select Tools" skill group displays all installed skills, including:
-- Official skills (`official` source)
-- Custom skills (`custom` source)
+The **Skills** tab in **Select Skills** lists the official and custom Skills available to the current tenant. You can add them to the current agent from this tab.
 
-### Creating Custom Skills
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_select_en.png" style="width: 80%; height: auto;" alt="Select Skills dialog" />
+</div>
 
-Nexent supports two ways to create custom skills: uploading a skill package file, or generating one automatically from a natural language description.
-
-#### Method 1: Upload SKILL.md or ZIP
-
-1. Go to the skill configuration interface
-2. Click the "Upload Skill" button
-3. Select a `SKILL.md` file (single file) or a `.zip` package (complete skill package)
-4. The system automatically parses and creates the skill
-
-#### Method 2: NL-to-Skill Natural Language Creation
-
-Click the **"NL Create Skill"** button on the skill management page. See the [NL-to-Skill](#-nl-to-skill) section below for details.
-
-### Editing Skills
-
-1. Find the target skill in the skill list
-2. Click the skill card to enter the edit page
-3. Modify the skill name, description, tags, parameter configuration, etc.
-4. Save changes
-
-### Importing/Exporting Skills
-
-- **Export**: Click "Export" on the skill detail page to download as a JSON configuration file
-- **Import**: Click "Import Skill" on the Agent Development page to upload a JSON configuration file
-
-> ⚠️ **Note**: When importing skills containing knowledge base tools (such as `knowledge_base_search`), these tools will only search **knowledge bases that the currently logged-in user is permitted to access in this environment**. The original skill's knowledge base configuration will not be automatically inherited.
+> Different agents can save separate parameter configurations for the same Skill.
 
 ## Skill Upload Guide
 
@@ -366,6 +452,10 @@ In simple terms:
 
 > You say "I want a skill that can search GitHub repositories and extract Star counts," and the system automatically generates a complete, usable skill for you.
 
+<div style="display: flex; justify-content: left;">
+  <img src="../assets/resource-repository/skill_create_en.png" style="width: 80%; height: auto;" alt="NL-to-Skill creation interface" />
+</div>
+
 ### Quick Start
 
 #### Step 1: Describe Your Requirement
@@ -509,9 +599,9 @@ When encountering requirements that cannot be fulfilled, the system will provide
 
 #### Modifying Skills
 
-In the NL-to-Skill interface, you can select an existing skill. After selecting, the skill information loads automatically. You can then use natural language to attempt updating the skill in the left dialog.
+In **My Skills**, find the Skill you want to change and click **Edit**. On the agent configuration page, you can also click the pencil icon for a Skill that you are allowed to edit. The system loads its basic information, `SKILL.md` body, and additional files. You can use the interactive creation view to refine the content with natural language, or edit the files directly and save your changes.
 
-If the skill name you create conflicts with an existing skill, Nexent will automatically switch from skill creation mode to skill update mode. All content will overwrite the original skill.
+When creating or uploading a Skill, if its name already exists, the system prompts you to change the name before submitting again.
 
 ## Official Skills Overview
 
