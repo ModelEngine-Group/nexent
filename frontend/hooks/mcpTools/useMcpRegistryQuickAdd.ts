@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -8,7 +8,6 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
-  suggestMcpContainerPortService,
   testMcpConnectionService,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
@@ -37,8 +36,6 @@ import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 
 interface UseMcpRegistryQuickAddParams {
   onSuccess: () => void;
-  /** True when nexent runs inside Docker/K8s: the container port is auto-suggested and locked. */
-  portsVirtual?: boolean;
 }
 
 /**
@@ -47,7 +44,6 @@ interface UseMcpRegistryQuickAddParams {
  */
 export function useMcpRegistryQuickAdd({
   onSuccess,
-  portsVirtual = false,
 }: UseMcpRegistryQuickAddParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
@@ -60,7 +56,6 @@ export function useMcpRegistryQuickAdd({
   const [containerPort, setContainerPort] = useState<number | undefined>(
     undefined
   );
-  const containerPortSuggestedRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [customName, setCustomName] = useState<string>("");
   const [testingConnection, setTestingConnection] = useState(false);
@@ -89,7 +84,6 @@ export function useMcpRegistryQuickAdd({
       setSelectedKey(firstKey);
       setValues(buildInitialQuickAddValues(nextOptions[0]));
       setContainerPort(undefined);
-      containerPortSuggestedRef.current = false;
     },
     [message, t]
   );
@@ -101,7 +95,6 @@ export function useMcpRegistryQuickAdd({
     setSelectedKey("");
     setValues({});
     setContainerPort(undefined);
-    containerPortSuggestedRef.current = false;
     setCustomName("");
   }, []);
 
@@ -114,19 +107,6 @@ export function useMcpRegistryQuickAdd({
     },
     [options]
   );
-
-  // In Docker/K8s (virtual) mode the container port is auto-suggested and
-  // locked; on a host deployment the user picks the port themselves.
-  useEffect(() => {
-    if (!portsVirtual || selectedOption?.transportType !== McpTransportType.CONTAINER) return;
-    if (containerPort !== undefined || containerPortSuggestedRef.current) return;
-    containerPortSuggestedRef.current = true;
-    suggestMcpContainerPortService().then((res) => {
-      if (res.success && typeof res.data?.port === "number") {
-        setContainerPort(res.data.port);
-      }
-    });
-  }, [selectedOption, containerPort, portsVirtual]);
 
   const setValue = useCallback((formKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [formKey]: value }));

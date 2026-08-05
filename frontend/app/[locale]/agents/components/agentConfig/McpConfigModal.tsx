@@ -44,7 +44,6 @@ import {
   importOpenApiService,
   deleteOpenApiService,
 } from "@/services/mcpService";
-import { suggestMcpContainerPortService } from "@/services/mcpToolsService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -63,7 +62,6 @@ export default function McpConfigModal({
     loading,
     containerList,
     enableUploadImage,
-    mcpPortsVirtual,
     updatingTools,
     healthCheckLoading,
     loadServerList,
@@ -125,22 +123,6 @@ export default function McpConfigModal({
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
   const noMcpEditPermissionTitle = t("mcpConfig.permission.noEdit");
-
-  // When running inside a container (Docker/K8s), MCP ports are not published
-  // to the host, so a fixed default port is used and the user cannot change it.
-  // Auto-suggest the port when the modal opens (backend returns the default).
-  useEffect(() => {
-    if (!mcpPortsVirtual || !visible) return;
-    if (containerPort === undefined || uploadPort === undefined) {
-      suggestMcpContainerPortService().then((res) => {
-        if (res.success && res.data?.port) {
-          const p = res.data.port;
-          if (containerPort === undefined) setContainerPort(p);
-          if (uploadPort === undefined) setUploadPort(p);
-        }
-      });
-    }
-  }, [visible, mcpPortsVirtual, containerPort, uploadPort]);
 
   const renderPermissionControlledButton = (props: {
     isReadOnly: boolean;
@@ -1027,7 +1009,7 @@ export default function McpConfigModal({
                           min={1}
                           max={65535}
                           style={{ width: 120 }}
-                          disabled={actionsLocked || mcpPortsVirtual}
+                          disabled={actionsLocked}
                           controls={false}
                         />
                         <div style={{ flex: 1 }} />
@@ -1126,7 +1108,7 @@ export default function McpConfigModal({
                                 min={1}
                                 max={65535}
                                 style={{ width: 150 }}
-                                disabled={actionsLocked || mcpPortsVirtual}
+                                disabled={actionsLocked}
                                 controls={false}
                               />
                               <Input
