@@ -547,6 +547,9 @@ class ElasticSearchService:
             return PERMISSION_EDIT
 
         if role in {"USER", "DEV"}:
+            if str(record.get("created_by")) == str(user_id):
+                return ElasticSearchService.CREATOR_PERMISSION
+
             kb_group_ids_str = record.get("group_ids")
             kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
             user_group_ids = query_group_ids_by_user(user_id)
@@ -565,9 +568,6 @@ class ElasticSearchService:
             )
             if not has_group_intersection:
                 return None
-
-            if str(record.get("created_by")) == str(user_id):
-                return ElasticSearchService.CREATOR_PERMISSION
 
             ingroup_permission = record.get("ingroup_permission") or PERMISSION_READ
             if ingroup_permission == PERMISSION_EDIT:
@@ -1176,39 +1176,39 @@ class ElasticSearchService:
                 kb_ingroup_permission = record.get(
                     "ingroup_permission") or PERMISSION_READ
 
-                # Check if user belongs to any of the knowledgebase groups
-                # Compatibility logic for legacy data:
-                # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
-                #   consider them intersecting (backward compatibility)
-                # - If either side has groups but they don't intersect, no intersection
-                kb_groups_empty = kb_group_ids_str is None or (isinstance(
-                    kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
-                user_groups_empty = len(user_group_ids) == 0
-
-                if kb_groups_empty and user_groups_empty:
-                    # Both are empty/None - consider intersecting for backward compatibility
-                    has_group_intersection = True
+                if str(kb_created_by) == str(user_id):
+                    permission = "CREATOR"
                 else:
-                    # Normal intersection check
-                    has_group_intersection = bool(
-                        set(user_group_ids) & set(kb_group_ids))
+                    # Check if user belongs to any of the knowledgebase groups
+                    # Compatibility logic for legacy data:
+                    # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
+                    #   consider them intersecting (backward compatibility)
+                    # - If either side has groups but they don't intersect, no intersection
+                    kb_groups_empty = kb_group_ids_str is None or (isinstance(
+                        kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
+                    user_groups_empty = len(user_group_ids) == 0
 
-                if has_group_intersection:
-                    # Determine permission level
-                    permission = PERMISSION_READ  # Default
+                    if kb_groups_empty and user_groups_empty:
+                        # Both are empty/None - consider intersecting for backward compatibility
+                        has_group_intersection = True
+                    else:
+                        # Normal intersection check
+                        has_group_intersection = bool(
+                            set(user_group_ids) & set(kb_group_ids))
 
-                    # User is creator: creator permission
-                    if kb_created_by == user_id:
-                        permission = "CREATOR"
-                    # Group permission allows editing
-                    elif kb_ingroup_permission == PERMISSION_EDIT:
-                        permission = PERMISSION_EDIT
-                    # Group permission is read-only: already set
-                    elif kb_ingroup_permission == PERMISSION_READ:
-                        permission = PERMISSION_READ
-                    # Group permission is private: not visible
-                    elif kb_ingroup_permission == "PRIVATE":
-                        permission = None
+                    if has_group_intersection:
+                        # Determine permission level
+                        permission = PERMISSION_READ  # Default
+
+                        # Group permission allows editing
+                        if kb_ingroup_permission == PERMISSION_EDIT:
+                            permission = PERMISSION_EDIT
+                        # Group permission is read-only: already set
+                        elif kb_ingroup_permission == PERMISSION_READ:
+                            permission = PERMISSION_READ
+                        # Group permission is private: not visible
+                        elif kb_ingroup_permission == "PRIVATE":
+                            permission = None
 
             # Add to visible list if permission is granted
             if permission:
