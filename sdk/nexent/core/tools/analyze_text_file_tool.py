@@ -4,6 +4,7 @@ Analyze Text File Tool
 Extracts content from text files (excluding images) and analyzes it using a large language model.
 Supports files from S3, HTTP, and HTTPS URLs.
 """
+import json
 import logging
 from typing import List, Optional
 
@@ -113,9 +114,6 @@ class AnalyzeTextFileTool(Tool):
             validate_url_access=validate_callback
         )
         self.time_out = 60 * 5
-
-        self.running_prompt_zh = "正在分析文件..."
-        self.running_prompt_en = "Analyzing file..."
         # Dynamically apply the load_object decorator to forward method
         self.forward = self.mm.load_object(
             input_names=["file_url_list"])(self._forward_impl)
@@ -139,10 +137,6 @@ class AnalyzeTextFileTool(Tool):
         Returns:
             List[str]: One analysis string per file that aligns with the order
         """
-        # Send tool run message
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
         if file_url_list is None:
             raise ValueError("file_url_list cannot be None")
@@ -156,7 +150,8 @@ class AnalyzeTextFileTool(Tool):
             for index, single_file in enumerate(file_url_list, start=1):
                 logger.info(
                     f"Extracting text content from file #{index}, query: {query}")
-                filename = f"file_{index}.txt"
+                extension = ".json" if self._is_valid_json(single_file) else ".txt"
+                filename = f"file_{index}{extension}"
 
                 # Step 1: Get file content
                 raw_text = self.process_text_file(filename, single_file)
@@ -185,6 +180,15 @@ class AnalyzeTextFileTool(Tool):
             error_msg = f"Error analyzing text file: {str(e)}"
             raise Exception(error_msg)
 
+    @staticmethod
+    def _is_valid_json(file_content: bytes) -> bool:
+        """Return whether the file content is a valid JSON document."""
+        try:
+            json.loads(file_content)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            return False
+        return True
+
     def process_text_file(self, filename: str, file_content: bytes,) -> str:
         """
         Process text file, convert to text using external API
@@ -196,8 +200,13 @@ class AnalyzeTextFileTool(Tool):
         raw_text = ""
         try:
             # Upload byte data as a file
+            content_type = (
+                "application/json"
+                if filename.lower().endswith(".json")
+                else "application/octet-stream"
+            )
             files = {
-                'file': (filename, file_content, 'application/octet-stream')
+                'file': (filename, file_content, content_type)
             }
             data = {
                 'chunking_strategy': 'basic',

@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import mock_open
+
+import pytest
+from jinja2 import Environment, meta
 
 from utils.prompt_template_utils import (
     get_agent_prompt_template,
@@ -8,13 +10,77 @@ from utils.prompt_template_utils import (
     get_generate_title_prompt_template,
     get_document_summary_prompt_template,
     get_cluster_summary_reduce_prompt_template,
+    get_prompt_generate_template_keys,
     get_skill_creation_simple_prompt_template,
     get_prompt_template,
+    merge_prompt_generate_templates,
+    normalize_prompt_generate_template_content,
 )
 
 
 class TestPromptTemplateUtils:
     """Test cases for prompt_template_utils module"""
+
+    def test_get_prompt_generate_template_keys_returns_an_independent_list(self):
+        template_keys = get_prompt_generate_template_keys()
+
+        assert "duty_system_prompt" in template_keys
+        template_keys.clear()
+        assert get_prompt_generate_template_keys()
+
+    @pytest.mark.parametrize("template_content", [None, [], "invalid"])
+    def test_normalize_prompt_generate_template_content_rejects_non_mappings(
+        self, template_content
+    ):
+        assert normalize_prompt_generate_template_content(template_content) == {}
+
+    def test_normalize_prompt_generate_template_content_supports_aliases(self):
+        template_content = {
+            "duty_system_prompt": "Current duty prompt",
+            "DUTY_SYSTEM_PROMPT": "Legacy duty prompt",
+            "CONSTRAINT_SYSTEM_PROMPT": "Legacy constraint prompt",
+            "few_shots_system_prompt": "   ",
+            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": 42,
+        }
+
+        assert normalize_prompt_generate_template_content(template_content) == {
+            "duty_system_prompt": "Current duty prompt",
+            "constraint_system_prompt": "Legacy constraint prompt",
+        }
+
+    def test_merge_prompt_generate_templates_uses_first_valid_value(self):
+        merged = merge_prompt_generate_templates(
+            None,
+            {
+                "duty_system_prompt": "Primary duty prompt",
+                "constraint_system_prompt": "",
+            },
+            {
+                "DUTY_SYSTEM_PROMPT": "Fallback duty prompt",
+                "CONSTRAINT_SYSTEM_PROMPT": "Fallback constraint prompt",
+                "USER_PROMPT": "Fallback user prompt",
+            },
+        )
+
+        assert merged == {
+            "duty_system_prompt": "Primary duty prompt",
+            "constraint_system_prompt": "Fallback constraint prompt",
+            "user_prompt": "Fallback user prompt",
+        }
+
+    @pytest.mark.parametrize(
+        ("is_manager", "language"),
+        [(True, "zh"), (True, "en"), (False, "zh"), (False, "en")],
+    )
+    def test_agent_templates_contain_only_non_context_sections(self, is_manager, language):
+        """Stable context must not be sourced from YAML after runtime consolidation."""
+        result = get_agent_prompt_template(is_manager=is_manager, language=language)
+
+        assert "system_prompt" not in result
+        assert "final_answer" in result
+        assert "verification" in result
+        if is_manager:
+            assert "managed_agent" in result
 
     def test_get_agent_prompt_template_manager_zh(self, mocker):
         """Test get_agent_prompt_template for manager mode in Chinese"""
@@ -153,6 +219,39 @@ class TestPromptTemplateUtils:
 
 class TestGetPromptTemplate:
     """Test cases for get_prompt_template function"""
+
+    @pytest.mark.parametrize(
+        ("language", "template_filename"),
+        [("zh", "nl2agent_zh.yaml"), ("en", "nl2agent_en.yaml")],
+    )
+    def test_get_prompt_template_nl2agent_path(
+        self, mocker, language, template_filename
+    ):
+        mock_yaml_load = mocker.patch(
+            "yaml.safe_load", return_value={"system_prompt": "test"}
+        )
+        mock_file = mocker.patch(
+            "builtins.open", mock_open(read_data="system_prompt: test")
+        )
+
+        result = get_prompt_template(template_type="nl2agent", language=language)
+
+        template_path = mock_file.call_args[0][0].replace("\\", "/")
+        assert template_path.endswith(f"backend/prompts/{template_filename}")
+        mock_yaml_load.assert_called_once()
+        assert result == {"system_prompt": "test"}
+
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    def test_nl2agent_prompt_templates_define_runtime_variables(self, language):
+        template_config = get_prompt_template("nl2agent", language)
+
+        assert set(template_config) == {"system_prompt"}
+        parsed_template = Environment().parse(template_config["system_prompt"])
+        assert meta.find_undeclared_variables(parsed_template) == {
+            "tool_name",
+            "wrapper_name",
+            "max_results",
+        }
 
     def test_get_prompt_template_unsupported_type(self, mocker):
         """Test get_prompt_template with unsupported template type raises ValueError"""

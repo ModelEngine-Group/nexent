@@ -14,6 +14,7 @@ consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.OAUTH_SSL_VERIFY = True
 consts_mock.const.OAUTH_CA_BUNDLE = ""
 consts_mock.const.OAUTH_LOGIN_MODE = "button"
+consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 

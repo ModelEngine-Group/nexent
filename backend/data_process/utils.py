@@ -15,6 +15,27 @@ from .app import app as celery_app
 logger = logging.getLogger("data_process.utils")
 
 
+def _parse_failure_info(info: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse Celery failure metadata as structured JSON or plain error text."""
+    if isinstance(info, dict):
+        return info, None
+    if info is None:
+        return None, None
+
+    info_text = str(info).strip()
+    if not info_text:
+        return None, None
+
+    try:
+        parsed_info = json.loads(info_text)
+    except (json.JSONDecodeError, TypeError):
+        return None, info_text
+
+    if isinstance(parsed_info, dict):
+        return parsed_info, None
+    return None, info_text
+
+
 def get_all_task_ids_from_redis(redis_client: redis.Redis) -> List[str]:
     """
     Get all task IDs from Redis backend
@@ -25,10 +46,8 @@ def get_all_task_ids_from_redis(redis_client: redis.Redis) -> List[str]:
     task_ids = []
     try:
         # Get all keys matching Celery result pattern
-        result_keys = redis_client.keys('celery-task-meta-*')
-
-        # Extract task IDs from keys
-        for key in result_keys:
+        for key in redis_client.scan_iter(
+                match='celery-task-meta-*', count=500):
             if isinstance(key, bytes):
                 key = key.decode('utf-8')
 
@@ -145,18 +164,10 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                 # Add error information for failed tasks
                 if result.failed():
                     try:
-                        info = str(result.info)
-                        error_json = None
-                        if isinstance(info, str):
-                            try:
-                                error_json = json.loads(info)
-                            except Exception as e:
-                                logger.error(
-                                    f"Failed to load result.info as a json: {str(e)}")
-                                error_json = None
-                        else:
-                            logger.warning(
-                                f"Cannot parse result.info into a string: {type(result.info)}")
+                        error_json, plain_error = _parse_failure_info(
+                            result.info)
+                        if plain_error:
+                            status_info['error'] = plain_error
 
                         if error_json:
                             if error_json.get('message') is not None:
@@ -174,7 +185,7 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
                             if error_json.get('original_filename') is not None:
                                 status_info['original_filename'] = error_json.get(
                                     'original_filename')
-                        else:
+                        elif not status_info['error']:
                             # fallback: compatible with previous format
                             status_info['error'] = str(
                                 result.result) if result.result else "Unknown error"

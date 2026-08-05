@@ -12,14 +12,13 @@ import {
   message,
   Tag,
   Skeleton,
-  Tooltip
+  Tooltip,
 } from "antd";
 import { Settings } from "lucide-react";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { Skill, SkillParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { saveSkillInstance } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import {
   getToolTypeForSkill,
@@ -27,9 +26,17 @@ import {
   getKbParamNameForSkill,
   ToolKbType,
 } from "@/components/tool-config";
-import { useKnowledgeBasesForToolConfig, useSyncKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
+import {
+  useKnowledgeBasesForToolConfig,
+  useSyncKnowledgeBases,
+} from "@/hooks/useKnowledgeBaseSelector";
 import log from "@/lib/logger";
-import { isZhLocale, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
+import {
+  isZhLocale,
+  getKbDisplayName,
+  mapKbIdsToDisplayNames,
+  parseKbIds,
+} from "@/lib/utils";
 
 export interface SkillConfigModalProps {
   isOpen: boolean;
@@ -39,6 +46,8 @@ export interface SkillConfigModalProps {
   initialParams: SkillParam[];
   currentAgentId?: number;
   isCreatingMode?: boolean;
+  zIndex?: number;
+  maskClosable?: boolean;
 }
 
 function extractDefaultValue(value: any, type: string): any {
@@ -68,6 +77,8 @@ export default function SkillConfigModal({
   initialParams,
   currentAgentId,
   isCreatingMode,
+  zIndex = 1000,
+  maskClosable = true,
 }: SkillConfigModalProps) {
   const [form] = Form.useForm();
   const [isLoading, setIsLoading] = useState(false);
@@ -96,7 +107,9 @@ export default function SkillConfigModal({
     const hidden = new Set<number>();
     currentParams.forEach((param, idx) => {
       if (param.depends_on) {
-        const depIdx = currentParams.findIndex((p) => p.name === param.depends_on);
+        const depIdx = currentParams.findIndex(
+          (p) => p.name === param.depends_on
+        );
         if (depIdx !== -1) {
           const depVal = currentParams[depIdx].value;
           if (!depVal) {
@@ -112,9 +125,13 @@ export default function SkillConfigModal({
 
   // Knowledge base selector state
   const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
-  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(null);
+  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(
+    null
+  );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
-  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<string[]>([]);
+  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
+    string[]
+  >([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
   // Fetch knowledge bases based on skill tool type
@@ -130,7 +147,9 @@ export default function SkillConfigModal({
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
-      setSelectedKbDisplayNames(mapKbIdsToDisplayNames(selectedKbIds, knowledgeBases));
+      setSelectedKbDisplayNames(
+        mapKbIdsToDisplayNames(selectedKbIds, knowledgeBases)
+      );
     }
   }, [knowledgeBases, selectedKbIds]);
 
@@ -151,7 +170,9 @@ export default function SkillConfigModal({
       );
       if (validKbIds.length !== selectedKbIds.length) {
         setSelectedKbIds(validKbIds);
-        setSelectedKbDisplayNames(mapKbIdsToDisplayNames(validKbIds, knowledgeBases));
+        setSelectedKbDisplayNames(
+          mapKbIdsToDisplayNames(validKbIds, knowledgeBases)
+        );
       }
     }
   }, [knowledgeBases, selectedKbIds]);
@@ -161,7 +182,8 @@ export default function SkillConfigModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    const schema = initialParams && Array.isArray(initialParams) ? initialParams : [];
+    const schema =
+      initialParams && Array.isArray(initialParams) ? initialParams : [];
 
     // Saved config_values from database (per-agent instance values)
     const savedConfigValues =
@@ -195,7 +217,14 @@ export default function SkillConfigModal({
         }
       }
     }
-  }, [isOpen, initialParams, skill.config_values, form, skillRequiresKbSelection, kbParamName]);
+  }, [
+    isOpen,
+    initialParams,
+    skill.config_values,
+    form,
+    skillRequiresKbSelection,
+    kbParamName,
+  ]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -256,27 +285,6 @@ export default function SkillConfigModal({
         value: param.value,
       }));
 
-      const configValues = paramsToSave.reduce<Record<string, any>>((acc, p) => {
-        acc[p.name] = p.value;
-        return acc;
-      }, {});
-
-      if (!isCreatingMode && currentAgentId) {
-        const result = await saveSkillInstance(
-          Number(skill.skill_id),
-          Number(currentAgentId),
-          true,
-          0,
-          configValues
-        );
-
-        if (!result.success) {
-          message.error(result.message || t("agentConfig.skill.saveFailed"));
-          setIsLoading(false);
-          return;
-        }
-      }
-
       if (onSave) {
         onSave(paramsToSave);
       }
@@ -291,7 +299,9 @@ export default function SkillConfigModal({
 
   const getLocalizedDescription = useCallback(
     (param: SkillParam) => {
-      return isZh ? param.description_zh || param.description_en : param.description_en;
+      return isZh
+        ? param.description_zh || param.description_en
+        : param.description_en;
     },
     [isZh]
   );
@@ -305,7 +315,9 @@ export default function SkillConfigModal({
   // Handle knowledge base selection confirm
   const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
     const ids = selectedKnowledgeBases.map((kb) => kb.id);
-    const displayNames = selectedKnowledgeBases.map((kb) => getKbDisplayName(kb));
+    const displayNames = selectedKnowledgeBases.map((kb) =>
+      getKbDisplayName(kb)
+    );
 
     setSelectedKbIds(ids);
     setSelectedKbDisplayNames(displayNames);
@@ -452,7 +464,9 @@ export default function SkillConfigModal({
             )}
           </div>
           {hasError && (
-            <div style={{ color: "#ff4d4f", fontSize: "12px", marginTop: "4px" }}>
+            <div
+              style={{ color: "#ff4d4f", fontSize: "12px", marginTop: "4px" }}
+            >
               {t("toolConfig.validation.selectKb")}
             </div>
           )}
@@ -498,7 +512,10 @@ export default function SkillConfigModal({
             value={param.value}
             onChange={(checked) => {
               const updatedParams = [...currentParams];
-              updatedParams[index] = { ...updatedParams[index], value: checked };
+              updatedParams[index] = {
+                ...updatedParams[index],
+                value: checked,
+              };
               setCurrentParams(updatedParams);
               form.setFieldValue(`param_${index}`, checked);
             }}
@@ -540,6 +557,8 @@ export default function SkillConfigModal({
       open={isOpen}
       onCancel={onCancel}
       width={600}
+      zIndex={zIndex}
+      maskClosable={maskClosable}
       destroyOnHidden
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -576,10 +595,7 @@ export default function SkillConfigModal({
 
                 // Add custom validator for knowledge base selector field (index_names/dataset_ids)
                 // Since this field uses custom display without form control, we need custom validation
-                if (
-                  skillRequiresKbSelection &&
-                  param.name === kbParamName
-                ) {
+                if (skillRequiresKbSelection && param.name === kbParamName) {
                   rules.push({
                     validator: async () => {
                       if (selectedKbIds.length === 0) {

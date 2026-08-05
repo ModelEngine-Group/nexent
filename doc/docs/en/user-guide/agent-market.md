@@ -48,7 +48,7 @@ Select your preferred agent, download with one click, and add it to your agent s
 
 🔑 Fill in MCP tool permissions as prompted
 
-After installation, your agent will be ready in **[Agent Space](./agent-space)**
+After installation, your agent will be ready in **[Agent Space](./agent-development.md)**
 
 ## 📢 Share Your Creations
 
@@ -60,8 +60,8 @@ Welcome to share your work in [GitHub Discussions](https://github.com/ModelEngin
 
 While waiting for the Agent Market to launch, you can:
 
-1. Manage your own agents in **[Agent Space](./agent-space)**
-2. Create custom agents through **[Agent Development](./agent-development)**
+1. Manage your own agents in **[Agent Space](./agent-development.md)**
+2. Create custom agents through **[Agent Development](./agent-development.md)**
 3. Experience the powerful features of agents in **[Start Chat](./start-chat)**
 
-If you encounter any issues during use, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues during use, please refer to our **[FAQ](../quick-start/faq.md)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

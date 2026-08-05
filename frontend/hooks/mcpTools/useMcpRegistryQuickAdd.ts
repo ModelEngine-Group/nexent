@@ -17,6 +17,7 @@ import {
   buildInitialQuickAddValues,
   collectPackageEnvValues,
   findMissingRequiredField,
+  getMcpAddErrorMessage,
   hasUnresolvedUrlTemplate,
   inferContainerRuntimeCommand,
   normalizeServerKey,
@@ -31,6 +32,7 @@ import type {
   RegistryQuickAddOption,
 } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 
 interface UseMcpRegistryQuickAddParams {
   onSuccess: () => void;
@@ -248,6 +250,7 @@ export function useMcpRegistryQuickAdd({
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
+      queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
       await refreshToolListWithToast({
         message,
         t,
@@ -259,14 +262,7 @@ export function useMcpRegistryQuickAdd({
       log.error("[useMcpRegistryQuickAdd] Failed to add from registry", {
         error,
       });
-      const msg = error instanceof Error ? error.message : "";
-      if (/already exists|name conflict|name already used/i.test(msg)) {
-        message.error(t("mcpTools.add.error.nameExists"));
-      } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
-        message.error(t("mcpTools.add.error.connectionFailed"));
-      } else {
-        message.error(msg || t("mcpTools.add.failed"));
-      }
+      message.error(getMcpAddErrorMessage(error, t));
     } finally {
       setSubmitting(false);
     }

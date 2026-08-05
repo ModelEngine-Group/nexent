@@ -18,6 +18,9 @@ export interface PublishedServiceEditDraft {
   description: string;
   version: string;
   tags: string[];
+  groupIds?: string;
+  ingroupPermission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  sharedFields?: Record<string, boolean>;
 }
 
 const draftFromItem = (
@@ -30,6 +33,9 @@ const draftFromItem = (
     description: item.description || "",
     version: item.version || "",
     tags: item.tags || [],
+    groupIds: item.groupIds,
+    ingroupPermission: item.ingroupPermission,
+    sharedFields: item.sharedFields,
   };
 };
 
@@ -81,6 +87,9 @@ export function usePublishedServiceDetailEdit(
         description: currentDraft.description.trim(),
         version: currentDraft.version.trim(),
         tags: newTags,
+        group_ids: currentDraft.groupIds ? currentDraft.groupIds.split(",").map(Number).filter(Boolean) : undefined,
+        ingroup_permission: currentDraft.ingroupPermission,
+        shared_fields: currentDraft.sharedFields ?? undefined,
       });
       // Update local state
       setDraft((prev) => {
@@ -132,6 +141,9 @@ export function usePublishedServiceDetailEdit(
         description: currentDraft.description.trim(),
         version: currentDraft.version.trim(),
         tags: currentDraft.tags,
+        group_ids: currentDraft.groupIds ? currentDraft.groupIds.split(",").map(Number).filter(Boolean) : undefined,
+        ingroup_permission: currentDraft.ingroupPermission,
+        shared_fields: currentDraft.sharedFields ?? undefined,
       });
       message.success(t("mcpTools.service.saveSuccess"));
       queryClient.invalidateQueries({

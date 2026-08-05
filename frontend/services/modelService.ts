@@ -116,6 +116,12 @@ const mapCapacityCoverageFromApi = (coverage: any): CapacityCoverage => ({
   })),
 });
 
+type ModelConnectivityResult = {
+  connectivity: boolean;
+  modelName?: string;
+  error?: string;
+};
+
 // Error class
 export class ModelError extends Error {
   constructor(
@@ -623,6 +629,50 @@ export const modelService = {
       }
       log.error(`验证模型 ${displayName} 连接失败:`, error);
       return false;
+    }
+  },
+
+  checkManageTenantModelConnectivityDetail: async (
+    tenantId: string,
+    displayName: string,
+    modelType: string,
+    signal?: AbortSignal
+  ): Promise<ModelConnectivityResult> => {
+    try {
+      if (!displayName) return { connectivity: false };
+      const response = await fetch(API_ENDPOINTS.model.manageModelHealthcheck, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          display_name: displayName,
+          model_type: modelType,
+        }),
+        signal,
+      });
+      const result = await response.json();
+      if (response.status === 200 && result.data) {
+        return {
+          connectivity: Boolean(result.data.connectivity),
+          modelName: result.data.model_name,
+          error: result.data.error,
+        };
+      }
+      return {
+        connectivity: false,
+        error: result.detail || result.message,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      return {
+        connectivity: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   },
 

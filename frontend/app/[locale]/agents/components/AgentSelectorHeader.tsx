@@ -1,12 +1,17 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
+import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -27,13 +32,12 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/lib/agentImportUtils";
+import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
@@ -49,6 +53,7 @@ export default function AgentSelectorHeader({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
@@ -57,10 +62,9 @@ export default function AgentSelectorHeader({
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
   const { token } = theme?.useToken?.() || {};
-  const { user } = useAuthorizationContext();
 
-  // Fetch agent list internally
-  const { agents } = useAgentList(user?.tenantId ?? null);
+  // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
+  const { agents } = useAgentList("");
 
   // Store state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
@@ -84,6 +88,7 @@ export default function AgentSelectorHeader({
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [agentSearch, setAgentSearch] = useState("");
 
   // Mutations
   const updateAgentMutation = useMutation({
@@ -145,44 +150,16 @@ export default function AgentSelectorHeader({
   );
 
   // Handle import agent
-  const handleImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
+  const handleImportAgent = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+      },
+      message: message,
+      t: t,
+      log: log,
+    });
   };
 
   // Handle view call relationship
@@ -208,7 +185,12 @@ export default function AgentSelectorHeader({
   const handleExportAgent = async (agent: Agent) => {
     try {
       const result = await exportAgent(Number(agent.id));
-      if (result.success && result.data) {
+      if (!result.success) {
+        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        return;
+      }
+
+      if (result.data) {
         const blob = new Blob([JSON.stringify(result.data, null, 2)], {
           type: "application/json",
         });
@@ -220,12 +202,9 @@ export default function AgentSelectorHeader({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.message.agentExportSuccess"));
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.agentImportFailed")
-        );
       }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
     } catch (error) {
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
@@ -288,6 +267,7 @@ export default function AgentSelectorHeader({
         model_ids: modelIdsForCopy,
         max_steps: detail.max_step,
         requested_output_tokens: detail.requested_output_tokens ?? null,
+        is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,
@@ -430,6 +410,9 @@ export default function AgentSelectorHeader({
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
         setCurrentAgent(result.data);
+        const nextSearchParams = new URLSearchParams(searchParams.toString());
+        nextSearchParams.set("agent_id", String(agent.id));
+        router.replace(`${pathname}?${nextSearchParams.toString()}`);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -439,8 +422,19 @@ export default function AgentSelectorHeader({
     }
   };
 
+  const filteredAgents = useMemo(() => {
+    const query = agentSearch.trim().toLowerCase();
+    if (!query) return agents;
+
+    return agents.filter((agent: Agent) =>
+      [agent.display_name, agent.name, agent.description].some((value) =>
+        String(value || "").toLowerCase().includes(query)
+      )
+    );
+  }, [agentSearch, agents]);
+
   // Dropdown menu items (only agents)
-  const agentMenuItems = agents.flatMap((agent: Agent, index: number) => {
+  const agentMenuItems = filteredAgents.flatMap((agent: Agent, index: number) => {
     const isAvailable = agent.is_available !== false;
     const displayName = agent.display_name || "";
     const name = agent.name || "";
@@ -578,7 +572,7 @@ export default function AgentSelectorHeader({
     };
 
     // Add divider after each item except the last one
-    const divider = index < agents.length - 1
+    const divider = index < filteredAgents.length - 1
       ? { key: `divider-${agent.id}`, type: 'divider' as const }
       : null;
 
@@ -591,6 +585,14 @@ export default function AgentSelectorHeader({
       return;
     }
     router.push(`/${locale}/agent-space?tab=mine`);
+  };
+
+  const handleCreateAgent = () => {
+    enterCreateMode();
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("agent_id");
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
   };
 
   return (
@@ -609,31 +611,62 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex min-w-0"
           >
-            <Flex vertical className="min-w-0 w-full">
+            <Flex align="center" className="min-w-0 w-full" gap={4}>
               {showBackFromRepository ? (
-                <Button
-                  type="text"
-                  className="mb-1 flex w-fit items-center gap-1 px-2 text-gray-600"
-                  icon={<ChevronLeft className="size-4" aria-hidden />}
-                  onClick={handleBackToRepository}
-                >
-                  {t("agentRepository.mine.backToRepository")}
-                </Button>
+                <Tooltip title={t("agentRepository.mine.backToRepository")}>
+                  <Button
+                    type="text"
+                    aria-label={t("agentRepository.mine.backToRepository")}
+                    className="flex shrink-0 items-center px-2 text-gray-600"
+                    icon={<ChevronLeft className="size-4" aria-hidden />}
+                    onClick={handleBackToRepository}
+                  />
+                </Tooltip>
               ) : null}
               <Dropdown
               trigger={["click"]}
               placement="bottomLeft"
               open={dropdownOpen}
-              onOpenChange={setDropdownOpen}
-              menu={{ 
-                items: agentMenuItems,
-                style: { maxHeight: 500, overflowY: 'auto' }
+              onOpenChange={(open) => {
+                setDropdownOpen(open);
+                if (!open) setAgentSearch("");
               }}
+              menu={{
+                items: agentMenuItems,
+              }}
+              popupRender={(menu) => (
+                <div className="overflow-hidden rounded-lg bg-white shadow-lg">
+                  <div className="border-b border-gray-100 p-2">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        autoFocus
+                        value={agentSearch}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        onChange={(event) => setAgentSearch(event.target.value)}
+                        placeholder={t("agentSelector.searchPlaceholder")}
+                        allowClear
+                        className="pl-7"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {filteredAgents.length > 0 ? menu : (
+                      <div className="px-3 py-8 text-center text-sm text-gray-400">
+                        {t("agentSelector.noSearchResults")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
+              classNames={{ root: "agent-selector-dropdown" }}
+              className="min-w-0 flex-1"
               styles={{
                 root: {
-                  width: 'calc(100% - 32px)',
-                }
+                  width: showBackFromRepository ? "calc(100% - 68px)" :  'calc(100% - 32px)',
+                },
               }}
             >
               <div
@@ -674,51 +707,46 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex justify-end"
           >
-          {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
-              <Flex
-                align="center"
-                gap={4}
-                className="py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700"
-              >
+          <Flex align="center" gap={12} wrap="wrap" justify="flex-end" className="w-full mr-6">
+            {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
+              <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
                 <History size={16} />
-
                 <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm">
-                  {agentVersionDetail?.version.version_name} 
+                  {agentVersionDetail?.version.version_name}
                 </Tag>
-                <span className="text-xs text-gray-500 ml-1">
-                / {t("agent.version.totalVersions", { count: total ?? 0 })}
+                <span className="text-xs text-gray-500">
+                  / {t("agent.version.totalVersions", { count: total ?? 0 })}
                 </span>
-              </Flex>
+              </div>
             )}
-          {/* Right side: Agent count + Version management button */}
-          <Flex align="center" gap={12} className="mr-6">
-            {/* Create and Import buttons outside dropdown */}
-            <Flex align="center" gap={8} className="ml-4">
+            <Flex align="center" gap={12} wrap="wrap">
+              <Flex align="center" gap={8} wrap="wrap" className="ml-4">
+                <Button
+                  size="middle"
+                  onClick={handleCreateAgent}
+                  className="flex items-center gap-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{t("agentConfig.button.new")}</span>
+                </Button>
+                <Button
+                  size="middle"
+                  onClick={handleImportAgent}
+                  className="flex items-center gap-1"
+                >
+                  <FileInput className="w-4 h-4" />
+                  <span>{t("agentConfig.button.import")}</span>
+                </Button>
+              </Flex>
+
               <Button
-                size="middle"
-                onClick={enterCreateMode}
-                className="flex items-center gap-1"
+                icon={<GitBranch size={16} />}
+                onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
+                type={isShowVersionManagePanel ? "primary" : "default"}
               >
-                <Plus className="w-4 h-4" />
-                <span>{t("agentConfig.button.new")}</span>
-              </Button>
-              <Button
-                size="middle"
-                onClick={handleImportAgent}
-                className="flex items-center gap-1"
-              >
-                <FileInput className="w-4 h-4" />
-                <span>{t("agentConfig.button.import")}</span>
+                {t("agent.version.manage")}
               </Button>
             </Flex>
-
-            <Button
-              icon={<GitBranch size={16} />}
-              onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
-              type={isShowVersionManagePanel ? "primary" : "default"}
-            >
-              {t("agent.version.manage")}
-            </Button>
           </Flex>
           </Col>
         </Row>
@@ -750,7 +778,6 @@ export default function AgentSelectorHeader({
             selectedAgentForRelationship.display_name ||
             selectedAgentForRelationship.name
           }
-          
         />
       )}
 

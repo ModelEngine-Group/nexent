@@ -10,9 +10,10 @@ import {
   MinioFileItem,
 } from "@/types/chat";
 import log from "@/lib/logger";
+import type { TFunction } from "i18next";
 
 // Replace <user_break> tag with the localized natural language string
-const processSpecialTag = (content: string, t: any): string => {
+const processSpecialTag = (content: string, t: TFunction): string => {
   if (!content || typeof content !== "string") {
     return content;
   }
@@ -62,7 +63,7 @@ export function extractAssistantMsgFromResponse(
   dialog_msg: ApiMessage,
   index: number,
   create_time: number,
-  t: any
+  t: TFunction
 ) {
   let searchResultsContent: SearchResult[] = [];
   if (
@@ -100,7 +101,8 @@ export function extractAssistantMsgFromResponse(
 
   // extract the content of the Message
   let finalAnswer = "";
-  let steps: AgentStep[] = [];
+  const steps: AgentStep[] = [];
+  let automationProposal: ChatMessageType["automationProposal"];
   if (dialog_msg.message && Array.isArray(dialog_msg.message)) {
     let lastModelOutputIndex = -1;
 
@@ -125,9 +127,7 @@ export function extractAssistantMsgFromResponse(
       }
 
       step.contents.push({
-        id: `model-${Date.now()}-${Math.random()
-          .toString(36)
-          .substring(2, 7)}`,
+        id: `model-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         type: chatConfig.messageTypes.MODEL_OUTPUT,
         subType,
         content,
@@ -145,6 +145,15 @@ export function extractAssistantMsgFromResponse(
       switch (msg.type) {
         case chatConfig.messageTypes.FINAL_ANSWER: {
           finalAnswer += processSpecialTag(msg.content, t);
+          break;
+        }
+
+        case "automation_proposal": {
+          try {
+            automationProposal = JSON.parse(msg.content);
+          } catch (error) {
+            log.error("Cannot parse automation proposal history", error);
+          }
           break;
         }
 
@@ -192,6 +201,50 @@ export function extractAssistantMsgFromResponse(
             expanded: true,
             timestamp: Date.now(),
           });
+          resetModelOutputTracking();
+          break;
+        }
+
+        case chatConfig.messageTypes.TOOL_CALL: {
+          // Merged tool_call: JSON with both tool call and execution result
+          const currentStep = getOrCreateCurrentStep(steps, "Tool Call");
+          try {
+            const toolCallData = JSON.parse(msg.content);
+            // Add tool call content
+            const toolContentId = `tool-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: toolContentId,
+              type: "executing",
+              content: toolCallData.tool_call || "",
+              expanded: true,
+              timestamp: Date.now(),
+            });
+            // Add execution result
+            const execContentId = `execution-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: execContentId,
+              type: "execution",
+              content: toolCallData.execution_result || "",
+              expanded: true,
+              timestamp: Date.now(),
+            });
+          } catch {
+            // Fallback: treat as plain text
+            const contentId = `tool-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: contentId,
+              type: "executing",
+              content: msg.content,
+              expanded: true,
+              timestamp: Date.now(),
+            });
+          }
           resetModelOutputTracking();
           break;
         }
@@ -254,6 +307,19 @@ export function extractAssistantMsgFromResponse(
               currentStep.metrics = null;
             }
           }
+          break;
+        }
+
+        case chatConfig.messageTypes.HISTORY_SUMMARY: {
+          const currentStep = getOrCreateCurrentStep(steps, "History Summary");
+          currentStep.contents.push({
+            id: `history-summary-${dialog_msg.message_id}-${currentStep.contents.length}`,
+            type: chatConfig.messageTypes.HISTORY_SUMMARY,
+            content: msg.content,
+            expanded: false,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
@@ -378,6 +444,7 @@ export function extractAssistantMsgFromResponse(
     images: imagesContent,
     attachments:
       assistantAttachments.length > 0 ? assistantAttachments : undefined,
+    automationProposal,
   };
   return formattedAssistantMsg;
 }
@@ -438,7 +505,7 @@ export function extractUserMsgFromResponse(
 
 export function formatConversationMessagesFromResponse(
   conversationData: ApiConversationDetail,
-  t: any
+  t: TFunction
 ): ChatMessageType[] {
   const dialogMessages = conversationData.message || [];
   const createTime = Number(conversationData.create_time || Date.now());

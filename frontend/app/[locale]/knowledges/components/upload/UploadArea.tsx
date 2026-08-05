@@ -2,13 +2,14 @@ import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallbac
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
-import { App } from 'antd';
+import { App, Upload } from 'antd';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
 import log from "@/lib/logger";
 import { 
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
+  validateKnowledgeBaseFileSize,
   validateFileType,
 } from '@/services/uploadService';
 
@@ -21,9 +22,10 @@ interface UploadAreaProps {
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
   selectedFiles?: File[];
-  onUpload?: () => void;
+  onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
   disabled?: boolean;
+  disabledMessage?: string;
   componentHeight?: string;
   isCreatingMode?: boolean;
   indexName?: string;
@@ -43,6 +45,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       onUpload,
       isUploading = false,
       disabled = false,
+      disabledMessage,
       componentHeight = "100%",
       isCreatingMode = false,
       indexName = "",
@@ -61,11 +64,10 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const [isKnowledgeBaseReady, setIsKnowledgeBaseReady] = useState(false);
     const currentKnowledgeBaseRef = useRef<string>("");
     const pendingRequestRef = useRef<AbortController | null>(null);
-    const prevFileListRef = useRef<UploadFile[]>([]);
-
-    useEffect(() => {
-      prevFileListRef.current = fileList;
-    }, [fileList]);
+    // UIDs already handed off to the parent upload; kept in the visible list but not re-sent.
+    const uploadedUidsRef = useRef<Set<string>>(new Set());
+    const pendingUploadRequestsRef = useRef<any[]>([]);
+    const uploadScheduledRef = useRef(false);
 
     const updateNameStatus = useCallback((status: string) => {
       setNameStatus(status);
@@ -74,6 +76,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
 
     // Function to reset all states
     const resetAllStates = useCallback(() => {
+      uploadedUidsRef.current = new Set();
       setFileList([]);
       updateNameStatus("available");
       setIsLoading(true);
@@ -174,64 +177,75 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const handleChange = useCallback(
       ({ fileList: newFileList }: { fileList: UploadFile[] }) => {
         // Ensure only updating current knowledge base's file list
-        if (isCreatingMode || indexName === currentKnowledgeBaseRef.current) {
-          // Deduplicate by name + size + lastModified to avoid duplicates within and across selections
-          const seen = new Set<string>();
-          const deduped: UploadFile[] = [];
-          for (const f of newFileList) {
-            const origin = f.originFileObj as RcFile | undefined;
-            const key = origin
-              ? `${origin.name.toLowerCase()}|${origin.size}|${
-                  origin.lastModified
-                }`
-              : f.name.toLowerCase();
-            if (!seen.has(key)) {
-              seen.add(key);
-              deduped.push(f);
-            }
-          }
-          setFileList(deduped);
-
-          // Trigger file selection callback with deduplicated files
-          const files = deduped
-            .map((file) => file.originFileObj)
-            .filter((file): file is RcFile => !!file);
-          if (files.length > 0) {
-            onFileSelect(files as unknown as File[]);
-          }
-        } else {
+        if (!(isCreatingMode || indexName === currentKnowledgeBaseRef.current)) {
           return;
         }
 
-        // Check if upload just completed
-        const prevFileList = prevFileListRef.current;
-        const uploadWasInProgress = prevFileList.some(
-          (f) => f.status === "uploading"
-        );
-        const uploadIsNowFinished =
-          newFileList.length > 0 &&
-          !newFileList.some((f) => f.status === "uploading");
-
-        if (uploadWasInProgress && uploadIsNowFinished) {
-          // After upload completion only call external upload completion callback, let KnowledgeBaseManager manage polling uniformly
-          if (onUpload) {
-            onUpload();
+        // Deduplicate by name + size + lastModified to avoid duplicates within and across selections
+        const seen = new Set<string>();
+        const deduped: UploadFile[] = [];
+        for (const f of newFileList) {
+          const origin = f.originFileObj as RcFile | undefined;
+          const key = origin
+            ? `${origin.name.toLowerCase()}|${origin.size}|${
+                origin.lastModified
+              }`
+            : f.name.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(f);
           }
         }
+        // Keep completed history visible; accumulate across successive uploads
+        setFileList(deduped);
 
-        // Note: file selection callback already handled above when list is deduplicated
+        // Only pass files not yet uploaded so the API request is the current batch only
+        const pendingFiles = deduped
+          .filter((file) => !uploadedUidsRef.current.has(file.uid))
+          .map((file) => file.originFileObj)
+          .filter((file): file is RcFile => !!file);
+        if (pendingFiles.length > 0) {
+          onFileSelect(pendingFiles as unknown as File[]);
+        }
+
       },
-      [indexName, onFileSelect, isCreatingMode, newKnowledgeBaseName, onUpload]
+      [indexName, onFileSelect, isCreatingMode]
     );
 
     // Handle custom upload request
-    const handleCustomRequest = useCallback((options: any) => {
-      // Actual upload is handled by parent component's handleFileUpload
-      const { onSuccess, file } = options;
-      setTimeout(() => {
-        onSuccess({}, file);
-      }, 100);
-    }, []);
+    const handleCustomRequest = useCallback(
+      (options: any) => {
+        pendingUploadRequestsRef.current.push(options);
+        if (uploadScheduledRef.current) {
+          return;
+        }
+
+        uploadScheduledRef.current = true;
+        setTimeout(async () => {
+          try {
+            while (pendingUploadRequestsRef.current.length > 0) {
+              const requests = pendingUploadRequestsRef.current.splice(0);
+              try {
+                await onUpload?.(requests.map(({ file }) => file as File));
+                requests.forEach(({ onSuccess, file }) => {
+                  uploadedUidsRef.current.add(file.uid);
+                  onSuccess?.({}, file);
+                });
+              } catch (error) {
+                requests.forEach(({ onError, file }) =>
+                  onError?.(error, undefined, file)
+                );
+              }
+            }
+          } catch (error) {
+            log.error("Unexpected error while updating upload status", error);
+          } finally {
+            uploadScheduledRef.current = false;
+          }
+        }, 0);
+      },
+      [onUpload]
+    );
 
     // Upload component properties
     const uploadProps: UploadProps = {
@@ -240,7 +254,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       fileList,
       onChange: handleChange,
       customRequest: handleCustomRequest,
-      accept: ".pdf,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
+      accept: ".pdf,.doc,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
       showUploadList: true,
       disabled: disabled,
       progress: {
@@ -252,26 +266,28 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         format: (percent?: number) =>
           percent ? `${parseFloat(percent.toFixed(2))}%` : "0%",
       },
-      beforeUpload: (file) => validateFileType(file, t, message),
+      beforeUpload: (file) => {
+        if (
+          !validateKnowledgeBaseFileSize(file, t, message) ||
+          !validateFileType(file, t, message)
+        ) {
+          return Upload.LIST_IGNORE;
+        }
+        return true;
+      },
     };
-
-    // Clear previous selection when user starts a new selection via click
-    const handleStartNewSelection = useCallback(() => {
-      setFileList([]);
-      prevFileListRef.current = [];
-    }, []);
 
     return (
       <UploadAreaUI
         fileList={fileList}
         uploadProps={uploadProps}
-        onStartNewSelection={handleStartNewSelection}
         isLoading={isLoading}
         isKnowledgeBaseReady={isKnowledgeBaseReady}
         isCreatingMode={isCreatingMode}
         nameStatus={nameStatus}
         isUploading={isUploading}
         disabled={disabled}
+        disabledMessage={disabledMessage}
         componentHeight={componentHeight}
         newKnowledgeBaseName={newKnowledgeBaseName}
         selectedFiles={selectedFiles}
@@ -281,4 +297,4 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
   }
 );
 
-export default UploadArea; 
+export default UploadArea;

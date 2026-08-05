@@ -8,7 +8,9 @@ from starlette.responses import JSONResponse
 from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
 from consts.model import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from services.skill_repository_service import (
+    count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
+    ensure_skill_repository_access,
     get_skill_repository_listing_detail_impl,
     install_skill_from_repository_impl,
     list_my_editable_skills_impl,
@@ -46,9 +48,11 @@ async def list_skill_repository_listings_api(
 ):
     """List all skill marketplace repository listings with optional filters."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        ensure_skill_repository_access(user_id)
         result = list_skill_repository_listings_impl(
             tenant_id,
+            user_id=user_id,
             status=status,
             skill_id=skill_id,
             category_id=category_id,
@@ -63,6 +67,11 @@ async def list_skill_repository_listings_api(
             f"Unauthorized skill repository listings access attempt: {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        logger.warning(
+            f"Forbidden skill repository listings access attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Invalid skill repository listings request parameters: {str(e)}"
@@ -115,6 +124,25 @@ async def list_my_editable_skills_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
 
 
+@skill_repository_router.get("/mine/counts")
+async def count_my_editable_skills_api(
+    authorization: str = Header(None),
+):
+    """Count visible skills by ownership without loading full skill records."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = count_my_editable_skills_impl(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized my editable skill counts access attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+
+
 @skill_repository_router.get("/{skill_repository_id}")
 async def get_skill_repository_listing_detail_api(
     skill_repository_id: int,
@@ -122,7 +150,8 @@ async def get_skill_repository_listing_detail_api(
 ):
     """Get detailed skill marketplace repository listing by primary key."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        ensure_skill_repository_access(user_id)
         result = get_skill_repository_listing_detail_impl(
             skill_repository_id,
             tenant_id,
@@ -134,6 +163,12 @@ async def get_skill_repository_listing_detail_api(
             f"(id={skill_repository_id}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        logger.warning(
+            f"Forbidden skill repository listing detail access attempt "
+            f"(id={skill_repository_id}): {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Skill repository listing not found (id={skill_repository_id}): {str(e)}"
@@ -151,16 +186,23 @@ async def update_skill_repository_status_api(
             "New status: not_shared / pending_review / rejected / shared"
         ),
     ),
+    content: Optional[str] = Body(
+        None,
+        embed=True,
+        description="Review opinion or resubmit note",
+    ),
     authorization: str = Header(None),
 ):
     """Update skill marketplace repository listing status."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        ensure_skill_repository_access(user_id)
         result = update_skill_repository_status_impl(
             skill_repository_id=skill_repository_id,
             status=status,
             user_id=user_id,
             tenant_id=tenant_id,
+            content=content,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
@@ -244,11 +286,17 @@ async def install_skill_from_repository_api(
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
-        logger.warning(
-            f"Skill repository listing not found for install "
-            f"(id={skill_repository_id}): {str(e)}"
+        message = str(e)
+        status_code = (
+            HTTPStatus.NOT_FOUND
+            if "not found" in message.lower()
+            else HTTPStatus.BAD_REQUEST
         )
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+        logger.warning(
+            f"Invalid skill repository install request "
+            f"(id={skill_repository_id}): {message}"
+        )
+        raise HTTPException(status_code=status_code, detail=message)
     except SkillDuplicateError as e:
         logger.warning(
             f"Duplicate skill repository install attempt "

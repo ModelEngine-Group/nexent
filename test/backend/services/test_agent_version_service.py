@@ -178,6 +178,7 @@ from backend.services.agent_version_service import (
     _check_version_snapshot_availability,
     _get_version_detail_or_draft,
     _remove_audit_fields_for_insert,
+    _build_sub_agent_relations,
 )
 
 
@@ -1609,6 +1610,7 @@ def test_list_published_agents_impl_success(monkeypatch):
                 "name": "Test Agent",
                 "model_ids": [1],
                 "description": "Test",
+                "is_main_agent": False,
             },
             [{"tool_id": 1, "enabled": True}],
             [],
@@ -1630,6 +1632,7 @@ def test_list_published_agents_impl_success(monkeypatch):
     assert result[0]["name"] == "Test Agent"
     assert result[0]["model_ids"] == [1]
     assert result[0]["model_names"] == ["Test Model"]
+    assert result[0]["is_main_agent"] is False
 
 
 def test_list_published_agents_impl_no_published_version(monkeypatch):
@@ -3372,3 +3375,335 @@ def test_list_published_agents_impl_empty_model_ids(monkeypatch):
     agent_version_service_module.get_valid_model_ids.assert_called_once_with([], "tenant1")
     assert result[0]["model_ids"] == []
     assert result[0]["model_names"] == []
+
+
+# ===================== _build_sub_agent_relations tests =====================
+
+
+def test_build_sub_agent_relations_empty():
+    """Test _build_sub_agent_relations with empty list returns empty list."""
+    assert _build_sub_agent_relations([]) == []
+
+
+def test_build_sub_agent_relations_with_version():
+    """Test _build_sub_agent_relations maps selected_agent_id and selected_agent_version_no."""
+    relations = [
+        {"selected_agent_id": 2, "selected_agent_version_no": 3},
+        {"selected_agent_id": 5, "selected_agent_version_no": 1},
+    ]
+    result = _build_sub_agent_relations(relations)
+    assert result == [
+        {"agent_id": 2, "version_no": 3},
+        {"agent_id": 5, "version_no": 1},
+    ]
+
+
+def test_build_sub_agent_relations_null_version():
+    """Test _build_sub_agent_relations handles missing selected_agent_version_no as None."""
+    relations = [
+        {"selected_agent_id": 2},
+        {"selected_agent_id": 5, "selected_agent_version_no": None},
+    ]
+    result = _build_sub_agent_relations(relations)
+    assert result == [
+        {"agent_id": 2, "version_no": None},
+        {"agent_id": 5, "version_no": None},
+    ]
+
+
+# ===================== get_version_detail_impl sub_agent_relations tests =====================
+
+
+def test_get_version_detail_impl_with_sub_agent_relations(monkeypatch):
+    """Test get_version_detail_impl populates sub_agent_relations from snapshots."""
+    mock_version = {
+        "version_no": 1,
+        "version_name": "v1.0",
+        "status": "RELEASED",
+        "release_note": "",
+        "source_type": "NORMAL",
+        "source_version_no": None,
+    }
+
+    mock_agent_snapshot = {
+        "agent_id": 1,
+        "name": "Test Agent",
+        "model_ids": [],
+        "group_ids": None,
+    }
+
+    mock_relations_snapshot = [
+        {"selected_agent_id": 2, "selected_agent_version_no": 3},
+        {"selected_agent_id": 5, "selected_agent_version_no": 1},
+    ]
+
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", MagicMock(return_value=mock_version))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", MagicMock(
+        return_value=(mock_agent_snapshot, [], mock_relations_snapshot)
+    ))
+    monkeypatch.setattr(agent_version_service_module, "get_model_by_model_id", MagicMock(return_value=None))
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+
+    result = get_version_detail_impl(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert result["sub_agent_id_list"] == [2, 5]
+    assert result["sub_agent_relations"] == [
+        {"agent_id": 2, "version_no": 3},
+        {"agent_id": 5, "version_no": 1},
+    ]
+
+
+# ===================== list_published_agents_impl sub_agent_relations tests =====================
+
+
+def test_list_published_agents_impl_with_sub_agent_relations(monkeypatch):
+    """Test list_published_agents_impl populates sub_agent_relations from snapshots."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+
+    mock_relations = [
+        {"selected_agent_id": 3, "selected_agent_version_no": 2},
+    ]
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [1],
+                "description": "Test",
+                "is_main_agent": True,
+            },
+            [],
+            mock_relations,
+        )
+    )
+
+    agent_version_db_mock.query_version_list = MagicMock(
+        return_value=[{"version_no": 1, "version_name": "v1.0"}]
+    )
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+    agent_service_mock.get_model_by_model_id = MagicMock(
+        return_value={"display_name": "Test Model", "model_name": "test_model"}
+    )
+
+    # Spy on _build_sub_agent_relations to verify it's called with the right relations
+    original_build = agent_version_service_module._build_sub_agent_relations
+    captured_relations = []
+    def spy_build(relations):
+        captured_relations.append(relations)
+        return original_build(relations)
+    monkeypatch.setattr(agent_version_service_module, "_build_sub_agent_relations", spy_build)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert len(result) == 1
+    # Verify _build_sub_agent_relations was called with the snapshot relations
+    assert len(captured_relations) == 1
+    assert captured_relations[0] == mock_relations
+    # Verify the mapped result is correct
+    assert original_build(mock_relations) == [
+        {"agent_id": 3, "version_no": 2},
+    ]
+
+
+# ===================== compare_versions_impl with falsy model_ids tests =====================
+
+
+def test_compare_versions_impl_model_ids_none(monkeypatch):
+    """Test comparing versions where model_ids is None (triggers _normalize_model_ids return [])."""
+    version_a = {
+        "name": "Agent A",
+        "model_ids": None,
+        "model_names": [],
+        "model_name": None,
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+    version_b = {
+        "name": "Agent A",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+
+    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+        mock_get_detail.side_effect = [version_a, version_b]
+
+        result = compare_versions_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            version_no_a=0,
+            version_no_b=1,
+        )
+
+        difference_fields = [d["field"] for d in result["differences"]]
+        assert "model_ids" in difference_fields
+
+
+def test_compare_versions_impl_both_model_ids_empty(monkeypatch):
+    """Test comparing versions where both model_ids are empty (no difference)."""
+    version_a = {
+        "name": "Agent A",
+        "model_ids": [],
+        "model_names": [],
+        "model_name": None,
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+    version_b = {
+        "name": "Agent A",
+        "model_ids": None,
+        "model_names": [],
+        "model_name": None,
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+
+    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+        mock_get_detail.side_effect = [version_a, version_b]
+
+        result = compare_versions_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            version_no_a=0,
+            version_no_b=1,
+        )
+
+        difference_fields = [d["field"] for d in result["differences"]]
+        assert "model_ids" not in difference_fields
+
+
+# ===================== list_published_agents_impl edge case tests =====================
+
+
+def test_list_published_agents_impl_no_available_versions(monkeypatch):
+    """Test list_published_agents_impl skips agent when no available versions found."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+
+    # Return empty list - no available versions
+    agent_version_db_mock.query_version_list = MagicMock(return_value=[])
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    # Agent should be skipped because no available versions
+    assert len(result) == 0
+
+
+def test_list_published_agents_impl_model_not_found(monkeypatch):
+    """Test list_published_agents_impl handles model not found (get_model_by_model_id returns None)."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [99],
+                "description": "Test",
+                "is_main_agent": True,
+            },
+            [],
+            [],
+        )
+    )
+
+    agent_version_db_mock.query_version_list = MagicMock(
+        return_value=[{"version_no": 1, "version_name": "v1.0"}]
+    )
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+    # Model not found - returns None
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
+    # Reset get_valid_model_ids to pass through (previous tests may have overridden it)
+    agent_version_service_module.get_valid_model_ids = MagicMock(
+        side_effect=lambda model_ids, tenant_id: model_ids
+    )
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert len(result) == 1
+    # When model is not found, model_names should contain str(mid) as fallback
+    assert result[0]["model_names"] == ["99"]
+    assert result[0]["model_name"] == "99"

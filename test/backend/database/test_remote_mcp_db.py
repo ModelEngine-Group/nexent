@@ -429,6 +429,62 @@ def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, 
     assert call_args["authorization_token"] == "new_token"
 
 
+def test_update_mcp_record_manage_fields_by_id_with_group_permissions(monkeypatch, mock_session):
+    """Test group_ids and ingroup_permission in update_mcp_record_manage_fields_by_id."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None,
+        group_ids="2,4",
+        ingroup_permission="EDIT",
+    )
+    call_args = mock_update.call_args[0][0]
+    assert call_args["group_ids"] == "2,4"
+    assert call_args["ingroup_permission"] == "EDIT"
+
+
+def test_update_mcp_record_manage_fields_by_id_with_shared_fields(monkeypatch, mock_session):
+    """Test shared_fields in update_mcp_record_manage_fields_by_id."""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    shared = {"serverUrl": True, "authorizationToken": False}
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="n", server_url="u", description=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
+        market_id=None,
+        group_ids="2", ingroup_permission="READ_ONLY",
+        shared_fields=shared,
+    )
+    call_args = mock_update.call_args[0][0]
+    assert call_args["group_ids"] == "2"
+    assert call_args["ingroup_permission"] == "READ_ONLY"
+    assert call_args["shared_fields"] == shared
+
+
 # ============================================================================
 # update_mcp_record_enabled_by_id (NEW)
 # ============================================================================

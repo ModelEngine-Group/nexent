@@ -4,6 +4,7 @@ import knowledgeBaseService from './knowledgeBaseService';
 
 import { NON_TERMINAL_STATUSES } from '@/const/knowledgeBase';
 import { Document, KnowledgeBase } from '@/types/knowledgeBase';
+import { emitQuotaUsageChanged } from '@/lib/quotaEvents';
 import log from '@/lib/logger';
 
 class KnowledgeBasePollingService {
@@ -105,6 +106,7 @@ class KnowledgeBasePollingService {
         
         // Trigger knowledge base list update
         this.triggerKnowledgeBaseListUpdate(true);
+        emitQuotaUsageChanged();
       } catch (error) {
         log.error(`Error polling knowledge base ${kbId} document status:`, error);
       }

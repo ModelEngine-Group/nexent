@@ -111,7 +111,7 @@ export function MyAgentCard({
     key: "delete",
     danger: true,
     icon: <Trash2 className="size-3.5" aria-hidden />,
-    label: t("agentRepository.mine.menu.delete"),
+    label: t("common.delete"),
     disabled: isDeleting,
     onClick: onDelete,
   });
@@ -229,15 +229,7 @@ export function MyAgentCard({
               {t("agentRepository.mine.view")}
             </Button>
           )}
-          <Button
-            type="default"
-            className="min-w-0 flex-1"
-            icon={<LineChart className="size-3.5" aria-hidden />}
-            onClick={onEvaluate}
-            disabled={!canEvaluate}
-          >
-            {t("agentRepository.mine.evaluate")}
-          </Button>
+          {/* Evaluate button hidden: agent evaluation feature temporarily disabled */}
         </div>
       </div>
     </Card>

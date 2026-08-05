@@ -12,7 +12,10 @@ from fastmcp.tools.tool import ToolResult
 
 from database.outer_api_tool_db import query_available_openapi_services
 from mcp.types import Tool as MCPTool
-from tool_collection.mcp.local_mcp_service import local_mcp_service
+from tool_collection.mcp.local_mcp_service import (
+    LOCAL_MCP_TOOL_NAME_OVERRIDES,
+    local_mcp_service,
+)
 from utils.logging_utils import configure_logging
 
 configure_logging(logging.INFO)
@@ -70,7 +73,11 @@ class CustomFunctionTool:
 
 
 nexent_mcp = FastMCP(name="nexent_mcp")
-nexent_mcp.mount(local_mcp_service, local_mcp_service.name)
+nexent_mcp.mount(
+    local_mcp_service,
+    local_mcp_service.name,
+    tool_names=LOCAL_MCP_TOOL_NAME_OVERRIDES,
+)
 
 _openapi_mcp_services: Dict[str, FastMCP] = {}
 
@@ -309,7 +316,11 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
         nexent_mcp._tool_manager._mounted_servers.clear()
 
     # Re-mount local_mcp_service after clearing
-    nexent_mcp.mount(local_mcp_service, local_mcp_service.name)
+    nexent_mcp.mount(
+        local_mcp_service,
+        local_mcp_service.name,
+        tool_names=LOCAL_MCP_TOOL_NAME_OVERRIDES,
+    )
 
     # Query all available OpenAPI services from database
     services = query_available_openapi_services(tenant_id)

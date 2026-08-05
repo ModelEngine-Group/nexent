@@ -98,7 +98,7 @@ async def create_new_index(
         Optional[Dict[str, Any]],
         Body(
             description=(
-                "Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"
+                "Request body containing embedding_model_id and optional knowledge-base settings"
             ),
         ),
     ] = None,
@@ -115,13 +115,16 @@ async def create_new_index(
 
         ingroup_permission = None
         group_ids = None
-        embedding_model_name = None
+        embedding_model_id = None
         preserve_source_file = None
         if body:
             ingroup_permission = body.get("ingroup_permission")
             group_ids = body.get("group_ids")
-            embedding_model_name = body.get("embedding_model_name")
+            embedding_model_id = body.get("embedding_model_id")
             preserve_source_file = body.get("preserve_source_file")
+
+        if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
+            raise ValueError("embedding_model_id must be an integer")
 
         return ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
@@ -131,7 +134,7 @@ async def create_new_index(
             tenant_id=ctx.tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            embedding_model_name=embedding_model_name,
+            embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
         )
     except LimitExceededError as e:
@@ -144,6 +147,9 @@ async def create_new_index(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception:
         logger.exception("Error creating index")
         raise HTTPException(

@@ -902,6 +902,7 @@ interface ProviderConfigEditDialogProps {
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
   }) => Promise<void> | void;
+  onSuccess?: () => Promise<void> | void;
 }
 
 export const ProviderConfigEditDialog = ({
@@ -919,6 +920,7 @@ export const ProviderConfigEditDialog = ({
   providerHint,
   onClose,
   onSave,
+  onSuccess,
 }: ProviderConfigEditDialogProps) => {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState<string>(initialApiKey);
@@ -1091,6 +1093,9 @@ export const ProviderConfigEditDialog = ({
           : {}),
       });
       onClose();
+      if (onSuccess) {
+        await onSuccess();
+      }
     } finally {
       setSaving(false);
     }

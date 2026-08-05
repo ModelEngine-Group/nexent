@@ -5,11 +5,12 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import update as sa_update
+from sqlalchemy import or_, update as sa_update
 
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
 from utils.skill_params_utils import strip_params_comments_for_db
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,34 @@ def query_skill_instances_by_agent_id(agent_id: int, tenant_id: str, version_no:
             SkillInstance.delete_flag != 'Y')
         skill_instances = query.all()
         return [as_dict(skill_instance) for skill_instance in skill_instances]
+
+
+def get_valid_skill_ids(tenant_id: str, skill_ids: List[int]) -> set:
+    """Return skill IDs that still exist in ag_skill_info_t and are not soft-deleted.
+
+    Checks both tenant-scoped skills and global (tenant_id IS NULL) skills.
+
+    Used as a fallback check when skill instances may reference deleted skills.
+
+    Args:
+        tenant_id: Tenant ID for filtering tenant-scoped skills.
+        skill_ids: Candidate skill IDs to validate.
+
+    Returns:
+        Set of valid (non-deleted) skill IDs.
+    """
+    if not skill_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.query(SkillInfo.skill_id).filter(
+            SkillInfo.skill_id.in_(skill_ids),
+            SkillInfo.delete_flag != 'Y',
+            or_(
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.tenant_id.is_(None),
+            ),
+        ).all()
+        return {row[0] for row in rows}
 
 
 def query_enabled_skill_instances(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -203,10 +232,16 @@ def _build_skill_update_values(
         "content": "skill_content",
         "tags": "skill_tags",
         "source": "source",
+        "ingroup_permission": "ingroup_permission",
     }
     for input_field, model_field in field_mapping.items():
         if input_field in skill_data:
             row_values[model_field] = skill_data[input_field]
+    if "group_ids" in skill_data:
+        group_ids = skill_data["group_ids"]
+        row_values["group_ids"] = (
+            convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids
+        )
 
     for field in ("config_schemas", "config_values"):
         if field in skill_data:
@@ -218,6 +253,7 @@ def _replace_skill_tool_relations(
     session,
     skill_id: int,
     tool_ids: List[int],
+    updated_by: Optional[str] = None,
 ) -> None:
     session.query(SkillToolRelation).filter(
         SkillToolRelation.skill_id == skill_id
@@ -226,7 +262,10 @@ def _replace_skill_tool_relations(
         session.add(SkillToolRelation(
             skill_id=skill_id,
             tool_id=tool_id,
+            created_by=updated_by,
             create_time=datetime.now(),
+            updated_by=updated_by,
+            update_time=datetime.now(),
         ))
 
 
@@ -242,6 +281,8 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
         "source": skill.source,
+        "group_ids": convert_string_to_list(skill.group_ids),
+        "ingroup_permission": skill.ingroup_permission,
         "created_by": skill.created_by,
         "create_time": skill.create_time.isoformat() if skill.create_time else None,
         "updated_by": skill.updated_by,
@@ -259,6 +300,9 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
         skills = session.query(SkillInfo).filter(
             SkillInfo.tenant_id == tenant_id,
             SkillInfo.delete_flag != 'Y'
+        ).order_by(
+            SkillInfo.create_time.desc(),
+            SkillInfo.skill_id.desc(),
         ).all()
         results = []
         for s in skills:
@@ -266,6 +310,29 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
             result["tool_ids"] = _get_tool_ids(session, s.skill_id)
             results.append(result)
         return results
+
+
+def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """List only the fields required to resolve skill visibility and ownership."""
+    with get_db_session() as session:
+        rows = session.query(
+            SkillInfo.skill_id,
+            SkillInfo.created_by,
+            SkillInfo.group_ids,
+            SkillInfo.ingroup_permission,
+        ).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return [
+            {
+                "skill_id": row.skill_id,
+                "created_by": row.created_by,
+                "group_ids": convert_string_to_list(row.group_ids),
+                "ingroup_permission": row.ingroup_permission,
+            }
+            for row in rows
+        ]
 
 
 def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -368,6 +435,12 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
             config_values=_params_value_for_db(
                 skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
+            group_ids=(
+                convert_list_to_string(skill_data.get("group_ids"))
+                if isinstance(skill_data.get("group_ids"), list)
+                else skill_data.get("group_ids")
+            ),
+            ingroup_permission=skill_data.get("ingroup_permission"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
             updated_by=skill_data.get("updated_by"),
@@ -380,11 +453,16 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
 
         tool_ids = skill_data.get("tool_ids", [])
         if tool_ids:
+            relation_created_by = skill_data.get("created_by") or skill_data.get("updated_by")
+            relation_updated_by = skill_data.get("updated_by") or relation_created_by
             for tool_id in tool_ids:
                 rel = SkillToolRelation(
                     skill_id=skill_id,
                     tool_id=tool_id,
-                    create_time=datetime.now()
+                    created_by=relation_created_by,
+                    create_time=datetime.now(),
+                    updated_by=relation_updated_by,
+                    update_time=datetime.now(),
                 )
                 session.add(rel)
 
@@ -441,6 +519,7 @@ def update_skill(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()
@@ -509,6 +588,7 @@ def update_skill_by_id(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()

@@ -56,11 +56,15 @@ export function getMineCardMenuActions(
 
   const reviewStatus = onlineService?.reviewStatus || item.service.reviewStatus;
 
-  if (reviewStatus === "pending") {
+  // Always show "view review progress" for any submitted status (pending/approved/rejected)
+  if (reviewStatus === "pending" || reviewStatus === "approved" || reviewStatus === "rejected") {
     actions.push("view-review-progress");
-  } else if (reviewStatus === "approved") {
+  }
+
+  // Primary action depends on status
+  if (reviewStatus === "approved") {
     actions.push("submit-version-update");
-  } else {
+  } else if (reviewStatus !== "pending") {
     // never submitted, rejected, or offline → apply for listing
     actions.push("apply-for-listing");
   }
@@ -103,11 +107,11 @@ export function getMineCardReviewBadge(
 
   switch (reviewStatus) {
     case "pending":
-      return { labelKey: "mcpTools.mine.status.reviewing", variant: "pending" };
+      return { labelKey: "repository.status.reviewing", variant: "pending" };
     case "approved":
-      return { labelKey: "mcpTools.mine.status.listed", variant: "approved" };
+      return { labelKey: "repository.status.listed", variant: "approved" };
     case "rejected":
-      return { labelKey: "mcpTools.mine.status.rejected", variant: "rejected" };
+      return { labelKey: "repository.status.rejected", variant: "rejected" };
     default:
       return null;
   }

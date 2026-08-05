@@ -39,12 +39,13 @@ export default function MineMcpReviewStatusModal({
   const canCancel = isCancelableReviewStatus(reviewStatus);
   const canTakeDown = isTakeDownableReviewStatus(reviewStatus);
   const submittedAt = formatMineDate(communityRecord?.createdAt);
+  const listingContent = communityRecord?.content?.trim() || "";
 
   const statusConfig = isPending
     ? {
         icon: Clock,
-        label: t("mcpTools.mine.reviewModal.pendingLabel"),
-        description: t("mcpTools.mine.reviewModal.pendingDescription"),
+        label: t("repository.listingStatus.pendingLabel"),
+        description: t("repository.listingStatus.pendingDescription"),
         tone:
           "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
@@ -52,16 +53,16 @@ export default function MineMcpReviewStatusModal({
     : isRejected
       ? {
           icon: XCircle,
-          label: t("mcpTools.mine.reviewModal.rejectedLabel"),
-          description: t("mcpTools.mine.reviewModal.rejectedDescription"),
+          label: t("repository.listingStatus.rejectedLabel"),
+          description: t("repository.listingStatus.rejectedDescription"),
           tone:
             "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
-          label: t("mcpTools.mine.reviewModal.approvedLabel"),
-          description: t("mcpTools.mine.reviewModal.approvedDescription"),
+          label: t("repository.listingStatus.listedLabel"),
+          description: t("repository.listingStatus.listedDescription"),
           tone:
             "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
@@ -71,11 +72,11 @@ export default function MineMcpReviewStatusModal({
 
   const confirmCancelApply = () => {
     Modal.confirm({
-      title: t("mcpTools.mine.reviewModal.confirmCancelApplyTitle"),
-      content: t("mcpTools.mine.reviewModal.confirmCancelApplyContent", {
+      title: t("repository.listingStatus.confirmCancelApplyTitle"),
+      content: t("repository.listingStatus.confirmCancelApplyContent", {
         name: title,
       }),
-      okText: t("mcpTools.mine.reviewModal.cancelApply"),
+      okText: t("repository.listingStatus.cancelApply"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
@@ -89,24 +90,12 @@ export default function MineMcpReviewStatusModal({
     });
   };
 
-  const confirmTakeDown = () => {
-    Modal.confirm({
-      title: t("mcpTools.mine.reviewModal.confirmTakeDownTitle"),
-      content: t("mcpTools.mine.reviewModal.confirmTakeDownContent", {
-        name: title,
-      }),
-      okText: t("mcpTools.mine.reviewModal.takeDown"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      centered: true,
-      onOk: async () => {
-        try {
-          if (onlineService) await onTakeDown(item, onlineService);
-        } catch {
-          throw new Error("Take down failed");
-        }
-      },
-    });
+  const confirmTakeDown = async () => {
+    try {
+      if (onlineService) await onTakeDown(item, onlineService);
+    } catch {
+      throw new Error("Take down failed");
+    }
   };
 
   return (
@@ -125,7 +114,7 @@ export default function MineMcpReviewStatusModal({
               icon={<XCircle className="size-4" aria-hidden />}
               onClick={confirmCancelApply}
             >
-              {t("mcpTools.mine.reviewModal.cancelApply")}
+              {t("repository.listingStatus.cancelApply")}
             </Button>
           ) : null}
           {canTakeDown ? (
@@ -135,7 +124,7 @@ export default function MineMcpReviewStatusModal({
               icon={<XCircle className="size-4" aria-hidden />}
               onClick={confirmTakeDown}
             >
-              {t("mcpTools.mine.reviewModal.takeDown")}
+              {t("repository.listingStatus.takeDown")}
             </Button>
           ) : null}
         </div>
@@ -143,7 +132,7 @@ export default function MineMcpReviewStatusModal({
       title={
         <span className="inline-flex items-center gap-2">
           <Store className="size-5 text-primary" aria-hidden />
-          {t("mcpTools.mine.reviewModal.title")}
+          {t("repository.listingStatus.title")}
         </span>
       }
       centered
@@ -165,13 +154,24 @@ export default function MineMcpReviewStatusModal({
           <p className="text-sm leading-relaxed opacity-90">
             {statusConfig.description}
           </p>
+          {listingContent ? (
+            <p className="text-sm leading-relaxed opacity-90">
+              {isPending
+                ? t("repository.listingStatus.pendingNote", {
+                    content: listingContent,
+                  })
+                : t("repository.listingStatus.reviewOpinion", {
+                    content: listingContent,
+                  })}
+            </p>
+          ) : null}
         </div>
       </div>
 
       {submittedAt ? (
         <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
           <div className="flex justify-between gap-4">
-            <span>{t("mcpTools.mine.reviewModal.submittedAt")}</span>
+            <span>{t("repository.listingStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>

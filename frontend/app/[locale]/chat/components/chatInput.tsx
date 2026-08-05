@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload, ArrowUp } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
@@ -830,19 +830,14 @@ export function ChatInput({
             }
           >
             <Button
-                  type="default"
-                  shape="circle"
-                  size="middle"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                  onClick={toggleRecording}
-                  disabled={recordingStatus === "connecting" || isStreaming}
-            >
-              {isRecording ? (
-                <MicOff className="h-5 w-5" />
-              ) : (
-                <Mic className="h-5 w-5" />
-              )}
-            </Button>
+              type="default"
+              shape="circle"
+              size="large"
+              className="text-slate-700 hover:bg-slate-200"
+              icon={isRecording ? <MicOff /> : <Mic />}
+              onClick={toggleRecording}
+              disabled={recordingStatus === "connecting" || isStreaming}
+            />
           </Tooltip>
 
           {/* Upload file button */}
@@ -850,23 +845,22 @@ export function ChatInput({
             <Button
               type="default"
               shape="circle"
-              size="middle"
-              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              size="large"
+              className="text-slate-700 hover:bg-slate-200"
+              icon={<Paperclip />}
               onClick={() =>
                 document.getElementById("file-upload-regular")?.click()
               }
-            >
-              <Paperclip className="h-5 w-5" />
-              <Input
-                type="file"
-                id="file-upload-regular"
-                className="hidden"
-                onChange={handleFileUpload}
-                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => '.' + ext).join(',')}`}
-                multiple
-              />
-            </Button>
+            />
           </Tooltip>
+          <Input
+            type="file"
+            id="file-upload-regular"
+            className="hidden"
+            onChange={handleFileUpload}
+            accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => '.' + ext).join(',')}`}
+            multiple
+          />
 
           {isStreaming ? (
             <Tooltip
@@ -878,11 +872,10 @@ export function ChatInput({
                 onClick={onStop}
                 type="primary"
                 shape="circle"
-                size="middle"
-                className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
-              >
-                <Square className="h-5 w-5" />
-              </Button>
+                size="large"
+                className="bg-red-500 hover:bg-red-600"
+                icon={<Square />}
+              />
             </Tooltip>
           ) : (
             <Button
@@ -890,12 +883,12 @@ export function ChatInput({
               disabled={!input.trim() || isLoading || !selectedAgentId}
               type="primary"
               shape="circle"
-              size="middle"
-              className={`h-10 w-10 ${
+              size="large"
+              className={
                 hasUnsupportedFiles || !selectedAgentId
-                  ? "bg-gray-400 cursor-not-allowed"
+                  ? "bg-gray-400"
                   : "bg-blue-500 hover:bg-blue-600"
-              } text-white rounded-full flex items-center justify-center`}
+              }
               title={
                 hasUnsupportedFiles
                   ? t("chatInput.unsupportedFileTypeSimple")
@@ -903,34 +896,8 @@ export function ChatInput({
                   ? t("agentSelector.pleaseSelectAgent")
                   : t("chatInput.send")
               }
-            >
-              <svg
-                width="14"
-                height="16"
-                viewBox="0 0 14 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M7 16c-.595 0-1.077-.462-1.077-1.032V1.032C5.923.462 6.405 0 7 0s1.077.462 1.077 1.032v13.936C8.077 15.538 7.595 16 7 16z"
-                  fill="currentColor"
-                ></path>
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M.315 7.44a1.002 1.002 0 0 1 0-1.46L6.238.302a1.11 1.11 0 0 1 1.523 0c.421.403.421 1.057 0 1.46L1.838 7.44a1.11 1.11 0 0 1-1.523 0z"
-                  fill="currentColor"
-                ></path>
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M13.685 7.44a1.11 1.11 0 0 1-1.523 0L6.238 1.762a1.002 1.002 0 0 1 0-1.46 1.11 1.11 0 0 1 1.523 0l5.924 5.678c.42.403.42 1.056 0 1.46z"
-                  fill="currentColor"
-                ></path>
-              </svg>
-            </Button>
+              icon={<ArrowUp />}
+            />
           )}
         </div>
       </div>
@@ -1046,7 +1013,7 @@ export function ChatInput({
             )}
             {!agentGreeting && (
               <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-                {appConfig.appDescription || t("chatInput.introMessage")}
+                {appConfig.appDescription ? t("project.config.description") : t("chatInput.introMessage")}
               </p>
             )}
           </div>

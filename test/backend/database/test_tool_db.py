@@ -128,7 +128,8 @@ from backend.database.tool_db import (
     check_tool_is_available,
     delete_tools_by_agent_id,
     search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized
+    check_tool_list_initialized,
+    set_mcp_tools_unavailable,
 )
 
 class MockToolInstance:
@@ -965,6 +966,100 @@ def test_update_tool_table_existing_tools_set_unavailable(monkeypatch, mock_sess
     assert existing_tool2.is_available is True
 
 
+def test_update_tool_table_keeps_enabled_mcp_tools_unavailable_unchanged(monkeypatch, mock_session):
+    """Test that tools of enabled MCPs are NOT downgraded when the MCP was
+    unreachable during this scan (transient connection failure)."""
+    session, query = mock_session
+
+    # Existing MCP tool that was previously available
+    existing_mcp_tool = MockToolInfo()
+    existing_mcp_tool.name = "get_tickets"
+    existing_mcp_tool.source = "mcp"
+    existing_mcp_tool.usage = "adeu"
+    existing_mcp_tool.is_available = True
+
+    # Existing local tool (non-MCP, should still be downgraded if not scanned)
+    existing_local_tool = MockToolInfo()
+    existing_local_tool.name = "local_tool"
+    existing_local_tool.source = "local"
+    existing_local_tool.is_available = True
+
+    mock_all = MagicMock()
+    mock_all.return_value = [existing_mcp_tool, existing_local_tool]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data)
+
+    mock_tool_info_instance = MagicMock()
+    mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
+    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+                        mock_tool_info_class)
+
+    # Scan fails to reach "adeu" this time -> "adeu" not in tool_list,
+    # but "adeu" is an enabled MCP so its tools keep availability.
+    tool_list = []  # nothing fetched this scan
+
+    update_tool_table_from_scan_tool_list(
+        "tenant1", "user1", tool_list,
+        enabled_mcp_names={"adeu"},
+    )
+
+    # Enabled MCP tool preserved, local tool still downgraded
+    assert existing_mcp_tool.is_available is True
+    assert existing_local_tool.is_available is False
+
+
+def test_update_tool_table_downgrades_disabled_mcp_tools(monkeypatch, mock_session):
+    """Test that tools of a DISABLED MCP are still downgraded even when
+    enabled_mcp_names is provided (the disabled MCP is not in the set)."""
+    session, query = mock_session
+
+    existing_mcp_tool = MockToolInfo()
+    existing_mcp_tool.name = "get_tickets"
+    existing_mcp_tool.source = "mcp"
+    existing_mcp_tool.usage = "disabled_mcp"
+    existing_mcp_tool.is_available = True
+
+    mock_all = MagicMock()
+    mock_all.return_value = [existing_mcp_tool]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data)
+
+    mock_tool_info_instance = MagicMock()
+    mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
+    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+                        mock_tool_info_class)
+
+    # "disabled_mcp" is NOT in the enabled set -> its tool should be downgraded
+    update_tool_table_from_scan_tool_list(
+        "tenant1", "user1", [],
+        enabled_mcp_names={"other_enabled_mcp"},
+    )
+
+    assert existing_mcp_tool.is_available is False
+
+
 def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
     """Test MCP tool with invalid name should set is_available=False"""
     session, query = mock_session
@@ -1016,6 +1111,48 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
         "is_available": False  # Should be False for invalid tool name
     })
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
+
+
+def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
+    """Test marking all tools of a deleted MCP server as unavailable."""
+    session, query = mock_session
+    mock_update = MagicMock(return_value=3)
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_unavailable(
+        tenant_id="tenant1", mcp_server_name="deleted_server", user_id="user1")
+
+    assert result == 3
+    mock_update.assert_called_once_with(
+        {"is_available": False, "updated_by": "user1"})
+
+
+def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
+    """Test set_mcp_tools_unavailable returns 0 when no tool rows match."""
+    session, query = mock_session
+    mock_update = MagicMock(return_value=None)  # None from SQLAlchemy edge case
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = set_mcp_tools_unavailable(
+        tenant_id="tenant1", mcp_server_name="missing_server", user_id="user1")
+
+    assert result == 0
 
 
 def test_add_tool_field(monkeypatch, mock_session):

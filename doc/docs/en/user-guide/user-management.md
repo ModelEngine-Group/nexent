@@ -2,7 +2,7 @@
 
 This page provides a detailed explanation of the Nexent platform's user role system, data visibility scope, operation permissions for various resources, and practical examples of permission configuration.
 
-⚠️ **Important Note**: When deploying v1.8.0 or later for the first time, please pay special attention to the `suadmin` super administrator account information output in the Docker logs. This account has the highest system privileges, and the password is only displayed upon first generation. It cannot be viewed again later, so please be sure to save it securely.
+⚠️ **Important Note**: When deploying v1.8.0 or later for the first time, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123` and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD`; an offline package launched with `--config` uses the interactively entered password instead and does not display it.
 
 ## 📋 Page Navigation
 
@@ -39,7 +39,7 @@ Includes the following four core roles:
 
 | Role | Responsibility Description | Applicable Scenarios | Role Notes |
 | ---- | -------------------------- | -------------------- | ---------- |
-| **Super Administrator** | Can create **different tenants** and manage all tenant resources | Platform operation and maintenance personnel | There is only one Super Administrator in the Nexent system. Account credentials are generated during local deployment. Please keep them safe as they cannot be retrieved after logs are cleared |
+| **Super Administrator** | Can create **different tenants** and manage all tenant resources | Platform operation and maintenance personnel | There is only one Super Administrator in Nexent. It is created during the first deployment, and its password can be preset through the deployment environment |
 | **Administrator** | Responsible for **intra-tenant** resource management and permission allocation | Department managers, tenant leaders | A tenant can have multiple administrators, who can only be invited by the Super Administrator |
 | **Developer** | Can create and edit agents, knowledge bases, and other resources, but has no management permissions | Developers, product managers | A tenant can have multiple developers who can belong to multiple user groups within the tenant, invited by administrators and the Super Administrator |
 | **Regular User** | Can only use platform features without creation and editing permissions | Employees, business personnel | A tenant can have multiple regular users who can belong to multiple user groups within the tenant, invited by administrators and the Super Administrator |

@@ -14,6 +14,7 @@ _ALLOWED_SKILL_META_KEYS = frozenset([
     "description",
     "allowed-tools",
     "tags",
+    "script_outputs",
 ])
 
 
@@ -66,6 +67,7 @@ class SkillLoader:
             "description": filtered_meta.get("description", ""),
             "allowed_tools": filtered_meta.get("allowed-tools", []),
             "tags": filtered_meta.get("tags", []),
+            "script_outputs": filtered_meta.get("script_outputs", {}),
             "content": body.strip(),
             "source_path": source_path
         }
@@ -206,6 +208,8 @@ class SkillLoader:
             frontmatter["allowed-tools"] = skill_dict["allowed-tools"]
         if skill_dict.get("tags"):
             frontmatter["tags"] = skill_dict["tags"]
+        if skill_dict.get("script_outputs"):
+            frontmatter["script_outputs"] = skill_dict["script_outputs"]
 
         # Use default_flow_style=False for block style
         # Use width=float("inf") to prevent line wrapping

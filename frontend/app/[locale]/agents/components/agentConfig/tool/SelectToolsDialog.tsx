@@ -8,6 +8,8 @@ import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
 
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
@@ -78,6 +80,21 @@ export default function SelectToolsDialog({
   const { confirm } = useConfirmModal();
 
   const { availableTools } = useToolList({ enabled: open });
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { serverList: rawServers } = useMcpServerList({ enabled: open, tenantId });
+  const allMcpServerNames = useMemo(
+    () => new Set(rawServers.map((s) => s.service_name)),
+    [rawServers],
+  );
+  const visibleMcpNames = useMemo(
+    () => new Set(
+      rawServers
+        .filter((s) => !s.permission || s.permission === "EDIT" || s.permission === "READ_ONLY" || s.group_ids)
+        .map((s) => s.service_name),
+    ),
+    [rawServers],
+  );
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
 
@@ -104,6 +121,7 @@ export default function SelectToolsDialog({
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
 
   // --- Group tools by source & category ---
   const sourceGroups = useMemo(() => {
@@ -112,8 +130,12 @@ export default function SelectToolsDialog({
       const sourceTools = availableTools.filter(
         (t: any) => t.source === tab.sourceValue
       );
+      // For MCP tools: show API-added (not in server list) or from visible servers
+      const filteredTools = tab.key === "mcp"
+        ? sourceTools.filter((t: any) => !allMcpServerNames.has(t.usage) || visibleMcpNames.has(t.usage))
+        : sourceTools;
       const catMap = new Map<string, any[]>();
-      for (const tool of sourceTools) {
+      for (const tool of filteredTools) {
         // MCP tools are grouped by server name (usage); local/langchain by category
         const cat =
           tab.key === "mcp"
@@ -134,7 +156,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools]);
+  }, [availableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {
@@ -181,6 +203,10 @@ export default function SelectToolsDialog({
     () => new Set(selectedTools.map((t) => parseInt(t.id))),
     [selectedTools]
   );
+  const activeToolGroup = useMemo(
+    () => currentGroups.find((group) => group.category === activeCategory),
+    [activeCategory, currentGroups]
+  );
 
   // --- Merge instance params for a tool ---
   const mergeInstanceParams = useCallback(
@@ -223,6 +249,45 @@ export default function SelectToolsDialog({
           (p.value === undefined || p.value === "" || p.value === null)
       ),
     []
+  );
+
+  const selectableToolsInActiveGroup = useMemo(() => {
+    if (!activeToolGroup) return [];
+
+    return activeToolGroup.tools.filter((tool: any) => {
+      const toolId = parseInt(tool.id);
+      const hasDuplicateName = selectedTools.some(
+        (selectedTool) =>
+          parseInt(selectedTool.id) !== toolId &&
+          selectedTool.name === tool.name
+      );
+
+      return (
+        !hasDuplicateName &&
+        !isToolDisabled(
+          tool.name,
+          isImageUnderstandingAvailable,
+          isVideoUnderstandingAvailable,
+          isEmbeddingAvailable
+        ) &&
+        !hasMissingRequired(tool.initParams || [])
+      );
+    });
+  }, [
+    activeToolGroup,
+    hasMissingRequired,
+    isEmbeddingAvailable,
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
+    selectedTools,
+  ]);
+  const allVisibleSelectableToolsSelected = useMemo(
+    () =>
+      selectableToolsInActiveGroup.length > 0 &&
+      selectableToolsInActiveGroup.every((tool: any) =>
+        selectedToolIds.has(parseInt(tool.id))
+      ),
+    [selectableToolsInActiveGroup, selectedToolIds]
   );
 
   // --- Open ToolConfigModal (which handles add/update internally) ---
@@ -293,6 +358,67 @@ export default function SelectToolsDialog({
     },
     [prefetchKnowledgeBases, mergeInstanceParams, hasMissingRequired, confirm, updateTools, t]
   );
+
+  const selectAllVisibleTools = useCallback(async () => {
+    if (isSelectingAll) return;
+
+    const currentSelected = useAgentConfigStore.getState().editedAgent.tools;
+    const currentSelectedIds = new Set(
+      currentSelected.map((tool) => parseInt(tool.id))
+    );
+    const toolsToAdd = selectableToolsInActiveGroup.filter(
+      (tool: any) => !currentSelectedIds.has(parseInt(tool.id))
+    );
+    if (toolsToAdd.length === 0) return;
+
+    setIsSelectingAll(true);
+    try {
+      const toolsWithParams = await Promise.all(
+        toolsToAdd.map(async (tool: any) => ({
+          ...tool,
+          initParams: await mergeInstanceParams(tool),
+        }))
+      );
+      const latestSelected = useAgentConfigStore.getState().editedAgent.tools;
+      const latestIds = new Set(latestSelected.map((tool) => parseInt(tool.id)));
+      const names = new Set(latestSelected.map((tool) => tool.name));
+      const additions = toolsWithParams.filter((tool) => {
+        if (
+          latestIds.has(parseInt(tool.id)) ||
+          names.has(tool.name) ||
+          hasMissingRequired(tool.initParams)
+        ) {
+          return false;
+        }
+        names.add(tool.name);
+        return true;
+      });
+
+      if (additions.length > 0) {
+        updateTools([...latestSelected, ...additions]);
+      }
+    } finally {
+      setIsSelectingAll(false);
+    }
+  }, [
+    hasMissingRequired,
+    isSelectingAll,
+    mergeInstanceParams,
+    selectableToolsInActiveGroup,
+    updateTools,
+  ]);
+
+  const deselectAllVisibleTools = useCallback(() => {
+    if (!activeToolGroup) return;
+
+    const visibleToolIds = new Set(
+      activeToolGroup.tools.map((tool: any) => parseInt(tool.id))
+    );
+    const currentSelected = useAgentConfigStore.getState().editedAgent.tools;
+    updateTools(
+      currentSelected.filter((tool) => !visibleToolIds.has(parseInt(tool.id)))
+    );
+  }, [activeToolGroup, updateTools]);
 
   const tabItems: TabsProps["items"] = SOURCE_TABS
     .filter((tab) => (sourceGroups[tab.key] || []).length > 0)
@@ -371,6 +497,25 @@ export default function SelectToolsDialog({
             maxTagCount={1}
             notFoundContent={allLabels.length === 0 ? t("toolPool.noLabelsAssigned") : undefined}
           />
+          <Button
+            loading={isSelectingAll}
+            disabled={
+              isSelectingAll || selectableToolsInActiveGroup.length === 0
+            }
+            onClick={() => {
+              if (allVisibleSelectableToolsSelected) {
+                deselectAllVisibleTools();
+                return;
+              }
+              void selectAllVisibleTools();
+            }}
+          >
+            {t(
+              allVisibleSelectableToolsSelected
+                ? "common.deselectAll"
+                : "common.selectAll"
+            )}
+          </Button>
         </div>
 
         <div className="flex max-h-[55vh] min-h-[340px] gap-3">

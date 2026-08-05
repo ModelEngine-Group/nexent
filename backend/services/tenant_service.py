@@ -26,11 +26,25 @@ from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by
 from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from database.invitation_db import query_invitations_by_tenant, remove_invitation
 from database.tool_db import delete_tools_by_agent_id
-from consts.const import ASSET_OWNER_TENANT_ID, TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID, CONTAINER_SKILLS_PATH
-from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    CONTAINER_SKILLS_PATH,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    TENANT_ID,
+    TENANT_NAME,
+    IS_SPEED_MODE,
+)
+from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
 from services.skill_service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
+
+
+def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
+    """Return whether a tenant id represents a real tenant in management views."""
+    normalized_tenant_id = (tenant_id or "").strip()
+    return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
 def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
@@ -45,7 +59,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Tenant information
     """
-    if not tenant_id:
+    if not _is_displayable_tenant_id(tenant_id):
         return {}
 
     # Get tenant name
@@ -67,6 +81,20 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     }
 
     return tenant_info
+
+
+def get_tenant_info_for_user(
+    tenant_id: str,
+    *,
+    requester_tenant_id: str,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """Get tenant information after enforcing tenant-scoped access."""
+    role = (requester_role or "").upper()
+    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
+    if role != "SU" and not is_speed_admin and tenant_id != requester_tenant_id:
+        raise ForbiddenError("Not authorized to access this tenant")
+    return get_tenant_info(tenant_id)
 
 
 def _ensure_tenant_name_config(tenant_id: str) -> bool:
@@ -139,10 +167,10 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
     """
-    # Exclude virtual ASSET_OWNER tenant from admin tenant listings
+    # Exclude virtual/system tenants from admin tenant listings.
     all_tenant_ids = [
         tid for tid in get_all_tenant_ids()
-        if tid != ASSET_OWNER_TENANT_ID
+        if _is_displayable_tenant_id(tid)
     ]
     total = len(all_tenant_ids)
 
@@ -176,6 +204,19 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         "page_size": page_size,
         "total_pages": total_pages
     }
+
+
+def get_tenants_paginated_for_user(
+    page: int = 1,
+    page_size: int = 20,
+    *,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """List tenants for platform administrators only."""
+    role = (requester_role or "").upper()
+    if role != "SU" and not (IS_SPEED_MODE and role == "SPEED"):
+        raise ForbiddenError("Only super administrators can list tenants")
+    return get_tenants_paginated(page=page, page_size=page_size)
 
 
 def create_tenant(

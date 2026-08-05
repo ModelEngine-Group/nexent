@@ -10,8 +10,10 @@ import {
   addMcpToolService,
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
+import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { uploadMcpImage } from "@/services/mcpService";
@@ -63,18 +65,29 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       }
     }
 
-    // Parse OpenAPI JSON for API type
+    // Parse OpenAPI JSON for API type. A valid OpenAPI spec is required:
+    // without it the backend cannot register any tools and the record is
+    // treated as a plain remote MCP instead of an API-type service.
     let configJson: Record<string, unknown> | undefined;
     if (isApi) {
       const raw = (draft.openApiJson ?? "").trim();
       if (!raw) {
-        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
         return false;
       }
       try {
         configJson = JSON.parse(raw);
       } catch {
-        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJsonFormat"));
+        return false;
+      }
+      if (
+        !configJson ||
+        typeof configJson !== "object" ||
+        Array.isArray(configJson) ||
+        !("openapi" in configJson)
+      ) {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
         return false;
       }
     }
@@ -106,7 +119,14 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
           : undefined;
 
-        await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+        const result = await uploadMcpImage(
+          file, draft.containerPort, trimmedName, envVars,
+          undefined, draft.groupIds?.join(","), draft.ingroupPermission,
+          draft.sharedFields ? JSON.stringify(draft.sharedFields) : undefined,
+        );
+        if (!result.success) {
+          throw new Error(result.message || t("mcpTools.add.error.imageUploadFailed"));
+        }
       } else if (isContainer) {
         const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
         if (!mcpConfig) {
@@ -123,6 +143,9 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           registry_json: registryJson,
           port: draft.containerPort as number,
           mcp_config: mcpConfig,
+          group_ids: draft.groupIds?.join(",") ?? undefined,
+          ingroup_permission: draft.ingroupPermission ?? undefined,
+          shared_fields: draft.sharedFields ?? undefined,
         });
       } else {
         await addMcpToolService({
@@ -135,6 +158,9 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           config_json: configJson,
           registry_json: registryJson,
           tags: draft.tags,
+          group_ids: draft.groupIds?.join(",") ?? undefined,
+          ingroup_permission: draft.ingroupPermission ?? undefined,
+          shared_fields: draft.sharedFields ?? undefined,
         });
       }
 
@@ -142,6 +168,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       queryClient.invalidateQueries({
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
+      queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
       await refreshToolListWithToast({
         message,
         t,
@@ -151,14 +178,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });
-      const msg = error instanceof Error ? error.message : "";
-      if (/already exists|name conflict|name already used/i.test(msg)) {
-        message.error(t("mcpTools.add.error.nameExists"));
-      } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
-        message.error(t("mcpTools.add.error.connectionFailed"));
-      } else {
-        message.error(msg || t("mcpTools.add.failed"));
-      }
+      message.error(getMcpAddErrorMessage(error, t));
       return false;
     } finally {
       setSubmitting(false);

@@ -183,10 +183,12 @@ def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str
     """
     filters = {'display_name': display_name}
 
-    if model_type in ["multiEmbedding", "multi_embedding"]:
-        filters['model_type'] = "multi_embedding"
-    elif model_type == "embedding":
-        filters['model_type'] = "embedding"
+    if model_type:
+        filters['model_type'] = (
+            "multi_embedding"
+            if model_type in ["multiEmbedding", "multi_embedding"]
+            else model_type
+        )
 
     records = get_model_records(filters, tenant_id)
     if not records:
@@ -358,5 +360,3 @@ def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: st
     }
     records = get_model_records(filters, tenant_id)
     return records[0] if records else None
-
-

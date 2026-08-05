@@ -17,3 +17,8 @@ again. Use patterns such as `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD
 COLUMN IF NOT EXISTS`, and conflict-safe inserts where possible.
 
 `deploy/sql/init.sql` is the initial baseline before these incremental files.
+
+Historical migrations through v2.4.0 are consolidated by minor version in
+`v2.2_merged_migrations.sql`, `v2.3_merged_migrations.sql`, and
+`v2.4_merged_migrations.sql`. Newer migrations remain separate until their
+minor-version history is consolidated.

@@ -437,6 +437,22 @@ def test_get_model_by_display_name_embedding_filter(monkeypatch):
     assert captured["model_type"] == "embedding"
 
 
+def test_get_model_by_display_name_llm_filter(monkeypatch):
+    captured = {}
+
+    def fake_get_model_records(filters, tenant_id):
+        captured.update(filters)
+        return [{"model_id": 13, "display_name": "Shared Name", "model_type": "llm"}]
+
+    monkeypatch.setattr(model_mgmt_db, "get_model_records", fake_get_model_records)
+
+    result = model_mgmt_db.get_model_by_display_name("Shared Name", "tenant13", model_type="llm")
+
+    assert result["model_id"] == 13
+    assert captured["display_name"] == "Shared Name"
+    assert captured["model_type"] == "llm"
+
+
 def test_get_model_by_model_id_not_found(monkeypatch):
     mock_scalars = MagicMock()
     mock_scalars.first.return_value = None

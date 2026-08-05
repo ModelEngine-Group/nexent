@@ -15,7 +15,7 @@ import {
   Puzzle,
   Building2,
   Zap,
-  Inbox,
+  CalendarClock,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -39,6 +39,7 @@ interface RouteConfig {
   labelKey: string;
   order: number;
   parentKey?: string | null;
+  navigationPath?: string;
 }
 
 /**
@@ -66,41 +67,49 @@ const ROUTE_CONFIG: RouteConfig[] = [
     labelKey: "sidebar.startChat",
     order: 1,
     parentKey: null,
+    navigationPath: "/newchat",
+  },
+  {
+    path: "/agent-tasks",
+    Icon: CalendarClock,
+    labelKey: "sidebar.agentTasks",
+    order: 2,
+    parentKey: null,
   },
   // Agent Development submenu
   {
     path: "/agent-dev",
     Icon: Code,
     labelKey: "sidebar.agentDev",
-    order: 2,
+    order: 3,
     parentKey: null,
   },
   {
     path: "/models",
     Icon: Settings,
     labelKey: "sidebar.modelConfig",
-    order: 3,
+    order: 4,
     parentKey: "/agent-dev",
   },
   {
     path: "/knowledges",
     Icon: BookOpen,
     labelKey: "sidebar.knowledgeBaseConfig",
-    order: 4,
+    order: 5,
     parentKey: "/agent-dev",
   },
   {
     path: "/agents",
     Icon: Bot,
     labelKey: "sidebar.agentConfig",
-    order: 5,
+    order: 6,
     parentKey: "/agent-dev",
   },
   {
     path: "/memory",
     Icon: Database,
     labelKey: "sidebar.memoryConfig",
-    order: 6,
+    order: 7,
     parentKey: "/agent-dev",
   },
   // Resource Space submenu
@@ -108,28 +117,28 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/resource-space",
     Icon: Globe,
     labelKey: "sidebar.resourceSpace",
-    order: 7,
+    order: 8,
     parentKey: null,
   },
   {
     path: "/agent-space",
     Icon: Bot,
     labelKey: "sidebar.agentSpace",
-    order: 8,
+    order: 9,
     parentKey: "/resource-space",
   },
   {
     path: "/mcp-space",
     Icon: Puzzle,
     labelKey: "sidebar.mcpSpace",
-    order: 9,
+    order: 10,
     parentKey: "/resource-space",
   },
   {
     path: "/skill-space",
     Icon: Zap,
     labelKey: "sidebar.skillSpace",
-    order: 10,
+    order: 11,
     parentKey: "/resource-space",
   },
   // Management menus
@@ -137,14 +146,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/resource-manage",
     Icon: Building2,
     labelKey: "sidebar.resourceManage",
-    order: 11,
+    order: 12,
     parentKey: null,
   },
   {
     path: "/owner-manage",
     Icon: Building2,
     labelKey: "sidebar.ownerManage",
-    order: 12,
+    order: 13,
     parentKey: null,
   },
 ];
@@ -182,7 +191,12 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   // Update selected key and expand parent menu when pathname changes
   useEffect(() => {
     const currentPath = getEffectiveRoutePath(pathname);
-    const matchedKey = ROUTE_PATHS.includes(currentPath) ? currentPath : null;
+    const matchedKey =
+      currentPath === "/newchat"
+        ? "/chat"
+        : ROUTE_PATHS.includes(currentPath)
+          ? currentPath
+          : null;
     setSelectedKey(matchedKey || "");
 
     // Auto-expand parent menu when visiting child page
@@ -226,9 +240,9 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) =>
-      accessibleRoutes.includes(route.path)
-    );
+    const filtered = ROUTE_CONFIG.filter((route) => {
+      return accessibleRoutes.includes(route.path);
+    });
 
     // Separate root items and children
     const rootItems = filtered
@@ -266,16 +280,17 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       icon: <route.Icon className="w-4 h-4" />,
       label: t(route.labelKey),
       onClick: () => {
+        const navigationPath = route.navigationPath || route.path;
         setSelectedKey(route.path);
 
         // Pre-check authentication - show auth prompt if user is not authenticated
         if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
-          setPendingNavigationPath(route.path);
-          openAuthPromptModal(route.path);
+          setPendingNavigationPath(navigationPath);
+          openAuthPromptModal(navigationPath);
           return; // Prevent navigation
         }
 
-        router.push(route.path);
+        router.push(navigationPath);
       },
     };
   };

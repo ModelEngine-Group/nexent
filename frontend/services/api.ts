@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
+import { withBasePath } from "@/lib/basePath";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
@@ -11,8 +12,9 @@ import type {
   SkillRepositoryListingListParams,
 } from "@/types/skillRepository";
 import type { MarketAgentListParams } from "@/types/market";
+import type { NotificationListParams } from "@/types/notification";
 
-const API_BASE_URL = "/api";
+export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   user: {
@@ -77,6 +79,7 @@ export const API_ENDPOINTS = {
   },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
+    nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
@@ -94,6 +97,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
       version: (agentId: number, versionNo: number) =>
@@ -113,6 +117,30 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
+  agentAutomation: {
+    list: `${API_BASE_URL}/agent/automations`,
+    detail: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    update: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    delete: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}`,
+    pause: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/pause`,
+    resume: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/resume`,
+    run: (taskId: number) => `${API_BASE_URL}/agent/automations/${taskId}/run`,
+    runs: (taskId: number) =>
+      `${API_BASE_URL}/agent/automations/${taskId}/runs`,
+    cancelRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}/cancel`,
+    deleteRun: (runId: number) =>
+      `${API_BASE_URL}/agent/automations/runs/${runId}`,
+    proposals: `${API_BASE_URL}/agent/automations/proposals`,
+    updateProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}`,
+    confirmProposal: (proposalId: number) =>
+      `${API_BASE_URL}/agent/automations/proposals/${proposalId}/confirm`,
+    conversation: (conversationId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/automation`,
+  },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
     update: `${API_BASE_URL}/tool/update`,
@@ -127,10 +155,12 @@ export const API_ENDPOINTS = {
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
     labels: `${API_BASE_URL}/tool/labels`,
+    updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   promptTemplates: {
     list: `${API_BASE_URL}/prompt_templates`,
@@ -160,10 +190,10 @@ export const API_ENDPOINTS = {
     delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
-    ws: `/api/voice/stt/ws`,
+    ws: `${API_BASE_URL}/voice/stt/ws`,
   },
   tts: {
-    ws: `/api/voice/tts/ws`,
+    ws: `${API_BASE_URL}/voice/tts/ws`,
   },
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
@@ -249,6 +279,7 @@ export const API_ENDPOINTS = {
   knowledgeBase: {
     // Elasticsearch service
     health: `${API_BASE_URL}/indices/health`,
+    summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
     listFiles: (indexName: string) =>
@@ -309,10 +340,23 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
     knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
+  aidpMgmt: {
+    knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
+    kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
+    kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
+    kbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    models: `${API_BASE_URL}/aidp-mgmt/models`,
+    /** PATCH endpoint for the per-KB in-group permission. */
+    kbPermission: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
+  },
   config: {
+    frontend: `${API_BASE_URL}/frontend-config`,
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
+    projectConfig: `${API_BASE_URL}/config/project-config`,
   },
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
@@ -353,6 +397,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
     agentProtocol: (agentId: string) =>
       `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentSecurityCredentials: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/security-credentials`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>
@@ -422,6 +468,7 @@ export const API_ENDPOINTS = {
     // ---------------- Memory configuration ----------------
     config: {
       load: `${API_BASE_URL}/memory/config/load`,
+      embeddingStatus: `${API_BASE_URL}/memory/config/embedding-status`,
       set: `${API_BASE_URL}/memory/config/set`,
       disableAgentAdd: `${API_BASE_URL}/memory/config/disable_agent`,
       disableAgentRemove: (agentId: string | number) =>
@@ -429,6 +476,16 @@ export const API_ENDPOINTS = {
       disableUserAgentAdd: `${API_BASE_URL}/memory/config/disable_useragent`,
       disableUserAgentRemove: (agentId: string | number) =>
         `${API_BASE_URL}/memory/config/disable_useragent/${agentId}`,
+    },
+
+    // ---------------- Memory record management ----------------
+    records: {
+      list: `${API_BASE_URL}/memory/records`,
+      create: `${API_BASE_URL}/memory/records`,
+      update: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
+      delete: (memoryId: string | number) =>
+        `${API_BASE_URL}/memory/records/${memoryId}`,
     },
 
     // ---------------- Memory CRUD ----------------
@@ -476,6 +533,9 @@ export const API_ENDPOINTS = {
       }
       if (params?.new_agent_padding) {
         queryParams.append("new_agent_padding", "true");
+      }
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
@@ -536,6 +596,7 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
+    mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
     install: (skillRepositoryId: number) =>
@@ -573,6 +634,16 @@ export const API_ENDPOINTS = {
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
   },
+  // Quota management endpoints
+  quota: {
+    // Tenant-level quota
+    config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
+    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    // Platform-level quota (SU/ASSET_OWNER/SPEED only)
+    platformOverview: `${API_BASE_URL}/platform/quota/overview`,
+    platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
+    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+  },
   users: {
     list: `${API_BASE_URL}/users/list`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
@@ -607,6 +678,23 @@ export const API_ENDPOINTS = {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
+  notifications: {
+    list: (params?: NotificationListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.only_unread) {
+        queryParams.append("only_unread", "true");
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/notifications${queryString ? `?${queryString}` : ""}`;
+    },
+    markRead: `${API_BASE_URL}/notifications/read`,
+  },
 };
 
 // Common error handling
@@ -635,13 +723,17 @@ export const fetchWithErrorHandling = async (
       let errorMessage = `Request failed: ${response.status}`;
       const errorText = await response.text();
 
-      let parsedErrorData = null;
       try {
         const errorData = JSON.parse(errorText);
-        if (errorData && errorData.code) {
-          parsedErrorData = errorData;
-          errorCode = errorData.code;
-          errorMessage = errorData.message || errorMessage;
+        const errorDetail =
+          errorData?.detail && typeof errorData.detail === "object"
+            ? errorData.detail
+            : errorData?.message && typeof errorData.message === "object"
+              ? errorData.message
+              : errorData;
+        if (errorDetail?.code) {
+          errorCode = errorDetail.code;
+          errorMessage = errorDetail.message || errorMessage;
         } else {
           errorMessage = errorText || errorMessage;
         }
@@ -676,8 +768,19 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      // Handle request entity too large error (413)
+      // Preserve the tenant storage quota error so upload callers can present
+      // the correct recovery action instead of treating it as a per-file limit.
       if (response.status === 413) {
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData?.error === "TenantStorageFull") {
+            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+          }
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error;
+          }
+        }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
           "File size exceeds limit."

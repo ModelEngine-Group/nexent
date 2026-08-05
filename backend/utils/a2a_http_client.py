@@ -22,6 +22,14 @@ ERR_CLIENT_NOT_INITIALIZED = "Client not initialized. Use async context manager.
 CONTENT_TYPE_JSON = "application/json"
 
 
+class A2AHttpStatusError(Exception):
+    """Raised when an A2A endpoint returns a non-success HTTP status."""
+
+    def __init__(self, method: str, url: str, status: int):
+        super().__init__(f"A2A {method} request to {url} failed with HTTP {status}")
+        self.status = status
+
+
 class A2AHttpClient:
     """HTTP client for A2A protocol communication."""
 
@@ -147,6 +155,9 @@ class A2AHttpClient:
                 url,
                 headers=request_headers
             )
+            if not 200 <= status < 300:
+                raise A2AHttpStatusError("GET", url, status)
+
             # Decode body and handle empty responses
             body_text = body.decode('utf-8') if body else ""
             
@@ -179,7 +190,9 @@ class A2AHttpClient:
         self,
         url: str,
         payload: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, str]] = None,
+        cookies: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Send a POST request and return JSON response."""
         if not self._session:
@@ -195,15 +208,20 @@ class A2AHttpClient:
         if headers:
             request_headers.update(headers)
 
-        logger.info(f"A2A POST request: url={url}, payload={payload}")
+        logger.info(f"A2A POST request: url={url}")
 
         try:
             status, body = await self._request_with_retry(
                 "POST",
                 url,
                 json=payload,
-                headers=request_headers
+                headers=request_headers,
+                params=params,
+                cookies=cookies,
             )
+            if not 200 <= status < 300:
+                raise A2AHttpStatusError("POST", url, status)
+
             # Decode body and handle empty responses
             body_text = body.decode('utf-8') if body else ""
             
@@ -240,7 +258,9 @@ class A2AHttpClient:
         self,
         url: str,
         payload: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, str]] = None,
+        cookies: Optional[Dict[str, str]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Send a streaming POST request and yield SSE events."""
         if not self._session:
@@ -250,7 +270,9 @@ class A2AHttpClient:
             response = await self._session.post(
                 url,
                 json=payload,
-                headers=headers
+                headers=headers,
+                params=params,
+                cookies=cookies,
             )
             response.raise_for_status()
 

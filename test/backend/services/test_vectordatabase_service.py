@@ -122,7 +122,9 @@ class _VectorDatabaseCore:
 
 class MockOpenAICompatibleEmbedding:
     def __init__(self, *args, **kwargs):
-        pass
+        self.model = kwargs.get("model_name", "mock-embedding-model")
+        self.embedding_dim = kwargs.get("embedding_dim", 768)
+        self.model_type = kwargs.get("model_type", "embedding")
 
 
 class MockDashScopeMultimodalEmbedding:
@@ -135,6 +137,11 @@ class MockJinaEmbedding:
         pass
 
 
+class MockSiliconflowMultimodalEmbedding:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
 class MockBaseEmbedding:
     pass
 
@@ -143,6 +150,7 @@ embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
 embedding_model_module.JinaEmbedding = MockJinaEmbedding
 embedding_model_module.BaseEmbedding = MockBaseEmbedding
 embedding_model_module.DashScopeMultimodalEmbedding = MockDashScopeMultimodalEmbedding
+embedding_model_module.SiliconflowMultimodalEmbedding = MockSiliconflowMultimodalEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
 
 # Mock nexent.core.models.rerank_model with proper class exports
@@ -432,6 +440,30 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_embedding.model_type = "text"
         self.mock_get_embedding.return_value = self.mock_embedding
 
+        # Patch get_embedding_model_by_id so it returns (None, None) when model_id is None.
+        # This is critical because setUp also patches get_model_by_model_id, which would
+        # otherwise cause get_embedding_model_by_id(tenant_id, None) to return a real mock
+        # instance and populate embedding_model_name in create_index.
+        self.get_embedding_model_by_id_patcher = patch(
+            'backend.services.vectordatabase_service.get_embedding_model_by_id')
+        self.mock_get_embedding_by_id = self.get_embedding_model_by_id_patcher.start()
+        self.mock_get_embedding_by_id.return_value = (None, None)
+
+        self.get_model_by_id_patcher = patch(
+            'backend.services.vectordatabase_service.get_model_by_model_id')
+        self.mock_get_model_by_id = self.get_model_by_id_patcher.start()
+        self.mock_get_model_by_id.return_value = {
+            "model_id": 1,
+            "model_name": "test-model",
+            "display_name": "Test model",
+            "model_type": "embedding",
+            "model_factory": "OpenAI-API-Compatible",
+            "api_key": "test-key",
+            "base_url": "https://api.example.com/v1/embeddings",
+            "max_tokens": 768,
+            "ssl_verify": True,
+        }
+
         # Patch get_rerank_model for all tests
         self.get_rerank_model_patcher = patch(
             'backend.services.vectordatabase_service.get_rerank_model')
@@ -447,6 +479,8 @@ class TestElasticSearchService(unittest.TestCase):
     def tearDown(self):
         """Clean up resources after each test."""
         self.get_embedding_model_patcher.stop()
+        self.get_embedding_model_by_id_patcher.stop()
+        self.get_model_by_id_patcher.stop()
         self.get_rerank_model_patcher.stop()
         if hasattr(ElasticSearchService, 'accurate_search'):
             del ElasticSearchService.accurate_search
@@ -488,6 +522,7 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertIn("embedding_model_name", call_kwargs)
         self.assertIsNone(call_kwargs["embedding_model_name"])
+        self.assertIsNone(call_kwargs["embedding_model_id"])
         self.assertEqual(call_kwargs["index_name"], "test_index")
         self.assertEqual(call_kwargs["created_by"], "test_user")
         self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
@@ -538,6 +573,7 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
+            embedding_model_id=1,
         )
 
         self.assertEqual(result["status"], "success")
@@ -571,6 +607,7 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
+            embedding_model_id=1,
             ingroup_permission="EDIT",
             group_ids=[1, 2, 3],
         )
@@ -605,6 +642,7 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
+            embedding_model_id=1,
             ingroup_permission="READ_ONLY",
             # group_ids not provided
         )
@@ -639,6 +677,7 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
+            embedding_model_id=1,
             ingroup_permission="PRIVATE",
             group_ids=[],
         )
@@ -667,11 +706,11 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
-            is_multimodal=True,
+            embedding_model_id=1,
         )
 
         self.assertEqual(result["status"], "success")
-        mock_get_embedding.assert_called_once_with("tenant-1", None, "multi_embedding")
+        self.mock_get_model_by_id.assert_called_with(1, "tenant-1")
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
@@ -736,24 +775,18 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
-            embedding_model_name="text-embedding-3-small",
+            embedding_model_id=10,
         )
 
         # Assert
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["knowledge_id"], 10)
 
-        # Verify get_embedding_model was called with the model name
-        mock_get_embedding.assert_called_once_with(
-            "tenant-1",
-            "text-embedding-3-small",
-            None,
-        )
-
         # Verify knowledge record was created with the embedding model name
         mock_create_knowledge.assert_called_once()
         call_kwargs = mock_create_knowledge.call_args[0][0]
-        self.assertEqual(call_kwargs["embedding_model_name"], "text-embedding-3-small")
+        self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
+        self.assertEqual(call_kwargs["embedding_model_id"], 10)
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
@@ -788,23 +821,17 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
-            # embedding_model_name is not provided
+            embedding_model_id=11,
         )
 
         # Assert
         self.assertEqual(result["status"], "success")
 
-        # Verify get_embedding_model was called with None (no specific model)
-        mock_get_embedding.assert_called_once_with(
-            "tenant-1",
-            None,
-            None,
-        )
-
         # Verify knowledge record was created with the model's display name
         mock_create_knowledge.assert_called_once()
         call_kwargs = mock_create_knowledge.call_args[0][0]
-        self.assertEqual(call_kwargs["embedding_model_name"], "default-embedding-model")
+        self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
+        self.assertEqual(call_kwargs["embedding_model_id"], 11)
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
@@ -841,7 +868,7 @@ class TestElasticSearchService(unittest.TestCase):
             tenant_id="tenant-1",
             ingroup_permission="READ_ONLY",
             group_ids=[1, 2],
-            embedding_model_name="bge-large-zh-v1.5",
+            embedding_model_id=12,
         )
 
         # Assert
@@ -852,7 +879,8 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
         self.assertEqual(call_kwargs["group_ids"], [1, 2])
-        self.assertEqual(call_kwargs["embedding_model_name"], "bge-large-zh-v1.5")
+        self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
+        self.assertEqual(call_kwargs["embedding_model_id"], 12)
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     @patch('backend.services.vectordatabase_service.get_embedding_model')
@@ -886,7 +914,7 @@ class TestElasticSearchService(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
-            embedding_model_name="bge-large-zh-v1.5",  # User explicitly selected this
+            embedding_model_id=13,
         )
 
         # Assert
@@ -896,7 +924,8 @@ class TestElasticSearchService(unittest.TestCase):
         mock_create_knowledge.assert_called_once()
         call_kwargs = mock_create_knowledge.call_args[0][0]
         # When user provides embedding_model_name, that exact name should be saved
-        self.assertEqual(call_kwargs["embedding_model_name"], "bge-large-zh-v1.5")
+        self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
+        self.assertEqual(call_kwargs["embedding_model_id"], 13)
 
     @patch('backend.services.vectordatabase_service.delete_knowledge_record')
     def test_delete_index_success(self, mock_delete_knowledge):
@@ -1397,6 +1426,45 @@ class TestElasticSearchService(unittest.TestCase):
         # Assert
         self.assertEqual(len(result["indices_info"]), 1)
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_hides_private_knowledge_base_from_group_member(
+        self,
+        mock_get_knowledge,
+        mock_get_user_tenant,
+        mock_get_group_ids,
+    ):
+        self.mock_vdb_core.get_user_indices.return_value = ["private-index"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "private-index",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other-user",
+                "ingroup_permission": "PRIVATE",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch",
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "DEV",
+            "tenant_id": "test_tenant",
+        }
+        mock_get_group_ids.return_value = [1]
+
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=False,
+            target_tenant_id="test_tenant",
+            user_id="dev-user",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
@@ -3267,6 +3335,23 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_args["knowledge_name"], "New Name")
         self.assertNotIn("ingroup_permission", call_args)
         self.assertNotIn("group_ids", call_args)
+        self.assertNotIn("quota_limit_bytes", call_args)
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_clear_quota(self, mock_update_record):
+        """Test that an explicit None clears the knowledge base quota."""
+        mock_update_record.return_value = True
+
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            quota_limit_bytes=None,
+            user_id="test_user"
+        )
+
+        self.assertTrue(result)
+        call_args = mock_update_record.call_args[0][0]
+        self.assertIn("quota_limit_bytes", call_args)
+        self.assertIsNone(call_args["quota_limit_bytes"])
 
     @patch('backend.services.vectordatabase_service.update_knowledge_record')
     def test_update_knowledge_base_partial_update_permission(self, mock_update_record):
@@ -4917,10 +5002,22 @@ class TestRethrowOrPlain(unittest.TestCase):
             "kb-2", mock_vdb_core, "user-2")
 
     @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    def test_create_knowledge_base_create_index_failure(self, mock_create_record, mock_get_embedding):
+    def test_create_knowledge_base_create_index_failure(
+        self, mock_create_record, mock_get_model, mock_get_embedding
+    ):
         """create_knowledge_base raises when index creation fails."""
         mock_get_embedding.return_value = (None, None)
+        mock_get_model.return_value = {
+            "model_id": 1,
+            "model_name": "test-model",
+            "display_name": "Test model",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "base_url": "https://api.example.com/v1/embeddings",
+            "max_tokens": 768,
+        }
         mock_create_record.return_value = {
             "knowledge_id": 1,
             "index_name": "1-uuid",
@@ -4935,6 +5032,7 @@ class TestRethrowOrPlain(unittest.TestCase):
                 vdb_core=self.mock_vdb_core,
                 user_id="user-1",
                 tenant_id="tenant-1",
+                embedding_model_id=1,
             )
 
         self.assertIn("Failed to create index", str(exc.exception))
@@ -4956,6 +5054,7 @@ class TestRethrowOrPlain(unittest.TestCase):
                 vdb_core=self.mock_vdb_core,
                 user_id="user-2",
                 tenant_id="tenant-2",
+                embedding_model_id=1,
             )
 
         self.assertIn("Error creating knowledge base", str(exc.exception))
@@ -5941,6 +6040,78 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         )
 
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_embedding_model_by_id_uses_declared_embedding_type(
+        self, mock_get_model_name, mock_embedding_class, mock_get_model
+    ):
+        """Endpoint shape cannot override a model record declared as text embedding."""
+        from backend.services.vectordatabase_service import get_embedding_model_by_id
+
+        mock_get_model.return_value = {
+            "model_id": 61,
+            "model_type": "embedding",
+            "model_factory": "dashscope",
+            "model_name": "qwen3-vl-embedding",
+            "model_repo": "dashscope",
+            "api_key": "dashscope-key",
+            "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            "max_tokens": 2560,
+            "ssl_verify": True,
+        }
+        mock_get_model_name.return_value = "qwen3-vl-embedding"
+        mock_instance = MagicMock()
+        mock_embedding_class.return_value = mock_instance
+
+        model, model_id = get_embedding_model_by_id("tenant-1", 61)
+
+        self.assertIs(model, mock_instance)
+        self.assertEqual(model_id, 61)
+        mock_embedding_class.assert_called_once_with(
+            api_key="dashscope-key",
+            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            model_name="qwen3-vl-embedding",
+            embedding_dim=2560,
+            ssl_verify=True,
+        )
+
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.DashScopeMultimodalEmbedding')
+    @patch('backend.services.vectordatabase_service.get_model_name_from_config')
+    def test_get_embedding_model_by_id_dashscope_multi_embedding(
+        self, mock_get_model_name, mock_dashscope_class, mock_get_model
+    ):
+        """Test that a DashScope model selected by ID uses its matching client."""
+        from backend.services.vectordatabase_service import get_embedding_model_by_id
+
+        mock_get_model.return_value = {
+            "model_id": 48,
+            "model_type": "multi_embedding",
+            "model_factory": "dashscope",
+            "model_name": "multimodal-embedding-v1",
+            "model_repo": "dashscope",
+            "api_key": "dashscope-key",
+            "base_url": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            "max_tokens": 1024,
+            "ssl_verify": True,
+        }
+        mock_get_model_name.return_value = "multimodal-embedding-v1"
+        mock_instance = MagicMock()
+        mock_dashscope_class.return_value = mock_instance
+
+        model, model_id = get_embedding_model_by_id("tenant-1", 48)
+
+        self.assertIs(model, mock_instance)
+        self.assertEqual(model_id, 48)
+        mock_dashscope_class.assert_called_once_with(
+            api_key="dashscope-key",
+            base_url="https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+            model_name="multimodal-embedding-v1",
+            embedding_dim=1024,
+            ssl_verify=True,
+        )
+
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
     def test_get_embedding_model_by_id_model_not_found(self, mock_get_model):
         """
         Test get_embedding_model_by_id when model is not found.
@@ -6901,12 +7072,37 @@ class TestCoverageImprovement(unittest.TestCase):
         # Should return a DashScopeMultimodalEmbedding instance (mocked)
         self.assertIsNotNone(result)
 
-    # Tests for create_knowledge_base - is_multimodal=False with embedding_model_name (line 668)
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_embedding_model_siliconflow(self):
+        """Siliconflow multi-embedding models use their provider-specific client."""
+        from backend.services.vectordatabase_service import _create_embedding_model
+        with patch('backend.services.vectordatabase_service.get_model_name_from_config',
+                   return_value="Qwen/Qwen3-VL-Embedding-8B"):
+            result = _create_embedding_model({
+                "model_name": "Qwen/Qwen3-VL-Embedding-8B",
+                "model_type": "multi_embedding",
+                "model_factory": "silicon",
+                "api_key": "test-key",
+                "base_url": "https://api.siliconflow.cn/v1/embeddings",
+            })
+
+        self.assertIsInstance(result, MockSiliconflowMultimodalEmbedding)
+
+    # Tests for create_knowledge_base model ID validation
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    def test_create_knowledge_base_is_multimodal_false_with_model(self, mock_create_record, mock_get_embedding):
-        """Test create_knowledge_base when is_multimodal=False and embedding_model_name is provided (line 668)."""
-        mock_get_embedding.return_value = (None, None)
+    def test_create_knowledge_base_stores_selected_model_id(
+        self, mock_create_record, mock_get_model
+    ):
+        """The selected embedding model ID is stored without name-based re-resolution."""
+        mock_get_model.return_value = {
+            "model_id": 1,
+            "model_name": "test-model",
+            "display_name": "Test model",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "base_url": "https://api.example.com/v1/embeddings",
+            "max_tokens": 768,
+        }
         mock_create_record.return_value = {
             "knowledge_id": 99, "index_name": "99-uuid", "knowledge_name": "kb-nomodal"
         }
@@ -6918,12 +7114,49 @@ class TestCoverageImprovement(unittest.TestCase):
             vdb_core=self.mock_vdb_core,
             user_id="user-1",
             tenant_id="tenant-1",
-            is_multimodal=False,
-            embedding_model_name="text-embedding-3-small",
+            embedding_model_id=1,
         )
 
         self.assertEqual(result["status"], "success")
-        mock_get_embedding.assert_called_once_with("tenant-1", "text-embedding-3-small", "embedding")
+        knowledge_data = mock_create_record.call_args[0][0]
+        self.assertEqual(knowledge_data["embedding_model_id"], 1)
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_requires_model_id(self, mock_create_record):
+        with self.assertRaisesRegex(ValueError, "embedding_model_id is required"):
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb-missing-model",
+                embedding_dim=256,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+            )
+
+        mock_create_record.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_rejects_non_embedding_model(
+        self, mock_create_record, mock_get_model
+    ):
+        mock_get_model.return_value = {
+            "model_id": 2,
+            "model_name": "chat-model",
+            "display_name": "Chat model",
+            "model_type": "llm",
+        }
+
+        with self.assertRaisesRegex(ValueError, "is not an embedding model"):
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb-invalid-model",
+                embedding_dim=256,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+                embedding_model_id=2,
+            )
+
+        mock_create_record.assert_not_called()
 
     # Tests for delete_index - MINIO file deletion loop (lines 862-871)
     @pytest.mark.asyncio
@@ -7381,6 +7614,407 @@ class TestCoverageImprovement(unittest.TestCase):
             )
         # Should be wrapped as a generic Exception by search_hybrid's outer handler
         self.assertIn("embedding model", str(ctx.exception).lower())
+
+
+def _patch_kb_permission_context(
+    monkeypatch,
+    record,
+    user_tenant=None,
+    user_group_ids=None,
+    speed_mode=False,
+):
+    import backend.services.vectordatabase_service as vdb_service
+
+    monkeypatch.setattr(vdb_service, "get_knowledge_record", lambda _filters: record)
+    monkeypatch.setattr(
+        vdb_service,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: user_tenant,
+    )
+    monkeypatch.setattr(
+        vdb_service,
+        "query_group_ids_by_user",
+        lambda _user_id: user_group_ids or [],
+    )
+    monkeypatch.setattr(vdb_service, "IS_SPEED_MODE", speed_mode)
+    monkeypatch.setattr(vdb_service, "ASSET_OWNER_TENANT_ID", "asset-owner")
+
+
+def test_resolve_knowledge_base_permission_not_found(monkeypatch):
+    _patch_kb_permission_context(monkeypatch, record=None)
+
+    with pytest.raises(ValueError, match="not found"):
+        ElasticSearchService.resolve_knowledge_base_permission(
+            "missing-kb", "user-1", "tenant-1"
+        )
+
+
+def test_resolve_knowledge_base_permission_datamate_is_read_only(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={"index_name": "datamate-kb", "knowledge_sources": "datamate"},
+    )
+
+    permission = ElasticSearchService.resolve_knowledge_base_permission(
+        "datamate-kb", "user-1", "tenant-1"
+    )
+
+    assert permission == "READ_ONLY"
+
+
+def test_resolve_knowledge_base_permission_without_user_tenant_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant=None,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "user_id,user_tenant,speed_mode,expected",
+    [
+        ("tenant-1", {"tenant_id": "tenant-1"}, False, "EDIT"),
+        ("user-speed", None, True, "EDIT"),
+        ("admin-user", {"user_role": "ADMIN", "tenant_id": "tenant-1"}, False, "EDIT"),
+    ],
+)
+def test_resolve_knowledge_base_permission_admin_like_roles_edit(
+    monkeypatch,
+    user_id,
+    user_tenant,
+    speed_mode,
+    expected,
+):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant=user_tenant,
+        speed_mode=speed_mode,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", user_id, "tenant-1")
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "role,expected",
+    [
+        ("ASSET_OWNER", "EDIT"),
+        ("SU", "READ_ONLY"),
+        ("DEV", "READ_ONLY"),
+        ("USER", None),
+    ],
+)
+def test_resolve_knowledge_base_permission_asset_owner_record(monkeypatch, role, expected):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "asset-kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "asset-owner",
+        },
+        user_tenant={"user_role": role, "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("asset-kb", "user-1", "tenant-1")
+        == expected
+    )
+
+
+def test_resolve_knowledge_base_permission_cross_tenant_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-2",
+        },
+        user_tenant={"user_role": "ADMIN", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "admin-user", "tenant-1")
+        is None
+    )
+
+
+def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch):
+    _patch_kb_permission_context(
+        monkeypatch,
+        record={
+            "index_name": "kb",
+            "knowledge_sources": "elasticsearch",
+            "tenant_id": "tenant-1",
+        },
+        user_tenant={"user_role": "GUEST", "tenant_id": "tenant-1"},
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "guest-user", "tenant-1")
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "record,user_group_ids,expected",
+    [
+        ({"group_ids": "1,2", "created_by": "other", "ingroup_permission": "EDIT"}, [2], "EDIT"),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "READ_ONLY"}, [1], "READ_ONLY"),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "PRIVATE"}, [1], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "UNKNOWN"}, [1], None),
+        ({"group_ids": "1", "created_by": "other", "ingroup_permission": "EDIT"}, [3], None),
+        ({"group_ids": "", "created_by": "user-1", "ingroup_permission": "READ_ONLY"}, [], "CREATOR"),
+        ({"group_ids": "9", "created_by": "user-1", "ingroup_permission": "PRIVATE"}, [], "CREATOR"),
+        ({"group_ids": None, "created_by": "other"}, [], "READ_ONLY"),
+    ],
+)
+def test_resolve_knowledge_base_permission_user_group_rules(
+    monkeypatch,
+    record,
+    user_group_ids,
+    expected,
+):
+    record = {
+        "index_name": "kb",
+        "knowledge_sources": "elasticsearch",
+        "tenant_id": "tenant-1",
+        **record,
+    }
+    _patch_kb_permission_context(
+        monkeypatch,
+        record=record,
+        user_tenant={"user_role": "USER", "tenant_id": "tenant-1"},
+        user_group_ids=user_group_ids,
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "user-1", "tenant-1")
+        == expected
+    )
+
+
+def test_resolve_knowledge_base_permission_private_dev_creator_ignores_groups(monkeypatch):
+    record = {
+        "index_name": "kb",
+        "knowledge_sources": "elasticsearch",
+        "tenant_id": "tenant-1",
+        "created_by": "dev-user",
+        "group_ids": "9",
+        "ingroup_permission": "PRIVATE",
+    }
+    _patch_kb_permission_context(
+        monkeypatch,
+        record=record,
+        user_tenant={"user_role": "DEV", "tenant_id": "tenant-1"},
+        user_group_ids=[],
+    )
+
+    assert (
+        ElasticSearchService.resolve_knowledge_base_permission("kb", "dev-user", "tenant-1")
+        == ElasticSearchService.CREATOR_PERMISSION
+    )
+
+
+@pytest.mark.parametrize("permission", ["EDIT", "CREATOR"])
+def test_require_knowledge_base_edit_permission_allows_editors(monkeypatch, permission):
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: permission),
+    )
+
+    assert (
+        ElasticSearchService.require_knowledge_base_edit_permission("kb", "user-1", "tenant-1")
+        == permission
+    )
+
+
+def test_require_knowledge_base_edit_permission_rejects_read_only(monkeypatch):
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: "READ_ONLY"),
+    )
+
+    with pytest.raises(PermissionError, match="No permission"):
+        ElasticSearchService.require_knowledge_base_edit_permission("kb", "user-1", "tenant-1")
+
+
+# ============================================================================
+# KB Read Permission Control Tests (Issue #3339)
+# ============================================================================
+
+
+@pytest.mark.parametrize("permission", ["READ_ONLY", "EDIT", "CREATOR"])
+def test_require_knowledge_base_read_permission_allows_readers(monkeypatch, permission):
+    """User with any non-None permission level can read the knowledge base."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: permission),
+    )
+
+    assert (
+        ElasticSearchService.require_knowledge_base_read_permission("kb", "user-1", "tenant-1")
+        == permission
+    )
+
+
+def test_require_knowledge_base_read_permission_rejects_no_permission(monkeypatch):
+    """User with None permission cannot read the knowledge base."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kwargs: None),
+    )
+
+    with pytest.raises(PermissionError, match="No permission"):
+        ElasticSearchService.require_knowledge_base_read_permission("kb", "user-1", "tenant-1")
+
+
+def test_filter_accessible_indices_preserves_order(monkeypatch):
+    """filter_accessible_indices returns accessible indices in original order."""
+    permissions = {
+        "kb1": "READ_ONLY",
+        "kb2": None,
+        "kb3": "EDIT",
+        "kb4": None,
+        "kb5": "CREATOR",
+    }
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        return permissions.get(index_name)
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3", "kb4", "kb5"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb3", "kb5"]
+
+
+def test_filter_accessible_indices_empty_input():
+    """Empty input returns empty output."""
+    result = ElasticSearchService.filter_accessible_indices([], "user-1", "tenant-1")
+    assert result == []
+
+
+def test_filter_accessible_indices_all_accessible(monkeypatch):
+    """When all indices are accessible, all are returned."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kw: "READ_ONLY"),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2", "kb3"]
+
+
+def test_filter_accessible_indices_none_accessible(monkeypatch):
+    """When no indices are accessible, empty list is returned."""
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(lambda **_kw: None),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb2", "kb3"], "user-1", "tenant-1"
+    )
+    assert result == []
+
+
+def test_filter_accessible_indices_handles_missing_kb_gracefully(monkeypatch):
+    """When KB record is not found (ValueError), treat as inaccessible and continue."""
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        if index_name == "kb_missing":
+            raise ValueError("KB not found")
+        return "READ_ONLY"
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb_missing", "kb2"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2"]
+
+
+def test_filter_accessible_indices_handles_unexpected_exception(monkeypatch):
+    """When permission check raises unexpected exception, treat as inaccessible and continue."""
+
+    def mock_resolve(index_name, user_id, tenant_id=None):
+        if index_name == "kb_error":
+            raise RuntimeError("DB connection failed")
+        return "READ_ONLY"
+
+    monkeypatch.setattr(
+        ElasticSearchService,
+        "resolve_knowledge_base_permission",
+        staticmethod(mock_resolve),
+    )
+
+    result = ElasticSearchService.filter_accessible_indices(
+        ["kb1", "kb_error", "kb2"], "user-1", "tenant-1"
+    )
+    assert result == ["kb1", "kb2"]
+
+
+def test_create_embedding_model_rejects_invalid_model_type():
+    from backend.services.vectordatabase_service import _create_embedding_model
+
+    with pytest.raises(ValueError, match="Invalid model_type 'chat'"):
+        _create_embedding_model({"model_name": "not-an-embedding", "model_type": "chat"})
+
+
+def test_get_embedding_model_returns_none_when_default_record_is_not_embedding(monkeypatch):
+    import backend.services.vectordatabase_service as vdb_service
+
+    monkeypatch.setattr(
+        vdb_service,
+        "get_model_records",
+        lambda *_args, **_kwargs: [{"model_id": 1, "model_type": "chat"}],
+    )
+
+    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
+
+
+def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
+    import backend.services.vectordatabase_service as vdb_service
+
+    def raise_lookup(*_args, **_kwargs):
+        raise RuntimeError("model registry unavailable")
+
+    monkeypatch.setattr(vdb_service, "get_model_records", raise_lookup)
+
+    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
 
 
 if __name__ == '__main__':

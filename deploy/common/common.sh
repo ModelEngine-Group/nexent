@@ -11,6 +11,7 @@ DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT=""
 DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
+DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT="Nexent@123"
 
 DEPLOYMENT_COMPONENTS=""
 DEPLOYMENT_PORT_POLICY=""
@@ -109,6 +110,9 @@ deployment_i18n_format() {
       password.validation) printf '密码至少 8 位，并且包含大写字母、小写字母和数字。' ;;
       env.created_from_docker) printf '✅ 已从 docker/.env 创建 deploy/env/.env' ;;
       env.created_from_example) printf '✅ 已从 deploy/env/.env.example 创建 deploy/env/.env' ;;
+      env.example_missing) printf '缺少可读的 deploy/env/.env.example，无法初始化或升级环境配置' ;;
+      env.merge_failed) printf '无法将 deploy/env/.env.example 中的新变量合并到 deploy/env/.env' ;;
+      env.merged) printf '✅ 已将 deploy/env/.env.example 中的新变量追加到 deploy/env/.env' ;;
       env.root_missing) printf '未找到 deploy/env/.env，且没有可用的 docker/.env 或 deploy/env/.env.example 模板' ;;
       validation.local_config_schema) printf '%s' '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
       validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
@@ -171,6 +175,9 @@ deployment_i18n_format() {
       password.validation) printf 'Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers.' ;;
       env.created_from_docker) printf '✅ Created deploy/env/.env from docker/.env' ;;
       env.created_from_example) printf '✅ Created deploy/env/.env from deploy/env/.env.example' ;;
+      env.example_missing) printf 'A readable deploy/env/.env.example is required to initialize or upgrade environment configuration' ;;
+      env.merge_failed) printf 'Failed to merge new variables from deploy/env/.env.example into deploy/env/.env' ;;
+      env.merged) printf '✅ Added new variables from deploy/env/.env.example to deploy/env/.env' ;;
       env.root_missing) printf 'deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available' ;;
       validation.local_config_schema) printf '%s' 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
       validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
@@ -309,6 +316,92 @@ deployment_password_validation_message() {
   deployment_i18n password.validation
 }
 
+deployment_super_admin_password() {
+  printf '%s' "${NEXENT_SUPER_ADMIN_PASSWORD:-$DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT}"
+}
+
+deployment_should_prompt_super_admin_password() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" = "true" ] &&
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
+}
+
+deployment_should_prompt_root_dir() {
+  [ "${NEXENT_DEPLOYMENT_OFFLINE:-false}" != "true" ] ||
+    [ "${NEXENT_DEPLOY_CONFIG_MODE:-}" = "tui" ]
+}
+
+deployment_require_env_example() {
+  local example_file="$1"
+  if [ ! -f "$example_file" ] || [ ! -r "$example_file" ]; then
+    deployment_error "$(deployment_i18n env.example_missing)"
+    return 1
+  fi
+}
+
+deployment_merge_env_from_example() {
+  local env_file="$1"
+  local example_file="$2"
+  local missing_assignments
+  local last_byte
+
+  deployment_require_env_example "$example_file" || return 1
+
+  if [ ! -f "$env_file" ] || [ ! -r "$env_file" ]; then
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  fi
+
+  missing_assignments="$(awk '
+    function assignment_key(line, normalized) {
+      normalized = line
+      sub(/^[[:space:]]*/, "", normalized)
+      sub(/^export[[:space:]]+/, "", normalized)
+      if (normalized !~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) {
+        return ""
+      }
+      sub(/[[:space:]]*=.*/, "", normalized)
+      return normalized
+    }
+    FILENAME == ARGV[1] {
+      key = assignment_key($0)
+      if (key != "") {
+        existing[key] = 1
+      }
+      next
+    }
+    {
+      key = assignment_key($0)
+      if (key != "" && !(key in existing)) {
+        print $0
+      }
+    }
+  ' "$env_file" "$example_file")" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+
+  if [ -z "$missing_assignments" ]; then
+    return 0
+  fi
+
+  if [ -s "$env_file" ]; then
+    last_byte="$(tail -c 1 "$env_file" 2>/dev/null || true)"
+  fi
+  {
+    if [ -s "$env_file" ]; then
+      if [ -n "$last_byte" ]; then
+        printf '\n'
+      fi
+      printf '\n'
+    fi
+    printf '# Added automatically from the current deploy/env/.env.example\n%s\n' "$missing_assignments"
+  } >> "$env_file" || {
+    deployment_error "$(deployment_i18n env.merge_failed)"
+    return 1
+  }
+  deployment_log "$(deployment_i18n env.merged)"
+}
+
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"
@@ -317,28 +410,27 @@ deployment_ensure_root_env() {
   local root_example="$env_dir/.env.example"
   local docker_env="$docker_dir/.env"
 
-  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
+  deployment_require_env_example "$root_example" || return 1
+
+  mkdir -p "$env_dir"
+
   if [ -f "$root_env" ]; then
-    return 0
+    deployment_merge_env_from_example "$root_env" "$root_example"
+    return $?
   fi
 
   if [ -f "$docker_env" ]; then
     cp "$docker_env" "$root_env"
     deployment_log "$(deployment_i18n env.created_from_docker)"
-    return 0
-  fi
-
-  if [ -f "$root_example" ]; then
+  else
     cp "$root_example" "$root_env"
     deployment_log "$(deployment_i18n env.created_from_example)"
-    return 0
   fi
 
-  deployment_error "$(deployment_i18n env.root_missing)"
-  return 1
+  deployment_merge_env_from_example "$root_env" "$root_example"
 }
 
 deployment_source_root_env() {
@@ -1666,6 +1758,7 @@ deployment_apply_image_source() {
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
     export NEXENT_MCP_DOCKER_IMAGE="nexent/nexent-mcp:latest"
+    export NEXENT_SANDBOX_IMAGE="nexent/nexent-sandbox:latest"
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
   fi
 
@@ -1673,6 +1766,7 @@ deployment_apply_image_source() {
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
+  export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
@@ -1690,7 +1784,7 @@ deployment_apply_image_source() {
   export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
   export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
   export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
-  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  export LANGFUSE_MINIO_IMAGE="${LANGFUSE_MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
   export LANGFUSE_REDIS_IMAGE="${LANGFUSE_REDIS_IMAGE:-docker.io/redis:alpine}"
   export LANGFUSE_POSTGRES_IMAGE="${LANGFUSE_POSTGRES_IMAGE:-docker.io/postgres:15-alpine}"
 
@@ -1700,6 +1794,7 @@ deployment_apply_image_source() {
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
       NEXENT_MCP_DOCKER_IMAGE \
+      NEXENT_SANDBOX_IMAGE \
       ELASTICSEARCH_IMAGE \
       POSTGRESQL_IMAGE \
       REDIS_IMAGE \
@@ -1786,6 +1881,7 @@ deployment_render_docker_env() {
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
+    printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
     printf 'ELASTICSEARCH_IMAGE="%s"\n' "$ELASTICSEARCH_IMAGE"
     printf 'POSTGRESQL_IMAGE="%s"\n' "$POSTGRESQL_IMAGE"
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
@@ -1853,6 +1949,7 @@ deployment_render_image_values() {
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_DB")" "$(deployment_image_tag "$SUPABASE_DB")"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
 }
 
 deployment_render_k8s_port_values() {
@@ -1966,6 +2063,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePort: 30436\n' "$internal_type"
   printf 'nexent-common:\n'
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
+  printf '    sandbox:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_SANDBOX_IMAGE")" "$(deployment_image_tag "$NEXENT_SANDBOX_IMAGE")" "$local_pull_policy"
 }
 
 deployment_yaml_quote() {
@@ -2057,7 +2155,7 @@ deployment_render_helm_monitoring_chart_values() {
   deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
   deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
   deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
-  deployment_render_monitoring_image_value minio docker.io/minio/minio "$minio_tag"
+  deployment_render_monitoring_image_value minio quay.io/minio/minio "$minio_tag"
   deployment_render_monitoring_image_value redis docker.io/redis "$redis_tag"
   deployment_render_monitoring_image_value postgres docker.io/postgres "$postgres_tag"
   printf '  collector:\n'

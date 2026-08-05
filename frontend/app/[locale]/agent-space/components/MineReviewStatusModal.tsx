@@ -46,12 +46,13 @@ export function MineReviewStatusModal({
   const canTakeDown = isTakeDownableRepositoryStatus(repositoryInfo.status);
   const versionLabel = formatRepositoryVersionLabel(repositoryInfo);
   const submittedAt = formatMineDate(repositoryInfo.create_time);
+  const listingContent = repositoryInfo.content?.trim() ?? "";
 
   const statusConfig = isPending
     ? {
         icon: Clock,
-        label: t("agentRepository.mine.reviewModal.pendingLabel"),
-        description: t("agentRepository.mine.reviewModal.pendingDescription"),
+        label: t("repository.listingStatus.pendingLabel"),
+        description: t("repository.listingStatus.pendingDescription"),
         tone:
           "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
@@ -59,16 +60,16 @@ export function MineReviewStatusModal({
     : isRejected
       ? {
           icon: XCircle,
-          label: t("agentRepository.mine.reviewModal.rejectedLabel"),
-          description: t("agentRepository.mine.reviewModal.rejectedDescription"),
+          label: t("repository.listingStatus.rejectedLabel"),
+          description: t("repository.listingStatus.rejectedDescription"),
           tone:
             "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
-          label: t("agentRepository.mine.reviewModal.sharedLabel"),
-          description: t("agentRepository.mine.reviewModal.sharedDescription"),
+          label: t("repository.listingStatus.listedLabel"),
+          description: t("repository.listingStatus.listedDescription"),
           tone:
             "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
@@ -78,15 +79,15 @@ export function MineReviewStatusModal({
   const modalTitle =
     mode === "reviewUpdate"
       ? t("agentRepository.mine.reviewModal.reviewUpdateTitle")
-      : t("agentRepository.mine.reviewModal.title");
+      : t("repository.listingStatus.title");
 
   const confirmCancelApply = () => {
     Modal.confirm({
-      title: t("agentRepository.mine.reviewModal.confirmCancelApplyTitle"),
-      content: t("agentRepository.mine.reviewModal.confirmCancelApplyContent", {
+      title: t("repository.listingStatus.confirmCancelApplyTitle"),
+      content: t("repository.listingStatus.confirmCancelApplyContent", {
         name: title,
       }),
-      okText: t("agentRepository.mine.reviewModal.cancelApply"),
+      okText: t("repository.listingStatus.cancelApply"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -101,11 +102,11 @@ export function MineReviewStatusModal({
 
   const confirmTakeDown = () => {
     Modal.confirm({
-      title: t("agentRepository.mine.reviewModal.confirmTakeDownTitle"),
-      content: t("agentRepository.mine.reviewModal.confirmTakeDownContent", {
+      title: t("repository.listingStatus.confirmTakeDownTitle"),
+      content: t("repository.listingStatus.confirmTakeDownContent", {
         name: title,
       }),
-      okText: t("agentRepository.mine.reviewModal.takeDown"),
+      okText: t("repository.listingStatus.takeDown"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -134,7 +135,7 @@ export function MineReviewStatusModal({
               icon={<XCircle className="size-4" aria-hidden />}
               onClick={confirmCancelApply}
             >
-              {t("agentRepository.mine.reviewModal.cancelApply")}
+              {t("repository.listingStatus.cancelApply")}
             </Button>
           ) : null}
           {canTakeDown ? (
@@ -144,7 +145,7 @@ export function MineReviewStatusModal({
               icon={<PackageX className="size-4" aria-hidden />}
               onClick={confirmTakeDown}
             >
-              {t("agentRepository.mine.reviewModal.takeDown")}
+              {t("repository.listingStatus.takeDown")}
             </Button>
           ) : null}
         </div>
@@ -174,6 +175,17 @@ export function MineReviewStatusModal({
           <p className="text-sm leading-relaxed opacity-90">
             {statusConfig.description}
           </p>
+          {listingContent ? (
+            <p className="text-sm leading-relaxed opacity-90">
+              {isPending
+                ? t("repository.listingStatus.pendingNote", {
+                    content: listingContent,
+                  })
+                : t("repository.listingStatus.reviewOpinion", {
+                    content: listingContent,
+                  })}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -186,7 +198,7 @@ export function MineReviewStatusModal({
         </div>
         {submittedAt ? (
           <div className="flex justify-between gap-4">
-            <span>{t("agentRepository.mine.reviewModal.submittedAt")}</span>
+            <span>{t("repository.listingStatus.submittedAt")}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
               {submittedAt}
             </span>

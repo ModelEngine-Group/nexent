@@ -11,6 +11,7 @@ import {
 } from "@/services/mcpToolsService";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { McpServiceStatus } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { McpServiceItem } from "@/types/mcpTools";
 
 /**
@@ -67,6 +68,7 @@ export function useMcpServiceToggle() {
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ["tools"] });
           queryClient.invalidateQueries({ queryKey: ["agents"] });
+          queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
         })
         .finally(() => {
           setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));

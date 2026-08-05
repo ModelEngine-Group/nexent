@@ -25,6 +25,8 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
+import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
+import { ApiError } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -45,6 +47,7 @@ import {
   DocumentProvider,
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
+import quotaService from "@/services/quotaService";
 
 const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
 const normalizeEmbeddingModelType = (type: string) =>
@@ -169,6 +172,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Get available embedding models for knowledge base creation
   const { models } = useModelList({ enabled: true });
+
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -229,6 +233,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
     useState<boolean>(true);
+  const [newKbQuotaBytes, setNewKbQuotaBytes] = useState<number | null>(null);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
@@ -268,22 +273,42 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   }, [models]);
 
+  const hasKnowledgeBaseDetailModelMismatch = useCallback(
+    (knowledgeBase: KnowledgeBase) => {
+      if (hasKnowledgeBaseModelMismatch(knowledgeBase)) {
+        return true;
+      }
+      if (
+        knowledgeBase.embeddingModel === "unknown" ||
+        knowledgeBase.source === "datamate"
+      ) {
+        return false;
+      }
+
+      const knowledgeBaseModel = knowledgeBase.embeddingModel.trim();
+      return !availableEmbeddingModels.some(
+        (model) => model.displayName.trim() === knowledgeBaseModel
+      );
+    },
+    [availableEmbeddingModels, hasKnowledgeBaseModelMismatch]
+  );
+
   const resolveEmbeddingModelId = useCallback(
     ({
       displayName,
-      isMultimodal,
+      modelType,
     }: {
       displayName?: string;
-      isMultimodal?: boolean;
+      modelType?: string;
     }) => {
       const normalizedDisplayName = (displayName || "").trim();
-      if (!normalizedDisplayName) return undefined;
+      const normalizedModelType = normalizeEmbeddingModelType(modelType || "");
+      if (!normalizedDisplayName || !normalizedModelType) return undefined;
 
-      const modelType = isMultimodal ? "multi_embedding" : "embedding";
       return availableEmbeddingModels.find(
         (model) =>
           model.displayName === normalizedDisplayName &&
-          model.type === modelType
+          model.type === normalizedModelType
       )?.id;
     },
     [availableEmbeddingModels]
@@ -291,15 +316,16 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Open warning modal only when neither embedding nor multi-embedding is configured.
   useEffect(() => {
-    const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
+    const singleEmbeddingModelName =
+      modelConfig?.embedding?.displayName?.trim();
     const multiEmbeddingModelName =
-      modelConfig?.multiEmbedding?.modelName?.trim();
+      modelConfig?.multiEmbedding?.displayName?.trim();
     setShowEmbeddingWarning(
       !singleEmbeddingModelName && !multiEmbeddingModelName
     );
   }, [
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
   ]);
 
   // Add event listener for selecting new knowledge base
@@ -376,9 +402,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     if (kbState.isLoading) return; // avoid running during list loading
     if (hasCleanedRef.current) return; // run once per entry
 
-    const embeddingName = modelConfig?.embedding?.modelName?.trim() || "";
+    const embeddingName = modelConfig?.embedding?.displayName?.trim() || "";
     const multiEmbeddingName =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
 
     const allowedModels = new Set<string>();
     if (embeddingName) allowedModels.add(embeddingName);
@@ -389,8 +415,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     isActive,
     kbState.isLoading,
     kbState.knowledgeBases,
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
     kbDispatch,
   ]);
 
@@ -508,8 +534,12 @@ function DataConfig({ isActive }: DataConfigProps) {
 
     if (isCreatingMode || kbState.activeKnowledgeBase) {
       const files = Array.from(e.dataTransfer.files);
-      if (files.length > 0) {
-        setUploadFiles(files);
+      const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
+      if (validFiles.length !== files.length) {
+        message.error(t("knowledgeBase.upload.fileTooLarge"));
+      }
+      if (validFiles.length > 0) {
+        setUploadFiles(validFiles);
         handleFileUpload();
       }
     } else {
@@ -720,10 +750,11 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbPreserveSourceFile(true);
     // Set default embedding model:
     // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
+    // Use displayName to match availableEmbeddingModels and KB embeddingModel.
     const configEmbeddingModel =
-      modelConfig?.embedding?.modelName?.trim() || "";
+      modelConfig?.embedding?.displayName?.trim() || "";
     const configMultiEmbeddingModel =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
     const preferredModel = [
       { modelName: configEmbeddingModel, type: "embedding" },
       { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
@@ -756,6 +787,10 @@ function DataConfig({ isActive }: DataConfigProps) {
   const handleDeleteDocument = (docId: string) => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
+    if (kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
 
     confirm({
       title: t("document.modal.deleteConfirm.title"),
@@ -775,12 +810,16 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
-  const handleFileUpload = async () => {
-    if (!uploadFiles.length) {
+  const handleFileUpload = async (selectedFiles: File[] = uploadFiles) => {
+    if (!isCreatingMode && kbState.activeKnowledgeBase?.permission === "READ_ONLY") {
+      message.error(t("errorCode.000202", "Access forbidden."));
+      return;
+    }
+    if (!selectedFiles.length) {
       message.warning(t("document.message.noFiles"));
       return;
     }
-    const filesToUpload = uploadFiles;
+    const filesToUpload = selectedFiles;
 
     if (isCreatingMode) {
       if (!newKbName || newKbName.trim() === "") {
@@ -806,11 +845,13 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const parsedSelectedModel =
           parseEmbeddingModelOptionValue(newKbEmbeddingModel);
-        const isMultimodal = parsedSelectedModel.isMultimodal;
         const selectedModelId = resolveEmbeddingModelId({
           displayName: parsedSelectedModel.displayName,
-          isMultimodal: parsedSelectedModel.isMultimodal,
+          modelType: parsedSelectedModel.type,
         });
+        if (selectedModelId === undefined) {
+          throw new Error("Selected embedding model could not be resolved");
+        }
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
@@ -818,9 +859,9 @@ function DataConfig({ isActive }: DataConfigProps) {
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
-          parsedSelectedModel.displayName,
-          isMultimodal,
-          newKbPreserveSourceFile
+          selectedModelId,
+          newKbPreserveSourceFile,
+          newKbQuotaBytes,
         );
 
         if (!newKB) {
@@ -858,8 +899,13 @@ function DataConfig({ isActive }: DataConfigProps) {
           });
       } catch (error) {
         log.error(t("knowledgeBase.error.createUpload"), error);
-        message.error(t("knowledgeBase.message.createUploadError"));
+        message.error(
+          error instanceof ApiError && error.code === 413
+            ? t("quota.uploadBlocked")
+            : t("knowledgeBase.message.createUploadError")
+        );
         setHasClickedUpload(false);
+        throw error;
       }
       return;
     }
@@ -873,7 +919,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     try {
       const activeKbModelId = resolveEmbeddingModelId({
         displayName: kbState.activeKnowledgeBase?.embeddingModel,
-        isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
+        modelType: kbState.activeKnowledgeBase?.is_multimodal
+          ? "multi_embedding"
+          : "embedding",
       });
 
       await uploadDocuments(kbId, filesToUpload, activeKbModelId);
@@ -894,7 +942,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       );
     } catch (error) {
       log.error(t("document.error.upload"), error);
-      message.error(t("document.message.uploadError"));
+      message.error(
+        error instanceof ApiError && error.code === 413
+          ? t("quota.uploadBlocked")
+          : t("document.message.uploadError")
+      );
+      throw error;
     }
   };
 
@@ -1026,7 +1079,6 @@ function DataConfig({ isActive }: DataConfigProps) {
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
-              configuredEmbeddingModels={availableEmbeddingModels}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
               onClick={handleKnowledgeBaseClick}
@@ -1093,6 +1145,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onSelectedGroupIdsChange={setNewKbGroupIds}
                 preserveSourceFile={newKbPreserveSourceFile}
                 onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                quotaLimitBytes={newKbQuotaBytes}
+                onQuotaLimitBytesChange={setNewKbQuotaBytes}
                 // Embedding model for create mode
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}
@@ -1103,7 +1157,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onFileSelect={handleFileSelect}
-                onUpload={() => handleFileUpload()}
+                onUpload={handleFileUpload}
                 isUploading={docState.isUploading}
               />
             ) : kbState.activeKnowledgeBase ? (
@@ -1114,17 +1168,19 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
-                modelMismatch={hasKnowledgeBaseModelMismatch(
+                modelMismatch={hasKnowledgeBaseDetailModelMismatch(
                   kbState.activeKnowledgeBase
                 )}
                 currentModel={
                   kbState.activeKnowledgeBase?.is_multimodal
-                    ? modelConfig?.multiEmbedding?.modelName?.trim() || ""
-                    : modelConfig?.embedding?.modelName?.trim() || ""
+                    ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
+                    : modelConfig?.embedding?.displayName?.trim() || ""
                 }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
-                  hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
+                  hasKnowledgeBaseDetailModelMismatch(
+                    kbState.activeKnowledgeBase
+                  )
                     ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
                     : undefined
                 }
@@ -1165,7 +1221,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onFileSelect={handleFileSelect}
-                onUpload={() => handleFileUpload()}
+                onUpload={handleFileUpload}
                 isUploading={docState.isUploading}
               />
             ) : (

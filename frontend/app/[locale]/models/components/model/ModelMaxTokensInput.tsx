@@ -17,6 +17,7 @@ interface ModelMaxTokensInputProps {
   value: string;
   placeholder?: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }
 
 export const isValidMaxTokens = (value: string): boolean => {
@@ -33,6 +34,7 @@ export const ModelMaxTokensInput = ({
   value,
   placeholder,
   onChange,
+  disabled = false,
 }: ModelMaxTokensInputProps) => {
   return (
     <AutoComplete
@@ -41,6 +43,7 @@ export const ModelMaxTokensInput = ({
       options={MAX_TOKEN_OPTIONS}
       placeholder={placeholder}
       onChange={onChange}
+      disabled={disabled}
       filterOption={(inputValue, option) =>
         String(option?.label ?? "")
           .toLowerCase()
@@ -48,7 +51,7 @@ export const ModelMaxTokensInput = ({
         String(option?.value ?? "").includes(inputValue)
       }
     >
-      <Input id={id} inputMode="numeric" pattern="[0-9]*" />
+      <Input id={id} inputMode="numeric" pattern="[0-9]*" disabled={disabled} />
     </AutoComplete>
   );
 };

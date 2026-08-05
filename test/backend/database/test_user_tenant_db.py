@@ -80,6 +80,7 @@ sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now import the functions to be tested
 from backend.database.user_tenant_db import (
+    get_user_email_map,
     get_user_tenant_by_user_id,
     get_all_tenant_ids,
     insert_user_tenant,
@@ -144,6 +145,33 @@ def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
     assert result["tenant_id"] == "test_tenant_id"
     assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
+
+
+def test_get_user_email_map_returns_empty_without_user_ids(mock_session):
+    """Empty user IDs avoid an unnecessary database query."""
+    session, _ = mock_session
+
+    assert get_user_email_map(["", ""]) == {}
+    session.query.assert_not_called()
+
+
+def test_get_user_email_map_returns_only_non_empty_emails(monkeypatch, mock_session):
+    """Only active user IDs with email addresses are exposed to callers."""
+    session, query = mock_session
+    query.filter.return_value.all.return_value = [
+        ("user-1", "editor@example.com"),
+        ("user-2", ""),
+        ("user-3", None),
+    ]
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    assert get_user_email_map(["user-1", "user-1", "user-2", "user-3"]) == {
+        "user-1": "editor@example.com"
+    }
+    query.filter.assert_called_once()
 
 def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
     """Test retrieval of user tenant relationship when record does not exist"""
