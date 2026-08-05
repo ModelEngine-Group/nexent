@@ -112,14 +112,14 @@
   "chatInput.unsupportedFileTypeSimple": "不支持的文件类型",
   "chatInput.dragAndDropFilesHere": "文件拖动到此处即可上传",
   "chatInput.supportedFileFormats": "支持的格式包括：图片、文档（PDF、Word、Excel、PPT、EPUB）、纯文本、CSV/TSV、Markdown、JSON、HTML、XML",
-  "chatInput.sendMessageTo": "给 {{appName}} 发送消息",
+  "chatInput.sendMessageTo": "给 {productName} 发送消息",
   "chatInput.stopRecording": "停止录音",
   "chatInput.startRecording": "开始录音",
   "chatInput.uploadFiles": "上传文件",
   "chatInput.stopGenerating": "停止生成",
   "chatInput.recording": "正在录音...",
   "chatInput.recordingError": "录音出错，请重试",
-  "chatInput.helloIm": "你好，我是{{appName}}",
+  "chatInput.helloIm": "你好，我是{productName} 智能体",
   "chatInput.introMessage": "我可以帮你写代码、读文件、查资料各种创意内容，请把你的任务交给我吧~",
   "chatInput.close": "关闭",
   "chatInput.send": "发送",
@@ -4065,5 +4065,6 @@
   "project.config.page.subtitle": "子标题",
   "project.config.page.description": "页面描述",
   "project.config.page.complete.logo": "完整logo",
-  "project.config.page.simple.log": "系统logo"
+  "project.config.page.simple.log": "系统logo",
+  "project.config.description": "{productName} 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 }

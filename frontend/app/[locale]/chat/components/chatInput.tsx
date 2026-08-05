@@ -1011,7 +1011,7 @@ export function ChatInput({
             )}
             {!agentGreeting && (
               <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-                {appConfig.appDescription || t("chatInput.introMessage")}
+                {appConfig.appDescription ? t("project.config.description") : t("chatInput.introMessage")}
               </p>
             )}
           </div>
