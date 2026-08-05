@@ -1,140 +1,203 @@
 # Memory Configuration
 
-Nexent’s intelligent memory system gives agents persistent context. With multi-level memories, agents can remember key facts across conversations, retrieve them automatically, and deliver more personalized answers.
+Nexent's memory capability preserves reusable information across multiple turns and conversations. The current memory system uses a **three-level Tenant, User, and Agent architecture**: the Tenant and User levels store long-term memories, while the Agent level stores short-term memories generated through interactions between a specific user and a specific agent.
 
-## 🎯 What the Memory System Does
+When memory is enabled, the system loads long-term memories and retrieves relevant Agent short-term memories before the agent runs. Before producing its final response, the agent also determines whether the current conversation contains new information worth saving.
 
-The memory system lets agents “remember” important information and reuse it later without you repeating yourself.
+## 🎯 How It Works
 
-### Core Benefits
+During a normal conversation, memory works as follows:
 
-- **Cross-conversation memory** – Agents keep track of important facts from earlier chats.
-- **Automatic retrieval** – Relevant memories are pulled in automatically.
-- **Personalized service** – Responses adapt to user preferences and habits.
-- **Knowledge accumulation** – Agents keep getting smarter the more you use them.
+1. Load the current tenant's Tenant long-term memories and the current user's User long-term memories.
+2. Use the user's latest question to search the short-term memories associated with the current user and agent.
+3. Add the available long-term memories and retrieved short-term memories to the agent context.
+4. Generate a response using the memories, current question, tool results, and conversation history.
+5. Before returning the final response, determine whether the conversation introduced new user preferences, task objectives, action plans, recent progress, or corrective reflections. If so, summarize them as concise Agent short-term memories.
 
-## ⚙️ System Configuration
+Memory operations are performed through built-in tools. You can inspect tool execution status to confirm the memory-loading trace. If memory retrieval fails, the system skips memory and continues the current task so that a memory service issue does not interrupt the entire conversation.
 
-### Access Memory Management
+![Memory search tool](./../assets/memory-management/memory-search-tool.png)
 
-1. Click **Memory Management** in the left navigation.
-2. Open the **System Configuration** section.
+> 💡 **Note:** Memory retrieval and writing are disabled in agent debug mode to prevent test data from affecting production memories. Use **Start Chat** to verify cross-conversation memory behavior.
+
+## ⚙️ Open Memory Configuration
+
+1. Click **Memory Configuration** in the left navigation bar.
+2. The page contains four tabs: **Base Settings**, **Tenant**, **User**, and **Agent**.
+3. The number beside each tab indicates how many memory records are currently loaded for that level.
 
 ### Base Settings
 
-| Setting | Options | Default | Description |
+Base Settings currently provides a master switch for memory capability.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| **Memory Capability** | Enabled | When enabled, normal conversations load, retrieve, and write memories. Disabling it stops agents from using memory but does not delete existing records. |
+
+Changes to the switch are saved immediately. If saving fails, the page restores the previous state and displays an error message.
+
+![Memory settings](./../assets/memory-management/memory-settings.png)
+
+## 📚 Three-Level Memory Architecture
+
+The current system uses only the following three memory levels:
+
+| Level | Visibility and Scope | Primary Source | How It Is Used |
 | --- | --- | --- | --- |
-| Memory Service Status | Enable / Disable | Enable | Controls whether the memory system runs. |
-| Agent Memory Sharing Strategy | Always Share / Ask Every Time / Never Share | Always Share | Defines if agents can share memories without user confirmation. |
+| **Tenant** | Shared within the current tenant | Manually maintained by authorized users | Supplied to agents as organization-level long-term context |
+| **User** | Visible only to the current user and available to that user's agents | Manually maintained by the current user | Supplied to agents as user-level long-term context |
+| **Agent** | Isolated to the current user and a specific agent | Automatically summarized by the agent during conversations | Relevant content is selected through vector retrieval and added to the context |
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/memory-management/mem-config.png" style="width: 80%; height: auto;" alt="Memory configuration" />
-</div>
+### Tenant Memory
 
-**Setting Tips**
+Tenant memory stores stable information that applies across the organization, such as:
 
-- **Memory service status** – Disable it if you want a completely stateless experience; enable it to unlock all memory features.
-- **Sharing strategy**
-  - *Always Share* – Agents exchange memories automatically.
-  - *Ask Every Time* – You approve each sharing request.
-  - *Never Share* – Agents stay isolated.
+- Company terminology and standardized wording
+- Common working conventions and process principles
+- Organization-level preferences or constraints
+- Facts that multiple users and agents need to reference
 
-## 📚 Memory Levels
+Agents do not write Tenant memories automatically. Only users with permission to create Tenant memories can see the **New Memory** button; these memories are typically maintained by tenant administrators.
 
-Nexent uses four storage levels so you can keep global knowledge and private facts separate.
+### User Memory
 
-### Tenant-Level
+User memory belongs only to the current user and is suitable for stable personal information that should be reused across agents, such as:
 
-- **Scope:** Entire organization, shared by all users and agents.
-- **Stores:** SOPs, compliance policies, org charts, long-term facts.
-- **Best for:** Company-wide knowledge and governance.
-- **Managed by:** Tenant administrators.
+- Preferred language, format, and writing style
+- Long-term working habits
+- Ongoing project context
+- Personal requirements that all agents should follow
 
-### Agent-Level
+User memories are created and maintained manually by the current user. They are not shared with other users in the tenant.
 
-- **Scope:** A specific agent, shared by everyone using it.
-- **Stores:** Domain knowledge, skill templates, historical summaries.
-- **Best for:** Letting an agent accumulate expertise over time.
-- **Managed by:** Tenant administrators.
+### Agent Memory
 
-### User-Level
+Agent memories are generated automatically during production conversations and are bound to both the current user and current agent. They may store:
 
-- **Scope:** A single user account.
-- **Stores:** Personal preferences, habits, favorite commands, personal info.
-- **Best for:** Tailoring the platform to a specific user.
-- **Managed by:** That user.
+- Preferences the user expresses to that agent
+- Current task objectives
+- Action plans and recent progress
+- Reflections derived from user feedback, errors, or failed results
 
-### User-Agent Level
+Agent memories for the same user-agent pair can be recalled across conversations, but they are not automatically shared across users or agents. Main agents and collaborative agents also maintain separate Agent memories.
 
-- **Scope:** A specific agent used by a specific user (most granular).
-- **Stores:** Collaboration history, personal facts, task context.
-- **Best for:** Deep personalization and long-running projects.
-- **Managed by:** That user.
+Before saving a memory, the agent must evaluate, summarize, and deduplicate it into a concise, reusable entry. Full conversations, temporary calculations, intermediate noise, unverified assumptions, duplicate content, sensitive credentials, and information the user explicitly asked to forget should not be written to memory. A single agent run can automatically save at most three Agent short-term memories.
 
-### Retrieval Priority
+> ⚠️ **Note:** The current version does not periodically promote Agent short-term memories to User long-term memories in the background.
 
-When an agent retrieves memory it follows this order (high ➝ low):
+## 🗂️ View and Filter Memories
 
-1. Tenant Level – shared facts and policies.
-2. User-Agent Level – very specific context for that pairing.
-3. User Level – general personal preferences.
-4. Agent Level – the agent’s professional knowledge.
+The Tenant, User, and Agent tabs display memory records in tables, including memory content, type, status, and creation time.
 
-## 🤖 Automated Memory Management
+All levels support:
 
-The system takes care of most work for you:
+- Searching by memory content
+- Filtering by status
+- Viewing the number of filtered results
+- Paginated browsing with 10, 20, or 50 records per page
 
-- **Smart extraction:** Detects key facts in conversations, creates memory entries automatically, and stores them at the right level—no manual input needed.
-- **Automatic context embedding:** Retrieves the most relevant memories and implicitly injects them into the conversation context so agents respond with better accuracy.
-- **Incremental updates:** Gradually refreshes or removes outdated memories to keep the store clean, timely, and reliable.
+The Agent tab also supports:
 
-## ✋ Manual Memory Operations
+- Filtering by agent, source conversation, or creation date range
+- Viewing the agent name and source conversation
+- Clicking the source conversation title to return to the conversation that generated the memory
 
-Need full control? Manage entries manually.
+![Agent memory](./../assets/memory-management/agent-memory.png)
 
-### Add a Memory
+### Memory Status
 
-1. Choose the level (tenant / agent / user / user-agent) and target agent.
-2. Click the green **+** button.
-3. Enter up to 500 characters describing the fact.
-4. Click the check mark to save.
+| Status | Description |
+| --- | --- |
+| **Active** | The memory can participate in long-term context loading or Agent short-term memory retrieval. |
+| **Archived** | The memory remains in the list but is excluded from runtime loading and retrieval. |
+| **Disabled** | The memory is temporarily unavailable. This status can be set manually or caused by an Agent memory being incompatible with the current embedding model. |
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/memory-management/add-mem.png" style="width: 80%; height: auto;" alt="Add memory" />
-</div>
+## ✍️ Create, Edit, and Delete Memories
 
-### Delete Memories
+### Create a Long-Term Memory
 
-- **Delete group:** Click the red ✕ icon to remove every entry under that agent group (confirm in the dialog).
-- **Delete single entry:** Click the red eraser icon to remove one entry.
+The page only supports manually creating Tenant or User long-term memories. Agent short-term memories are generated while agents run, so the Agent tab does not provide a **New Memory** button.
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/memory-management/delete-mem.png" style="width: 80%; height: auto;" alt="Delete memory" />
-</div>
+1. Open the Tenant or User tab.
+2. Click **New Memory** in the upper-right corner.
+3. Enter the content to retain, up to 500 characters.
+4. Click **Create Memory**.
+
+Manually created records default to the **Long-term Memory** type and **Active** status.
+
+![Add memory](./../assets/memory-management/add-memory.png)
+
+### Edit a Memory
+
+1. Click **Edit** on the right side of the target record.
+2. Modify the memory content or status.
+3. Click **Save Changes**.
+
+Edited content must still remain within the 500-character limit. The current page does not allow changing a record's memory level or type through editing.
+
+If an Agent memory is incompatible with the current embedding model, it appears as unavailable and cannot be edited, but it can still be deleted.
+
+### Delete a Memory
+
+Click **Delete** on the right side of a record, then select **Confirm Delete** in the confirmation dialog. The record will be removed from the page and excluded from subsequent memory loading and retrieval.
+
+> ⚠️ **Note:** The page does not provide a restore option. Confirm that the memory is no longer needed before deleting it.
+
+## 🔍 Memory Retrieval and Context Usage
+
+Different levels are used differently:
+
+- **Tenant / User long-term memories:** Active long-term memories are read from storage and supplied directly to the agent as persistent context, without semantic-similarity filtering.
+- **Agent short-term memories:** The latest user question is used for vector retrieval. The results are then filtered through relevance fusion, time decay, similarity deduplication, and the context budget before the most useful entries are supplied to the agent.
+
+Tenant and User memories should therefore remain concise and stable, because excessive content directly consumes model context. Agent memories can accumulate gradually through interactions; the system prioritizes content that is more relevant to the current question, more recent, and non-duplicative.
+
+## 🧩 Embedding Models and Agent Memory
+
+Generating and retrieving Agent short-term memories depends on the tenant's currently configured embedding model. When opening **Memory Configuration** or **Start Chat**, the system displays a prompt if the tenant has not configured an embedding model.
+
+Without an available embedding model:
+
+- Tenant and User long-term memories remain stored and are managed as long-term context.
+- Agent short-term memories cannot be generated or retrieved normally.
+
+After switching embedding models, Agent memories indexed with the previous model may be incompatible with the current index. The page automatically synchronizes their status when loading records:
+
+| Embedding Compatibility | Synchronized Status |
+| --- | --- |
+| Incompatible | Disabled |
+| Compatible | Active |
+
+<img src="./../assets/memory-management/embedding-missing-warn.png" alt="Missing embedding model warning" style="zoom:50%;" />
+
+![Disabled memory](./../assets/memory-management/disabled-memory.png)
+
+If you switch back to an embedding model compatible with the original records, disabled Agent memories become **Active** again.
 
 ## 💡 Usage Tips
 
-### Memory Content Guidelines
+### Write High-Quality Memories
 
-1. **Keep entries atomic:** Each memory should contain *one* clear fact.
-   - ✅ Good: “The user prefers dark mode.”
-   - ❌ Not good: “The user prefers dark mode, works nights, and loves coffee.”
-2. **Maintain freshness:** Review and remove outdated entries regularly.
-3. **Protect privacy:** Store sensitive info at the user or user-agent level instead of tenant level.
+Each memory should express one clear fact that can be reused over time.
 
-### Best Practices
+✅ `The user prefers technical proposals to present the conclusion before the risks.`
 
-- Pick the memory level that matches the sharing needs.
-- Let automation handle routine facts; manually add critical knowledge.
-- Review the memory list periodically to keep everything relevant.
-- Keep personal or sensitive data scoped tightly to the right user.
+❌ Not recommended: `The user likes concise answers, often works at night, manages several projects, and wants everything presented in tables.`
+
+Follow these guidelines:
+
+1. **Keep memories atomic:** Each entry should describe only one preference, fact, objective, or piece of progress.
+2. **Avoid temporary information:** Do not save one-off calculations or short-lived irrelevant details.
+3. **Maintain memories regularly:** Archive or delete outdated content.
+4. **Control the number of long-term memories:** Tenant and User memories are supplied as persistent context, so avoid verbose, duplicate, or contradictory entries.
+5. **Protect privacy:** Do not store passwords, access tokens, keys, or unnecessary sensitive personal information.
 
 ## 🚀 Next Steps
 
-With memory configured you can:
+After configuring memory, you can:
 
-1. Experience the new continuity in **[Start Chat](../start-chat)**.
-2. Manage all agents in **[Agent Repository](../resource-repository/agent-repository)**.
-3. Build more agents inside **[Agent Development](../agent-development)**.
+1. Start multiple conversations with the same agent in **[Start Chat](../start-chat)** to verify cross-conversation memory.
+2. Check the embedding model in **[Model Configuration](./model-configuration.md)**.
+3. Continue creating and adjusting agents in **[Agent Configuration](./agent-configuration.md)**.
 
-Need help? Check the **[FAQ](../../quick-start/faq.md)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues, refer to the **[FAQ](../../quick-start/faq.md)** or visit [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) for support.
