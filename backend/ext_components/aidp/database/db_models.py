@@ -1,7 +1,7 @@
 """ORM models for the AIDP knowledge base permission subsystem (v7.1).
 
 These models back the ``aidp_kb_permission_t`` table introduced in
-``deploy/sql/migrations/v2.4.0_0723_add_aidp_kb_permission.sql``. The schema
+``deploy/sql/migrations/v2.4_merged_migrations.sql``. The schema
 is intentionally separate from the SDK ``aidp_client`` so the SDK can stay a
 pure HTTP adapter while permission decisions live in the backend.
 

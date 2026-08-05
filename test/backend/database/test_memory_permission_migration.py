@@ -7,7 +7,7 @@ def test_memory_permission_migration_renames_and_restricts_create():
         / "deploy"
         / "sql"
         / "migrations"
-        / "v2.4.0_0725_rename_mem_agent_permission_to_mem_tenant.sql"
+        / "v2.4_merged_migrations.sql"
     ).read_text(encoding="utf-8")
 
     assert "SET permission_type = 'MEM.TENANT'" in migration
