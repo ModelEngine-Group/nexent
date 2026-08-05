@@ -311,6 +311,11 @@ const StreamingMarkdownSegment = memo(({ content }: { content: string }) => (
           {children}
         </code>
       ),
+      // AIDP image markers belong to the persisted final answer. During
+      // reasoning they are internal tool metadata; rendering them here would
+      // issue an unauthenticated request to the placeholder path and cause
+      // broken-image layout jumps while tokens stream in.
+      img: () => null,
     }}
   >
     {content}
@@ -332,7 +337,7 @@ const StreamingReasoning = () => {
     return (
       <MarkdownTextPrimitive
         className="aui-md prose prose-sm max-w-none dark:prose-invert"
-        components={defaultComponents}
+        components={{ ...defaultComponents, img: () => null }}
         preprocess={normalizeReasoningCodeBlocks}
       />
     );

@@ -575,7 +575,7 @@ export default function AgentTasksPage() {
       render: (_, task) => (
         <div className="min-w-0">
           <Link
-            href={`/${params.locale}/chat?conversation_id=${task.conversation_id}`}
+            href={`/${params.locale}/newchat?conversation_id=${task.conversation_id}`}
             className="block w-fit max-w-full truncate font-medium !text-gray-900 transition-colors hover:!text-blue-600 hover:underline"
             title={t("agentAutomation.page.openConversation")}
           >
@@ -791,7 +791,9 @@ export default function AgentTasksPage() {
           <Button
             type="primary"
             icon={<MessageCirclePlus size={16} />}
-            onClick={() => router.push(`/${params.locale}/chat`)}
+            onClick={() =>
+              router.push(`/${params.locale}/newchat?entry=automation`)
+            }
           >
             {t("agentAutomation.page.createInChat")}
           </Button>

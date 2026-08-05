@@ -447,3 +447,113 @@ class TestArgumentValidation:
             kb_id="kb-1", tenant_id="tenant-a", ingroup_permission="EDIT",
         )
         assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# list_kds_name_to_id_map (lines 108-126)
+# ---------------------------------------------------------------------------
+
+
+class TestListKdsNameToIdMap:
+    def test_returns_mapping_for_active_rows_for_tenant(self, aidp_permission_db, fake_session):
+        """Rows with non-empty kds_name are returned as {kds_name: kb_id}."""
+        from collections import namedtuple
+        Row = namedtuple("Row", ["kds_name", "kb_id"])
+        fake_session.execute_result.all.return_value = [
+            Row(kds_name="KB Alpha", kb_id="kb-1"),
+            Row(kds_name="KB Beta", kb_id="kb-2"),
+        ]
+
+        result = aidp_permission_db.list_kds_name_to_id_map("tenant-a")
+
+        assert result == {"KB Alpha": "kb-1", "KB Beta": "kb-2"}
+        assert len(fake_session.executed) == 1
+
+    def test_skips_rows_with_empty_or_null_kds_name(self, aidp_permission_db, fake_session):
+        """Rows with empty string or None kds_name are excluded from the map."""
+        from collections import namedtuple
+        Row = namedtuple("Row", ["kds_name", "kb_id"])
+        fake_session.execute_result.all.return_value = [
+            Row(kds_name="KB Alpha", kb_id="kb-1"),
+            Row(kds_name="", kb_id="kb-2"),
+            Row(kds_name=None, kb_id="kb-3"),
+        ]
+
+        result = aidp_permission_db.list_kds_name_to_id_map("tenant-a")
+
+        assert result == {"KB Alpha": "kb-1"}
+
+    def test_rejects_empty_tenant_id(self, aidp_permission_db, fake_session):
+        """Empty tenant_id raises ValueError without issuing SQL."""
+        with pytest.raises(ValueError, match="tenant_id is required"):
+            aidp_permission_db.list_kds_name_to_id_map("")
+        assert fake_session.executed == []
+
+    def test_no_active_rows_returns_empty(self, aidp_permission_db, fake_session):
+        """When no active rows match, returns empty dict."""
+        fake_session.execute_result.all.return_value = []
+
+        result = aidp_permission_db.list_kds_name_to_id_map("tenant-a")
+
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# kds_name parameter in create/update permission (lines 173-269)
+# ---------------------------------------------------------------------------
+
+
+class TestKdsNameWriteHelpers:
+    def test_create_permission_persists_kds_name(self, aidp_permission_db, fake_session):
+        """Pass kds_name explicitly and verify it appears in the inserted record."""
+        aidp_permission_db.create_permission(
+            kb_id="kb-1",
+            kds_name="My Knowledge Base",
+            owner_user_id="user-1",
+            tenant_id="tenant-a",
+        )
+
+        record = fake_session.added[0]
+        assert record.kds_name == "My Knowledge Base"
+
+    def test_create_permission_defaults_kds_name_to_empty_when_not_given(self, aidp_permission_db, fake_session):
+        """When kds_name is not passed (None), payload uses empty string."""
+        aidp_permission_db.create_permission(
+            kb_id="kb-1",
+            owner_user_id="user-1",
+            tenant_id="tenant-a",
+        )
+
+        record = fake_session.added[0]
+        assert record.kds_name == ""
+
+    def test_update_permission_applies_kds_name(self, aidp_permission_db, fake_session):
+        """Pass kds_name and verify update statement includes it."""
+        fake_session.execute_result.rowcount = 1
+
+        aidp_permission_db.update_permission(
+            kb_id="kb-1",
+            tenant_id="tenant-a",
+            kds_name="New Name",
+        )
+
+        assert fake_session.executed
+        statement, _params = fake_session.executed[0]
+        values = statement.compile().params
+        assert values["kds_name"] == "New Name"
+
+    def test_update_permission_no_op_when_kds_name_none(self, aidp_permission_db, fake_session):
+        """kds_name=None does not add kds_name to update values; other fields can still update."""
+        fake_session.execute_result.rowcount = 1
+
+        aidp_permission_db.update_permission(
+            kb_id="kb-1",
+            tenant_id="tenant-a",
+            ingroup_permission="EDIT",
+        )
+
+        assert fake_session.executed
+        statement, _params = fake_session.executed[0]
+        values = statement.compile().params
+        assert "kds_name" not in values
+        assert values["ingroup_permission"] == "EDIT"

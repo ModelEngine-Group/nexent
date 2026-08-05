@@ -273,22 +273,42 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   }, [models]);
 
+  const hasKnowledgeBaseDetailModelMismatch = useCallback(
+    (knowledgeBase: KnowledgeBase) => {
+      if (hasKnowledgeBaseModelMismatch(knowledgeBase)) {
+        return true;
+      }
+      if (
+        knowledgeBase.embeddingModel === "unknown" ||
+        knowledgeBase.source === "datamate"
+      ) {
+        return false;
+      }
+
+      const knowledgeBaseModel = knowledgeBase.embeddingModel.trim();
+      return !availableEmbeddingModels.some(
+        (model) => model.displayName.trim() === knowledgeBaseModel
+      );
+    },
+    [availableEmbeddingModels, hasKnowledgeBaseModelMismatch]
+  );
+
   const resolveEmbeddingModelId = useCallback(
     ({
       displayName,
-      isMultimodal,
+      modelType,
     }: {
       displayName?: string;
-      isMultimodal?: boolean;
+      modelType?: string;
     }) => {
       const normalizedDisplayName = (displayName || "").trim();
-      if (!normalizedDisplayName) return undefined;
+      const normalizedModelType = normalizeEmbeddingModelType(modelType || "");
+      if (!normalizedDisplayName || !normalizedModelType) return undefined;
 
-      const modelType = isMultimodal ? "multi_embedding" : "embedding";
       return availableEmbeddingModels.find(
         (model) =>
           model.displayName === normalizedDisplayName &&
-          model.type === modelType
+          model.type === normalizedModelType
       )?.id;
     },
     [availableEmbeddingModels]
@@ -296,15 +316,16 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Open warning modal only when neither embedding nor multi-embedding is configured.
   useEffect(() => {
-    const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
+    const singleEmbeddingModelName =
+      modelConfig?.embedding?.displayName?.trim();
     const multiEmbeddingModelName =
-      modelConfig?.multiEmbedding?.modelName?.trim();
+      modelConfig?.multiEmbedding?.displayName?.trim();
     setShowEmbeddingWarning(
       !singleEmbeddingModelName && !multiEmbeddingModelName
     );
   }, [
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
   ]);
 
   // Add event listener for selecting new knowledge base
@@ -381,9 +402,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     if (kbState.isLoading) return; // avoid running during list loading
     if (hasCleanedRef.current) return; // run once per entry
 
-    const embeddingName = modelConfig?.embedding?.modelName?.trim() || "";
+    const embeddingName = modelConfig?.embedding?.displayName?.trim() || "";
     const multiEmbeddingName =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
 
     const allowedModels = new Set<string>();
     if (embeddingName) allowedModels.add(embeddingName);
@@ -394,8 +415,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     isActive,
     kbState.isLoading,
     kbState.knowledgeBases,
-    modelConfig?.embedding?.modelName,
-    modelConfig?.multiEmbedding?.modelName,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
     kbDispatch,
   ]);
 
@@ -729,10 +750,11 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbPreserveSourceFile(true);
     // Set default embedding model:
     // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
+    // Use displayName to match availableEmbeddingModels and KB embeddingModel.
     const configEmbeddingModel =
-      modelConfig?.embedding?.modelName?.trim() || "";
+      modelConfig?.embedding?.displayName?.trim() || "";
     const configMultiEmbeddingModel =
-      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
     const preferredModel = [
       { modelName: configEmbeddingModel, type: "embedding" },
       { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
@@ -823,11 +845,13 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const parsedSelectedModel =
           parseEmbeddingModelOptionValue(newKbEmbeddingModel);
-        const isMultimodal = parsedSelectedModel.isMultimodal;
         const selectedModelId = resolveEmbeddingModelId({
           displayName: parsedSelectedModel.displayName,
-          isMultimodal: parsedSelectedModel.isMultimodal,
+          modelType: parsedSelectedModel.type,
         });
+        if (selectedModelId === undefined) {
+          throw new Error("Selected embedding model could not be resolved");
+        }
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
@@ -835,8 +859,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
-          parsedSelectedModel.displayName,
-          isMultimodal,
+          selectedModelId,
           newKbPreserveSourceFile,
           newKbQuotaBytes,
         );
@@ -896,7 +919,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     try {
       const activeKbModelId = resolveEmbeddingModelId({
         displayName: kbState.activeKnowledgeBase?.embeddingModel,
-        isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
+        modelType: kbState.activeKnowledgeBase?.is_multimodal
+          ? "multi_embedding"
+          : "embedding",
       });
 
       await uploadDocuments(kbId, filesToUpload, activeKbModelId);
@@ -1054,7 +1079,6 @@ function DataConfig({ isActive }: DataConfigProps) {
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
-              configuredEmbeddingModels={availableEmbeddingModels}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
               onClick={handleKnowledgeBaseClick}
@@ -1144,17 +1168,19 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
-                modelMismatch={hasKnowledgeBaseModelMismatch(
+                modelMismatch={hasKnowledgeBaseDetailModelMismatch(
                   kbState.activeKnowledgeBase
                 )}
                 currentModel={
                   kbState.activeKnowledgeBase?.is_multimodal
-                    ? modelConfig?.multiEmbedding?.modelName?.trim() || ""
-                    : modelConfig?.embedding?.modelName?.trim() || ""
+                    ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
+                    : modelConfig?.embedding?.displayName?.trim() || ""
                 }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
-                  hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
+                  hasKnowledgeBaseDetailModelMismatch(
+                    kbState.activeKnowledgeBase
+                  )
                     ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
                     : undefined
                 }

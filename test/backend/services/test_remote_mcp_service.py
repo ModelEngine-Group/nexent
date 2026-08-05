@@ -118,6 +118,7 @@ from backend.consts.model import MCPConfigRequest
 from backend.services.remote_mcp_service import (
     mcp_server_health,
     _is_container_record,
+    mcp_ports_are_virtual,
     check_container_port_conflict_records,
     check_runtime_host_port_available,
     check_container_port_conflict,

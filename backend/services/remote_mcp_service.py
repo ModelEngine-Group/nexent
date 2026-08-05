@@ -4,9 +4,10 @@ import tempfile
 import asyncio
 import socket
 import random
+from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE, IS_DEPLOYED_BY_KUBERNETES
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -229,6 +230,18 @@ def _is_container_record(record: dict | None) -> bool:
 # ---------------------------------------------------------------------------
 # Port Management Functions
 # ---------------------------------------------------------------------------
+
+def mcp_ports_are_virtual() -> bool:
+    """Return True when MCP container ports are not published to the host.
+
+    When nexent itself runs inside a container (Docker or Kubernetes), MCP
+    containers communicate over the internal container network and do not
+    occupy host ports. Each container has its own network namespace, so
+    multiple MCPs can share the same internal port and port conflicts cannot
+    occur.
+    """
+    return IS_DEPLOYED_BY_KUBERNETES or Path("/.dockerenv").exists()
+
 
 def check_container_port_conflict_records(port: int) -> bool:
     """Check if there are enabled MCP records that already use the given container port."""
@@ -551,7 +564,10 @@ async def add_container_mcp_service(
     if check_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
         raise McpNameConflictError("Enabled MCP name already exists")
 
-    if not check_container_port_conflict(port=port):
+    # In container mode (Docker/K8s) ports are never published to the host and
+    # each container is isolated, so multiple MCPs can share the same internal
+    # port without conflict.
+    if not mcp_ports_are_virtual() and not check_container_port_conflict(port=port):
         raise McpPortConflictError(f"Port {port} is already in use")
 
     servers = mcp_config.mcpServers

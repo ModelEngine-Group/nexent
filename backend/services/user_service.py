@@ -12,6 +12,8 @@ from database.group_db import remove_user_from_all_groups, query_groups_by_users
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
+from consts.const import IS_SPEED_MODE
+from consts.exceptions import ForbiddenError, NotFoundException
 from utils.auth_utils import get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
@@ -59,11 +61,33 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
             "page_size": page_size,
             "total_pages": (result["total"] + page_size - 1) // page_size
         }
+    return {
+        "users": users,
+        "total": result["total"]
+    }
+
+
+def get_users_for_requester(
+    tenant_id: str,
+    page: Optional[int] = 1,
+    page_size: Optional[int] = 20,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    *,
+    requester_tenant_id: str,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """List users after enforcing role and tenant boundaries."""
+    role = (requester_role or "").upper()
+    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
+    if role == "SU" or is_speed_admin:
+        pass
+    elif role == "ADMIN" and tenant_id == requester_tenant_id:
+        pass
     else:
-        return {
-            "users": users,
-            "total": result["total"]
-        }
+        raise ForbiddenError("Not authorized to list users for this tenant")
+
+    return get_users(tenant_id, page, page_size, sort_by, sort_order)
 
 
 async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str) -> Dict[str, Any]:
@@ -112,6 +136,34 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
     except Exception as exc:
         logger.error(f"Failed to update user {user_id}: {str(exc)}")
         raise
+
+
+async def update_user_for_requester(
+    user_id: str,
+    update_data: Dict[str, Any],
+    *,
+    updated_by: str,
+    requester_tenant_id: str,
+    requester_role: str,
+) -> Dict[str, Any]:
+    """Update a user after enforcing management role and tenant boundaries."""
+    target_user = get_user_tenant_by_user_id(user_id)
+    if not target_user:
+        raise NotFoundException(f"User {user_id} not found")
+
+    role = (requester_role or "").upper()
+    target_role = str(target_user.get("user_role") or "").upper()
+    target_tenant_id = target_user.get("tenant_id")
+    is_speed_admin = IS_SPEED_MODE and role == "SPEED"
+
+    if role == "SU" or is_speed_admin:
+        pass
+    elif role == "ADMIN" and target_tenant_id == requester_tenant_id and target_role != "SU":
+        pass
+    else:
+        raise ForbiddenError("Not authorized to update this user")
+
+    return await update_user(user_id, update_data, updated_by)
 
 
 async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:

@@ -161,6 +161,7 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
+  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string; version_no: number | null; version_name?: string }>;
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
@@ -172,6 +173,7 @@ export interface Agent {
   /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
   prompts_hidden?: boolean;
   current_version_no?: number;
+  version_name?: string;
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];

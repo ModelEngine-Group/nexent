@@ -353,6 +353,18 @@ export default defineConfig({
                   {
                     text: "Skill仓库",
                     link: "/zh/user-guide/resource-repository/skill-repository",
+                    items: [
+                      {
+                        text: "官方技能",
+                        link: "/zh/user-guide/resource-repository/official-skills",
+                        items: [
+                          {
+                            text: "create-docx",
+                            link: "/zh/user-guide/resource-repository/create-docx",
+                          },
+                        ],
+                      },
+                    ],
                   },
                 ],
               },

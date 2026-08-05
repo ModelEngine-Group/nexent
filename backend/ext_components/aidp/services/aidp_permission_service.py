@@ -378,6 +378,37 @@ def get_allowed_kds_list(user_id: str, tenant_id: str) -> list[str]:
     return allowed
 
 
+def get_kds_name_to_id_map(user_id: str, tenant_id: str) -> dict[str, str]:
+    """Build the kds_name-to-kds_id lookup for the LLM tool layer.
+
+    Mirrors :func:`get_allowed_kds_list` exactly: same DB query, same user
+    group and role resolution, same ``_resolve_permission`` + REQUIRE_READ
+    gate. The only difference is the return shape — a ``{kds_name: kb_id}``
+    dict instead of a flat list — and rows with an empty ``kds_name`` are
+    skipped (the tool cannot resolve a name that does not exist).
+    """
+    rows = aidp_permission_db.list_permissions_by_tenant(
+        tenant_id=tenant_id, page=1, page_size=200
+    )
+    user_groups = _get_user_groups(user_id, tenant_id)
+    role = _get_user_role(user_id, tenant_id)
+    is_management = role in CAN_EDIT_ALL_USER_ROLES
+
+    kds_map: dict[str, str] = {}
+    for row in rows:
+        kb_id = row["kb_id"]
+        kds_name = row.get("kds_name")
+        if not kds_name:
+            continue
+        if is_management or row.get("owner_user_id") == user_id:
+            kds_map[kds_name] = kb_id
+            continue
+        decision = _resolve_permission(row, user_id, tenant_id, user_groups)
+        if _decision_meets(decision, REQUIRE_READ):
+            kds_map[kds_name] = kb_id
+    return kds_map
+
+
 def require_permission(
     kb_id: str,
     user_id: str,
@@ -430,6 +461,7 @@ __all__ = [
     "get_accessible_kbs",
     "count_accessible_kbs",
     "get_allowed_kds_list",
+    "get_kds_name_to_id_map",
     "require_permission",
 ]
 

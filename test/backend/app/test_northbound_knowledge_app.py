@@ -90,6 +90,18 @@ class _ElasticSearchServiceStub:
     def delete_documents(index_name, path_or_url, vdb_core):
         return {"message": "Documents deleted successfully", "deleted": 1}
 
+    @staticmethod
+    def create_knowledge_base(*args, **kwargs):
+        return {"index_name": kwargs["knowledge_name"]}
+
+    @staticmethod
+    async def full_delete_knowledge_base(*args, **kwargs):
+        return {"status": "success"}
+
+    @staticmethod
+    async def list_files(*args, **kwargs):
+        return {"files": []}
+
 
 vectordb_service_module.ElasticSearchService = _ElasticSearchServiceStub
 vectordb_service_module.KnowledgeBaseNeedsModelConfigError = (
@@ -511,3 +523,221 @@ class TestHybridSearch:
             )
         assert response.status_code == 500
         assert "Error executing hybrid search" in response.json()["detail"]
+
+
+class TestIndexManagement:
+    def test_create_index_forwards_optional_settings(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.create_knowledge_base",
+            return_value={"index_name": "kb1"},
+        ) as mock_create:
+            response = client.post(
+                "/nb/v1/knowledge/indices/kb1",
+                params={"embedding_dim": 1024},
+                json={
+                    "embedding_model_id": 7,
+                    "ingroup_permission": True,
+                    "group_ids": ["group-1"],
+                    "preserve_source_file": False,
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"index_name": "kb1"}
+        assert mock_create.call_args.kwargs["embedding_model_id"] == 7
+        assert mock_create.call_args.kwargs["preserve_source_file"] is False
+
+    @pytest.mark.parametrize("embedding_model_id", [None, True, "7"])
+    def test_create_index_rejects_invalid_embedding_model_id(
+        self, client, mock_northbound_context, embedding_model_id
+    ):
+        mock_northbound_context.return_value = ASSET_CTX
+
+        response = client.post(
+            "/nb/v1/knowledge/indices/kb1",
+            json={"embedding_model_id": embedding_model_id},
+        )
+
+        assert response.status_code == 400
+        assert "embedding_model_id must be an integer" in response.json()["detail"]
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (LimitExceededError("limit"), 429),
+            (UnauthorizedError("bad token"), 401),
+            (RuntimeError("down"), 500),
+        ],
+    )
+    def test_create_index_maps_service_errors(
+        self, client, mock_northbound_context, exception, status_code
+    ):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.create_knowledge_base",
+            side_effect=exception,
+        ):
+            response = client.post(
+                "/nb/v1/knowledge/indices/kb1", json={"embedding_model_id": 7}
+            )
+
+        assert response.status_code == status_code
+
+    def test_delete_index_success(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            return_value={"status": "success"},
+        ) as mock_delete:
+            response = client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "success"}
+        mock_delete.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        ("exception", "status_code"),
+        [
+            (LimitExceededError("limit"), 429),
+            (UnauthorizedError("bad token"), 401),
+            (RuntimeError("down"), 500),
+        ],
+    )
+    def test_delete_index_maps_service_errors(
+        self, client, mock_northbound_context, exception, status_code
+    ):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            side_effect=exception,
+        ):
+            response = client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert response.status_code == status_code
+
+    def test_get_index_files_returns_service_files(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.list_files",
+            new_callable=AsyncMock,
+            return_value={"files": [{"name": "guide.pdf"}]},
+        ):
+            response = client.get("/nb/v1/knowledge/indices/kb1/files")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "success", "files": [{"name": "guide.pdf"}]}
+
+
+class TestUploadAndDownload:
+    def test_upload_success_returns_created_payload(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.upload_files_impl.return_value = (
+            [], ["docs/guide.txt"], ["guide.txt"]
+        )
+        utils_fm_module.trigger_data_process.return_value = {"status": "queued"}
+
+        response = client.post(
+            "/nb/v1/knowledge/file/upload",
+            data={"index_name": "kb1"},
+            files=[("file", ("guide.txt", b"hello", "text/plain"))],
+        )
+
+        assert response.status_code == 201
+        assert response.json()["process_tasks"] == {"status": "queued"}
+
+    def test_upload_processing_error_returns_detail(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.upload_files_impl.return_value = (
+            [], ["docs/guide.txt"], ["guide.txt"]
+        )
+        utils_fm_module.trigger_data_process.return_value = {
+            "status": "error", "message": "processor unavailable"
+        }
+
+        response = client.post(
+            "/nb/v1/knowledge/file/upload",
+            data={"index_name": "kb1"},
+            files=[("file", ("guide.txt", b"hello", "text/plain"))],
+        )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "processor unavailable"
+
+    def test_download_redirect_and_default_url(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.get_file_url_impl.return_value = {"url": "https://files.example/guide"}
+
+        redirect_response = client.get(
+            "/nb/v1/knowledge/file/download/docs/guide.txt",
+            params={"download": "redirect"},
+            follow_redirects=False,
+        )
+        info_response = client.get("/nb/v1/knowledge/file/download/docs/guide.txt")
+
+        assert redirect_response.status_code == 307
+        assert redirect_response.headers["location"] == "https://files.example/guide"
+        assert info_response.status_code == 200
+        assert info_response.json()["url"] == "https://files.example/guide"
+
+    def test_download_base64_encodes_file_content(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        stream = MagicMock()
+        stream.read.return_value = b"hello"
+        file_mgmt_module.get_file_stream_impl.return_value = (stream, "text/plain")
+
+        response = client.get(
+            "/nb/v1/knowledge/file/download/docs/guide.txt", params={"download": "base64"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["base64"] == "aGVsbG8="
+        assert response.json()["content_type"] == "text/plain"
+
+    def test_download_stream_sets_filename_headers(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.get_file_stream_impl.return_value = ([b"hello"], "text/plain")
+
+        response = client.get(
+            "/nb/v1/knowledge/file/download/docs/guide.txt", params={"download": "stream"}
+        )
+
+        assert response.status_code == 200
+        assert response.content == b"hello"
+        assert response.headers["content-disposition"] == 'attachment; filename="file.txt"'
+
+
+class TestDeleteDocumentsCoverage:
+    def test_full_delete_includes_redis_cleanup_summary(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        redis_mock = MagicMock()
+        redis_mock.delete_document_records.return_value = {
+            "total_deleted": 3,
+            "celery_tasks_deleted": 1,
+            "cache_keys_deleted": 2,
+            "errors": ["stale key"],
+        }
+        redis_service_module.get_redis_service.return_value = redis_mock
+
+        response = client.delete(
+            "/nb/v1/knowledge/indices/kb1/documents",
+            params={"path_or_url": "minio://guide", "scope": "full"},
+        )
+
+        assert response.status_code == 200
+        assert "Cleaned up 3 Redis records" in response.json()["message"]
+        assert response.json()["redis_warnings"] == ["stale key"]
+
+    def test_source_only_delete_skips_redis_cleanup(self, client, mock_northbound_context):
+        mock_northbound_context.return_value = ASSET_CTX
+        redis_service_module.get_redis_service.reset_mock()
+
+        response = client.delete(
+            "/nb/v1/knowledge/indices/kb1/documents",
+            params={"path_or_url": "minio://guide", "scope": "source_only"},
+        )
+
+        assert response.status_code == 200
+        redis_service_module.get_redis_service.assert_not_called()

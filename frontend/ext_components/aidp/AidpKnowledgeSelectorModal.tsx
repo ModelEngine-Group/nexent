@@ -88,15 +88,16 @@ export default function AidpKnowledgeSelectorModal({
         nameMap.current.delete(id);
       }
     }
-    // Only reset tempSelectedIds if it hasn't been modified by user
-    // (i.e., if it's still equal to the initial value from when modal opened)
-    if (
-      tempSelectedIds.length === 0 &&
-      selectedDatasetIds.length === 0 &&
-      JSON.stringify(initialSelectedIdsRef.current) !== JSON.stringify(selectedDatasetIds)
-    ) {
-      // Only reset if user hasn't made changes
-    }
+    // Apply removals made by the parent's permission filter while preserving
+    // any selections the user has made in this open modal.
+    const previousParentIds = new Set(initialSelectedIdsRef.current.map(String));
+    const nextParentIds = new Set(selectedDatasetIds.map(String));
+    setTempSelectedIds((currentIds) => {
+      return currentIds.filter(
+        (id) => !previousParentIds.has(String(id)) || nextParentIds.has(String(id))
+      );
+    });
+    initialSelectedIdsRef.current = selectedDatasetIds;
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------

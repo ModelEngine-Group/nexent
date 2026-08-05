@@ -119,7 +119,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -130,7 +130,7 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                invite_code=None,
+                invite_code="INVITE123",
                 auto_login=True
             )
 
@@ -144,7 +144,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None,
+                    "invite_code": "INVITE123",
                     "auto_login": False
                 }
             )
@@ -156,9 +156,25 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                invite_code=None,
+                invite_code="INVITE123",
                 auto_login=False
             )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"email": "test@example.com", "password": "password123"},
+            {"email": "test@example.com", "password": "password123", "invite_code": None},
+            {"email": "test@example.com", "password": "password123", "invite_code": ""},
+            {"email": "test@example.com", "password": "password123", "invite_code": "   "},
+        ],
+    )
+    def test_signup_requires_non_empty_invite_code(self, payload):
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            response = client.post("/user/signup", json=payload)
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_signup.assert_not_called()
 
     def test_signup_success_admin_user(self):
         """Test successful admin user registration"""
@@ -220,7 +236,7 @@ class TestUserSignup:
                 json={
                     "email": "admin@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -273,7 +289,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -291,7 +307,7 @@ class TestUserSignup:
                 json={
                     "email": "existing@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -309,7 +325,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "weakpass",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -327,7 +343,7 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "invite_code": None
+                    "invite_code": "INVITE123"
                 }
             )
 
@@ -946,7 +962,7 @@ class TestIntegration:
             json={
                 "email": "test@example.com",
                 "password": "password123",
-                "invite_code": None
+                "invite_code": "INVITE123"
             }
         )
         assert signup_response.status_code == HTTPStatus.OK
