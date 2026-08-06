@@ -106,12 +106,17 @@ assert_common_package_files() {
 create_fake_docker
 
 WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
+echo "$WORKFLOW_CONTENT" | grep -A2 '^  push:$' | grep -q -- "- 'v\*'" || fail "offline package workflow should run automatically for version tags"
+! echo "$WORKFLOW_CONTENT" | grep -A4 '^      version:$' | grep -q "default: 'latest'" || fail "offline package workflow version input should defer to the selected ref"
+echo "$WORKFLOW_CONTENT" | grep -q 'elif \[ "$REF_TYPE" = "tag" \]; then' || fail "offline package workflow should resolve the package version from a tag"
+echo "$WORKFLOW_CONTENT" | grep -q 'VERSION="$REF_NAME"' || fail "offline package workflow should use the tag name as the package version"
+echo "$WORKFLOW_CONTENT" | grep -q "IMAGE_SOURCE=\"\${{ inputs.image_source || 'general' }}\"" || fail "tag builds should default to the general image source"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
 echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
 echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
-echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'package/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
+echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'packages/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
 echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
 ! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
 echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"

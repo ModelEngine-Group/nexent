@@ -1,12 +1,14 @@
 name: Build Offline Deployment Package
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Image version tag, e.g. v2.2.0 or latest'
+        description: 'Image version tag; leave blank to use the selected Git tag or branch'
         required: false
-        default: 'latest'
       image_source:
         description: 'Image source'
         required: false
@@ -71,13 +73,17 @@ jobs:
           fi
 
           SOURCE_SUFFIX=""
-          if [ "${{ inputs.include_source }}" = "true" ]; then
+          INCLUDE_SOURCE="${{ inputs.include_source || false }}"
+          IMAGE_SOURCE="${{ inputs.image_source || 'general' }}"
+          if [ "$INCLUDE_SOURCE" = "true" ]; then
             SOURCE_SUFFIX="-with-source"
           fi
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "platform=$PLATFORM" >> "$GITHUB_OUTPUT"
+          echo "include-source=$INCLUDE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "image-source=$IMAGE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Set deployment components
         id: set-components
@@ -95,8 +101,8 @@ jobs:
             --version "${{ steps.set-vars.outputs.version }}" \
             --platform "${{ steps.set-vars.outputs.platform }}" \
             --output-dir ./offline-output \
-            --include-source "${{ inputs.include_source }}" \
-            --image-source "${{ inputs.image_source }}" \
+            --include-source "${{ steps.set-vars.outputs.include-source }}" \
+            --image-source "${{ steps.set-vars.outputs.image-source }}" \
             --components "${{ steps.set-components.outputs.components }}" \
             --target all \
             --package-name "${{ steps.set-vars.outputs.package-name }}" \
@@ -148,7 +154,7 @@ jobs:
           echo "OBS object: packages/${{ steps.set-vars.outputs.package-name }}.zip"
           echo "Note: the GitHub artifact zip contains the offline package contents directly."
           echo "Components: ${{ steps.set-components.outputs.components }}"
-          echo "Image source: ${{ inputs.image_source }}"
+          echo "Image source: ${{ steps.set-vars.outputs.image-source }}"
           echo "Ref Type: ${{ github.ref_type }}"
           echo "Ref Name: ${{ github.ref_name }}"
           echo "========================================"
