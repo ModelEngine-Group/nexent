@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import copy
 import json
 import logging
@@ -851,6 +851,29 @@ async def create_agent_config(
         output_type=ParallelExecutorTool.output_type,
         params={},
         source="local",
+    ))
+
+    # Append OutputCardTool as an always-available system-managed tool for A2UI card output.
+    tool_list.append(ToolConfig(
+        class_name="OutputCardTool",
+        name="output_card",
+        description=(
+            "Output an interactive A2UI card or form to the user. "
+            "Supports info cards, feedback forms, confirmation dialogs, "
+            "custom forms, and rating components. Use this when you need to "
+            "display structured information or request user input."
+        ),
+        inputs=json.dumps({
+            "card_type": {"type": "string", "description": "Type of card: info/feedback/confirmation/form/rating"},
+            "title": {"type": "string", "description": "Card title text"},
+            "message": {"type": "string", "description": "Card body message"},
+            "options": {"type": "array", "description": "Option strings for feedback/confirmation cards"},
+            "fields": {"type": "array", "description": "Form field definitions for custom form type"},
+            "allow_custom_input": {"type": "boolean", "description": "Allow custom text input"},
+        }, ensure_ascii=False),
+        output_type="object",
+        params={},
+        source="builtin",
     ))
 
     if (

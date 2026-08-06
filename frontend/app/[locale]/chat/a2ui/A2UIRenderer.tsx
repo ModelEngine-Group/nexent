@@ -12,11 +12,12 @@ import {
   Form,
   Space,
   Tag,
+  Rate,
   message,
   ConfigProvider,
 } from "antd";
 import {
-  TextFieldOutlined,
+  FontSizeOutlined,
   FormOutlined,
   CheckSquareOutlined,
   PushpinOutlined,
@@ -46,7 +47,7 @@ const iconMap: Record<string, React.ReactNode> = {
   pushpin: <PushpinOutlined />,
   form: <FormOutlined />,
   checkbox: <CheckSquareOutlined />,
-  textfield: <TextFieldOutlined />,
+  textfield: <FontSizeOutlined />,
 };
 
 const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
@@ -163,21 +164,42 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     }
 
     case "Text": {
-      if (component.variant === "title") {
-        return <Title level={4}>{component.text}</Title>;
+      const textContent = component.text || "";
+      const isHtml = /<[a-z][\s\S]*>/i.test(textContent);
+
+      if (isHtml) {
+        if (component.variant === "h3" || component.variant === "title") {
+          return <h4 style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+        }
+        if (component.variant === "subtitle") {
+          return <h5 style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+        }
+        if (component.variant === "paragraph") {
+          return <p style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+        }
+        return <div dangerouslySetInnerHTML={{ __html: textContent }} />;
+      }
+
+      if (component.variant === "h3" || component.variant === "title") {
+        return <Title level={4}>{textContent}</Title>;
+      }
+      if (component.variant === "subtitle") {
+        return <Title level={5}>{textContent}</Title>;
       }
       if (component.variant === "paragraph") {
-        return <Paragraph>{component.text}</Paragraph>;
+        return <Paragraph>{textContent}</Paragraph>;
       }
       if (component.variant === "secondary") {
-        return <Text type="secondary">{component.text}</Text>;
+        return <Text type="secondary">{textContent}</Text>;
       }
-      return <Text>{component.text}</Text>;
+      return <Text>{textContent}</Text>;
     }
 
     case "Button": {
       const variant = component.variant || "primary";
-      const isFormSubmit = component.action?.startsWith("form:submit");
+      const actionName = component.action?.event?.name || component.action;
+      const actionPayload = component.action?.event?.payload;
+      const isFormSubmit = typeof actionName === "string" && actionName.startsWith("form:submit");
       return (
         <Button
           type={variant === "primary" ? "primary" : variant === "dashed" ? "dashed" : "default"}
@@ -186,8 +208,8 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           onClick={() => {
             if (isFormSubmit && component.dataBinding) {
               handleFormSubmit(component.dataBinding);
-            } else if (component.action) {
-              handleAction(component.action, formData);
+            } else if (actionName) {
+              handleAction(actionName, actionPayload || formData);
             }
           }}
           style={{ marginRight: 8, marginBottom: 8 }}
@@ -199,34 +221,42 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
 
     case "TextField": {
       const binding = component.dataBinding || component.id;
-      const placeholder = component.placeholder || "";
+      const label = (component.props?.label as string) || component.label || "";
+      const placeholder = (component.props?.placeholder as string) || component.placeholder || "";
+      const required = (component.props?.required as boolean) ?? component.required ?? false;
       const defaultValue =
         (dataModel?.[binding] as string) || component.value || "";
       return (
-        <Input
-          placeholder={placeholder}
-          defaultValue={defaultValue}
-          required={component.required}
-          onChange={(e) => handleDataChange(binding, e.target.value)}
-          style={{ marginBottom: 8 }}
-        />
+        <div style={{ marginBottom: 8 }}>
+          {label && <label style={{ display: "block", marginBottom: 4, fontSize: 14 }}>{label}{required && <span style={{ color: "red" }}> *</span>}</label>}
+          <Input
+            placeholder={placeholder}
+            defaultValue={defaultValue}
+            required={required}
+            onChange={(e) => handleDataChange(binding, e.target.value)}
+          />
+        </div>
       );
     }
 
     case "TextArea": {
       const binding = component.dataBinding || component.id;
-      const placeholder = component.placeholder || "";
+      const label = (component.props?.label as string) || component.label || "";
+      const placeholder = (component.props?.placeholder as string) || component.placeholder || "";
+      const required = (component.props?.required as boolean) ?? component.required ?? false;
       const defaultValue =
         (dataModel?.[binding] as string) || component.value || "";
       return (
-        <TextArea
-          placeholder={placeholder}
-          defaultValue={defaultValue}
-          required={component.required}
-          onChange={(e) => handleDataChange(binding, e.target.value)}
-          autoSize={{ minRows: 2, maxRows: 6 }}
-          style={{ marginBottom: 8 }}
-        />
+        <div style={{ marginBottom: 8 }}>
+          {label && <label style={{ display: "block", marginBottom: 4, fontSize: 14 }}>{label}{required && <span style={{ color: "red" }}> *</span>}</label>}
+          <TextArea
+            placeholder={placeholder}
+            defaultValue={defaultValue}
+            required={required}
+            onChange={(e) => handleDataChange(binding, e.target.value)}
+            autoSize={{ minRows: 2, maxRows: 6 }}
+          />
+        </div>
       );
     }
 
@@ -249,29 +279,39 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     case "Form": {
       const interactionId = component.dataBinding || component.id;
       const title = component.text || component.label || "Form";
+      const hasSubmitButton = component.children?.some(
+        (child: any) =>
+          child?.component === "Button" &&
+          (child?.action?.event?.name?.startsWith("submit") ||
+            child?.text?.toLowerCase().includes("submit"))
+      );
       return (
         <Form
           layout="vertical"
           onFinish={() => handleFormSubmit(interactionId)}
           style={{ marginBottom: 12 }}
         >
-          <Form.Item>
-            <Title level={5} style={{ marginBottom: 16 }}>
-              {title}
-            </Title>
-          </Form.Item>
+          {title && (
+            <Form.Item>
+              <Title level={5} style={{ marginBottom: 16 }}>
+                {title}
+              </Title>
+            </Form.Item>
+          )}
           {renderChildren(component)}
-          <Form.Item>
-            <Space>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={submitting}
-              >
-                Submit
-              </Button>
-            </Space>
-          </Form.Item>
+          {!hasSubmitButton && (
+            <Form.Item>
+              <Space>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={submitting}
+                >
+                  Submit
+                </Button>
+              </Space>
+            </Form.Item>
+          )}
         </Form>
       );
     }
@@ -280,6 +320,19 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
       const iconName = component.text || component.id;
       const icon = iconMap[iconName] || <PushpinOutlined />;
       return <span style={{ fontSize: 16 }}>{icon}</span>;
+    }
+
+    case "Rating": {
+      const binding = component.dataBinding || "rating.value";
+      const maxValue = (component.props?.maxValue as number) || 5;
+      return (
+        <div style={{ marginBottom: 8 }}>
+          <Rate
+            count={maxValue}
+            onChange={(value) => handleDataChange(binding, value)}
+          />
+        </div>
+      );
     }
 
     default:

@@ -456,6 +456,9 @@ class NexentAgent:
                 create_proposal=metadata.get("create_proposal"),
                 observer=self.observer,
             )
+        elif class_name == "OutputCardTool":
+            from nexent.core.tools.a2ui_card_tool import OutputCardTool
+            return OutputCardTool(observer=self.observer)
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

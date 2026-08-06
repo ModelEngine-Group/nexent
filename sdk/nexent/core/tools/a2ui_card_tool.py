@@ -141,7 +141,7 @@ class OutputCardTool(Tool):
                 "error": "Observer not initialized. Cannot send card.",
             }
 
-        builder = A2UIBuilder(surface_id=f"card_{len(card_type)}")
+        builder = A2UIBuilder(surface_id=f"card_{card_type}_{id(self)}")
 
         try:
             # Create surface
@@ -225,13 +225,13 @@ class OutputCardTool(Tool):
             builder.add_text_area(
                 label="Additional comments (optional)",
                 placeholder="Enter your feedback here...",
-                binding="/feedback/comment",
+                data_binding="/feedback/comment",
             )
 
         builder.add_button(
             text="Submit Feedback",
             action_name="submit_feedback",
-            payload={"data": "$dataModel/feedback"},
+            action_payload={"data": "$dataModel/feedback"},
             variant="primary",
         )
 
@@ -258,23 +258,53 @@ class OutputCardTool(Tool):
         """Build a custom form card."""
         builder.add_text(text=title or "Form", variant="h3")
 
-        form_fields = []
+        form_components = []
         for field in fields:
             field_type = field.get("type", "textfield")
-            field_def = {
-                "name": field.get("name", ""),
-                "label": field.get("label", ""),
-                "type": field_type,
-                "placeholder": field.get("placeholder", ""),
-                "required": field.get("required", False),
-            }
-            if field_type == "select":
-                field_def["options"] = field.get("options", [])
-            form_fields.append(field_def)
+            field_name = field.get("name", "")
+            field_label = field.get("label", "")
+            field_placeholder = field.get("placeholder", "")
+            field_required = field.get("required", False)
+            field_binding = field.get("binding", f"dataModel/{field_name}")
+
+            if field_type == "textarea":
+                component = builder.add_text_area(
+                    label=field_label,
+                    placeholder=field_placeholder,
+                    data_binding=field_binding,
+                )
+            elif field_type == "select":
+                # Create a text field that renders as a select on frontend
+                component = builder.add_text_field(
+                    label=field_label,
+                    placeholder=field_placeholder,
+                    data_binding=field_binding,
+                    required=field_required,
+                )
+                # Store options in props for frontend rendering
+                component.props["options"] = field.get("options", [])
+            elif field_type == "checkbox":
+                # Use text field as checkbox placeholder
+                component = builder.add_text_field(
+                    label=field_label,
+                    placeholder=field_placeholder,
+                    data_binding=field_binding,
+                    required=field_required,
+                )
+                component.props["checkbox"] = True
+            else:  # textfield or default
+                component = builder.add_text_field(
+                    label=field_label,
+                    placeholder=field_placeholder,
+                    data_binding=field_binding,
+                    required=field_required,
+                )
+            form_components.append(component)
 
         builder.add_form(
-            fields=form_fields,
+            fields=form_components,
             submit_action="submit_form",
+            submit_payload={"form_data": "$dataModel"},
         )
 
     def _build_rating_card(
@@ -294,6 +324,6 @@ class OutputCardTool(Tool):
         builder.add_button(
             text="Submit Rating",
             action_name="submit_rating",
-            payload={"rating": "$dataModel/rating"},
+            action_payload={"rating": "$dataModel/rating"},
             variant="primary",
         )

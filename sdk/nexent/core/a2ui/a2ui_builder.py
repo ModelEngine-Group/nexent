@@ -330,14 +330,39 @@ class A2UIBuilder:
     def build_update_components(self) -> dict:
         """Build the payload for an ``A2UI_COMPONENTS`` message.
 
+        Components are returned as a nested tree: each component's
+        ``children`` field contains full child component dicts (resolved
+        recursively from ID references).  The ``components`` array contains
+        only root-level components.
+
         If the surface has not been created yet it will be created
         automatically with default settings.
         """
         if not self._created:
             self.create_surface()
+
+        def resolve_component(comp_id: str, visited: set[str] | None = None) -> dict:
+            """Resolve a component ID to a full dict with nested children."""
+            if visited is None:
+                visited = set()
+            if comp_id in visited:
+                return {"id": comp_id, "component": "Text", "text": "(circular)"}
+            visited = visited | {comp_id}
+            comp = self._components.get(comp_id)
+            if comp is None:
+                return {"id": comp_id, "component": "Text", "text": "(missing)"}
+            result = comp.to_dict()
+            # Resolve children IDs to full component dicts
+            if comp.children:
+                result["children"] = [
+                    resolve_component(cid, visited) for cid in comp.children
+                ]
+            return result
+
+        root_components = [resolve_component(rid) for rid in self._root_ids]
         return {
             "surfaceId": self._sid,
-            "components": [c.to_dict() for c in self._components.values()],
+            "components": root_components,
             "rootIds": self._root_ids,
             "dataModel": self._data_model,
         }

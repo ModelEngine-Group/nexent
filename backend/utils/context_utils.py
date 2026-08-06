@@ -378,6 +378,62 @@ def _build_available_resources_header_text(
     return content
 
 
+def _build_a2ui_card_guide_text(language: str = "zh") -> str:
+    """Build the A2UI card usage guide for the system prompt.
+
+    Instructs the agent on when and how to use the output_card tool
+    to generate interactive cards and forms for the user.
+    """
+    if language == "zh":
+        lines = ["### 交互式卡片输出 (output_card 工具)"]
+        lines.append("当需要向用户展示结构化信息或请求用户反馈时，请使用 output_card 工具生成交互式卡片：")
+        lines.append("")
+        lines.append("卡片类型：")
+        lines.append("- info: 信息卡片，展示标题和消息内容")
+        lines.append("- feedback: 反馈表单卡片，包含问题和选项，用户可选择或填写")
+        lines.append("- confirmation: 确认对话框，提供是/否或自定义选项按钮")
+        lines.append("- form: 自定义表单卡片，支持文本框、下拉选择、复选框等字段")
+        lines.append("- rating: 评分组件，用户可以对服务进行评分")
+        lines.append("")
+        lines.append("使用场景：")
+        lines.append("- 需要用户确认某个操作或决策时")
+        lines.append("- 需要收集用户反馈或评价时")
+        lines.append("- 需要展示结构化信息（如摘要、列表）时")
+        lines.append("- 需要用户填写表单或提供输入时")
+        lines.append("")
+        lines.append("示例：")
+        lines.append('- 信息卡片: output_card(card_type="info", title="任务完成", message="您的请求已处理成功")')
+        lines.append('- 反馈卡片: output_card(card_type="feedback", title="请提供反馈", message="您对本次服务满意吗？", options=["非常满意", "满意", "不满意"])')
+        lines.append('- 确认卡片: output_card(card_type="confirmation", title="确认操作", message="确定要删除此项目吗？", options=["确认", "取消"])')
+        lines.append('- 表单卡片: output_card(card_type="form", title="用户信息", fields=[{"name": "name", "label": "姓名", "type": "textfield"}, {"name": "email", "label": "邮箱", "type": "textfield"}])')
+        lines.append('- 评分卡片: output_card(card_type="rating", title="服务评分", message="请为本次服务打分")')
+    else:
+        lines = ["### Interactive Card Output (output_card tool)"]
+        lines.append("When you need to display structured information or request user feedback, use the output_card tool to generate interactive cards:")
+        lines.append("")
+        lines.append("Card Types:")
+        lines.append("- info: Information card with title and message content")
+        lines.append("- feedback: Feedback form card with question and options for user selection")
+        lines.append("- confirmation: Confirmation dialog with yes/no or custom option buttons")
+        lines.append("- form: Custom form card supporting text fields, dropdowns, checkboxes, etc.")
+        lines.append("- rating: Rating component for user to rate the service")
+        lines.append("")
+        lines.append("Use Cases:")
+        lines.append("- When you need the user to confirm an action or decision")
+        lines.append("- When you need to collect user feedback or ratings")
+        lines.append("- When you need to display structured information (summary, list)")
+        lines.append("- When you need the user to fill out a form or provide input")
+        lines.append("")
+        lines.append("Examples:")
+        lines.append('- Info card: output_card(card_type="info", title="Task Complete", message="Your request has been processed successfully")')
+        lines.append('- Feedback card: output_card(card_type="feedback", title="Provide Feedback", message="How satisfied are you with this service?", options=["Very Satisfied", "Satisfied", "Dissatisfied"])')
+        lines.append('- Confirmation card: output_card(card_type="confirmation", title="Confirm Action", message="Are you sure you want to delete this item?", options=["Confirm", "Cancel"])')
+        lines.append('- Form card: output_card(card_type="form", title="User Information", fields=[{"name": "name", "label": "Name", "type": "textfield"}, {"name": "email", "label": "Email", "type": "textfield"}])')
+        lines.append('- Rating card: output_card(card_type="rating", title="Rate Service", message="Please rate your experience")')
+
+    return "\n".join(lines)
+
+
 def build_context_inputs(
     duty: Optional[str] = None,
     constraint: Optional[str] = None,
@@ -493,6 +549,11 @@ def build_context_inputs(
                     "is_manager": is_manager, "authority": "agent",
                 },
             ))
+
+    # Add A2UI card usage guide if output_card tool is available
+    if include_tools and tools and "output_card" in tools:
+        a2ui_guide = _build_a2ui_card_guide_text(language)
+        add_system("a2ui_card_guide", a2ui_guide, 48, "platform")
 
     if include_knowledge_base and knowledge_base_summary:
         guidance = (
