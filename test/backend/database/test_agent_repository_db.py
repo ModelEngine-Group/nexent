@@ -63,6 +63,7 @@ class _AgentRepositoryModel:
     version_name = MagicMock(name="version_name")
     agent_info_json = MagicMock(name="agent_info_json")
     status = MagicMock(name="status")
+    content = MagicMock(name="content")
     delete_flag = MagicMock(name="delete_flag")
     create_time = MagicMock(name="create_time")
 
@@ -109,14 +110,12 @@ from backend.database.agent_repository_db import (  # noqa: E402
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
     get_agent_repository_by_id,
-    get_agent_repository_by_id_and_publisher,
     increment_agent_repository_downloads,
     insert_agent_repository_record,
     list_agent_repository_by_agent_ids,
     list_agent_repository_by_publisher,
     list_agent_repository_summaries,
     reset_agent_repository_status,
-    soft_delete_agent_repository_by_id,
     sum_agent_repository_downloads_by_agent_ids,
     update_agent_repository_by_id,
     update_agent_repository_status_by_id,
@@ -175,6 +174,7 @@ class MockSummaryRow:
             "version_name": "v1",
             "icon": "icon",
             "downloads": 0,
+            "content": None,
         }
         defaults.update(kwargs)
         for key, value in defaults.items():
@@ -190,6 +190,7 @@ class MockAgentIdRow:
             "version_no": 1,
             "version_name": "v1",
             "create_time": datetime(2024, 1, 1),
+            "content": None,
         }
         defaults.update(kwargs)
         for key, value in defaults.items():
@@ -327,15 +328,15 @@ def test_insert_agent_repository_record_preserves_explicit_status(monkeypatch, m
 
 def test_get_agent_repository_by_id_found(monkeypatch, mock_session):
     session, query = mock_session
-    record = MockAgentRepository(agent_repository_id=5)
+    record = MockAgentRepository(agent_repository_id=3, publisher_tenant_id="tenant-1")
     query.filter.return_value.first.return_value = record
     _patch_session(monkeypatch, session)
     monkeypatch.setattr(repo_db, "as_dict", lambda obj: obj.__dict__)
 
-    result = get_agent_repository_by_id(5)
+    result = get_agent_repository_by_id(3, "tenant-1")
 
-    assert result["agent_repository_id"] == 5
-    assert result["name"] == "test-agent"
+    assert result["agent_repository_id"] == 3
+    assert result["publisher_tenant_id"] == "tenant-1"
 
 
 def test_get_agent_repository_by_id_not_found(monkeypatch, mock_session):
@@ -343,33 +344,7 @@ def test_get_agent_repository_by_id_not_found(monkeypatch, mock_session):
     query.filter.return_value.first.return_value = None
     _patch_session(monkeypatch, session)
 
-    assert get_agent_repository_by_id(999) is None
-
-
-# ---------------------------------------------------------------------------
-# get_agent_repository_by_id_and_publisher
-# ---------------------------------------------------------------------------
-
-
-def test_get_agent_repository_by_id_and_publisher_found(monkeypatch, mock_session):
-    session, query = mock_session
-    record = MockAgentRepository(agent_repository_id=3, publisher_tenant_id="tenant-1")
-    query.filter.return_value.first.return_value = record
-    _patch_session(monkeypatch, session)
-    monkeypatch.setattr(repo_db, "as_dict", lambda obj: obj.__dict__)
-
-    result = get_agent_repository_by_id_and_publisher(3, "tenant-1")
-
-    assert result["agent_repository_id"] == 3
-    assert result["publisher_tenant_id"] == "tenant-1"
-
-
-def test_get_agent_repository_by_id_and_publisher_not_found(monkeypatch, mock_session):
-    session, query = mock_session
-    query.filter.return_value.first.return_value = None
-    _patch_session(monkeypatch, session)
-
-    assert get_agent_repository_by_id_and_publisher(3, "tenant-1") is None
+    assert get_agent_repository_by_id(3, "tenant-1") is None
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +522,7 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "version_name",
         "icon",
         "downloads",
+        "content",
     }
 
 
@@ -705,24 +681,6 @@ def test_reset_agent_repository_status(monkeypatch, mock_session):
     session.execute.assert_called_once()
 
 
-def test_soft_delete_agent_repository_by_id(monkeypatch, mock_session):
-    session, _ = mock_session
-    execute_result = MagicMock()
-    execute_result.rowcount = 1
-    session.execute.return_value = execute_result
-    _patch_session(monkeypatch, session)
-    _patch_update(monkeypatch)
-
-    result = soft_delete_agent_repository_by_id(
-        repository_id=1,
-        publisher_tenant_id="tenant-1",
-        user_id="user-1",
-    )
-
-    assert result == 1
-    session.execute.assert_called_once()
-
-
 # ---------------------------------------------------------------------------
 # list_agent_repository_by_publisher
 # ---------------------------------------------------------------------------
@@ -790,6 +748,26 @@ def test_list_agent_repository_by_agent_ids_success(monkeypatch, mock_session):
     assert result[0]["version_no"] == 1
     assert result[0]["version_name"] == "v1"
     assert result[0]["create_time"] == row.create_time
+    assert result[0]["content"] is None
+
+
+def test_update_agent_repository_status_by_id_persists_content(monkeypatch, mock_session):
+    session, _ = mock_session
+    execute_result = MagicMock()
+    execute_result.rowcount = 1
+    session.execute.return_value = execute_result
+    _patch_session(monkeypatch, session)
+    _patch_update(monkeypatch)
+
+    result = update_agent_repository_status_by_id(
+        repository_id=1,
+        status="rejected",
+        user_id="user-1",
+        content="Needs more documentation",
+    )
+
+    assert result == 1
+    session.execute.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

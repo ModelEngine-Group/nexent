@@ -6,6 +6,7 @@ export interface User {
   id: string;
   username: string;
   role: string;
+  group_names?: string[];
   email?: string;
   tenant_id?: string;
   created_at?: string;

@@ -190,20 +190,6 @@ COMMENT ON COLUMN "model_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "model_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
-
-INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status")
-SELECT '', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable'
-WHERE NOT EXISTS (
-  SELECT 1 FROM "nexent"."model_record_t"
-  WHERE "model_name" = 'volcano_tts' AND "model_type" = 'tts'
-);
-INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status")
-SELECT '', 'volcano_stt', 'OpenAI-API-Compatible', 'stt', '', '', 0, 0, 'volcano_stt', 'unavailable'
-WHERE NOT EXISTS (
-  SELECT 1 FROM "nexent"."model_record_t"
-  WHERE "model_name" = 'volcano_stt' AND "model_type" = 'stt'
-);
-
 CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "knowledge_id" SERIAL,
   "index_name" varchar(100) COLLATE "pg_catalog"."default",
@@ -297,6 +283,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    context_policy JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -443,4 +430,3 @@ EXECUTE FUNCTION update_ag_tool_instance_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_ag_tool_instance_update_time_trigger ON nexent.ag_tool_instance_t IS 'Trigger to call update_ag_tool_instance_update_time function before each update on ag_tool_instance_t table';
-

@@ -569,7 +569,42 @@ class TestTokenPonyModelProvider:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["_error"] == "connection_failed"
+        assert result[0]["_error"] == "server_error"
+
+    @pytest.mark.asyncio
+    async def test_get_models_401_returns_authentication_failed(self, mocker: MockFixture):
+        """401 from provider surfaces the authentication_failed error code."""
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=MagicMock(status_code=401),
+        )
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "https://api.tokenpony.cn/v1/models"
+        )
+
+        provider = TokenPonyModelProvider()
+        provider_config = {
+            "model_type": "llm",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["_error"] == "authentication_failed"
 
     @pytest.mark.asyncio
     async def test_get_models_connect_error(self, mocker: MockFixture):

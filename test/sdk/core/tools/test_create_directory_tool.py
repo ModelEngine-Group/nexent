@@ -148,10 +148,7 @@ class TestCreateDirectoryTool:
         assert result_data["already_existed"] is False
         assert "created successfully" in result_data["message"]
 
-        # Verify observer messages
-        create_directory_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Creating directory..."
-        )
+        # Verify CARD observer message
         create_directory_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "folder-plus", "text": f"Creating directory {directory_path}"}], ensure_ascii=False)
@@ -175,7 +172,7 @@ class TestCreateDirectoryTool:
         assert result_data["already_existed"] is True
         assert "verified" in result_data["message"]
 
-        # Verify observer messages include existing directory message
+        # Verify existing directory observer message
         create_directory_tool.observer.add_message.assert_any_call(
             "", ProcessType.OTHER, f"Directory already exists: {directory_path}"
         )
@@ -285,16 +282,10 @@ class TestCreateDirectoryTool:
         create_directory_tool.observer.lang = "zh"
 
         directory_path = "test_dir"
-        result = create_directory_tool.forward(directory_path)
-
-        # Verify Chinese running prompt
-        create_directory_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在创建文件夹..."
-        )
+        os.makedirs(os.path.join(temp_workspace, directory_path))
+        create_directory_tool.forward(directory_path)
 
         # Verify Chinese existing directory message
-        # Call again to trigger existing directory message
-        create_directory_tool.forward("test_dir")
         create_directory_tool.observer.add_message.assert_any_call(
             "", ProcessType.OTHER, f"目录已存在: test_dir"
         )

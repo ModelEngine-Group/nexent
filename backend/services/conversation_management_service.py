@@ -10,6 +10,7 @@ from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_E
 from consts.model import AgentRequest, MessageRequest, MessageUnit
 from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
+    CHAT_MODE_VALUES,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -18,17 +19,21 @@ from database.conversation_db import (
     delete_conversation,
     get_conversation,
     get_conversation_history,
+    get_historical_context,
     get_conversation_list,
-    get_latest_assistant_message,
+    get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
-    get_last_unit_for_message,
+    get_latest_user_message_id,
+    get_last_unit_for_message,  # noqa: F401 - service boundary re-export
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    save_history_summary,
     update_conversation_agent_id,
+    update_conversation_chat_mode,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -36,10 +41,8 @@ from database.conversation_db import (
     update_message_unit_content,
     update_message_unit_status,
 )
-from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
-from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -103,9 +106,11 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
-                      unit_type: str, unit_content: str,
+                      unit_type: str, unit_content: Any,
                       user_id: Optional[str] = None,
-                      unit_status: str = 'completed') -> int:
+                      unit_status: str = 'completed',
+                      tool_call_id: Optional[str] = None,
+                      invocation_id: Optional[str] = None) -> int:
     """
     Insert exactly one ConversationMessageUnit row.
 
@@ -117,6 +122,11 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content: Complete content of the unit
         user_id: Identifier of the user creating the unit
         unit_status: Lifecycle status (streaming / completed)
+        tool_call_id: Unique ID of the originating tool invocation. None for
+            units that are not tied to a specific tool call.
+        invocation_id: Identifies which sub-agent invocation produced this unit.
+            Used by the frontend history adapter to route deep-thinking /
+            reasoning chunks into the correct nested sub-agent card.
 
     Returns:
         int: Newly created unit_id
@@ -129,7 +139,46 @@ def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
         unit_content=unit_content,
         user_id=user_id,
         unit_status=unit_status,
+        tool_call_id=tool_call_id,
+        invocation_id=invocation_id,
     )
+
+
+def persist_history_summary_candidate(
+    conversation_id: int, candidate: Any, user_id: str, tenant_id: str,
+) -> int:
+    """Backend persistence boundary injected into the SDK context runtime."""
+    def field(name: str, default: Any = None) -> Any:
+        return candidate.get(name, default) if isinstance(candidate, dict) \
+            else getattr(candidate, name, default)
+
+    return save_history_summary(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        summary=field("summary"),
+        covered_through_message_id=field("covered_through_message_id"),
+        previous_summary_unit_id=field("previous_summary_unit_id"),
+        trigger=field("trigger"),
+    )
+
+
+def load_historical_context(
+    conversation_id: int, current_user_message_id: int,
+    user_id: str, tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Load only the authorized checkpoint and completed turns needed by SDK."""
+    return get_historical_context(
+        conversation_id=conversation_id,
+        current_user_message_id=current_user_message_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
+def get_current_run_user_message_id(conversation_id: int, user_id: str) -> Optional[int]:
+    """Resolve the persisted boundary for the run that was just saved."""
+    return get_latest_user_message_id(conversation_id, user_id)
 
 
 def update_message_status(message_id: int, status: str, user_id: str) -> None:
@@ -291,7 +340,12 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     return success
 
 
-def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = None) -> Dict[str, Any]:
+def create_new_conversation(
+    title: str,
+    user_id: str,
+    agent_id: Optional[int] = None,
+    chat_mode: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Create a new conversation
 
@@ -299,12 +353,18 @@ def create_new_conversation(title: str, user_id: str, agent_id: Optional[int] = 
         title: Conversation title
         user_id: User ID
         agent_id: Agent used by the latest run in this conversation
+        chat_mode: Initial UI chat mode
 
     Returns:
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(title, user_id, agent_id=agent_id)
+        conversation_data = create_conversation(
+            title,
+            user_id,
+            agent_id=agent_id,
+            chat_mode=chat_mode,
+        )
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -326,6 +386,19 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         raise Exception(str(e))
 
 
+def get_conversation_service(
+    conversation_id: int,
+    user_id: str,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a conversation only within the requesting user and tenant scope."""
+    return get_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
 def update_conversation_agent_id_service(conversation_id: int, agent_id: int, user_id: str) -> bool:
     """
     Update the latest agent associated with a conversation.
@@ -337,6 +410,40 @@ def update_conversation_agent_id_service(conversation_id: int, agent_id: int, us
         return True
     except Exception as e:
         logging.error(f"Failed to update conversation agent: {str(e)}")
+        raise Exception(str(e))
+
+
+def update_conversation_chat_mode_service(
+    conversation_id: int,
+    chat_mode: str,
+    user_id: str,
+) -> bool:
+    """
+    Persist the UI chat mode (planning / execution) for a conversation.
+
+    The frontend calls this whenever the user toggles the mode so that
+    switching back to the conversation later can restore the same toggle
+    without re-inferring it from stored message units.
+    """
+    if chat_mode not in CHAT_MODE_VALUES:
+        raise ValueError(
+            f"Invalid chat_mode '{chat_mode}'. Allowed values: {sorted(CHAT_MODE_VALUES)}"
+        )
+    try:
+        success = update_conversation_chat_mode(
+            conversation_id=conversation_id,
+            chat_mode=chat_mode,
+            user_id=user_id,
+        )
+        if not success:
+            raise Exception(
+                f"Conversation {conversation_id} does not exist or has been deleted"
+            )
+        return True
+    except ValueError:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to update conversation chat mode: {str(e)}")
         raise Exception(str(e))
 
 
@@ -374,13 +481,19 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         bool: Whether the deletion was successful
     """
     try:
+        try:
+            from services.agent_automation.facade import agent_automation_facade
+            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+        except Exception as automation_error:
+            logging.warning(
+                "Failed to cleanup automation task for conversation %s: %s",
+                conversation_id,
+                automation_error,
+            )
+
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
-
-        # Defensive cleanup: release the ContextManager associated with this conversation
-        # to avoid memory leaks in edge cases
-        agent_run_manager.clear_conversation_context_manager(conversation_id)
 
         return True
     except Exception as e:
@@ -516,6 +629,27 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     unit_type = unit.get('unit_type')
                     unit_content = unit.get('unit_content')
 
+                    if unit_type == 'history_summary':
+                        try:
+                            summary_payload = json.loads(unit_content)
+                            covered_message_id = int(
+                                summary_payload['covered_through_message_id'])
+                        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                            logger.warning(
+                                "Skipping invalid history summary unit_id=%s",
+                                unit_id,
+                            )
+                            continue
+                        if covered_message_id != int(message_id):
+                            logger.warning(
+                                "Skipping misplaced history summary unit_id=%s "
+                                "message_id=%s coverage=%s",
+                                unit_id,
+                                message_id,
+                                covered_message_id,
+                            )
+                            continue
+
                     if unit_type == 'search_content_placeholder' and unit_id:
                         placeholder_content = {
                             "placeholder": True,
@@ -523,13 +657,33 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                         }
                         processed_units.append({
                             'type': 'search_content_placeholder',
-                            'content': json.dumps(placeholder_content, ensure_ascii=False)
+                            'content': json.dumps(placeholder_content, ensure_ascii=False),
+                            'unit_index': unit.get('unit_index'),
+                            'unit_status': unit.get('unit_status'),
+                            'tool_call_id': unit.get('tool_call_id'),
+                            'invocation_id': unit.get('invocation_id'),
                         })
                     else:
-                        processed_units.append({
+                        processed_unit = {
                             'type': unit_type,
-                            'content': unit_content
-                        })
+                            'content': unit_content,
+                            'unit_index': unit.get('unit_index'),
+                            'unit_status': unit.get('unit_status'),
+                            'tool_call_id': unit.get('tool_call_id'),
+                            'invocation_id': unit.get('invocation_id'),
+                        }
+                        if unit_type in ('tool', 'tool-call') and isinstance(unit_content, str):
+                            try:
+                                tool_data = json.loads(unit_content)
+                            except (json.JSONDecodeError, TypeError):
+                                tool_data = None
+                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                                processed_unit['content'] = tool_data.get('content', '')
+                                processed_unit['tool_name'] = tool_data.get('tool_name')
+                                processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
+                                if 'role' in tool_data:
+                                    processed_unit['role'] = tool_data['role']
+                        processed_units.append(processed_unit)
 
                 # Add final_answer type message unit only if not already present
                 has_final_answer = any(u.get('type') == 'final_answer' for u in processed_units)
@@ -549,6 +703,11 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 # Add minio_files field (if any, e.g., skill-generated attachments)
                 if 'minio_files' in msg and msg['minio_files']:
                     message_item['minio_files'] = msg['minio_files']
+
+            # Keep the logical message position so clients can distinguish a
+            # regenerated branch from a separate turn with identical text.
+            if msg.get('message_index') is not None:
+                message_item['message_index'] = msg['message_index']
 
             # Add image content (if any)
             if message_id in image_by_message:
@@ -577,6 +736,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
             'agent_id': history_data.get('agent_id'),
+            'chat_mode': history_data.get('chat_mode') or 'execution',
             'create_time': history_data['create_time'],
             'message': messages
         }
@@ -792,7 +952,7 @@ def save_skill_files_to_conversation(
                 conversation_id,
             )
         return success
-    except Exception as exc:
+    except Exception:
         logging.exception(
             "[skill-file] failed to persist skill file uploads for conversation=%s",
             conversation_id,

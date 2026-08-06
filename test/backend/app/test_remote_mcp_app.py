@@ -18,6 +18,10 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
+elasticsearch_module = types.ModuleType("elasticsearch")
+elasticsearch_module.Elasticsearch = MagicMock()
+elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", loader=None)
+sys.modules['elasticsearch'] = elasticsearch_module
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -160,6 +164,17 @@ class TestAddMcpService:
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_connection_error_returns_normalized_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = MCPConnectionError("MCP connection timeout")
+        resp = client.post("/mcp/add", json={
+            "name": "x", "source": "local", "server_url": "http://srv",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert resp.json()["detail"] == "MCP connection timeout"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
     def test_add_with_custom_headers(self, mock_add, mock_auth):
         """Test that custom_headers is passed to add_mcp_service (line 125)."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -189,6 +204,35 @@ class TestAddMcpService:
         assert resp.status_code == HTTPStatus.OK
         call_kwargs = mock_add.call_args[1]
         assert call_kwargs["custom_headers"] == {}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_skip_health_check(self, mock_add, mock_auth):
+        """skip_health_check=True is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "market_id": 1,
+            "skip_health_check": True,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["skip_health_check"] is True
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_with_container_port(self, mock_add, mock_auth):
+        """container_port is passed to add_mcp_service."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        resp = client.post("/mcp/add", json={
+            "name": "test-svc", "source": "community",
+            "server_url": "http://localhost:8080/mcp",
+            "container_port": 8080,
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.OK
+        call_kwargs = mock_add.call_args[1]
+        assert call_kwargs["container_port"] == 8080
 
 
 # ============================================================================
@@ -225,6 +269,18 @@ class TestAddFromConfig:
             "mcp_config": {"mcpServers": {"dup": {"command": "echo"}}},
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.CONFLICT
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_connection_error_returns_normalized_detail(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = MCPConnectionError("MCP protocol or endpoint invalid")
+        resp = client.post("/mcp/add-from-config", json={
+            "name": "svc", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert resp.json()["detail"] == "MCP protocol or endpoint invalid"
 
 
 # ============================================================================
@@ -279,6 +335,17 @@ class TestUpdateMcpService:
         assert resp.status_code == HTTPStatus.OK
         call_kwargs = mock_update.call_args[1]
         assert call_kwargs["custom_headers"] == {}
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service')
+    def test_update_name_conflict(self, mock_update, mock_auth):
+        """McpNameConflictError should return 409 CONFLICT."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_update.side_effect = McpNameConflictError("MCP name already exists")
+        resp = client.put("/mcp/update", json={
+            "mcp_id": 1, "name": "existing-name", "server_url": "http://url",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.CONFLICT
 
 
 # ============================================================================

@@ -22,6 +22,7 @@ export interface AgentRepositoryListingItem {
   version_label?: string | null;
   downloads?: number;
   submitted_by?: string | null;
+  content?: string | null;
 }
 
 export interface AgentRepositoryListingPagination {
@@ -70,6 +71,7 @@ export interface MyAgentRepositoryInfoItem {
   version_no?: number | null;
   version_label?: string | null;
   create_time?: string | null;
+  content?: string | null;
 }
 
 export interface MyEditableAgentItem {
@@ -114,6 +116,7 @@ export interface MyEditableAgentListParams {
   page_size?: number;
   search?: string;
   new_agent_padding?: boolean;
+  agent_id?: number;
 }
 
 export interface MyEditableAgentPagination {
@@ -132,6 +135,7 @@ export interface MyEditableAgentListResponse {
 export interface AgentRepositoryListingCreatePayload {
   icon: string;
   tags: string[];
+  content?: string;
 }
 
 export type RepositoryImportRequirementType =

@@ -130,6 +130,11 @@ export const useSiliconModelList = ({
 
   // Auto-fetch model list when batch import is enabled and API key is provided
   useEffect(() => {
+    // Only execute if this hook matches the current provider
+    if (form.provider !== "silicon" && form.provider !== "modelengine") {
+      return;
+    }
+
     const requiresUrl =
       form.provider === "modelengine"
         ? ((form as any).modelEngineUrl || "").toString().trim() !== ""
@@ -139,7 +144,7 @@ export const useSiliconModelList = ({
       getModelList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.type, form.isBatchImport]);
+  }, [form.type, form.isBatchImport, form.provider]);
 
   return {
     getModelList,

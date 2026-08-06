@@ -11,11 +11,12 @@ from starlette.responses import JSONResponse
 from consts.model import (
     UserListRequest, UserUpdateRequest
 )
+from consts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError
 from services.user_service import (
-    get_users, update_user, delete_user_and_cleanup
+    delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.post("/list")
 async def get_users_endpoint(
     request: UserListRequest,
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Get users belonging to a specific tenant with pagination
@@ -36,9 +38,16 @@ async def get_users_endpoint(
         JSONResponse: List of users in the tenant (paginated or all)
     """
     try:
-        # Get tenant users with pagination and sorting
-        result = get_users(request.tenant_id, request.page, request.page_size,
-                          request.sort_by, request.sort_order)
+        _, requester_tenant_id, requester_role = get_current_user_context(authorization)
+        result = get_users_for_requester(
+            request.tenant_id,
+            request.page,
+            request.page_size,
+            request.sort_by,
+            request.sort_order,
+            requester_tenant_id=requester_tenant_id,
+            requester_role=requester_role,
+        )
 
         # Build response content
         content = {
@@ -60,6 +69,10 @@ async def get_users_endpoint(
             status_code=HTTPStatus.OK,
             content=content
         )
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except Exception as exc:
         logger.error(f"Unexpected error retrieving users for tenant {request.tenant_id}: {str(exc)}")
         # Include the actual error message for debugging
@@ -88,10 +101,16 @@ async def update_user_endpoint(
     """
     try:
         # Get current user ID from token for access control
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, requester_tenant_id, requester_role = get_current_user_context(authorization)
 
         # Update user
-        updated_user = await update_user(user_id, request.model_dump(), current_user_id)
+        updated_user = await update_user_for_requester(
+            user_id,
+            request.model_dump(),
+            updated_by=current_user_id,
+            requester_tenant_id=requester_tenant_id,
+            requester_role=requester_role,
+        )
 
         logger.info(f"Updated user {user_id} by user {current_user_id}")
 
@@ -103,6 +122,12 @@ async def update_user_endpoint(
             }
         )
 
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    except NotFoundException as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
         raise HTTPException(
@@ -175,4 +200,3 @@ async def delete_user_endpoint(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(exc)}"
         )
-

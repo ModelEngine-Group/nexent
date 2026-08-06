@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Alert, Button, Form, Input, Upload } from "antd";
+import { useEffect, useState } from "react";
+import { Alert, Button, Form, Input, Select, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,9 @@ import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { Can } from "@/components/permission/Can";
 import ContainerPortField from "../../shared/ContainerPortField";
 import TagEditor from "../../shared/TagEditor";
 
@@ -46,18 +49,22 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   containerPort: undefined,
   uploadImageFile: null,
   tags: [],
+  groupIds: [],
+  ingroupPermission: "READ_ONLY",
 });
 
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
   enableUploadImage?: boolean;
   onAdded: () => void;
+  onSubmittingChange?: (submitting: boolean) => void;
 }
 
 export default function AddMcpServiceLocalSection({
   active,
   enableUploadImage = false,
   onAdded,
+  onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
@@ -66,6 +73,10 @@ export default function AddMcpServiceLocalSection({
   const [deploymentType, setDeploymentType] = useState<McpDeploymentType>(
     McpDeploymentType.REMOTE_LINK
   );
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { data: groupData } = useGroupList(tenantId);
+  const groups = groupData?.groups || [];
   const { submit, submitting } = useMcpAddLocal({
     onSuccess: () => {
       setDraft(createInitialDraft());
@@ -74,6 +85,11 @@ export default function AddMcpServiceLocalSection({
       onAdded();
     },
   });
+
+  // Notify parent modal of submitting state to block close during submission
+  useEffect(() => {
+    onSubmittingChange?.(submitting);
+  }, [submitting, onSubmittingChange]);
 
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -120,6 +136,15 @@ export default function AddMcpServiceLocalSection({
     patchDraft({ tags: draft.tags.filter((_, i) => i !== index) });
   };
 
+  const handlePermissionChange = (value: string) => {
+    const permission = value as "EDIT" | "READ_ONLY" | "PRIVATE";
+    patchDraft({ ingroupPermission: permission });
+    if (permission === "PRIVATE") {
+      patchDraft({ groupIds: [] });
+      form.setFieldValue("group_ids", []);
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       await form.validateFields();
@@ -135,6 +160,7 @@ export default function AddMcpServiceLocalSection({
   const isContainer = deploymentType === McpDeploymentType.CONTAINER;
   const isApi = deploymentType === McpDeploymentType.API;
   const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
+  const isGroupSelectDisabled = draft.ingroupPermission === "PRIVATE" || isApi;
 
   return (
     <div className="flex h-full flex-col">
@@ -163,6 +189,7 @@ export default function AddMcpServiceLocalSection({
                       value === McpDeploymentType.LOCAL_IMAGE
                         ? McpTransportType.CONTAINER
                         : McpTransportType.URL;
+                    const nextPermission = "READ_ONLY";
                     patchDraft({
                       deploymentType: value,
                       transportType: nextTransport,
@@ -170,7 +197,11 @@ export default function AddMcpServiceLocalSection({
                         value === McpDeploymentType.LOCAL_IMAGE
                           ? draft.uploadImageFile
                           : null,
+                      groupIds: draft.groupIds,
+                      ingroupPermission: nextPermission as "EDIT" | "READ_ONLY" | "PRIVATE",
                     });
+                    form.setFieldValue("ingroup_permission", nextPermission);
+                    form.setFieldValue("group_ids", []);
                     form.setFieldValue("transportType", nextTransport);
                   }}
                   className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
@@ -219,40 +250,82 @@ export default function AddMcpServiceLocalSection({
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.serverUrl")}
                 </label>
-                <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0">
-                  <Input
-                    {...bindField("serverUrl")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.serverUrl")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0 flex-1">
+                    <Input
+                      {...bindField("serverUrl")}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.serverUrl")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["serverUrl"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    {t("mcpTools.detail.share")}
+                  </label>
+                </div>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.bearerTokenOptional")}
                 </label>
-                <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0">
-                  <Input
-                    {...bindField("authorizationToken")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0 flex-1">
+                    <Input
+                      {...bindField("authorizationToken")}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["authorizationToken"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), authorizationToken: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    {t("mcpTools.detail.share")}
+                  </label>
+                </div>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.customHeaders")}
                 </label>
-                <Form.Item name="customHeaders" className="mb-0">
-                  <Input.TextArea
-                    {...bindField("customHeaders")}
-                    rows={2}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="customHeaders" className="mb-0 flex-1">
+                    <Input.TextArea
+                      {...bindField("customHeaders")}
+                      rows={2}
+                      className="w-full rounded-md"
+                      placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["customHeaders"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), customHeaders: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    {t("mcpTools.detail.share")}
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -266,14 +339,28 @@ export default function AddMcpServiceLocalSection({
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpTools.addModal.containerConfig")}
                 </label>
-                <Form.Item name="containerConfigJson" rules={rules.containerConfig} className="mb-0">
-                  <Input.TextArea
-                    {...bindField("containerConfigJson")}
-                    rows={5}
-                    placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-                    className="w-full"
-                  />
-                </Form.Item>
+                <div className="flex items-center gap-2">
+                  <Form.Item name="containerConfigJson" rules={rules.containerConfig} className="mb-0 flex-1">
+                    <Input.TextArea
+                      {...bindField("containerConfigJson")}
+                      rows={5}
+                      placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
+                      className="w-full"
+                    />
+                  </Form.Item>
+                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300"
+                      checked={draft.sharedFields?.["containerConfigJson"] ?? false}
+                      onChange={(e) => {
+                        const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
+                        patchDraft({ sharedFields: next });
+                      }}
+                    />
+                    {t("mcpTools.detail.share")}
+                  </label>
+                </div>
               </div>
 
               <Form.Item name="containerPort" rules={rules.containerPort} className="mb-0">
@@ -328,8 +415,9 @@ export default function AddMcpServiceLocalSection({
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpConfig.openapiService.form.openapiJson")}
+                  <span className="ml-1 text-red-500">*</span>
                 </label>
-                <Form.Item name="openApiJson" className="mb-0">
+                <Form.Item name="openApiJson" rules={rules.openApiJson} className="mb-0">
                   <Input.TextArea
                     {...bindField("openApiJson")}
                     rows={6}
@@ -337,6 +425,9 @@ export default function AddMcpServiceLocalSection({
                     placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                   />
                 </Form.Item>
+                <p className="mt-1 text-xs text-slate-400">
+                  {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                </p>
               </div>
             </div>
           </div>
@@ -361,10 +452,22 @@ export default function AddMcpServiceLocalSection({
                       message: t("mcpConfig.message.uploadImageFileRequired"),
                     },
                     {
-                      validator: (_, value: File | null | undefined) => {
-                        if (value && !value.name.endsWith(".tar")) {
+                      validator: (_, value) => {
+                        // The value can be a File, an antd Upload event object
+                        // (antd stores the raw `info` when Upload is inside a
+                        // Form.Item without valuePropName), or null. Only enforce
+                        // the .tar check on a real File so validation never throws.
+                        const fileName =
+                          value &&
+                          typeof value === "object" &&
+                          "name" in value
+                            ? String(value.name || "")
+                            : "";
+                        if (fileName && !fileName.endsWith(".tar")) {
                           return Promise.reject(
-                            new Error(t("mcpConfig.message.uploadImageInvalidFileType"))
+                            new Error(
+                              t("mcpConfig.message.uploadImageInvalidFileType")
+                            )
                           );
                         }
                         return Promise.resolve();
@@ -399,6 +502,7 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
+                    showSuggestButton={false}
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });
@@ -422,6 +526,54 @@ export default function AddMcpServiceLocalSection({
               </div>
             </div>
           </div>
+        ) : null}
+
+        <Can permission="group:read">
+          <div className="grid grid-cols-2 gap-4">
+            <Form.Item
+              name="group_ids"
+              label={t("tenantResources.knowledgeBase.groupNames")}
+              className="mb-0"
+            >
+              <Select
+                mode="multiple"
+                placeholder={
+                  isGroupSelectDisabled
+                    ? t("knowledgeBase.create.permission.groupPlaceholder")
+                    : t("tenantResources.knowledgeBase.groupNames")
+                }
+                value={isGroupSelectDisabled ? [] : draft.groupIds}
+                options={groups.map((group: { group_id: number; group_name: string }) => ({
+                  label: group.group_name,
+                  value: group.group_id,
+                }))}
+                disabled={isGroupSelectDisabled}
+                onChange={(values: number[]) => patchDraft({ groupIds: values })}
+                className="rounded-md"
+              />
+            </Form.Item>
+            <Can permission="kb.groups:read">
+              <Form.Item
+                name="ingroup_permission"
+                label={t("tenantResources.knowledgeBase.permission")}
+                className="mb-0"
+              >
+                <Select
+                  value={draft.ingroupPermission ?? "READ_ONLY"}
+                  onChange={handlePermissionChange}
+                  disabled={isApi}
+                  options={[
+                    { value: "READ_ONLY", label: t("knowledgeBase.ingroup.permission.READ_ONLY") },
+                    { value: "EDIT", label: t("knowledgeBase.ingroup.permission.EDIT") },
+                    { value: "PRIVATE", label: t("knowledgeBase.ingroup.permission.PRIVATE") },
+                  ]}
+                />
+              </Form.Item>
+            </Can>
+          </div>
+        </Can>
+        {isApi ? (
+          <p className="text-xs text-slate-400">{t("mcpTools.detail.groupPermissionUnsupported")}</p>
         ) : null}
 
         <div className="flex flex-col gap-4">

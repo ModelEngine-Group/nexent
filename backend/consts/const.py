@@ -53,6 +53,29 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Agent automation runtime configuration
+AGENT_AUTOMATION_ENABLED = os.getenv(
+    "AGENT_AUTOMATION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
+AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_POLL_INTERVAL_SECONDS", "5")
+)
+AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
+    os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
+)
+AGENT_AUTOMATION_LEASE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
+)
+AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS", "1800")
+)
+AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS", "30")
+)
+AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
+    os.getenv("AGENT_AUTOMATION_MIN_INTERVAL_SECONDS", "5")
+)
+
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
@@ -92,7 +115,7 @@ SUPABASE_JWT_SECRET = os.getenv(
 
 
 # OAuth Configuration
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "").rstrip("/")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # OAuth login mode:
@@ -190,6 +213,12 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv(
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+
+# AIDP Knowledge Base configuration
+ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
+AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
+AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
 DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 DEFAULT_APP_NAME_ZH = "Nexent 智能体"
@@ -201,6 +230,7 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_REGION = os.getenv("MINIO_REGION")
 MINIO_DEFAULT_BUCKET = os.getenv("MINIO_DEFAULT_BUCKET")
+MINIO_SECURE = os.getenv("MINIO_SECURE", "true").lower() == "true"
 S3_URL_PREFIX = "s3://"
 
 
@@ -227,12 +257,11 @@ NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_S
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
-    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
-DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
-    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
-FORWARD_REDIS_RETRY_DELAY_S = int(
-    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "300"))
+DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
+REDIS_ERROR_INFO_TTL_SECONDS = int(os.getenv("REDIS_ERROR_INFO_TTL_SECONDS", str(1 * 24 * 60 * 60)))
+REDIS_ERROR_INFO_SCAN_COUNT = int(os.getenv("REDIS_ERROR_INFO_SCAN_COUNT", "500"))
+FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
@@ -309,6 +338,65 @@ DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
+# ===== Memory System =====
+
+# MMR (Maximal Marginal Relevance) configuration
+MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "10"))
+MMR_FINAL_TOP_K = int(os.getenv("MMR_FINAL_TOP_K", "5"))
+MMR_DUPLICATE_THRESHOLD = float(os.getenv("MMR_DUPLICATE_THRESHOLD", "0.92"))
+
+# Temporal decay (only applied to internal agent short-term memory)
+AGENT_SHORT_TERM_HALF_LIFE_DAYS = int(
+    os.getenv("AGENT_SHORT_TERM_HALF_LIFE_DAYS", "14")
+)
+
+# Score fusion source weights
+W_AGENT_SHORT_TERM = float(os.getenv("W_AGENT_SHORT_TERM", "1.0"))
+W_EXTERNAL = float(os.getenv("W_EXTERNAL", "0.8"))
+
+# Token budget selection
+MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
+
+# Dreaming promotion thresholds
+LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
+RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
+# Scheduling/cron constants are intentionally not defined here: the
+# background Dreaming scheduler is not part of Phase 2 (an agent-driven
+# timer will be added in a later phase, at which point the cron expression
+# and heartbeat can be reintroduced).
+
+# External provider retry / timeout
+PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
+PROVIDER_RETRY_BACKOFF_BASE_SECONDS = int(
+    os.getenv("PROVIDER_RETRY_BACKOFF_BASE_SECONDS", "1")
+)
+PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
+)
+
+# External provider toggles (configured per provider elsewhere; these constants
+# describe protocol-level defaults)
+EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "model_output",
+    "model_output_thinking",
+    "model_output_deep_thinking",
+    "model_output_code",
+    "final_answer",
+    "error",
+    "search_content",
+    "tool",
+    "parse",
+    "execution_logs",
+    "picture_web",
+    "memory_search",
+    "verification",
+    "max_steps_reached",
+)
+
 
 DEFAULT_LLM_MAX_TOKENS = 4096
 
@@ -325,6 +413,11 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 # Invite code
 INVITE_CODE = os.getenv("INVITE_CODE")
+
+# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+JWT_EXPIRY_SECONDS = int(os.getenv("JWT_EXPIRY", "7200") or 7200)
+if JWT_EXPIRY_SECONDS <= 0:
+    raise ValueError("JWT_EXPIRY must be a positive number of seconds")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
@@ -568,6 +661,50 @@ def _resolve_app_version(default: str = "v2.2.1") -> str:
 
 
 APP_VERSION = _resolve_app_version()
+
+
+# =============================================================================
+# Agent Sandbox Configuration
+# =============================================================================
+
+NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local").lower()
+"""Default sandbox isolation level: local / docker / wasm.
+   Default 'local' preserves backward-compatibility for existing deployments."""
+
+NEXENT_SANDBOX_DEFAULT_SCOPE = os.getenv("NEXENT_SANDBOX_DEFAULT_SCOPE", "system").lower()
+"""Default sandbox container lifecycle scope: session / system.
+   session  = one container per agent_run, destroyed on run end (strictest isolation).
+   system   = persistent warm pool shared by all runs (lowest cold-start latency)."""
+
+NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
+    "NEXENT_SANDBOX_DOCKER_IMAGE", "nexent/nexent-sandbox:latest"
+)
+"""Docker image used when level is 'docker'."""
+
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+
+NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
+
+NEXENT_SANDBOX_TIMEOUT_S = int(os.getenv("NEXENT_SANDBOX_TIMEOUT_S", "30"))
+
+NEXENT_SANDBOX_NETWORK_DISABLED = (
+    os.getenv("NEXENT_SANDBOX_NETWORK", "disabled").lower() == "disabled"
+)
+
+NEXENT_SANDBOX_SHELL_POLICY = os.getenv(
+    "NEXENT_SANDBOX_SHELL_POLICY", "disabled"
+).lower()
+"""Shell execution policy: disabled / restricted / boxed.
+   'disabled' is recommended — blocks subprocess/os shell calls at AST-parse time."""
+
+NEXENT_SANDBOX_OUTPUT_BUCKET = os.getenv(
+    "NEXENT_SANDBOX_OUTPUT_BUCKET", "nexent-artifacts"
+)
+"""MinIO bucket for sandbox output file sync."""
+
+NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS = (
+    os.getenv("NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", "true").lower() == "true"
+)
 
 
 # Skill Creation Streaming Configuration

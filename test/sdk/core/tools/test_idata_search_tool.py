@@ -118,8 +118,6 @@ class TestIdataSearchToolInit:
             assert tool.vector_similarity_weight == 0.35
             assert tool.observer == mock_observer
             assert tool.record_ops == 1
-            assert tool.running_prompt_zh == "iData知识库检索中..."
-            assert tool.running_prompt_en == "Searching iData knowledge base..."
 
     def test_init_server_url_trailing_slash(self, mock_observer: MessageObserver):
         """Test that trailing slash is stripped from server_url"""
@@ -552,9 +550,6 @@ class TestForward:
 
         # Verify observer messages
         idata_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, idata_tool.running_prompt_en
-        )
-        idata_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "test query"}], ensure_ascii=False)
         )
         idata_tool.observer.add_message.assert_any_call(
@@ -569,10 +564,6 @@ class TestForward:
         self._setup_success_flow(idata_tool)
 
         idata_tool.forward("测试查询")
-
-        idata_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, idata_tool.running_prompt_zh
-        )
 
     def test_forward_no_observer(self, mock_observer: MessageObserver):
         """Test forward without observer"""

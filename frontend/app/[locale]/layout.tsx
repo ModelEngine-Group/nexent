@@ -20,7 +20,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   // Simple metadata for now - can be enhanced later with i18n
   return {
-    title: "Nexent - AI Agent Platform",
+    title: `AI Agent Platform`,
     description:
       "A powerful AI agent platform for intelligent conversations and automation",
     icons: {
@@ -46,7 +46,6 @@ export default async function RootLayout({
         <NextThemesProvider
           attribute="class"
           defaultTheme="light"
-          enableSystem
           disableTransitionOnChange
         >
           <I18nProviderWrapper locale={locale}>

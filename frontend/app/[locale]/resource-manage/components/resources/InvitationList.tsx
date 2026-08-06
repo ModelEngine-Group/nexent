@@ -19,6 +19,7 @@ import {
   Progress,
   Tooltip 
 } from "antd";
+import { copyToClipboard } from "@/lib/clipboard";
 import { ColumnsType } from "antd/es/table";
 import { useInvitationList } from "@/hooks/invitation/useInvitationList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -264,8 +265,8 @@ export default function InvitationList({
               <Button
                 type="text"
                 icon={<Copy className="h-4 w-4" />}
-                onClick={() => {
-                  navigator.clipboard.writeText(code);
+                onClick={async () => {
+                  await copyToClipboard(code);
                   message.success(t("common.copied"));
                 }}
                 aria-label={t("common.copy")}
@@ -378,11 +379,18 @@ export default function InvitationList({
           return (
             <Tag
               color={color}
-              className="inline-flex items-center"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                lineHeight: "20px",
+                height: "auto",
+                whiteSpace: "nowrap",
+              }}
               variant="solid"
             >
               {icon}
-              {t(`tenantResources.invitation.status.${status}`)}
+              <span>{t(`tenantResources.invitation.status.${status}`)}</span>
             </Tag>
           );
         },

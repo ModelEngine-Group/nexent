@@ -181,10 +181,12 @@ class NotFoundException(Exception): pass
 class OfficeConversionException(Exception): pass
 class UnsupportedFileTypeException(Exception): pass
 class FileTooLargeException(Exception): pass
+class QuotaExceededError(Exception): pass
 exceptions_stub.NotFoundException = NotFoundException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException
+exceptions_stub.QuotaExceededError = QuotaExceededError
 sys.modules["consts.exceptions"] = exceptions_stub
 setattr(consts_pkg, "exceptions", exceptions_stub)
 

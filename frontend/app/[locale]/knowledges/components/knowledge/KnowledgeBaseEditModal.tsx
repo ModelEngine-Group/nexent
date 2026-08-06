@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Select, message } from "antd";
-import { useGroupList } from "@/hooks/group/useGroupList";
+import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import { Can } from "@/components/permission/Can";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { checkKnowledgeBaseName } from "@/services/uploadService";
@@ -27,6 +28,7 @@ export function KnowledgeBaseEditModal({
   onSuccess,
 }: KnowledgeBaseEditModalProps) {
   const { t } = useTranslation("common");
+  const { groupIds } = useAuthorizationContext();
   const [form] = Form.useForm();
 
   // Name validation state
@@ -36,11 +38,12 @@ export function KnowledgeBaseEditModal({
   const originalNameRef = useRef<string>("");
 
   // Track current permission value for conditional logic
-  const [currentPermission, setCurrentPermission] = useState<string>("READ_ONLY");
+  const [currentPermission, setCurrentPermission] =
+    useState<string>("READ_ONLY");
 
-  // Fetch groups for group selection
+  // Fetch tenant groups and limit selections to current user's groups.
   const { data: groupData } = useGroupList(tenantId);
-  const groups = groupData?.groups || [];
+  const { groups } = useGroupDetails(groupData?.groups ?? [], groupIds);
 
   // Reset form and states when knowledge base changes
   React.useEffect(() => {
@@ -49,7 +52,8 @@ export function KnowledgeBaseEditModal({
       form.setFieldsValue({
         knowledge_name: knowledgeBase.name,
         ingroup_permission: permission,
-        group_ids: permission === "PRIVATE" ? [] : (knowledgeBase.group_ids || []),
+        group_ids:
+          permission === "PRIVATE" ? [] : knowledgeBase.group_ids || [],
       });
       // Store original name for comparison
       originalNameRef.current = knowledgeBase.name;
@@ -97,7 +101,8 @@ export function KnowledgeBaseEditModal({
       }
 
       // Ensure group_ids is empty when permission is PRIVATE
-      const groupIds = values.ingroup_permission === "PRIVATE" ? [] : values.group_ids;
+      const groupIds =
+        values.ingroup_permission === "PRIVATE" ? [] : values.group_ids;
 
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,
@@ -124,7 +129,9 @@ export function KnowledgeBaseEditModal({
       if (error.errorFields) {
         return; // Form validation error
       }
-      message.error(error.message || t("tenantResources.knowledgeBase.updateFailed"));
+      message.error(
+        error.message || t("tenantResources.knowledgeBase.updateFailed")
+      );
     }
   };
 
@@ -156,7 +163,10 @@ export function KnowledgeBaseEditModal({
           validateStatus={nameError ? "error" : undefined}
           help={nameError || undefined}
           rules={[
-            { required: true, message: t("tenantResources.knowledgeBase.nameRequired") },
+            {
+              required: true,
+              message: t("tenantResources.knowledgeBase.nameRequired"),
+            },
           ]}
         >
           <Input placeholder={t("tenantResources.knowledgeBase.enterName")} />
@@ -167,27 +177,50 @@ export function KnowledgeBaseEditModal({
             name="ingroup_permission"
             label={t("tenantResources.knowledgeBase.permission")}
             rules={[
-              { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
+              {
+                required: true,
+                message: t("tenantResources.knowledgeBase.permissionRequired"),
+              },
             ]}
           >
             <Select
               placeholder={t("tenantResources.knowledgeBase.permission")}
               onChange={handlePermissionChange}
               options={[
-                { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
-                { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
-                { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+                {
+                  value: "EDIT",
+                  label: t("tenantResources.knowledgeBase.permission.EDIT"),
+                },
+                {
+                  value: "READ_ONLY",
+                  label: t(
+                    "tenantResources.knowledgeBase.permission.READ_ONLY"
+                  ),
+                },
+                {
+                  value: "PRIVATE",
+                  label: t("tenantResources.knowledgeBase.permission.PRIVATE"),
+                },
               ]}
             />
           </Form.Item>
         </Can>
 
         <Can permission="group:read">
-          <Form.Item name="group_ids" label={t("tenantResources.knowledgeBase.groupNames")}>
+          <Form.Item
+            name="group_ids"
+            label={t("tenantResources.knowledgeBase.groupNames")}
+          >
             <Select
               mode="multiple"
-              placeholder={isGroupSelectDisabled ? t("knowledgeBase.create.permission.groupPlaceholder") : t("tenantResources.knowledgeBase.groupNames")}
-              value={isGroupSelectDisabled ? [] : form.getFieldValue("group_ids")}
+              placeholder={
+                isGroupSelectDisabled
+                  ? t("knowledgeBase.create.permission.groupPlaceholder")
+                  : t("tenantResources.knowledgeBase.groupNames")
+              }
+              value={
+                isGroupSelectDisabled ? [] : form.getFieldValue("group_ids")
+              }
               options={groups.map((group) => ({
                 label: group.group_name,
                 value: group.group_id,

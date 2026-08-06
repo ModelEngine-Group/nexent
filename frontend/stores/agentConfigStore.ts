@@ -16,6 +16,7 @@ import {
   AgentConfigUpdate,
   Skill,
   DEFAULT_AGENT_VERIFICATION_CONFIG,
+  DEFAULT_GUARDRAIL_CONFIG,
 } from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
@@ -31,10 +32,12 @@ export type EditableAgent = Pick<
   | "display_name"
   | "description"
   | "author"
+  | "created_by"
   | "model"
   | "model_ids"
   | "max_step"
   | "requested_output_tokens"
+  | "is_main_agent"
   | "provide_run_summary"
   | "tools"
   | "duty_prompt"
@@ -47,6 +50,7 @@ export type EditableAgent = Pick<
   | "prompt_template_name"
   | "verification_config"
   | "sub_agent_id_list"
+  | "sub_agent_relations"
   | "group_ids"
   | "ingroup_permission"
   | "enable_context_manager"
@@ -69,6 +73,7 @@ interface AgentConfigStoreState {
   defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
 
   forceRefreshKey: number;
+  saveValidation: (() => Promise<void>) | null;
 
   /**
    * Check if the current agent should be read-only.
@@ -112,6 +117,11 @@ interface AgentConfigStoreState {
   updateSubAgentIds: (ids: number[]) => void;
 
   /**
+   * Update sub_agent_relations (synced with sub_agent_id_list).
+   */
+  updateSubAgentRelations: (relations: Array<{ agent_id: number; version_no: number | null; version_name?: string }>) => void;
+
+  /**
    * Update external_sub_agent_id_list.
    */
   updateExternalSubAgentIds: (ids: number[]) => void;
@@ -121,6 +131,16 @@ interface AgentConfigStoreState {
    * Used for both generation and manual editing.
    */
   updateAgentConfig: (payload: AgentConfigUpdate) => void;
+
+  /**
+   * Register the active agent form's validation callback for all save entry points.
+   */
+  setSaveValidation: (validation: (() => Promise<void>) | null) => void;
+
+  /**
+   * Run the active agent form validation before persisting changes.
+   */
+  validateBeforeSave: () => Promise<void>;
 
   /**
    * Mark changes as saved: move edited -> baseline, clear hasUnsavedChanges.
@@ -165,10 +185,12 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     display_name: "",
     description: "",
     author: "",
+    created_by: null,
     model: llmConfig?.name || "",
     model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
     requested_output_tokens: null,
+    is_main_agent: true,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -180,8 +202,12 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
-    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
+    verification_config: {
+      ...DEFAULT_AGENT_VERIFICATION_CONFIG,
+      guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
+    },
     sub_agent_id_list: [],
+    sub_agent_relations: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
     greeting_message: "",
@@ -198,10 +224,12 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         display_name: agent.display_name || "",
         description: agent.description,
         author: agent.author || "",
+        created_by: agent.created_by ?? null,
         model: agent.model,
         model_ids: agent.model_ids || [],
         max_step: agent.max_step,
         requested_output_tokens: agent.requested_output_tokens ?? null,
+        is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
@@ -215,6 +243,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         prompt_template_name: agent.prompt_template_name || "system_default",
         verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
         sub_agent_id_list: agent.sub_agent_id_list || [],
+        sub_agent_relations: agent.sub_agent_relations || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
@@ -323,6 +352,7 @@ const isDirty = (
       normalizeArray(editedAgent.model_ids || []).length > 0 ||
       editedAgent.max_step !== 0 ||
       editedAgent.requested_output_tokens != null ||
+      editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
@@ -356,6 +386,7 @@ const isDirty = (
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
+    (baselineAgent.is_main_agent ?? true) !== (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
@@ -391,6 +422,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   isGenerating: false,
   defaultLlmConfig: null,
   forceRefreshKey: 0,
+  saveValidation: null,
 
   isReadOnly: () => {
     const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
@@ -483,6 +515,14 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     });
   },
 
+  updateSubAgentRelations: (relations) => {
+    set((state) => {
+      const editedAgent = { ...state.editedAgent, sub_agent_relations: relations };
+      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+      return { editedAgent, hasUnsavedChanges };
+    });
+  },
+
   updateExternalSubAgentIds: (ids) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, external_sub_agent_id_list: ids };
@@ -497,6 +537,14 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
       return { editedAgent, hasUnsavedChanges };
     });
+  },
+
+  setSaveValidation: (saveValidation) => {
+    set({ saveValidation });
+  },
+
+  validateBeforeSave: async () => {
+    await get().saveValidation?.();
   },
 
   markAsSaved: () => {

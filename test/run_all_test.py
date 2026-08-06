@@ -65,6 +65,7 @@ def _target_paths(project_root: Path) -> list[Path]:
     return [
         project_root / "test" / "backend",
         project_root / "test" / "sdk",
+        project_root / "test" / "ext_components",
     ]
 
 

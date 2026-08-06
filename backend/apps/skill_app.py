@@ -17,6 +17,7 @@ from services.skill_service import (
     stream_skill_creation,
     update_skill_list,
     get_official_skills_with_status,
+    install_skills_from_zip_for_tenant,
 )
 from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -46,6 +47,8 @@ def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
         "content",
         "tags",
         "source",
+        "group_ids",
+        "ingroup_permission",
         "config_schemas",
         "config_values",
     ):
@@ -66,11 +69,14 @@ async def list_skills(
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
-        _, current_tenant_id = get_current_user_id(authorization)
+        user_id, current_tenant_id = get_current_user_id(authorization)
         # Super admin can query a specific tenant's skills; otherwise use current user's tenant
         effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
-        skills = service.list_skills(tenant_id=effective_tenant_id)
+        skills = service.list_visible_skills(
+            tenant_id=effective_tenant_id,
+            user_id=user_id,
+        )
         return JSONResponse(content={"skills": skills})
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -122,8 +128,6 @@ async def install_skills(
     """
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)
-        from services.skill_service import install_skills_from_zip_for_tenant
-
         effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         installed_names = install_skills_from_zip_for_tenant(
             skill_names=request.skill_names,
@@ -165,6 +169,8 @@ async def create_skill(
             "tool_ids": tool_ids,
             "tags": request.tags,
             "source": request.source,
+            "group_ids": request.group_ids,
+            "ingroup_permission": request.ingroup_permission,
             "config_schemas": request.config_schemas,
             "config_values": request.config_values,
             "files": request.files if request.files else [],
@@ -200,6 +206,7 @@ async def create_skill_from_file(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+
         service = SkillService(tenant_id=tenant_id)
         content = await file.read()
 
@@ -222,6 +229,8 @@ async def create_skill_from_file(
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
         logger.warning(f"SkillException: {e}")
@@ -262,6 +271,8 @@ async def get_skill_file_tree(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -302,6 +313,8 @@ async def get_skill_file_content(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -309,7 +322,10 @@ async def get_skill_file_content(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{skill_name}/upload")
+@router.put(
+    "/{skill_name}/upload",
+    responses={403: {"description": "Not authorized to update this skill"}},
+)
 async def update_skill_from_file(
     skill_name: str,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
@@ -342,6 +358,8 @@ async def update_skill_from_file(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
@@ -382,18 +400,16 @@ async def get_skill_instance(
         # The instance's per-agent overrides are mapped to config_values for the frontend.
         skill = service.get_skill_by_id(skill_id, tenant_id)
         if skill:
+            instance_config_values = instance.get("config_values") or {}
             instance["skill_name"] = skill.get("name")
             instance["skill_description"] = skill.get("description", "")
             instance["skill_content"] = skill.get("content", "")
             # Template defaults from YAML-enriched skill
             instance["config_schemas"] = skill.get("config_schemas") or []
-            instance["config_values"] = skill.get("config_values") or {}
             # Per-agent overrides from SkillInstance.config_values override the template defaults
-            instance_params = instance.get("config_values") or {}
-            if instance_params:
-                merged = dict(instance.get("config_values") or {})
-                merged.update(instance_params)
-                instance["config_values"] = merged
+            merged = dict(skill.get("config_values") or {})
+            merged.update(instance_config_values)
+            instance["config_values"] = merged
 
         return JSONResponse(content=instance)
     except UnauthorizedError as e:
@@ -434,16 +450,14 @@ async def update_skill_instance(
         )
 
         # Enrich with template info so the frontend gets config_schemas and config_values
+        instance_config_values = instance.get("config_values") or {}
         instance["skill_name"] = skill.get("name")
         instance["skill_description"] = skill.get("description", "")
         instance["skill_content"] = skill.get("content", "")
         instance["config_schemas"] = skill.get("config_schemas") or []
-        instance["config_values"] = skill.get("config_values") or {}
-        instance_params = instance.get("config_values") or {}
-        if instance_params:
-            merged = dict(instance.get("config_values") or {})
-            merged.update(instance_params)
-            instance["config_values"] = merged
+        merged = dict(skill.get("config_values") or {})
+        merged.update(instance_config_values)
+        instance["config_values"] = merged
 
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except UnauthorizedError as e:
@@ -602,7 +616,10 @@ async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{skill_name}")
+@router.put(
+    "/{skill_name}",
+    responses={403: {"description": "Not authorized to update this skill"}},
+)
 async def update_skill(
     skill_name: str,
     request: SkillUpdateRequest,
@@ -643,6 +660,8 @@ async def update_skill(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         if _NOT_FOUND_TEXT in str(e).lower():
             raise HTTPException(status_code=404, detail=str(e))
@@ -695,7 +714,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
         url=quick_config.get("base_url", ""),
         temperature=0.1,
         top_p=0.95,
-        ssl_verify=True,
+        ssl_verify=quick_config.get("ssl_verify", False),
         model_factory=model_factory,
         prompt_cache=resolve_prompt_cache_profile(model_factory),
     )

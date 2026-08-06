@@ -32,6 +32,7 @@ class _SkillRepositoryModel:
     icon = MagicMock(name="icon")
     downloads = MagicMock(name="downloads")
     status = MagicMock(name="status")
+    content = MagicMock(name="content")
     delete_flag = MagicMock(name="delete_flag")
     create_time = MagicMock(name="create_time")
     update_time = MagicMock(name="update_time")
@@ -108,14 +109,45 @@ def test_get_repository_by_skill_id_with_optional_tenant(monkeypatch, mock_sessi
     session, query = mock_session
     record = MagicMock(payload={"skill_id": 8})
     query.filter.return_value = query
+    query.order_by.return_value = query
     query.first.return_value = record
     _patch_session(monkeypatch, session)
 
     assert repo_db.get_skill_repository_by_skill_id(
         8,
         publisher_tenant_id="tenant-1",
+        statuses={"pending_review", "rejected"},
     ) == {"skill_id": 8}
-    assert query.filter.call_count == 2
+    assert query.filter.call_count == 3
+    query.order_by.assert_called_once_with(repo_db.SkillRepository.update_time.desc())
+
+
+def test_get_repository_by_skill_id_without_status_filter(monkeypatch, mock_session):
+    session, query = mock_session
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.first.return_value = None
+    _patch_session(monkeypatch, session)
+
+    assert repo_db.get_skill_repository_by_skill_id(8) is None
+    assert query.filter.call_count == 1
+
+
+def test_reset_repository_status_resets_matching_peer_records(monkeypatch, mock_session):
+    session, _ = mock_session
+    session.execute.return_value.rowcount = 2
+    _patch_session(monkeypatch, session)
+    statement = _patch_update(monkeypatch)
+
+    affected = repo_db.reset_skill_repository_status(
+        repository_id=5,
+        skill_id=8,
+        status="pending_review",
+        publisher_tenant_id="tenant-1",
+    )
+
+    assert affected == 2
+    assert statement.values.call_args.kwargs == {"status": "not_shared"}
 
 
 def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
@@ -133,6 +165,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
         tags=["tag"],
         icon="skill",
         downloads=4,
+        content="please review",
         create_time=created_at,
     )
     query.filter.return_value = query
@@ -156,6 +189,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
     )
 
     assert result["items"][0]["created_at"] == created_at.isoformat()
+    assert result["items"][0]["content"] == "please review"
     assert result["pagination"] == {
         "page": 2,
         "page_size": 5,
@@ -205,10 +239,13 @@ def test_update_repository_status_applies_optional_values(monkeypatch, mock_sess
         publisher_tenant_id="tenant-2",
         publisher_user_id="user-2",
         submitted_by="dev@example.com",
+        content="please review",
     )
 
     assert affected == 1
-    assert statement.values.call_args.kwargs["publisher_tenant_id"] == "tenant-2"
+    values = statement.values.call_args.kwargs
+    assert values["publisher_tenant_id"] == "tenant-2"
+    assert values["content"] == "please review"
 
 
 def test_increment_downloads_updates_audit_user(monkeypatch, mock_session):
@@ -256,5 +293,6 @@ def test_list_repository_by_skill_ids_maps_rows(monkeypatch, mock_session):
         "skill_repository_id": 1,
         "skill_id": 8,
         "status": "shared",
+        "content": row.content,
         "create_time": created_at,
     }]

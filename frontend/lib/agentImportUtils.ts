@@ -151,16 +151,30 @@ export function selectFile(
 export async function openImportWizardWithFile(
   options: ParseAgentFileOptions & {
     onSuccess: (data: ImportAgentData) => void;
+    message?: { error: (msg: string) => void };
+    t?: (key: string) => string;
+    log?: { error: (...args: unknown[]) => void };
   }
 ): Promise<void> {
-  const { onSuccess, onParseError } = options;
+  const { onSuccess, message, t, log, ...parseOptions } = options;
   const file = await selectFile(".json,.zip");
 
   if (!file) return;
 
   const data = await parseAgentImportFile(file, {
-    onParseError: (msg) => onParseError?.(msg),
-    ...options,
+    onParseError: (msgKey) => {
+      parseOptions.onParseError?.(msgKey);
+      message?.error?.(t?.(msgKey) || msgKey);
+    },
+    onValidationError: (msgKey) => {
+      parseOptions.onValidationError?.(msgKey);
+      message?.error?.(t?.(msgKey) || msgKey);
+    },
+    onGenericError: (error) => {
+      parseOptions.onGenericError?.(error);
+      log?.error?.("Failed to read import file:", error);
+      message?.error?.(t?.("businessLogic.config.error.agentImportFailed") || "Failed to import agent");
+    },
   });
 
   if (data) {

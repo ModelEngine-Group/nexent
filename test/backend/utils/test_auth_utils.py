@@ -302,6 +302,22 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     assert seconds == 1234
 
 
+def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+
+    token = au.generate_session_jwt("user-1")
+    claims = au.jwt.decode(
+        token,
+        au.MOCK_JWT_SECRET_KEY,
+        algorithms=["HS256"],
+        audience="authenticated",
+    )
+
+    assert claims["exp"] - claims["iat"] == 5432
+
+
 def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
     """Expiry seconds must not trust JWT claims from tokens with invalid signatures."""
     now = int(time.time())
@@ -319,10 +335,11 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
     monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
 
     seconds = au.get_jwt_expiry_seconds(forged_token)
 
-    assert seconds == 3600
+    assert seconds == 5432
 
 
 def test_get_jwt_expiry_seconds_uses_debug_override(monkeypatch):
@@ -348,8 +365,9 @@ def test_get_jwt_expiry_seconds_rejects_non_positive_lifetime(monkeypatch):
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
     monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
 
-    assert au.get_jwt_expiry_seconds(token) == 3600
+    assert au.get_jwt_expiry_seconds(token) == 5432
 
 
 def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
@@ -567,8 +585,10 @@ def test_get_jwt_expiry_seconds_exception(monkeypatch):
     monkeypatch.setattr(au, "jwt", MagicMock())
     au.jwt.decode.side_effect = Exception("JWT decode failed")
 
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+
     result = au.get_jwt_expiry_seconds("invalid_token")
-    assert result == 3600  # Should return default value
+    assert result == 5432
 
 
 def test_get_current_user_id_no_tenant_mapping(monkeypatch):
@@ -811,3 +831,93 @@ class TestResolveTenantIdFromUserTenantRecord:
     def test_empty_tenant_other_role_falls_back_to_default(self):
         record = {"tenant_id": None, "user_role": "USER"}
         assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID
+
+
+class TestGetCurrentUserContext:
+    """Tests for authenticated tenant and role resolution."""
+
+    def test_returns_normalized_role_and_tenant(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        monkeypatch.setattr(
+            au,
+            "get_user_tenant_by_user_id",
+            lambda user_id: {"tenant_id": "tenant-1", "user_role": "admin"},
+        )
+
+        assert au.get_current_user_context("Bearer token") == ("user-1", "tenant-1", "ADMIN")
+
+    def test_rejects_user_without_tenant_record(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda user_id: None)
+
+        with pytest.raises(UnauthorizedError, match="relationship not found"):
+            au.get_current_user_context("Bearer token")
+
+    def test_speed_mode_does_not_require_tenant_record(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", True)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
+
+        assert au.get_current_user_context(None) == ("speed-user", "speed-tenant", "SPEED")
+
+    def test_rejects_user_without_role(self, monkeypatch):
+        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+        monkeypatch.setattr(
+            au,
+            "get_user_tenant_by_user_id",
+            lambda user_id: {"tenant_id": "tenant-1", "user_role": ""},
+        )
+
+        with pytest.raises(UnauthorizedError, match="User role not found"):
+            au.get_current_user_context("Bearer token")
+
+
+def test_validate_timestamp_rejects_non_numeric_value():
+    assert au.validate_timestamp("not-a-timestamp") is False
+
+
+def test_verify_aksk_signature_returns_false_when_configuration_fails(monkeypatch):
+    monkeypatch.setattr(
+        au,
+        "get_aksk_config",
+        lambda tenant_id: (_ for _ in ()).throw(RuntimeError("not configured")),
+    )
+
+    assert au.verify_aksk_signature("ak", "1", "signature", "body") is False
+
+
+def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens():
+    token = au.jwt.encode({"sid": "session-1"}, "unused", algorithm="HS256")
+
+    assert au.extract_session_id_from_authorization(f"Bearer {token}") == "session-1"
+    assert au.extract_session_id_from_authorization("invalid-token") is None
+    assert au.extract_session_id_from_authorization(None) is None
+
+
+def test_get_current_user_id_rejects_blank_and_subjectless_tokens(monkeypatch):
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+
+    with pytest.raises(UnauthorizedError, match="No authorization header provided"):
+        au.get_current_user_id("   ")
+
+    monkeypatch.setattr(au, "_decode_jwt_token", lambda authorization: {})
+    with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
+        au.get_current_user_id("Bearer token")
+
+
+def test_get_user_language_falls_back_when_cookies_are_malformed():
+    class RequestWithInvalidCookies:
+        @property
+        def cookies(self):
+            raise TypeError("bad cookies")
+
+    assert au.get_user_language(RequestWithInvalidCookies()) == "zh"
+
+
+def test_get_current_user_info_combines_authentication_and_language(monkeypatch):
+    monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+    monkeypatch.setattr(au, "get_user_language", lambda request: "en")
+
+    assert au.get_current_user_info("Bearer token", object()) == ("user-1", "tenant-1", "en")

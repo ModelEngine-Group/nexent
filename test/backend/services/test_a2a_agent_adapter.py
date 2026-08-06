@@ -417,6 +417,8 @@ class TestBuildA2ATaskEvent:
 
         assert "artifactUpdate" in result
         assert "artifact" in result["artifactUpdate"]
+        assert result["artifactUpdate"]["artifact"]["lastChunk"] is False
+        assert result["artifactUpdate"]["lastChunk"] is False
 
     def test_task_event_with_context_id(self):
         """Test task event with context ID."""

@@ -71,13 +71,12 @@ _MODULE_MOCKS = {
     "nexent.utils": _mock_nexent_utils,
     "nexent.utils.http_client_manager": _mock_nexent_utils_http,
 }
-sys.modules.update(_MODULE_MOCKS)
-
-# Now it is safe to import the module under test — the mocked namespace
-# packages prevent __init__.py execution, and Python finds the real
-# ragflow_search_tool.py via the __path__ on sdk.nexent.core.tools.
-from sdk.nexent.core.tools.ragflow_search_tool import RAGFlowSearchTool, _resolve_default  # noqa: E402
-from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
+# The tool module retains these imported dependencies after the context exits.
+# Restoring sys.modules prevents the collection-time stubs from affecting
+# unrelated tool tests.
+with patch.dict(sys.modules, _MODULE_MOCKS):
+    from sdk.nexent.core.tools.ragflow_search_tool import RAGFlowSearchTool, _resolve_default  # noqa: E402
+    from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +107,6 @@ def ragflow_tool(mock_observer: MessageObserver) -> RAGFlowSearchTool:
     tool.highlight = True
     tool.observer = mock_observer
     tool.record_ops = 1
-    tool.running_prompt_zh = "RAGFlow知识库检索中..."
-    tool.running_prompt_en = "Searching RAGFlow knowledge base..."
     tool.name = "ragflow_search"
     tool.tool_sign = "k"
     tool._http_client = MagicMock()
@@ -199,8 +196,6 @@ class TestRAGFlowSearchToolInit:
         assert tool.highlight is False
         assert tool.observer is mock_observer
         assert tool.record_ops == 1
-        assert tool.running_prompt_zh == "RAGFlow知识库检索中..."
-        assert tool.running_prompt_en == "Searching RAGFlow knowledge base..."
 
     def test_init_server_url_strips_trailing_slash(self, mock_observer: MessageObserver):
         with patch("sdk.nexent.core.tools.ragflow_search_tool.http_client_manager") as mock_mgr:
@@ -702,9 +697,6 @@ class TestForward:
 
         # Check observer messages
         ragflow_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, ragflow_tool.running_prompt_en
-        )
-        ragflow_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD,
             json.dumps([{"icon": "search", "text": "test query"}], ensure_ascii=False),
         )
@@ -719,10 +711,6 @@ class TestForward:
         self._setup_success_flow(ragflow_tool)
 
         ragflow_tool.forward("测试查询")
-
-        ragflow_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, ragflow_tool.running_prompt_zh
-        )
 
     def test_forward_no_observer(self, ragflow_tool: RAGFlowSearchTool):
         ragflow_tool.observer = None

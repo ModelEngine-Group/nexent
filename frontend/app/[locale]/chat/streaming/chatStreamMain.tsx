@@ -6,11 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
 import { Checkbox } from "antd";
-import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import {
   ChatMessageType,
   ProcessedMessages,
   ChatStreamMainProps,
+  TaskMessageType,
 } from "@/types/chat";
 
 import { ChatInput } from "../components/chatInput";
@@ -18,6 +19,23 @@ import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
 import { TokenMetrics } from "@/types/chat";
+
+const getHistorySummaryMessages = (
+  message: ChatMessageType
+): TaskMessageType[] =>
+  (message.steps || []).flatMap((step) =>
+    (step.contents || [])
+      .filter(
+        (content) => content.type === chatConfig.messageTypes.HISTORY_SUMMARY
+      )
+      .map((content) => ({
+        id: content.id,
+        role: MESSAGE_ROLES.ASSISTANT,
+        content: content.content,
+        timestamp: new Date(content.timestamp || Date.now()),
+        type: chatConfig.messageTypes.HISTORY_SUMMARY,
+      }))
+  );
 
 export function ChatStreamMain({
   messages,
@@ -114,6 +132,72 @@ export function ChatStreamMain({
       conversationGroups: conversationGroups,
     };
   }, [messages]);
+
+  const shareMessageGroups = useMemo(() => {
+    const groups: {
+      key: string;
+      userMessageId?: number;
+      messages: { message: ChatMessageType; index: number }[];
+    }[] = [];
+
+    processedMessages.finalMessages.forEach((message, index) => {
+      if (message.role === MESSAGE_ROLES.USER) {
+        groups.push({
+          key: message.id || `user-${index}`,
+          userMessageId: typeof message.message_id === "number" ? message.message_id : undefined,
+          messages: [{ message, index }],
+        });
+        return;
+      }
+
+      const currentGroup = groups.at(-1);
+      if (currentGroup) {
+        currentGroup.messages.push({ message, index });
+      } else {
+        groups.push({ key: message.id || `message-${index}`, messages: [{ message, index }] });
+      }
+    });
+
+    return groups;
+  }, [processedMessages.finalMessages]);
+
+  const renderFinalMessage = (
+    message: ChatMessageType,
+    index: number,
+    shareSelected = false
+  ) => (
+    <>
+      <ChatStreamFinalMessage
+        message={message}
+        onSelectMessage={onSelectMessage}
+        isSelected={message.id === selectedMessageId}
+        searchResultsCount={message?.searchResults?.length || 0}
+        imagesCount={message?.images?.length || 0}
+        onImageClick={onImageClick}
+        onOpinionChange={onOpinionChange}
+        readOnly={readOnly}
+        index={index}
+        currentConversationId={currentConversationId}
+        onCitationHover={onCitationHover}
+        shareSelected={shareSelected}
+      />
+      {message.role === MESSAGE_ROLES.ASSISTANT &&
+        getHistorySummaryMessages(message).length > 0 && (
+          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+            <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
+          </div>
+        )}
+      {message.role === MESSAGE_ROLES.USER &&
+        processedMessages.conversationGroups.has(message.id!) && (
+          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+            <TaskWindow
+              messages={processedMessages.conversationGroups.get(message.id!) || []}
+              isStreaming={isStreaming && lastUserMessageIdRef.current === message.id}
+            />
+          </div>
+        )}
+    </>
+  );
 
   // Extract latest token metrics from the most recent assistant step
   const latestMetrics = useMemo<TokenMetrics | null>(() => {
@@ -392,15 +476,44 @@ export function ChatStreamMain({
             )
           ) : (
             <>
-              {processedMessages.finalMessages.map((message, index) => (
-                <div
-                  key={message.id || index}
-                  className="flex flex-col gap-2 relative"
-                >
-                  {shareMode &&
-                    message.role === MESSAGE_ROLES.USER &&
-                    typeof message.message_id === "number" && (
-                      <div className="absolute left-0 top-2 z-10">
+              {shareMode
+                ? shareMessageGroups.map((group) => {
+                    const shareSelected =
+                      group.userMessageId !== undefined &&
+                      (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+                    return (
+                      <div
+                        key={group.key}
+                        className={`relative mb-4 w-full rounded-xl px-2 pt-1 pb-2 ${
+                          shareSelected
+                            ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]"
+                            : ""
+                        }`}
+                      >
+                        {group.userMessageId !== undefined && (
+                          <div className="absolute -left-7 top-3 z-10">
+                            <Checkbox
+                              checked={shareSelected}
+                              onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                            />
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-2">
+                          {group.messages.map(({ message, index }) => (
+                            <div key={message.id || index}>
+                              {renderFinalMessage(message, index, shareSelected)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })
+                : processedMessages.finalMessages.map((message, index) => (
+                    <div key={message.id || index} className="flex flex-col gap-2 relative">
+                      {shareMode &&
+                        message.role === MESSAGE_ROLES.USER &&
+                        typeof message.message_id === "number" && (
+                          <div className="absolute left-0 top-2 z-10">
                         <Checkbox
                           checked={
                             selectedShareMessageIds?.has(message.message_id) ||
@@ -410,39 +523,11 @@ export function ChatStreamMain({
                             onToggleShareMessage?.(message.message_id!)
                           }
                         />
-                      </div>
-                    )}
-                  <ChatStreamFinalMessage
-                    message={message}
-                    onSelectMessage={onSelectMessage}
-                    isSelected={message.id === selectedMessageId}
-                    searchResultsCount={message?.searchResults?.length || 0}
-                    imagesCount={message?.images?.length || 0}
-                    onImageClick={onImageClick}
-                    onOpinionChange={onOpinionChange}
-                    readOnly={readOnly}
-                    index={index}
-                    currentConversationId={currentConversationId}
-                    onCitationHover={onCitationHover}
-                  />
-                  {message.role === MESSAGE_ROLES.USER &&
-                    processedMessages.conversationGroups.has(message.id!) && (
-                      <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
-                        <TaskWindow
-                          messages={
-                            processedMessages.conversationGroups.get(
-                              message.id!
-                            ) || []
-                          }
-                          isStreaming={
-                            isStreaming &&
-                            lastUserMessageIdRef.current === message.id
-                          }
-                        />
-                      </div>
-                    )}
-                </div>
-              ))}
+                          </div>
+                        )}
+                      {renderFinalMessage(message, index)}
+                    </div>
+                  ))}
             </>
           )}
           <div ref={messagesEndRef} />

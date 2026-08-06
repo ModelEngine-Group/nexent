@@ -10,7 +10,12 @@ from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Path as 
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
+from consts.exceptions import (
+    FileTooLargeException,
+    NotFoundException,
+    QuotaExceededError,
+    UnsupportedFileTypeException,
+)
 from consts.model import ProcessParams
 from apps.permission_utils import require_knowledge_base_edit_permission
 from services.file_management_service import upload_to_minio, upload_files_impl, \
@@ -105,24 +110,36 @@ async def upload_files(
         user_id, tenant_id = get_current_user_id(authorization)
         if index_name:
             require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
-        errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
-            destination, file, folder, index_name, user_id, uploader_tenant_id=tenant_id
+        upload_result = await upload_files_impl(
+            destination,
+            file,
+            folder,
+            index_name,
+            user_id,
+            uploader_tenant_id=tenant_id,
         )
+        errors, uploaded_file_paths, uploaded_filenames = upload_result
+        quota_status = getattr(upload_result, "quota_status", None)
 
         if uploaded_file_paths:
+            response_content = {
+                "message": f"Files uploaded successfully to {destination}, ready for processing.",
+                "uploaded_filenames": uploaded_filenames,
+                "uploaded_file_paths": uploaded_file_paths,
+                "errors": errors,
+            }
+            if quota_status:
+                response_content["quota_status"] = quota_status.get("quota_status")
             return JSONResponse(
                 status_code=HTTPStatus.OK,
-                content={
-                    "message": f"Files uploaded successfully to {destination}, ready for processing.",
-                    "uploaded_filenames": uploaded_filenames,
-                    "uploaded_file_paths": uploaded_file_paths,
-                    "errors": errors
-                }
+                content=response_content,
             )
         else:
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                                 detail="No valid files uploaded")
     except HTTPException:
+        raise
+    except QuotaExceededError:
         raise
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")

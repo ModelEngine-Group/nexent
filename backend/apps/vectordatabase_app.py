@@ -24,7 +24,10 @@ from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
-from apps.permission_utils import require_knowledge_base_edit_permission
+from apps.permission_utils import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -77,7 +80,7 @@ def create_new_index(
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
         request: Dict[str, Any] = Body(
-            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"),
+            None, description="Request body containing embedding_model_id and optional knowledge-base settings"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -88,15 +91,18 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        embedding_model_name: Optional[str] = None
-        is_multimodal: Optional[bool] = None
+        embedding_model_id: Optional[int] = None
         preserve_source_file: Optional[bool] = None
+        quota_limit_bytes: Optional[int] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            embedding_model_name = request.get("embeddingModel")
-            is_multimodal = request.get("is_multimodal")
+            embedding_model_id = request.get("embedding_model_id")
             preserve_source_file = request.get("preserve_source_file")
+            quota_limit_bytes = request.get("quota_limit_bytes")
+
+        if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
+            raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -107,10 +113,15 @@ def create_new_index(
             tenant_id=tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            embedding_model_name=embedding_model_name,
-            is_multimodal=is_multimodal,
+            embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
+            quota_limit_bytes=quota_limit_bytes,
         )
+    except HTTPException:
+        raise
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -157,16 +168,19 @@ async def update_index(
         knowledge_name = request.get("knowledge_name")
         ingroup_permission = request.get("ingroup_permission")
         group_ids = request.get("group_ids")
-
         # Call service layer to update knowledge base
-        result = ElasticSearchService.update_knowledge_base(
-            index_name=index_name,
-            knowledge_name=knowledge_name,
-            ingroup_permission=ingroup_permission,
-            group_ids=group_ids,
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
+        update_kwargs = {
+            "index_name": index_name,
+            "knowledge_name": knowledge_name,
+            "ingroup_permission": ingroup_permission,
+            "group_ids": group_ids,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+        if "quota_limit_bytes" in request:
+            update_kwargs["quota_limit_bytes"] = request["quota_limit_bytes"]
+
+        result = ElasticSearchService.update_knowledge_base(**update_kwargs)
 
         if result:
             return JSONResponse(
@@ -830,7 +844,7 @@ async def hybrid_search(
 ):
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         resolved_index_names: List[str] = []
         for requested_name in payload.index_names:
             try:
@@ -839,6 +853,11 @@ async def hybrid_search(
                 )
             except Exception:
                 resolved_name = requested_name
+            # Enforce per-KB read permission before searching. The permission layer
+            # maps ValueError (KB not found) -> 404 and PermissionError (no access) -> 403.
+            require_knowledge_base_read_permission(
+                index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
+            )
             resolved_index_names.append(resolved_name)
         result = ElasticSearchService.search_hybrid(
             index_names=resolved_index_names,
@@ -863,6 +882,9 @@ async def hybrid_search(
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
+        raise
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

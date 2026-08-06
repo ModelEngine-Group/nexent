@@ -21,6 +21,7 @@ from consts.const import (
     OAUTH_SSL_VERIFY,
     OAUTH_CA_BUNDLE,
     SUPABASE_JWT_SECRET,
+    JWT_EXPIRY_SECONDS,
 )
 from consts.exceptions import OAuthLinkError, OAuthProviderError
 from services.asset_owner_visibility import require_asset_owner_enabled
@@ -414,7 +415,6 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from services.tool_configuration_service import init_tool_list_for_tenant
-    from services.user_management_service import generate_tts_stt_4_admin
     from utils.auth_utils import calculate_expires_at, generate_session_jwt
 
     pending = parse_pending_oauth_token(pending_token)
@@ -491,8 +491,6 @@ async def complete_pending_oauth_account(
     if group_ids and not is_asset_owner_registration:
         add_user_to_groups(supabase_user_id, group_ids, supabase_user_id)
 
-    if user_role == "ADMIN":
-        await generate_tts_stt_4_admin(tenant_id, supabase_user_id)
     if not is_asset_owner_registration:
         await init_tool_list_for_tenant(tenant_id, supabase_user_id)
 
@@ -505,8 +503,10 @@ async def complete_pending_oauth_account(
         tenant_id=tenant_id,
     )
 
-    expiry_seconds = 3600
-    jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+    jwt_token = generate_session_jwt(
+        supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+    )
+    expiry_seconds = JWT_EXPIRY_SECONDS
     expires_at = calculate_expires_at(jwt_token)
 
     return {

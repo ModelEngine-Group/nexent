@@ -15,8 +15,12 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+from consts.const import PERMISSION_PRIVATE, PERMISSION_READ
 from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_SKILL_REPOSITORY,
+)
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
@@ -24,11 +28,17 @@ from database.skill_repository_db import (
     insert_skill_repository_record,
     list_skill_repository_by_skill_ids,
     list_skill_repository_summaries,
+    reset_skill_repository_status,
     update_skill_repository_by_id,
     update_skill_repository_status_by_id,
 )
 from database.skill_db import get_skill_by_name
 from database.user_tenant_db import get_user_tenant_by_user_id
+from services.notification_service import (
+    create_repository_pending_review_notification,
+    create_repository_review_notification,
+    deactivate_notifications,
+)
 from services.skill_service import SkillService
 
 logger = logging.getLogger("skill_repository_service")
@@ -80,6 +90,7 @@ _UPDATE_SNAPSHOT_FIELDS = (
     "skill_info_json",
     "skill_zip_base64",
     "status",
+    "content",
 )
 
 
@@ -92,9 +103,13 @@ def _serialize_created_at(create_time: Any) -> Optional[str]:
     return str(create_time)
 
 
-def _to_summary_item(record: Dict[str, Any]) -> Dict[str, Any]:
+def _to_summary_item(
+    record: Dict[str, Any],
+    *,
+    can_take_down: Optional[bool] = None,
+) -> Dict[str, Any]:
     """Map a DB record to a lightweight skill marketplace summary item."""
-    return {
+    item = {
         "id": record.get("skill_repository_id"),
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
@@ -109,7 +124,11 @@ def _to_summary_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "downloads": record.get("downloads") or 0,
         "created_at": record.get("created_at") or _serialize_created_at(record.get("create_time")),
         "updated_at": record.get("updated_at") or _serialize_created_at(record.get("update_time")),
+        "content": record.get("content"),
     }
+    if can_take_down is not None:
+        item["can_take_down"] = can_take_down
+    return item
 
 
 def _to_detail_item(
@@ -119,12 +138,16 @@ def _to_detail_item(
 ) -> Dict[str, Any]:
     """Map a DB record to a skill marketplace detail payload."""
     snapshot = _as_dict(record.get("skill_info_json"))
+    creator_id = str(snapshot.get("created_by") or "").strip()
+    creator = get_user_tenant_by_user_id(creator_id) if creator_id else None
+    author = str((creator or {}).get("user_email") or "").strip() or None
     detail = {
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
         "name": record.get("name"),
         "description": record.get("description"),
         "source": record.get("source"),
+        "author": author,
         "submitted_by": record.get("submitted_by"),
         "icon": record.get("icon"),
         "status": record.get("status"),
@@ -133,7 +156,7 @@ def _to_detail_item(
         "downloads": record.get("downloads") or 0,
         "created_at": _serialize_created_at(record.get("create_time")),
         "updated_at": _serialize_created_at(record.get("update_time")),
-        "content": snapshot.get("content"),
+        "content": record.get("content"),
         "config_schemas": _as_dict(snapshot.get("config_schemas")),
         "config_values": _as_dict(snapshot.get("config_values")),
         "tool_ids": _as_list(snapshot.get("tool_ids")),
@@ -158,18 +181,21 @@ def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "skill_repository_id": record.get("skill_repository_id"),
         "status": record.get("status"),
+        "content": record.get("content"),
         "create_time": _serialize_created_at(record.get("create_time")),
     }
 
 
 def _matches_ownership(skill: Dict[str, Any], user_id: str, ownership_filter: str) -> bool:
     """Return whether a skill belongs to the requested ownership bucket."""
-    created_by = skill.get("created_by")
-    if ownership_filter in (OWNERSHIP_ALL, OWNERSHIP_CREATED):
-        return created_by == user_id
+    if ownership_filter == OWNERSHIP_ALL:
+        return True
+    is_creator = str(skill.get("created_by")) == str(user_id)
+    if ownership_filter == OWNERSHIP_CREATED:
+        return is_creator
     if ownership_filter == OWNERSHIP_OTHERS:
-        return False
-    return created_by == user_id
+        return not is_creator
+    return True
 
 
 def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
@@ -190,11 +216,16 @@ def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
 
 def _count_skills_by_ownership(skills: List[Dict[str, Any]], user_id: str) -> Dict[str, int]:
     """Count editable skills in each ownership bucket."""
-    created = sum(1 for skill in skills if skill.get("created_by") == user_id)
+    created = sum(
+        1
+        for skill in skills
+        if str(skill.get("created_by")) == str(user_id)
+    )
+    others = len(skills) - created
     return {
-        OWNERSHIP_ALL: created,
+        OWNERSHIP_ALL: len(skills),
         OWNERSHIP_CREATED: created,
-        OWNERSHIP_OTHERS: 0,
+        OWNERSHIP_OTHERS: others,
     }
 
 
@@ -229,16 +260,26 @@ def _get_user_role(user_id: str) -> str:
     return str(user_tenant.get("user_role") or "USER")
 
 
-def _resolve_mine_skill_permission(
+def ensure_skill_repository_access(user_id: str) -> None:
+    """Reject ordinary users from the Skill Repository API surface."""
+    user_role = _get_user_role(user_id).upper()
+    if user_role == "USER":
+        raise ForbiddenError("User role USER is not authorized to access Skill Repository")
+
+
+def _can_publish_skill(
     *,
     skill: Dict[str, Any],
     user_id: str,
     user_role: str,
-) -> str:
-    """Resolve list-item permission for skill repository mine view."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return PERMISSION_EDIT
-    return PERMISSION_EDIT if skill.get("created_by") == user_id else PERMISSION_READ
+) -> bool:
+    """Return whether the user may submit the skill to the repository."""
+    if user_role == "ADMIN":
+        return True
+    return (
+        user_role == "DEV"
+        and str(skill.get("created_by")) == str(user_id)
+    )
 
 
 def _resolve_submitter_email(user_id: str) -> Optional[str]:
@@ -255,9 +296,11 @@ def _validate_create_listing_permission(
 ) -> None:
     """Only ADMIN, or DEV who created the skill, may share to marketplace."""
     user_role = _get_user_role(user_id)
-    if user_role == "ADMIN":
-        return
-    if user_role == "DEV" and skill_info.get("created_by") == user_id:
+    if _can_publish_skill(
+        skill=skill_info,
+        user_id=user_id,
+        user_role=user_role,
+    ):
         return
     raise ForbiddenError(
         f"User role {user_role} not authorized to create repository listing"
@@ -322,6 +365,8 @@ def _build_skill_info_json(skill_info: Dict[str, Any]) -> Dict[str, Any]:
         "config_schemas": skill_info.get("config_schemas"),
         "config_values": skill_info.get("config_values"),
         "source": skill_info.get("source"),
+        "group_ids": skill_info.get("group_ids") or [],
+        "ingroup_permission": skill_info.get("ingroup_permission"),
         "tool_ids": skill_info.get("tool_ids") or [],
         "created_by": skill_info.get("created_by"),
     }
@@ -377,13 +422,56 @@ def _build_repository_data_from_skill(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "category_id"):
+        for key in ("icon", "downloads", "category_id", "content"):
             if key in card_fields and card_fields[key] is not None:
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
             repository_data["tags"] = card_fields["tags"]
 
+    repository_data["content"] = (card_fields or {}).get("content") or ""
     return repository_data
+
+
+def _find_resubmittable_repository_record(
+    skill_id: int,
+    tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find an existing review draft that can be refreshed by a new submission."""
+    pending = get_skill_repository_by_skill_id(
+        skill_id,
+        publisher_tenant_id=tenant_id,
+        statuses=[STATUS_PENDING_REVIEW],
+    )
+    if pending:
+        return pending
+    return get_skill_repository_by_skill_id(
+        skill_id,
+        publisher_tenant_id=tenant_id,
+        statuses=[STATUS_REJECTED],
+    )
+
+
+def _reset_repository_peer_statuses(
+    *,
+    skill_repository_id: int,
+    skill_id: int,
+    status: str,
+    publisher_tenant_id: str,
+) -> None:
+    """Reset peer listings with the same status; also clear rejected when submitting."""
+    reset_skill_repository_status(
+        repository_id=skill_repository_id,
+        skill_id=skill_id,
+        status=status,
+        publisher_tenant_id=publisher_tenant_id,
+    )
+    if status == STATUS_PENDING_REVIEW:
+        reset_skill_repository_status(
+            repository_id=skill_repository_id,
+            skill_id=skill_id,
+            status=STATUS_REJECTED,
+            publisher_tenant_id=publisher_tenant_id,
+        )
 
 
 def _validate_create_payload(repository_data: Dict[str, Any]) -> None:
@@ -426,9 +514,12 @@ def create_skill_repository_listing_impl(
     )
     _validate_create_payload(repository_data)
 
-    existing = get_skill_repository_by_skill_id(
+    existing = _find_resubmittable_repository_record(
         skill_id,
-        publisher_tenant_id=tenant_id,
+        tenant_id,
+    )
+    was_pending_review = bool(
+        existing and existing.get("status") == STATUS_PENDING_REVIEW
     )
     if not existing:
         repository_id = insert_skill_repository_record(
@@ -454,12 +545,32 @@ def create_skill_repository_listing_impl(
             raise ValueError("Failed to update repository listing")
         is_updated = True
 
+    _reset_repository_peer_statuses(
+        skill_repository_id=repository_id,
+        skill_id=skill_id,
+        status=STATUS_PENDING_REVIEW,
+        publisher_tenant_id=tenant_id,
+    )
+
     record = get_skill_repository_by_id_and_publisher(
         repository_id,
         tenant_id,
     )
     if not record:
         raise ValueError("Failed to load repository listing after write")
+    if not was_pending_review:
+        create_repository_pending_review_notification(
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            tenant_id=tenant_id,
+            unique_id=repository_id,
+            details={
+                "name": record.get("name"),
+                "skill_repository_id": repository_id,
+                "skill_id": record.get("skill_id"),
+                "content": record.get("content") or "",
+            },
+            created_by=user_id,
+        )
     return _to_detail_item(record, is_updated=is_updated)
 
 
@@ -486,8 +597,11 @@ def _validate_publisher_status_transition(
 ) -> Optional[Dict[str, str]]:
     if record.get("publisher_tenant_id") != tenant_id:
         raise ForbiddenError("Not authorized to update this repository listing")
-    if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-        raise ForbiddenError("Not authorized to update this repository listing")
+    if user_role == "DEV":
+        snapshot = _as_dict(record.get("skill_info_json"))
+        owner_user_id = snapshot.get("created_by") or record.get("publisher_user_id")
+        if str(owner_user_id) != str(user_id):
+            raise ForbiddenError("Not authorized to update this repository listing")
     if user_role == "ADMIN" and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
         return None
     if transition not in _PUBLISHER_STATUS_TRANSITIONS:
@@ -540,6 +654,7 @@ def update_skill_repository_status_impl(
     status: str,
     user_id: str,
     tenant_id: str,
+    content: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update a skill repository listing status by primary key."""
     if status not in VALID_REPOSITORY_STATUSES:
@@ -587,9 +702,17 @@ def update_skill_repository_status_impl(
             else None
         ),
         submitted_by=submitted_by,
+        content=content,
     )
     if rows_affected == 0:
         raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
+
+    _reset_repository_peer_statuses(
+        skill_repository_id=skill_repository_id,
+        skill_id=record["skill_id"],
+        status=status,
+        publisher_tenant_id=tenant_id,
+    )
 
     updated = get_skill_repository_by_id_and_publisher(
         skill_repository_id,
@@ -597,7 +720,54 @@ def update_skill_repository_status_impl(
     )
     if not updated:
         raise ValueError("Failed to load repository listing after update")
+
+    _handle_review_status_notifications(
+        current_status=current_status,
+        new_status=status,
+        updated=updated,
+        skill_repository_id=skill_repository_id,
+        user_id=user_id,
+        content=content,
+    )
+
     return _to_summary_item(updated)
+
+
+def _handle_review_status_notifications(
+    *,
+    current_status: str,
+    new_status: str,
+    updated: Dict[str, Any],
+    skill_repository_id: int,
+    user_id: str,
+    content: Optional[str] = None,
+) -> None:
+    """Send review-result notification and deactivate pending-review notification."""
+    if current_status != new_status and new_status in (STATUS_SHARED, STATUS_REJECTED):
+        details: Dict[str, Any] = {
+            "name": updated.get("name"),
+            "skill_repository_id": skill_repository_id,
+            "skill_id": updated.get("skill_id"),
+        }
+        if content:
+            details["content"] = content
+        create_repository_review_notification(
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            review_status=new_status,
+            receiver_user_id=updated["publisher_user_id"],
+            details=details,
+            tenant_id=updated.get("publisher_tenant_id"),
+            unique_id=skill_repository_id,
+            created_by=user_id,
+        )
+
+    if current_status == STATUS_PENDING_REVIEW:
+        deactivate_notifications(
+            event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            unique_id=skill_repository_id,
+            updated_by=user_id,
+        )
 
 
 def _extract_duplicate_skill_name(error_message: str) -> Optional[str]:
@@ -669,6 +839,10 @@ def install_skill_from_repository_impl(
         )
     if not copy_skill_name:
         raise ValueError("Skill name is required")
+    if len(copy_skill_name) > _MAX_COPY_NAME_LENGTH:
+        raise ValueError(
+            f"Skill name must be at most {_MAX_COPY_NAME_LENGTH} characters"
+        )
 
     try:
         created_skill = SkillService(tenant_id=tenant_id).create_skill_from_zip_bytes(
@@ -677,6 +851,7 @@ def install_skill_from_repository_impl(
             source="repository",
             user_id=user_id,
             tenant_id=tenant_id,
+            ingroup_permission=PERMISSION_READ,
         )
     except SkillException as exc:
         message = str(exc)
@@ -755,10 +930,13 @@ def _to_mine_skill_item(
         "description": skill.get("description"),
         "source": skill.get("source"),
         "tags": skill.get("tags") or [],
+        "group_ids": skill.get("group_ids") or [],
+        "ingroup_permission": skill.get("ingroup_permission"),
         "created_by": skill.get("created_by"),
         "created_at": skill.get("create_time"),
         "updated_at": skill.get("update_time"),
-        "permission": _resolve_mine_skill_permission(
+        "permission": skill.get("permission"),
+        "can_publish": _can_publish_skill(
             skill=skill,
             user_id=user_id,
             user_role=user_role,
@@ -789,7 +967,10 @@ def list_my_editable_skills_impl(
     safe_page_size = max(int(page_size or 10), 1)
 
     user_role = _get_user_role(user_id)
-    skills = SkillService(tenant_id=tenant_id).list_skills(tenant_id=tenant_id)
+    skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
     counts = _count_skills_by_ownership(skills, user_id)
 
     filtered_skills = [
@@ -835,9 +1016,25 @@ def list_my_editable_skills_impl(
     }
 
 
+def count_my_editable_skills_impl(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Count visible skills without loading content, tool relations, or YAML files."""
+    skills = SkillService(
+        tenant_id=tenant_id
+    ).list_visible_skill_permission_summaries(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return {"counts": _count_skills_by_ownership(skills, user_id)}
+
+
 def list_skill_repository_listings_impl(
     tenant_id: str,
     *,
+    user_id: str,
     status: Optional[str] = None,
     skill_id: Optional[int] = None,
     category_id: Optional[int] = None,
@@ -863,8 +1060,24 @@ def list_skill_repository_listings_impl(
         search=search,
         sort_by_update_time=sort_by_update_time,
     )
+    user_role = _get_user_role(user_id)
     return {
-        "items": [_to_summary_item(record) for record in result.get("items", [])],
+        "items": [
+            _to_summary_item(
+                record,
+                can_take_down=(
+                    record.get("status") == STATUS_SHARED
+                    and (
+                        user_role in ("ADMIN", "SU")
+                        or (
+                            user_role == "DEV"
+                            and str(record.get("publisher_user_id")) == str(user_id)
+                        )
+                    )
+                ),
+            )
+            for record in result.get("items", [])
+        ],
         "pagination": result.get("pagination"),
     }
 

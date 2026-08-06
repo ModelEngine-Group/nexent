@@ -11,6 +11,7 @@ Main features include:
 """
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -21,7 +22,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding, BaseEmbedding
+from nexent.core.models.embedding_model import (
+    BaseEmbedding,
+    DashScopeMultimodalEmbedding,
+    JinaEmbedding,
+    OpenAICompatibleEmbedding,
+    SiliconflowMultimodalEmbedding,
+)
 from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
@@ -240,6 +247,8 @@ ALLOWED_CHUNK_FIELDS = {
 # Configure logging
 logger = logging.getLogger("vectordatabase_service")
 
+_QUOTA_LIMIT_UNSET = object()
+
 
 def get_vector_db_core(
     db_type: Optional[VectorDatabaseType] = None, tenant_id: Optional[str] = None,
@@ -353,6 +362,7 @@ def _build_model_config(model: dict) -> dict:
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
+    model_type = model.get("model_type", "embedding")
     common_kwargs = {
         "api_key": model_config.get("api_key", ""),
         "base_url": model_config.get("base_url", ""),
@@ -360,11 +370,22 @@ def _create_embedding_model(model: dict) -> Any:
         "embedding_dim": model_config.get("max_tokens", 1024),
         "ssl_verify": model_config.get("ssl_verify", True),
     }
-    if model.get("model_type", "embedding") == "multi_embedding":
+
+    if model_type == "multi_embedding":
         model_factory = model.get("model_factory", "").lower()
         if model_factory == "dashscope":
             return DashScopeMultimodalEmbedding(**common_kwargs)
+        if model_factory == "silicon":
+            return SiliconflowMultimodalEmbedding(**common_kwargs)
         return JinaEmbedding(**common_kwargs)
+
+    if model_type != "embedding":
+        raise ValueError(
+            f"Invalid model_type '{model_type}' for model '{common_kwargs['model_name']}'. "
+            f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
+            f"Please check the model configuration in the model management page."
+        )
+
     return OpenAICompatibleEmbedding(**common_kwargs)
 
 def get_embedding_model(
@@ -437,33 +458,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     try:
         model = get_model_by_model_id(model_id, tenant_id)
         if model and model.get("model_type") in ["embedding", "multi_embedding"]:
-            model_config = {
-                "model_repo": model.get("model_repo", ""),
-                "model_name": model["model_name"],
-                "api_key": model.get("api_key", ""),
-                "base_url": model.get("base_url", ""),
-                "model_type": model.get("model_type", "embedding"),
-                "max_tokens": model.get("max_tokens", 1024),
-                "ssl_verify": model.get("ssl_verify", True),
-            }
-            model_type = model.get("model_type", "embedding")
-            if model_type == "multi_embedding":
-                embedding_model = JinaEmbedding(
-                    api_key=model_config.get("api_key", ""),
-                    base_url=model_config.get("base_url", ""),
-                    model_name=get_model_name_from_config(model_config) or "",
-                    embedding_dim=model_config.get("max_tokens", 1024),
-                    ssl_verify=model_config.get("ssl_verify", True),
-                )
-            else:
-                embedding_model = OpenAICompatibleEmbedding(
-                    api_key=model_config.get("api_key", ""),
-                    base_url=model_config.get("base_url", ""),
-                    model_name=get_model_name_from_config(model_config) or "",
-                    embedding_dim=model_config.get("max_tokens", 1024),
-                    ssl_verify=model_config.get("ssl_verify", True),
-                )
-            return embedding_model, model.get("model_id")
+            return _create_embedding_model(model), model.get("model_id")
         else:
             logger.warning(f"Model with id {model_id} not found or is not an embedding model")
     except Exception as e:
@@ -566,6 +561,9 @@ class ElasticSearchService:
             return PERMISSION_EDIT
 
         if role in {"USER", "DEV"}:
+            if str(record.get("created_by")) == str(user_id):
+                return ElasticSearchService.CREATOR_PERMISSION
+
             kb_group_ids_str = record.get("group_ids")
             kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
             user_group_ids = query_group_ids_by_user(user_id)
@@ -584,9 +582,6 @@ class ElasticSearchService:
             )
             if not has_group_intersection:
                 return None
-
-            if str(record.get("created_by")) == str(user_id):
-                return ElasticSearchService.CREATOR_PERMISSION
 
             ingroup_permission = record.get("ingroup_permission") or PERMISSION_READ
             if ingroup_permission == PERMISSION_EDIT:
@@ -613,6 +608,62 @@ class ElasticSearchService:
         if permission not in {PERMISSION_EDIT, ElasticSearchService.CREATOR_PERMISSION}:
             raise PermissionError("No permission to modify this knowledge base")
         return permission
+
+    @staticmethod
+    def require_knowledge_base_read_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> str:
+        """Raise when the current user cannot read the knowledge base.
+
+        Accepts any non-None permission level (READ_ONLY, EDIT, or CREATOR).
+        """
+        permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=index_name,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if permission is None:
+            raise PermissionError("No permission to access this knowledge base")
+        return permission
+
+    @staticmethod
+    def filter_accessible_indices(
+        index_names: List[str],
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return only the indices the user has at least read access to.
+
+        Indices whose knowledge base record cannot be found, or whose permission
+        check fails for any reason, are treated as inaccessible and dropped.
+        Order of the accessible subset is preserved.
+        """
+        accessible: List[str] = []
+        for index_name in index_names:
+            try:
+                permission = ElasticSearchService.resolve_knowledge_base_permission(
+                    index_name=index_name,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except ValueError:
+                # Knowledge base record not found in the DB - treat as inaccessible.
+                logger.warning(
+                    "Knowledge base '%s' not found during permission check, skipping",
+                    index_name,
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    "Permission check failed for knowledge base '%s': %s", index_name, e
+                )
+                continue
+
+            if permission is not None:
+                accessible.append(index_name)
+        return accessible
 
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
@@ -776,9 +827,9 @@ class ElasticSearchService:
             tenant_id: Optional[str],
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
-            embedding_model_name: Optional[str] = None,
-            is_multimodal: Optional[bool] = None,
+            embedding_model_id: Optional[int] = None,
             preserve_source_file: Optional[bool] = None,
+            quota_limit_bytes: Optional[int] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -796,8 +847,7 @@ class ElasticSearchService:
             tenant_id: Tenant ID
             ingroup_permission: Permission level (optional)
             group_ids: List of group IDs (optional)
-            embedding_model_name: Specific embedding model name to use (optional).
-                                   If provided, will use this model instead of tenant default.
+            embedding_model_id: Unique ID of the selected embedding model.
             preserve_source_file: Whether to preserve uploaded source documents after
                                    vectorization (optional; defaults to True when omitted).
 
@@ -805,24 +855,19 @@ class ElasticSearchService:
         with an explicit index_name.
         """
         try:
-            # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            selected_model_type = None
-            if is_multimodal is True:
-                selected_model_type = "multi_embedding"
-            elif is_multimodal is False and embedding_model_name:
-                selected_model_type = "embedding"
+            if embedding_model_id is None:
+                raise ValueError("embedding_model_id is required")
 
-            embedding_model, model_id = get_embedding_model(
-                tenant_id,
-                embedding_model_name,
-                selected_model_type
-            )
+            model = get_model_by_model_id(embedding_model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Embedding model with id {embedding_model_id} not found")
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model with id {embedding_model_id} is not an embedding model"
+                )
 
-            # Determine the embedding model name to save: use user-provided name if available,
-            # otherwise use the model's display name
-            saved_embedding_model_name = embedding_model_name
-            if not saved_embedding_model_name and embedding_model:
-                saved_embedding_model_name = embedding_model.model
+            embedding_model = _create_embedding_model(model)
+            saved_embedding_model_name = model.get("display_name") or model.get("model_name")
 
             # Create knowledge record first to obtain knowledge_id and generated index_name
             knowledge_data = {
@@ -831,7 +876,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
-                "embedding_model_id": model_id,
+                "embedding_model_id": embedding_model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -841,6 +886,8 @@ class ElasticSearchService:
                 knowledge_data["group_ids"] = group_ids
             if preserve_source_file is not None:
                 knowledge_data["preserve_source_file"] = preserve_source_file
+            if quota_limit_bytes is not None:
+                knowledge_data["quota_limit_bytes"] = quota_limit_bytes
 
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
@@ -858,9 +905,13 @@ class ElasticSearchService:
                 "status": "success",
                 "message": f"Index {index_name} created successfully",
                 "id": index_name,
+                "embedding_model_name": saved_embedding_model_name,
+                "model_type": model.get("model_type"),
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except ValueError:
+            raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
 
@@ -872,6 +923,7 @@ class ElasticSearchService:
             group_ids: Optional[List[int]] = None,
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
+            quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -883,6 +935,7 @@ class ElasticSearchService:
             group_ids: List of group IDs to assign (optional)
             tenant_id: ID of the tenant (optional, for validation)
             user_id: ID of the user making the update
+            quota_limit_bytes: New soft quota in bytes; None removes the quota
 
         Returns:
             bool: Whether the update was successful
@@ -911,6 +964,9 @@ class ElasticSearchService:
         if group_ids is not None:
             # Convert list to string for database storage
             update_data["group_ids"] = convert_list_to_string(group_ids)
+
+        if quota_limit_bytes is not _QUOTA_LIMIT_UNSET:
+            update_data["quota_limit_bytes"] = quota_limit_bytes
 
         # Call database update function
         result = update_knowledge_record(update_data)
@@ -1134,39 +1190,39 @@ class ElasticSearchService:
                 kb_ingroup_permission = record.get(
                     "ingroup_permission") or PERMISSION_READ
 
-                # Check if user belongs to any of the knowledgebase groups
-                # Compatibility logic for legacy data:
-                # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
-                #   consider them intersecting (backward compatibility)
-                # - If either side has groups but they don't intersect, no intersection
-                kb_groups_empty = kb_group_ids_str is None or (isinstance(
-                    kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
-                user_groups_empty = len(user_group_ids) == 0
-
-                if kb_groups_empty and user_groups_empty:
-                    # Both are empty/None - consider intersecting for backward compatibility
-                    has_group_intersection = True
+                if str(kb_created_by) == str(user_id):
+                    permission = "CREATOR"
                 else:
-                    # Normal intersection check
-                    has_group_intersection = bool(
-                        set(user_group_ids) & set(kb_group_ids))
+                    # Check if user belongs to any of the knowledgebase groups
+                    # Compatibility logic for legacy data:
+                    # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
+                    #   consider them intersecting (backward compatibility)
+                    # - If either side has groups but they don't intersect, no intersection
+                    kb_groups_empty = kb_group_ids_str is None or (isinstance(
+                        kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
+                    user_groups_empty = len(user_group_ids) == 0
 
-                if has_group_intersection:
-                    # Determine permission level
-                    permission = PERMISSION_READ  # Default
+                    if kb_groups_empty and user_groups_empty:
+                        # Both are empty/None - consider intersecting for backward compatibility
+                        has_group_intersection = True
+                    else:
+                        # Normal intersection check
+                        has_group_intersection = bool(
+                            set(user_group_ids) & set(kb_group_ids))
 
-                    # User is creator: creator permission
-                    if kb_created_by == user_id:
-                        permission = "CREATOR"
-                    # Group permission allows editing
-                    elif kb_ingroup_permission == PERMISSION_EDIT:
-                        permission = PERMISSION_EDIT
-                    # Group permission is read-only: already set
-                    elif kb_ingroup_permission == PERMISSION_READ:
-                        permission = PERMISSION_READ
-                    # Group permission is private: not visible
-                    elif kb_ingroup_permission == "PRIVATE":
-                        permission = None
+                    if has_group_intersection:
+                        # Determine permission level
+                        permission = PERMISSION_READ  # Default
+
+                        # Group permission allows editing
+                        if kb_ingroup_permission == PERMISSION_EDIT:
+                            permission = PERMISSION_EDIT
+                        # Group permission is read-only: already set
+                        elif kb_ingroup_permission == PERMISSION_READ:
+                            permission = PERMISSION_READ
+                        # Group permission is private: not visible
+                        elif kb_ingroup_permission == "PRIVATE":
+                            permission = None
 
             # Add to visible list if permission is granted
             if permission:
@@ -1199,6 +1255,10 @@ class ElasticSearchService:
         response = {
             "indices": indices,
             "count": len(indices),
+            "index_permissions": {
+                record["index_name"]: record["permission"]
+                for record in visible_knowledgebases
+            },
         }
 
         if include_stats:
@@ -1380,7 +1440,7 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
-                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "embedding" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
                     key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)

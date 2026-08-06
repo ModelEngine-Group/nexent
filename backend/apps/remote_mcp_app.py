@@ -170,10 +170,15 @@ async def add_mcp_service_endpoint(
             authorization_token=payload.authorization_token,
             custom_headers=payload.custom_headers,
             container_config=payload.container_config,
+            container_port=payload.container_port,
             registry_json=payload.registry_json,
             config_json=payload.config_json,
             market_id=payload.market_id,
             enabled=payload.enabled if payload.enabled is not None else False,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
+            skip_health_check=payload.skip_health_check if payload.skip_health_check is not None else False,
         )
 
         return JSONResponse(
@@ -186,7 +191,10 @@ async def add_mcp_service_endpoint(
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="MCP name already exists")
     except MCPConnectionError as e:
         logger.error(f"Failed to add MCP service: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="MCP connection failed")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(e) or "MCP connection failed"
+        )
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -222,6 +230,9 @@ async def add_container_mcp_service_endpoint(
             market_id=payload.market_id,
             port=payload.port,
             mcp_config=payload.mcp_config,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -254,7 +265,7 @@ async def add_container_mcp_service_endpoint(
         logger.error(f"MCP connection failed when adding container service: {e}")
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="MCP connection failed"
+            detail=str(e) or "MCP connection failed"
         )
     except Exception as e:
         logger.error(f"Failed to add container MCP service: {e}")
@@ -293,6 +304,9 @@ async def update_mcp_service_endpoint(
             config_json=payload.config_json,
             tags=payload.tags,
             market_id=payload.market_id,
+            group_ids=payload.group_ids,
+            ingroup_permission=payload.ingroup_permission,
+            shared_fields=payload.shared_fields,
         )
 
         return JSONResponse(
@@ -302,6 +316,8 @@ async def update_mcp_service_endpoint(
 
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpNameConflictError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -833,6 +849,12 @@ if ENABLE_UPLOAD_IMAGE:
             None, description="Name for the MCP service (auto-generated if not provided)"),
         env_vars: Optional[str] = Form(
             None, description="Environment variables as JSON string"),
+        group_ids: Optional[str] = Form(
+            None, description="Comma-separated group IDs that can access this MCP"),
+        ingroup_permission: Optional[str] = Form(
+            None, description="Permission level: EDIT, READ_ONLY, PRIVATE"),
+        shared_fields: Optional[str] = Form(
+            None, description="JSON string of field-level sharing flags"),
         tenant_id: Optional[str] = Form(
             None, description="Tenant ID for filtering (uses auth if not provided)"),
         authorization: Optional[str] = Header(None),
@@ -858,6 +880,9 @@ if ENABLE_UPLOAD_IMAGE:
                 port=port,
                 service_name=service_name,
                 env_vars=env_vars,
+                group_ids=group_ids,
+                ingroup_permission=ingroup_permission,
+                shared_fields=json.loads(shared_fields) if shared_fields else None,
             )
 
             return JSONResponse(status_code=HTTPStatus.OK, content=result)
