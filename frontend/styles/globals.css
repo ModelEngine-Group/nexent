@@ -4,7 +4,27 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@supports not (color: oklch(50% 0.1 180)) {
+  .shimmer:not(.shimmer-bg) {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
+}
+
 @theme {
+  /* Keep achromatic palette values compatible with Chrome < 111. */
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
+  --color-neutral-950: #0a0a0a;
+
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));

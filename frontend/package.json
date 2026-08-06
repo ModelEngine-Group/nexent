@@ -78,6 +78,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@csstools/postcss-oklab-function": "^5.0.7",
     "@tailwindcss/postcss": "^4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "22.15.16",

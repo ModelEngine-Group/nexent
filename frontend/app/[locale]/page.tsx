@@ -30,7 +30,10 @@ export default function Homepage() {
  * Navigate to a route with permission pre-check
  * Returns true if navigation is allowed, false if permission is denied
  */
-  const navigateWithPermissionCheck = (route: string): boolean => {
+  const navigateWithPermissionCheck = (
+    route: string,
+    navigationPath = route
+  ): boolean => {
     // Check authentication first
     if (!isAuthenticated && !isSpeedMode) {
       openAuthPromptModal();
@@ -44,11 +47,11 @@ export default function Homepage() {
     }
 
     // User has permission, navigate
-    router.push(route);
+    router.push(navigationPath);
     return true;
   };
 
-  const navigateToChat = () => navigateWithPermissionCheck("/chat");
+  const navigateToChat = () => navigateWithPermissionCheck("/chat", "/newchat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
   const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
   const canShowQuickAction = (route: string) =>
