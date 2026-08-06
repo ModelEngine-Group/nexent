@@ -10,6 +10,10 @@ import {
   ModelSource,
   CapacitySuggestion,
   CapacityCoverage,
+  ModelCatalogProviderInfo,
+  ModelCatalogModelEntry,
+  ModelCatalogProfile,
+  ModelCatalogFullPayload,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -1322,6 +1326,126 @@ export const modelService = {
         "Failed to get provider selected list for tenant",
         500
       );
+    }
+  },
+
+  // ================================================================
+  // Preset Model Catalog (预置模型目录) - readonly queries.
+  // Single-call fetch is preferred: getFullCatalog() returns every
+  // provider + model in one payload.  All filtering / profile lookups
+  // happen client-side, reducing network round-trips on the Add-Model
+  // page.  The older 3-endpoint methods are preserved for backwards
+  // compatibility but are no longer used internally.
+  // ================================================================
+
+  async getFullCatalog(): Promise<{
+    catalog: ModelCatalogFullPayload;
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.catalogAll, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      const data = result.data || {
+        version: "0.0.0",
+        metadata: {},
+        providers: [],
+      };
+      return {
+        catalog: data as ModelCatalogFullPayload,
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn("Model catalog full query failed:", error);
+      return {
+        catalog: { version: "0.0.0", metadata: {}, providers: [] },
+        catalogAvailable: false,
+      };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and filter client-side. */
+  async listCatalogProviders(): Promise<{
+    providers: ModelCatalogProviderInfo[];
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.catalogProviders, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      return {
+        providers: (result.data || []) as ModelCatalogProviderInfo[],
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn("Model catalog providers query failed:", error);
+      return { providers: [], catalogAvailable: false };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and filter client-side. */
+  async listCatalogModels(
+    provider: string,
+    modelType?: ModelType
+  ): Promise<{
+    models: ModelCatalogModelEntry[];
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const url = API_ENDPOINTS.model.catalogProviderModels(
+        provider,
+        modelType
+      );
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      return {
+        models: (result.data || []) as ModelCatalogModelEntry[],
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn(
+        `Model catalog models query failed for provider=${provider}:`,
+        error
+      );
+      return { models: [], catalogAvailable: false };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and look up profile client-side. */
+  async getCatalogModelProfile(
+    provider: string,
+    modelName: string
+  ): Promise<{
+    profile: ModelCatalogProfile | null;
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const url = API_ENDPOINTS.model.catalogModelProfile(provider, modelName);
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      if (response.status === 404) {
+        return { profile: null, catalogAvailable: true };
+      }
+      const result = await response.json();
+      return {
+        profile: (result.data || null) as ModelCatalogProfile | null,
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn(
+        `Model catalog profile query failed for ${provider}/${modelName}:`,
+        error
+      );
+      return { profile: null, catalogAvailable: false };
     }
   },
 };

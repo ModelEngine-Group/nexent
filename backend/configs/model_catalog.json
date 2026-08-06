@@ -1,0 +1,431 @@
+{
+  "version": "1.0.0",
+  "metadata": {
+    "updated_at": "2026-08-05",
+    "description": "Nexent 预置模型目录 - 自动填充模型配置，减少用户手动输入"
+  },
+  "providers": {
+    "silicon": {
+      "display_name": "SiliconFlow",
+      "base_url": "https://api.siliconflow.cn/v1/",
+      "models": {
+        "Qwen/Qwen3-8B": {
+          "model_type": "llm",
+          "display_name": "千问3-8B",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3-8b@1",
+          "timeout_seconds": 120,
+          "concurrency_limit": 10
+        },
+        "Qwen/Qwen3-72B": {
+          "model_type": "llm",
+          "display_name": "千问3-72B",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3-72b@1"
+        },
+        "Qwen/Qwen2.5-72B-Instruct": {
+          "model_type": "llm",
+          "display_name": "千问2.5-72B-Instruct",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen2.5-72b-instruct@1"
+        },
+        "deepseek-ai/DeepSeek-V3": {
+          "model_type": "llm",
+          "display_name": "DeepSeek-V3",
+          "context_window_tokens": 65536,
+          "max_input_tokens": 63488,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "deepseek/deepseek-v3@1"
+        },
+        "deepseek-ai/DeepSeek-R1": {
+          "model_type": "llm",
+          "display_name": "DeepSeek-R1",
+          "context_window_tokens": 65536,
+          "max_input_tokens": 63488,
+          "max_output_tokens": 32768,
+          "default_output_reserve_tokens": 8192,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "deepseek/deepseek-r1@1"
+        },
+        "meta-llama/Llama-3.1-70B-Instruct": {
+          "model_type": "llm",
+          "display_name": "Llama-3.1-70B-Instruct",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "llama3",
+          "capability_profile_version": "meta/llama-3.1-70b-instruct@1"
+        },
+        "mistralai/Mixtral-8x22B-Instruct-v0.1": {
+          "model_type": "llm",
+          "display_name": "Mixtral-8x22B-Instruct",
+          "context_window_tokens": 65536,
+          "max_input_tokens": 63488,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "llama",
+          "capability_profile_version": "mistral/mixtral-8x22b-instruct@1"
+        },
+        "THUDM/glm-4-9b-chat": {
+          "model_type": "llm",
+          "display_name": "GLM-4-9B-Chat",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "chatglm",
+          "capability_profile_version": "thudm/glm-4-9b-chat@1"
+        },
+        "Qwen/Qwen3-VL-8B": {
+          "model_type": "vlm",
+          "display_name": "千问3-VL-8B",
+          "context_window_tokens": 32768,
+          "max_input_tokens": 30720,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3-vl-8b@1"
+        },
+        "Qwen/Qwen3-VL-72B": {
+          "model_type": "vlm2",
+          "display_name": "千问3-VL-72B",
+          "context_window_tokens": 32768,
+          "max_input_tokens": 30720,
+          "max_output_tokens": 8192,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3-vl-72b@1"
+        },
+        "deepseek-ai/deepseek-vl2": {
+          "model_type": "vlm",
+          "display_name": "DeepSeek-VL2",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "deepseek/deepseek-vl2@1"
+        },
+        "THUDM/glm-4v-9b": {
+          "model_type": "vlm3",
+          "display_name": "GLM-4V-9B",
+          "context_window_tokens": 32768,
+          "max_input_tokens": 30720,
+          "max_output_tokens": 4096,
+          "tokenizer_family": "chatglm",
+          "capability_profile_version": "thudm/glm-4v-9b@1"
+        },
+        "BAAI/bge-m3": {
+          "model_type": "embedding",
+          "display_name": "BAAI-bge-m3",
+          "dimension": 1024,
+          "expected_chunk_size": 1024,
+          "maximum_chunk_size": 1536,
+          "chunk_batch": 10,
+          "base_url_override": "https://api.siliconflow.cn/v1/embeddings"
+        },
+        "BAAI/bge-large-zh-v1.5": {
+          "model_type": "embedding",
+          "display_name": "BAAI-bge-large-zh-v1.5",
+          "dimension": 1024,
+          "expected_chunk_size": 512,
+          "maximum_chunk_size": 1024,
+          "chunk_batch": 10,
+          "base_url_override": "https://api.siliconflow.cn/v1/embeddings"
+        },
+        "netease-youdao/bce-embedding-base_v1": {
+          "model_type": "multi_embedding",
+          "display_name": "BCE多模态Embedding",
+          "dimension": 768,
+          "expected_chunk_size": 1024,
+          "maximum_chunk_size": 1536,
+          "chunk_batch": 10,
+          "base_url_override": "https://api.siliconflow.cn/v1/embeddings"
+        },
+        "BAAI/bge-reranker-v2-m3": {
+          "model_type": "rerank",
+          "display_name": "BGE-Reranker-v2-m3",
+          "base_url_override": "https://api.siliconflow.cn/v1/rerank",
+          "max_tokens": 8192
+        },
+        "netease-youdao/bce-reranker-base_v1": {
+          "model_type": "rerank",
+          "display_name": "BCE-Reranker",
+          "base_url_override": "https://api.siliconflow.cn/v1/rerank"
+        }
+      }
+    },
+    "dashscope": {
+      "display_name": "阿里灵积 DashScope",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+      "models": {
+        "qwen-plus": {
+          "model_type": "llm",
+          "display_name": "千问Plus",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 126976,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-plus@1"
+        },
+        "qwen-turbo": {
+          "model_type": "llm",
+          "display_name": "千问Turbo",
+          "context_window_tokens": 2000000,
+          "max_input_tokens": 1995776,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-turbo@1"
+        },
+        "qwen-max": {
+          "model_type": "llm",
+          "display_name": "千问Max",
+          "context_window_tokens": 32768,
+          "max_input_tokens": 30720,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-max@1"
+        },
+        "qwen-long": {
+          "model_type": "llm",
+          "display_name": "千问Long",
+          "context_window_tokens": 10000000,
+          "max_input_tokens": 9990000,
+          "max_output_tokens": 20000,
+          "default_output_reserve_tokens": 4096,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-long@1"
+        },
+        "qwen-vl-max": {
+          "model_type": "vlm",
+          "display_name": "千问VL-Max",
+          "context_window_tokens": 32768,
+          "max_input_tokens": 30720,
+          "max_output_tokens": 2048,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-vl-max@1"
+        },
+        "qwen-vl-plus": {
+          "model_type": "vlm2",
+          "display_name": "千问VL-Plus",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 4096,
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen-vl-plus@1"
+        },
+        "text-embedding-v3": {
+          "model_type": "embedding",
+          "display_name": "Text-Embedding-v3",
+          "dimension": 1024,
+          "expected_chunk_size": 2048,
+          "maximum_chunk_size": 8192,
+          "chunk_batch": 10,
+          "base_url_override": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+        },
+        "text-embedding-v2": {
+          "model_type": "embedding",
+          "display_name": "Text-Embedding-v2",
+          "dimension": 1536,
+          "expected_chunk_size": 1024,
+          "maximum_chunk_size": 2048,
+          "chunk_batch": 10,
+          "base_url_override": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+        },
+        "paraformer-realtime-v2": {
+          "model_type": "stt",
+          "display_name": "Paraformer实时语音识别",
+          "base_url_override": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+          "model_factory_override": "DashScope-STT"
+        },
+        "cosyvoice-v1": {
+          "model_type": "tts",
+          "display_name": "CosyVoice语音合成",
+          "model_factory_override": "DashScope-TTS"
+        }
+      }
+    },
+    "tokenpony": {
+      "display_name": "TokenPony",
+      "base_url": "https://api.tokenpony.cn/v1/",
+      "models": {
+        "grok-3": {
+          "model_type": "llm",
+          "display_name": "Grok-3",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "grok",
+          "capability_profile_version": "xai/grok-3@1"
+        },
+        "grok-4": {
+          "model_type": "llm",
+          "display_name": "Grok-4",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 16384,
+          "default_output_reserve_tokens": 4096,
+          "tokenizer_family": "grok",
+          "capability_profile_version": "xai/grok-4@1"
+        }
+      }
+    },
+    "openai": {
+      "display_name": "OpenAI",
+      "base_url": "https://api.openai.com/v1/",
+      "models": {
+        "gpt-4o": {
+          "model_type": "vlm",
+          "display_name": "GPT-4o",
+          "context_window_tokens": 128000,
+          "max_input_tokens": 126000,
+          "max_output_tokens": 16384,
+          "default_output_reserve_tokens": 4096,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-4o@1"
+        },
+        "gpt-4o-mini": {
+          "model_type": "vlm2",
+          "display_name": "GPT-4o-Mini",
+          "context_window_tokens": 128000,
+          "max_input_tokens": 126000,
+          "max_output_tokens": 16384,
+          "default_output_reserve_tokens": 4096,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-4o-mini@1"
+        },
+        "gpt-4.1": {
+          "model_type": "llm",
+          "display_name": "GPT-4.1",
+          "context_window_tokens": 1047576,
+          "max_input_tokens": 1045000,
+          "max_output_tokens": 32768,
+          "default_output_reserve_tokens": 8192,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-4.1@1"
+        },
+        "gpt-4.1-mini": {
+          "model_type": "llm",
+          "display_name": "GPT-4.1-Mini",
+          "context_window_tokens": 1047576,
+          "max_input_tokens": 1045000,
+          "max_output_tokens": 65536,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-4.1-mini@1"
+        },
+        "o3": {
+          "model_type": "llm",
+          "display_name": "o3",
+          "context_window_tokens": 200000,
+          "max_input_tokens": 185000,
+          "max_output_tokens": 100000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/o3@1"
+        },
+        "text-embedding-3-large": {
+          "model_type": "embedding",
+          "display_name": "Text-Embedding-3-Large",
+          "dimension": 3072,
+          "expected_chunk_size": 2048,
+          "maximum_chunk_size": 4096,
+          "chunk_batch": 16,
+          "base_url_override": "https://api.openai.com/v1/embeddings"
+        },
+        "text-embedding-3-small": {
+          "model_type": "embedding",
+          "display_name": "Text-Embedding-3-Small",
+          "dimension": 1536,
+          "expected_chunk_size": 2048,
+          "maximum_chunk_size": 4096,
+          "chunk_batch": 32,
+          "base_url_override": "https://api.openai.com/v1/embeddings"
+        }
+      }
+    },
+    "volcengine": {
+      "display_name": "火山引擎",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3/",
+      "models": {
+        "speech_istreaming": {
+          "model_type": "stt",
+          "display_name": "火山流式语音识别",
+          "model_factory_override": "VolcEngine-STT",
+          "requires_appid": true,
+          "requires_access_token": true
+        },
+        "speech_tts": {
+          "model_type": "tts",
+          "display_name": "火山语音合成",
+          "model_factory_override": "VolcEngine-TTS",
+          "requires_appid": true,
+          "requires_access_token": true
+        }
+      }
+    },
+    "modelengine": {
+      "display_name": "ModelEngine",
+      "base_url": "https://api.modelengine-ai.net/v1/",
+      "models": {
+        "qwen3-8b": {
+          "model_type": "llm",
+          "display_name": "Qwen3-8B (ModelEngine)",
+          "context_window_tokens": 131072,
+          "max_input_tokens": 129024,
+          "max_output_tokens": 8192,
+          "default_output_reserve_tokens": 2048,
+          "tokenizer_family": "qwen"
+        }
+      }
+    },
+    "deepseek": {
+      "display_name": "DeepSeek 官方平台",
+      "base_url": "https://api.deepseek.com/v1/",
+      "models": {
+        "deepseek-v4-pro": {
+          "model_type": "llm",
+          "display_name": "DeepSeek-V4-Pro (旗舰推理)",
+          "context_window_tokens": 1000000,
+          "max_input_tokens": 868928,
+          "max_output_tokens": 131072,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "deepseek/v4-pro@1",
+          "timeout_seconds": 300,
+          "concurrency_limit": 10
+        },
+        "deepseek-v4-flash": {
+          "model_type": "llm",
+          "display_name": "DeepSeek-V4-Flash (高效低成本)",
+          "context_window_tokens": 1000000,
+          "max_input_tokens": 606784,
+          "max_output_tokens": 393216,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "deepseek/v4-flash@1",
+          "timeout_seconds": 240,
+          "concurrency_limit": 16
+        }
+      }
+    }
+  }
+}

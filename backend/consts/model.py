@@ -1694,3 +1694,43 @@ class CommunityStatusUpdateRequest(BaseModel):
 class DeleteMcpServiceRequest(BaseModel):
     """Request model for deleting an MCP service"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")
+
+
+# =============================================================================
+# Model Catalog (预置模型目录) 相关数据模型
+# =============================================================================
+
+
+class ModelCatalogProfile(BaseModel):
+    """从预置模型目录中读取的单个模型的完整配置描述。
+
+    字段设计与 ModelRecord 表列一一对应，但去掉了 api_key（用户输入）、
+    tenant_id（多租户隔离）、connect_status（运行时状态）等运行时字段。
+    """
+    model_type: str = Field(..., description="Model type: llm / embedding / multi_embedding / rerank / vlm / vlm2 / vlm3 / stt / tts")
+    display_name: Optional[str] = Field(None, description="UI display name (fallback to model_name)")
+    base_url: Optional[str] = Field(None, description="Provider-level base_url or model-level override")
+    model_factory: Optional[str] = Field(None, description="Model factory / compatibility format, e.g. OpenAI-API-Compatible, VolcEngine-STT")
+    context_window_tokens: Optional[int] = Field(None, gt=0, description="Combined input+output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, gt=0, description="Maximum input tokens allowed by the provider")
+    max_output_tokens: Optional[int] = Field(None, gt=0, description="Maximum output / completion tokens")
+    default_output_reserve_tokens: Optional[int] = Field(None, gt=0, description="Default output token reserve before input budget calc")
+    tokenizer_family: Optional[str] = Field(None, description="Tokenizer family identifier mapped via tokenizer_registry")
+    expected_chunk_size: Optional[int] = Field(None, gt=0, description="Expected chunk size (embedding / multi_embedding models)")
+    maximum_chunk_size: Optional[int] = Field(None, gt=0, description="Maximum chunk size (embedding / multi_embedding models)")
+    chunk_batch: Optional[int] = Field(None, gt=0, description="Concurrent batch size for embedding requests during chunking")
+    dimension: Optional[int] = Field(None, gt=0, description="Embedding vector dimension")
+    timeout_seconds: Optional[int] = Field(None, gt=0, description="Per-request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, gt=0, description="Maximum concurrent requests for this model")
+    capability_profile_version: Optional[str] = Field(None, description="Approved provider/model capability profile version")
+    requires_appid: bool = Field(False, description="Whether the model requires model_appid auth (STT/TTS)")
+    requires_access_token: bool = Field(False, description="Whether the model requires access_token auth (STT/TTS)")
+
+
+class ModelCatalogProviderInfo(BaseModel):
+    """某个 provider 在预置目录中的摘要信息，用于 API 返回给前端做展示。"""
+    id: str = Field(..., description="Provider id key (silicon / dashscope / openai / ...)")
+    display_name: str = Field(..., description="Human-readable provider name shown in UI")
+    base_url: str = Field(..., description="Provider-level default base_url")
+    supported_types: List[str] = Field(default_factory=list, description="Model types the catalog provides for this provider (llm/vlm/embedding/...)")
+    model_count: int = Field(0, description="Number of models in catalog for this provider")

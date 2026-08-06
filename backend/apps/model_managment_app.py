@@ -60,6 +60,31 @@ from services.model_management_service import (
 )
 from utils.auth_utils import get_current_user_id
 
+# Model Catalog loader (with graceful fallback)
+try:
+    from configs.model_catalog_loader import (
+        list_catalog_providers,
+        list_models_by_provider,
+        get_model_profile as _catalog_get_model_profile,
+        dump_full_catalog,
+    )
+    _CATALOG_AVAILABLE = True
+except Exception as _exc:  # noqa: BLE001
+    logger.warning("Model catalog unavailable: %s", _exc)
+    _CATALOG_AVAILABLE = False
+
+    def list_catalog_providers():
+        return []
+
+    def list_models_by_provider(_p, _t=None):
+        return []
+
+    def _catalog_get_model_profile(_p, _m):
+        return None
+
+    def dump_full_catalog():
+        return {"version": "0.0.0", "metadata": {}, "providers": []}
+
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
@@ -836,3 +861,193 @@ async def manage_create_provider_models(
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))
+
+
+# =============================================================================
+# Model Catalog (预置模型目录) - readonly endpoints for frontend autocompletion
+# =============================================================================
+
+
+@router.get("/catalog/all")
+async def get_model_catalog_all(
+    authorization: Optional[str] = Header(None),
+):
+    """Return the entire preset model catalog in a single HTTP call.
+
+    The payload contains every provider (display name + default base URL)
+    together with every model's full prefill profile.  The frontend performs
+    filtering, model list rendering and single-profile lookup locally without
+    issuing additional backend requests.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = dump_full_catalog()
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Dumping full catalog failed: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": f"catalog unavailable: {e}",
+                "catalog_available": False,
+                "data": {"version": "0.0.0", "metadata": {}, "providers": []},
+            },
+        )
+
+
+@router.get("/catalog/providers")
+async def list_model_catalog_providers(
+    authorization: Optional[str] = Header(None),
+):
+    """List all providers declared in the preset model catalog.
+
+    The response includes each provider's display name, default base URL,
+    supported model types and how many preset models it contains.  The
+    endpoint is intentionally lightweight so the frontend can decide which
+    providers to render a "From preset" entry-point for.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        # Validate the caller is still a real user.  Failure here means the
+        # frontend is not logged in (rare for model-config page); we still
+        # return catalog data since it carries no tenant information.
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        providers = list_catalog_providers()
+        data = [p.model_dump(mode="json") for p in providers]
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog providers failed: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": f"catalog unavailable: {e}",
+                "catalog_available": False,
+                "data": [],
+            },
+        )
+
+
+@router.get("/catalog/{provider}/models")
+async def list_model_catalog_models(
+    provider: str,
+    model_type: Annotated[Optional[str], Query()] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """List preset models inside one specific provider (optionally filtered by type).
+
+    Returns a list of ``{model_name, profile}`` pairs.  ``profile`` contains
+    the exact fields the frontend needs to prefill the Add-Model dialog form.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        models = list_models_by_provider(provider, model_type)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "filter_model_type": model_type,
+                "data": models,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog models for %s failed: %s", provider, e)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": f"catalog unavailable: {e}",
+                "catalog_available": False,
+                "provider": provider,
+                "filter_model_type": model_type,
+                "data": [],
+            },
+        )
+
+
+@router.get("/catalog/{provider}/{model_name:path}")
+async def get_model_catalog_profile(
+    provider: str,
+    model_name: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return the exact preset profile for a single (provider, model_name).
+
+    Used by the Add-Model dialog immediately after the operator selects a
+    preset entry from the dropdown -- the returned ``profile`` dict is the
+    source of truth for prefilling every field (base_url, context_window,
+    chunk sizes, tokenizer, ...).  ``model_name`` uses ``:path`` capture so
+    slashed identifiers like ``Qwen/Qwen3-8B`` round-trip correctly.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        profile = _catalog_get_model_profile(provider, model_name)
+        if profile is None:
+            return JSONResponse(
+                status_code=HTTPStatus.NOT_FOUND,
+                content={
+                    "message": f"No catalog profile for {provider}/{model_name}",
+                    "catalog_available": _CATALOG_AVAILABLE,
+                    "provider": provider,
+                    "model_name": model_name,
+                    "data": None,
+                },
+            )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "model_name": model_name,
+                "data": profile.model_dump(mode="json"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Get catalog profile for %s/%s failed: %s",
+                       provider, model_name, e)
+        return JSONResponse(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={
+                "message": f"catalog unavailable: {e}",
+                "catalog_available": False,
+                "provider": provider,
+                "model_name": model_name,
+                "data": None,
+            },
+        )

@@ -39,6 +39,15 @@ from utils.model_name_utils import (
     split_repo_name,
     sort_models_by_id,
 )
+# Model Catalog - 预置模型目录，自动填充默认配置
+try:
+    from configs.model_catalog_loader import apply_catalog_defaults
+except Exception as _exc:  # noqa: BLE001
+    logger_catalog_import = logging.getLogger("model_catalog")
+    logger_catalog_import.warning("model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc)
+
+    def apply_catalog_defaults(model_data: Dict[str, Any], provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
+        return False
 
 logger = logging.getLogger("model_management_service")
 
@@ -276,6 +285,23 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
     Raises ValueError on display name conflict or invalid input.
     """
     try:
+        # ================================================================
+        # Model Catalog - fill defaults from preset catalog.
+        # This runs BEFORE any URL normalization / repo-splitting so the
+        # provider hint is still whatever the caller sent (e.g. "silicon").
+        # ================================================================
+        _provider_hint = (
+            model_data.get("provider_hint")
+            or model_data.get("model_factory")
+        )
+        _catalog_applied = apply_catalog_defaults(model_data, _provider_hint)
+        if _catalog_applied:
+            logging.debug(
+                "Model catalog defaults applied to model=%s provider=%s",
+                model_data.get("model_name"),
+                _provider_hint,
+            )
+
         # Replace localhost with host.docker.internal for local llm
         model_base_url = model_data.get("base_url", "")
         if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
@@ -498,6 +524,12 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                 model_url=model_url,
                 model_api_key=model_api_key,
             )
+            # ============================================================
+            # Model Catalog - auto-fill defaults for batch-imported models.
+            # Use the top-level provider as the hint (it's always explicit in
+            # the batch_create call).
+            # ============================================================
+            apply_catalog_defaults(model_dict, provider)
             create_model_record(model_dict, user_id, tenant_id)
             logging.debug(f"Model {model['id']} created successfully")
     except Exception as e:

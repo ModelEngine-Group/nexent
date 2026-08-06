@@ -275,6 +275,15 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
     manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
+    // Preset Model Catalog (预置模型目录)
+    catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
+    catalogProviderModels: (provider: string, modelType?: string) => {
+      const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
+      return modelType ? `${base}?model_type=${encodeURIComponent(modelType)}` : base;
+    },
+    catalogModelProfile: (provider: string, modelName: string) =>
+      `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
   },
   knowledgeBase: {
     // Elasticsearch service
