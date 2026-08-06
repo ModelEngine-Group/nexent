@@ -97,6 +97,10 @@ import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+} from "@/types/knowledgeScope";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -109,18 +113,30 @@ export interface ThreadProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null
+  ) => Promise<void> | void;
 }
 
 /**
  * Derives ModelOption[] from agent.model_ids and agent.model_names.
  * Falls back to model_name for single model scenarios.
  */
-const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] => {
+const useAgentModels = (
+  agent: Agent | PublishedAgent
+): readonly ModelOption[] => {
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
-    if (model_ids && model_ids.length > 0 && model_names && model_names.length > 0) {
+    if (
+      model_ids &&
+      model_ids.length > 0 &&
+      model_names &&
+      model_names.length > 0
+    ) {
       return model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
@@ -128,7 +144,8 @@ const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] =
     }
 
     // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string }).model_name;
+    const modelName = (typedAgent as unknown as { model_name?: string })
+      .model_name;
     if (modelName) {
       return [{ id: modelName, name: modelName }];
     }
@@ -148,6 +165,9 @@ export const Thread: FC<ThreadProps> = ({
   onChatModeChange,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -155,19 +175,24 @@ export const Thread: FC<ThreadProps> = ({
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
-      (item) => item.id === s.threads.mainThreadId,
+      (item) => item.id === s.threads.mainThreadId
     );
     return currentThread?.title;
   });
   const hasMessages = messages.length > 0;
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const displayName = agent.display_name || agent.name;
-  const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || t("chat.thread.newChat");
+  const conversationTitle =
+    generatedTitle?.trim() ||
+    currentThreadTitle?.trim() ||
+    t("chat.thread.newChat");
   const [isShareMode, setIsShareMode] = useState(false);
-  const [selectedShareMessageIds, setSelectedShareMessageIds] = useState<Set<number>>(new Set());
-  const [backendMessageIdsByAuiId, setBackendMessageIdsByAuiId] = useState<Map<string, number>>(
-    new Map(),
-  );
+  const [selectedShareMessageIds, setSelectedShareMessageIds] = useState<
+    Set<number>
+  >(new Set());
+  const [backendMessageIdsByAuiId, setBackendMessageIdsByAuiId] = useState<
+    Map<string, number>
+  >(new Map());
   const [isCreatingShare, setIsCreatingShare] = useState(false);
   const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
 
@@ -175,7 +200,9 @@ export const Thread: FC<ThreadProps> = ({
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
 
   const open = useCallback((payload: SourcesPanelSelection) => {
     setSelection(payload);
@@ -200,12 +227,12 @@ export const Thread: FC<ThreadProps> = ({
 
   const panelContextValue = useMemo(
     () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close],
+    [selection, open, toggle, close]
   );
 
   const shareableUserMessageIds = useMemo(
     () => Array.from(backendMessageIdsByAuiId.values()),
-    [backendMessageIdsByAuiId],
+    [backendMessageIdsByAuiId]
   );
 
   const leaveShareMode = useCallback(() => {
@@ -222,11 +249,18 @@ export const Thread: FC<ThreadProps> = ({
     const directBackendMessageIds = auiUserMessageIds.map((id) => Number(id));
     if (
       directBackendMessageIds.length > 0 &&
-      directBackendMessageIds.every((id) => Number.isSafeInteger(id) && id > 0) &&
+      directBackendMessageIds.every(
+        (id) => Number.isSafeInteger(id) && id > 0
+      ) &&
       new Set(directBackendMessageIds).size === directBackendMessageIds.length
     ) {
       setBackendMessageIdsByAuiId(
-        new Map(auiUserMessageIds.map((id, index) => [id, directBackendMessageIds[index]])),
+        new Map(
+          auiUserMessageIds.map((id, index) => [
+            id,
+            directBackendMessageIds[index],
+          ])
+        )
       );
       setSelectedShareMessageIds(new Set());
       setIsShareMode(true);
@@ -236,14 +270,24 @@ export const Thread: FC<ThreadProps> = ({
     try {
       const response = await conversationService.getDetail(conversationId);
       const backendUserMessageIds = (response.data?.[0]?.message ?? [])
-        .filter((item) => item.role === "user" && Number.isInteger(item.message_id))
+        .filter(
+          (item) => item.role === "user" && Number.isInteger(item.message_id)
+        )
         .map((item) => item.message_id as number);
-      if (!backendUserMessageIds.length || backendUserMessageIds.length !== auiUserMessageIds.length) {
+      if (
+        !backendUserMessageIds.length ||
+        backendUserMessageIds.length !== auiUserMessageIds.length
+      ) {
         message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
         return;
       }
       setBackendMessageIdsByAuiId(
-        new Map(auiUserMessageIds.map((id, index) => [id, backendUserMessageIds[index]])),
+        new Map(
+          auiUserMessageIds.map((id, index) => [
+            id,
+            backendUserMessageIds[index],
+          ])
+        )
       );
       setSelectedShareMessageIds(new Set());
       setIsShareMode(true);
@@ -265,21 +309,26 @@ export const Thread: FC<ThreadProps> = ({
     setSelectedShareMessageIds((previous) =>
       previous.size === shareableUserMessageIds.length
         ? new Set()
-        : new Set(shareableUserMessageIds),
+        : new Set(shareableUserMessageIds)
     );
   }, [shareableUserMessageIds]);
 
   const createShare = useCallback(async () => {
     if (!conversationId) return;
     if (!selectedShareMessageIds.size) {
-      message.warning(t("chatInterface.selectShareMessages", "请至少选择一组问答"));
+      message.warning(
+        t("chatInterface.selectShareMessages", "请至少选择一组问答")
+      );
       return;
     }
     setIsCreatingShare(true);
     try {
       const result = await conversationService.createShare({
         conversationId,
-        mode: selectedShareMessageIds.size === shareableUserMessageIds.length ? "all" : "selected",
+        mode:
+          selectedShareMessageIds.size === shareableUserMessageIds.length
+            ? "all"
+            : "selected",
         selected_user_message_ids: Array.from(selectedShareMessageIds),
         render_version: "newchat",
       });
@@ -287,9 +336,12 @@ export const Thread: FC<ThreadProps> = ({
         .fetchRuntimeFrontendConfig()
         .catch((): { shareBaseUrl?: string } => ({}));
       const baseUrl = (
-        runtimeConfig.shareBaseUrl || process.env.NEXT_PUBLIC_SHARE_BASE_URL || window.location.origin
+        runtimeConfig.shareBaseUrl ||
+        process.env.NEXT_PUBLIC_SHARE_BASE_URL ||
+        window.location.origin
       ).replace(/\/$/, "");
-      const locale = window.location.pathname.split("/").filter(Boolean)[0] || "zh";
+      const locale =
+        window.location.pathname.split("/").filter(Boolean)[0] || "zh";
       const shareUrl = `${baseUrl}/${locale}/share/${result.share_id}`;
       try {
         await copyToClipboard(shareUrl);
@@ -303,7 +355,13 @@ export const Thread: FC<ThreadProps> = ({
     } finally {
       setIsCreatingShare(false);
     }
-  }, [conversationId, leaveShareMode, selectedShareMessageIds, shareableUserMessageIds, t]);
+  }, [
+    conversationId,
+    leaveShareMode,
+    selectedShareMessageIds,
+    shareableUserMessageIds,
+    t,
+  ]);
 
   return (
     <SourcesPanelProvider value={panelContextValue}>
@@ -317,6 +375,9 @@ export const Thread: FC<ThreadProps> = ({
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
         isDictationConfigured={isDictationConfigured}
+        knowledgeScope={knowledgeScope}
+        knowledgeCapabilities={knowledgeCapabilities}
+        onKnowledgeScopeChange={onKnowledgeScopeChange}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -334,12 +395,20 @@ export const Thread: FC<ThreadProps> = ({
         selection={selection}
         onPanelClose={close}
       />
-      <Dialog open={Boolean(manualShareUrl)} onOpenChange={(open) => !open && setManualShareUrl(null)}>
+      <Dialog
+        open={Boolean(manualShareUrl)}
+        onOpenChange={(open) => !open && setManualShareUrl(null)}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{t("chatInterface.shareLinkReady", "分享链接已生成")}</DialogTitle>
+            <DialogTitle>
+              {t("chatInterface.shareLinkReady", "分享链接已生成")}
+            </DialogTitle>
             <DialogDescription>
-              {t("chatInterface.shareCreatedCopyFailed", "分享链接已创建，但当前环境无法自动复制")}
+              {t(
+                "chatInterface.shareCreatedCopyFailed",
+                "分享链接已创建，但当前环境无法自动复制"
+              )}
             </DialogDescription>
           </DialogHeader>
           <input
@@ -349,7 +418,11 @@ export const Thread: FC<ThreadProps> = ({
             className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
           />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setManualShareUrl(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setManualShareUrl(null)}
+            >
               {t("common.close", "关闭")}
             </Button>
             <Button
@@ -358,10 +431,14 @@ export const Thread: FC<ThreadProps> = ({
                 if (!manualShareUrl) return;
                 try {
                   await copyToClipboard(manualShareUrl);
-                  message.success(t("chatInterface.shareLinkCopied", "分享链接已复制"));
+                  message.success(
+                    t("chatInterface.shareLinkCopied", "分享链接已复制")
+                  );
                   setManualShareUrl(null);
                 } catch {
-                  message.warning(t("chatInterface.shareManualCopyRequired", "请手动复制链接"));
+                  message.warning(
+                    t("chatInterface.shareManualCopyRequired", "请手动复制链接")
+                  );
                 }
               }}
             >
@@ -384,6 +461,11 @@ interface ThreadViewProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
   isDictationConfigured: boolean;
+  knowledgeScope: ConversationKnowledgeScope | null;
+  knowledgeCapabilities: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null
+  ) => Promise<void> | void;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
@@ -412,6 +494,9 @@ const ThreadView: FC<ThreadViewProps> = ({
   onChatModeChange,
   showModelSelector,
   isDictationConfigured,
+  knowledgeScope,
+  knowledgeCapabilities,
+  onKnowledgeScopeChange,
   hasMessages,
   displayName,
   conversationTitle,
@@ -440,7 +525,12 @@ const ThreadView: FC<ThreadViewProps> = ({
               <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
                 {conversationTitle}
               </div>
-              <Button variant="ghost" size="icon" onClick={onLeaveShareMode} aria-label={t("common.close", "关闭")}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onLeaveShareMode}
+                aria-label={t("common.close", "关闭")}
+              >
                 <XIcon className="size-4" />
               </Button>
             </>
@@ -456,7 +546,9 @@ const ThreadView: FC<ThreadViewProps> = ({
                   {hasMessages ? conversationTitle : displayName}
                 </span>
                 {hasMessages && (
-                  <span className="text-xs text-muted-foreground">{t("chat.thread.conversation")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("chat.thread.conversation")}
+                  </span>
                 )}
               </div>
               {hasMessages && conversationId && (
@@ -494,10 +586,20 @@ const ThreadView: FC<ThreadViewProps> = ({
                   defaultValue: "已选择 {{count}}",
                 })}
               </span>
-              <Button type="button" variant="outline" size="sm" onClick={onLeaveShareMode}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onLeaveShareMode}
+              >
                 {t("common.cancel", "取消")}
               </Button>
-              <Button type="button" size="sm" onClick={onCreateShare} disabled={isCreatingShare}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={onCreateShare}
+                disabled={isCreatingShare}
+              >
                 {isCreatingShare
                   ? t("common.loading", "处理中...")
                   : t("chatInterface.copyShareLink", "复制链接")}
@@ -530,6 +632,9 @@ const ThreadView: FC<ThreadViewProps> = ({
             onChatModeChange={onChatModeChange}
             showModelSelector={showModelSelector}
             isDictationConfigured={isDictationConfigured}
+            knowledgeScope={knowledgeScope}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={onKnowledgeScopeChange}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -550,19 +655,26 @@ export const ReadOnlyConversation: FC<{
   title: string;
 }> = ({ agent, title }) => {
   const { t } = useTranslation();
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
-  const open = useCallback((payload: SourcesPanelSelection) => setSelection(payload), []);
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
+  const open = useCallback(
+    (payload: SourcesPanelSelection) => setSelection(payload),
+    []
+  );
   const toggle = useCallback((payload: SourcesPanelSelection) => {
     setSelection((current) =>
-      current && current.messageId === payload.messageId && current.groupId === payload.groupId
+      current &&
+      current.messageId === payload.messageId &&
+      current.groupId === payload.groupId
         ? null
-        : payload,
+        : payload
     );
   }, []);
   const close = useCallback(() => setSelection(null), []);
   const panelContextValue = useMemo(
     () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close],
+    [selection, open, toggle, close]
   );
 
   return (
@@ -606,7 +718,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
     (question: string) => {
       aui.composer().setText(question);
     },
-    [aui],
+    [aui]
   );
 
   return (
@@ -670,7 +782,11 @@ export const ThreadMessages: FC<{
   const { t } = useTranslation();
   const messages = useAuiState((s) => s.thread.messages);
   const shareMessageGroups = useMemo(() => {
-    const groups: { key: string; messageIndexes: number[]; userMessageId?: number }[] = [];
+    const groups: {
+      key: string;
+      messageIndexes: number[];
+      userMessageId?: number;
+    }[] = [];
 
     messages.forEach((message, index) => {
       if (message.role === "user") {
@@ -693,9 +809,11 @@ export const ThreadMessages: FC<{
   const messageComponents = useMemo(
     () => ({
       UserMessage: () => <UserMessage readOnly={readOnly} />,
-      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} />,
+      AssistantMessage: () => (
+        <AssistantMessage agent={agent} readOnly={readOnly} />
+      ),
     }),
-    [agent, readOnly],
+    [agent, readOnly]
   );
 
   if (shareMode) {
@@ -703,26 +821,38 @@ export const ThreadMessages: FC<{
       <>
         {shareMessageGroups.map((group) => {
           const shareSelected =
-            group.userMessageId !== undefined && (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+            group.userMessageId !== undefined &&
+            (selectedShareMessageIds?.has(group.userMessageId) ?? false);
           return (
             <div
               key={group.key}
               className={`relative mb-4 w-full rounded-xl px-2 pt-1 pb-2 ${
-                shareSelected ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]" : ""
+                shareSelected
+                  ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]"
+                  : ""
               }`}
             >
               {group.userMessageId !== undefined && (
                 <label className="absolute -left-6 top-3 z-10 flex cursor-pointer items-center justify-center">
                   <input
                     type="checkbox"
-                    aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+                    aria-label={t(
+                      "chatInterface.selectShareMessages",
+                      "请选择要分享的问答"
+                    )}
                     checked={shareSelected}
-                    onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                    onChange={() =>
+                      onToggleShareMessage?.(group.userMessageId!)
+                    }
                   />
                 </label>
               )}
               {group.messageIndexes.map((index) => (
-                <ThreadPrimitive.MessageByIndex key={index} index={index} components={messageComponents} />
+                <ThreadPrimitive.MessageByIndex
+                  key={index}
+                  index={index}
+                  components={messageComponents}
+                />
               ))}
             </div>
           );
@@ -803,9 +933,7 @@ const AssistantWorkingIndicator: FC = () => {
 
 const AssistantCompletionIndicator: FC = () => {
   const { t } = useTranslation();
-  const isComplete = useAuiState(
-    (s) => s.message.status?.type === "complete",
-  );
+  const isComplete = useAuiState((s) => s.message.status?.type === "complete");
 
   if (!isComplete) return null;
 
@@ -838,11 +966,7 @@ const AssistantMessage: FC<{
   const agentRunTime = getAgentRunTime();
   const nl2a = useAuiState(
     (s) =>
-      (
-        s.message.metadata?.custom as
-          | { nl2a?: Nl2aMessage }
-          | undefined
-      )?.nl2a,
+      (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
   );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
@@ -904,11 +1028,14 @@ const AssistantMessage: FC<{
             // parallel invocations as separate cards inside the summary.
             // Each card retains the same reasoning/tool grouping as the main
             // message.
-            const meta = (part as { metadata?: { subagentId?: number | string; runId?: string } })
-              .metadata;
+            const meta = (
+              part as {
+                metadata?: { subagentId?: number | string; runId?: string };
+              }
+            ).metadata;
             const subagentId = meta?.subagentId;
             const runId = meta?.runId;
-            const chainPath: (`group-${string}`)[] =
+            const chainPath: `group-${string}`[] =
               part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : part.type === "tool-call"
@@ -919,9 +1046,11 @@ const AssistantMessage: FC<{
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
-              return ["group-subagent-calls", groupKey, ...chainPath] as (
-                `group-${string}`
-              )[];
+              return [
+                "group-subagent-calls",
+                groupKey,
+                ...chainPath,
+              ] as `group-${string}`[];
             }
             return chainPath;
           }}
@@ -967,16 +1096,24 @@ const AssistantMessage: FC<{
                 return (
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
-                      count={(part as typeof part & { indices?: unknown[] }).indices?.length ?? 0}
-                      active={(part as typeof part & { status?: { type?: string } }).status?.type === "running"}
+                      count={
+                        (part as typeof part & { indices?: unknown[] }).indices
+                          ?.length ?? 0
+                      }
+                      active={
+                        (part as typeof part & { status?: { type?: string } })
+                          .status?.type === "running"
+                      }
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
               case "group-reasoning": {
-                const running = (part as typeof part & { status?: { type?: string } }).status?.type === "running";
+                const running =
+                  (part as typeof part & { status?: { type?: string } }).status
+                    ?.type === "running";
                 return (
-                  <Reasoning.Root defaultOpen={running} >
+                  <Reasoning.Root defaultOpen={running}>
                     <GroupReasoningTrigger active={running} />
                     <Reasoning.Content aria-busy={running}>
                       <Reasoning.Text>{children}</Reasoning.Text>
@@ -985,7 +1122,14 @@ const AssistantMessage: FC<{
                 );
               }
               case "group-source":
-                return <SourceGroupButton indices={(part as typeof part & { indices?: unknown[] }).indices ?? []} />;
+                return (
+                  <SourceGroupButton
+                    indices={
+                      (part as typeof part & { indices?: unknown[] }).indices ??
+                      []
+                    }
+                  />
+                );
               case "group-default":
                 return <>{children}</>;
               case "text": {
@@ -1009,9 +1153,13 @@ const AssistantMessage: FC<{
                 return <MarkdownText />;
               }
               case "reasoning":
-                return <Reasoning {...part} /> ;
+                return <Reasoning {...part} />;
               case "tool-call":
-                return (part as typeof part & { toolUI?: unknown }).toolUI ?? <ToolFallback {...part} />;
+                return (
+                  (part as typeof part & { toolUI?: unknown }).toolUI ?? (
+                    <ToolFallback {...part} />
+                  )
+                );
               case "indicator":
                 return <AssistantWorkingIndicator />;
               case "source":
@@ -1020,14 +1168,23 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
-                if ((part as typeof part & { name?: string }).name === "automation-proposal") {
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "automation-proposal"
+                ) {
                   return (
                     <AutomationProposalMessage
-                      proposal={(part as typeof part & { data?: unknown }).data as AgentAutomationProposalData}
+                      proposal={
+                        (part as typeof part & { data?: unknown })
+                          .data as AgentAutomationProposalData
+                      }
                     />
                   );
                 }
-                return (part as typeof part & { dataRendererUI?: unknown }).dataRendererUI as ReactNode ?? null;
+                return (
+                  ((part as typeof part & { dataRendererUI?: unknown })
+                    .dataRendererUI as ReactNode) ?? null
+                );
               default:
                 return null;
             }
@@ -1108,7 +1265,6 @@ const AssistantActionBar: FC = () => {
         <MessageTiming />
         <SingleTurnTokenUsage />
       </div>
-
     </ActionBarPrimitive.Root>
   );
 };
@@ -1139,7 +1295,10 @@ const UserMessage: FC<{
         <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
           <input
             type="checkbox"
-            aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+            aria-label={t(
+              "chatInterface.selectShareMessages",
+              "请选择要分享的问答"
+            )}
             checked={selectedShareMessageIds?.has(backendMessageId) ?? false}
             onChange={() => onToggleShareMessage?.(backendMessageId)}
           />
@@ -1183,7 +1342,10 @@ const UserActionBar: FC = () => {
       className="aui-user-action-bar-root flex flex-col items-end"
     >
       <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip={t("chat.thread.edit")} className="aui-user-action-edit">
+        <TooltipIconButton
+          tooltip={t("chat.thread.edit")}
+          className="aui-user-action-edit"
+        >
           <PencilIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
@@ -1267,7 +1429,7 @@ const renderSubAgentCallsGroup = (
     indices: readonly number[];
     status: { type: string };
   },
-  children: ReactNode,
+  children: ReactNode
 ): ReactElement => (
   <SubAgentCallsGroupRenderer indices={part.indices}>
     {children}
@@ -1317,12 +1479,16 @@ const renderSubAgentGroup = (
     indices: readonly number[];
     status: { type: string };
   },
-  children: ReactNode,
+  children: ReactNode
 ): ReactElement | null => {
   // We can't read s.message.content from inside the children callback
   // because the callback is not a component. Defer to a small inline
   // component so the selector re-runs on each streaming yield.
-  return <SubAgentGroupRenderer indices={part.indices}>{children}</SubAgentGroupRenderer>;
+  return (
+    <SubAgentGroupRenderer indices={part.indices}>
+      {children}
+    </SubAgentGroupRenderer>
+  );
 };
 
 const SubAgentGroupRenderer: FC<{
@@ -1339,7 +1505,12 @@ const SubAgentGroupRenderer: FC<{
       task?: string;
       isRunning?: boolean;
     };
-    data?: { agentName?: string; task?: string; depth?: number; isRunning?: boolean };
+    data?: {
+      agentName?: string;
+      task?: string;
+      depth?: number;
+      isRunning?: boolean;
+    };
     name?: string;
   }>;
   const descriptor = useMemo(() => {
@@ -1357,21 +1528,30 @@ const SubAgentGroupRenderer: FC<{
         subagentId = meta.subagentId;
       }
       // The first member is the boundary stamp; prefer its `data` field.
-      if (member?.type === "data" && member.name === "subagent-boundary" && member.data) {
+      if (
+        member?.type === "data" &&
+        member.name === "subagent-boundary" &&
+        member.data
+      ) {
         if (member.data.agentName) agentName = member.data.agentName;
         if (member.data.task) task = member.data.task;
         if (typeof member.data.depth === "number") depth = member.data.depth;
-        if (typeof member.data.isRunning === "boolean") isRunning = member.data.isRunning;
+        if (typeof member.data.isRunning === "boolean")
+          isRunning = member.data.isRunning;
         break;
       }
       if (meta?.agentName) agentName = meta.agentName;
       if (meta?.task) task = meta.task;
       if (typeof meta?.depth === "number") depth = meta.depth;
-      if (typeof meta?.isRunning === "boolean") isRunning = isRunning || meta.isRunning;
+      if (typeof meta?.isRunning === "boolean")
+        isRunning = isRunning || meta.isRunning;
     }
     if (indices.length > 0) {
       const lastMember = content[indices[indices.length - 1]];
-      if (lastMember?.metadata && typeof lastMember.metadata.isRunning === "boolean") {
+      if (
+        lastMember?.metadata &&
+        typeof lastMember.metadata.isRunning === "boolean"
+      ) {
         isRunning = lastMember.metadata.isRunning;
       }
     }
@@ -1413,8 +1593,8 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
     const registryMessageId =
       groupedSources.find((source) => source.messageId)?.messageId ?? messageId;
     const registeredSources = registryMessageId
-      ? searchSourcesRegistry.get(registryMessageId) ??
-        conversationSourcesRegistry.get(registryMessageId)
+      ? (searchSourcesRegistry.get(registryMessageId) ??
+        conversationSourcesRegistry.get(registryMessageId))
       : undefined;
     const displaySources: PanelSourceItem[] = registeredSources?.length
       ? registeredSources.map((source) => ({
@@ -1471,14 +1651,21 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
         aria-pressed={isActive}
         className="aui-source-group-button inline-flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
       >
-        <span aria-hidden className="inline-flex items-center gap-1 text-muted-foreground">
+        <span
+          aria-hidden
+          className="inline-flex items-center gap-1 text-muted-foreground"
+        >
           <FileTextIcon className="size-3.5" />
           {t("chat.thread.searchResults")}
         </span>
         <span className="text-foreground">
-          {sources.length > 0 ? t("chat.thread.sourceCount", { count: sources.length }) : ""}
+          {sources.length > 0
+            ? t("chat.thread.sourceCount", { count: sources.length })
+            : ""}
           {sources.length > 0 && images.length > 0 ? ", " : ""}
-          {images.length > 0 ? t("chat.thread.imageCount", { count: images.length }) : ""}
+          {images.length > 0
+            ? t("chat.thread.imageCount", { count: images.length })
+            : ""}
         </span>
         {images.length > 0 ? (
           <ImageIcon className="size-3.5 text-muted-foreground" aria-hidden />

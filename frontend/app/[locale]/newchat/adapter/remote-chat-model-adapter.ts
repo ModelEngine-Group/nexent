@@ -107,7 +107,8 @@ export interface Nl2aAgentDraftPayload {
 }
 
 export type Nl2aPayload =
-  Nl2aLocalMcpRecommendationPayload | Nl2aAgentDraftPayload;
+  | Nl2aLocalMcpRecommendationPayload
+  | Nl2aAgentDraftPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -122,6 +123,7 @@ interface NexentRunConfig {
   agentId?: number | string;
   enablePlan?: boolean;
   runtimeMode?: "nl2agent";
+  knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -542,6 +544,7 @@ function mapChunkType(type: string): AssistantPartType | null {
       // runs. Falling through here would push them as plain text parts.
       return null;
     case "conversation_created":
+    case "knowledge_scope_resolved":
     case "other":
     case "agent_new_run":
     case "token_count":
@@ -1073,7 +1076,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       isNl2Agent && lastUserIndex >= 0
         ? (
             messages[lastUserIndex].metadata?.custom as
-              { nl2agentToolSelection?: Nl2AgentToolSelection } | undefined
+              | { nl2agentToolSelection?: Nl2AgentToolSelection }
+              | undefined
           )?.nl2agentToolSelection
         : undefined;
     const query = selectionMetadata
@@ -1137,6 +1141,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
     requestBody.enable_plan = custom?.enablePlan === true;
+    if (!isResume && !isNl2Agent && custom?.knowledgeScope) {
+      requestBody.knowledge_scope = custom.knowledgeScope;
+    }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
@@ -1149,7 +1156,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     );
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     try {
       agentResponse = await conversationService.runAgent(
         {
@@ -1166,6 +1174,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
+          knowledge_scope: requestBody.knowledge_scope as
+            | import("@/types/knowledgeScope").ConversationKnowledgeScope
+            | undefined,
           runtime_mode: isNl2Agent ? "nl2agent" : undefined,
         },
         abortSignal,
@@ -1807,8 +1818,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const resolvedUrl = imageMetadata?.image_url || url;
                 const text = imageMetadata ? "" : result.text;
                 const isImage =
-                  result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
-                const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                  result.score_details?.chunk_type === "image" ||
+                  Boolean(imageMetadata);
+                const title =
+                  result.title ||
+                  filename ||
+                  imageMetadata?.source_file ||
+                  resolvedUrl;
                 if (url || filename || title) {
                   searchSourcesAccumulator.push({
                     citeIndex,
@@ -1819,7 +1835,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     searchType: result.search_type,
                     toolSign: result.tool_sign,
                     filename,
-                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    sourceFile:
+                      result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
                     isImage,
@@ -1834,7 +1851,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     text,
                     sourceType: result.source_type,
                     filename,
-                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    sourceFile:
+                      result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
                     citeIndex,
@@ -2014,8 +2032,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const resolvedUrl = imageMetadata?.image_url || url;
                   const text = imageMetadata ? "" : result.text;
                   const isImage =
-                    result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
-                  const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                    result.score_details?.chunk_type === "image" ||
+                    Boolean(imageMetadata);
+                  const title =
+                    result.title ||
+                    filename ||
+                    imageMetadata?.source_file ||
+                    resolvedUrl;
                   if (url || filename || title) {
                     searchSourcesAccumulator.push({
                       citeIndex,
@@ -2026,7 +2049,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       searchType: result.search_type,
                       toolSign: result.tool_sign,
                       filename,
-                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      sourceFile:
+                        result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
                       isImage,
@@ -2041,7 +2065,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       text,
                       sourceType: result.source_type,
                       filename,
-                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      sourceFile:
+                        result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
                       citeIndex,

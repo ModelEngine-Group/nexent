@@ -164,7 +164,10 @@ class KnowledgeBaseService {
     apiKey: string
   ): Promise<KnowledgeBase[]> {
     try {
-      const url = new URL(API_ENDPOINTS.ragflow.datasets, globalThis.location.origin);
+      const url = new URL(
+        API_ENDPOINTS.ragflow.datasets,
+        globalThis.location.origin
+      );
       url.searchParams.set("ragflow_api_base", ragflowApiBase);
       url.searchParams.set("api_key", apiKey);
 
@@ -177,7 +180,8 @@ class KnowledgeBaseService {
 
       if (result.code !== undefined && result.code !== 0) {
         const errorCode = result.code || response.status;
-        const errorMessage = result.message || "Failed to fetch RAGFlow datasets";
+        const errorMessage =
+          result.message || "Failed to fetch RAGFlow datasets";
         throw new ApiError(errorCode, errorMessage);
       }
 
@@ -525,7 +529,7 @@ class KnowledgeBaseService {
       while (hasMore && allItems.length < AIDP_LIST_ITEM_CAP) {
         const url = new URL(
           API_ENDPOINTS.aidpMgmt.knowledgeBases,
-          globalThis.location.origin,
+          globalThis.location.origin
         );
         url.searchParams.set("page", String(page));
         url.searchParams.set("page_size", String(AIDP_LIST_PAGE_MAX));
@@ -540,11 +544,16 @@ class KnowledgeBaseService {
           const errorCode = pageResult.code || response.status;
           const errorMessage =
             pageResult.message || "Failed to fetch all AIDP knowledge bases";
-          log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+          log.error("AIDP API error:", {
+            code: errorCode,
+            message: errorMessage,
+          });
           throw new ApiError(errorCode, errorMessage);
         }
 
-        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(pageResult.value)
+        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(
+          pageResult.value
+        )
           ? pageResult.value
           : [];
         allItems.push(...pageItems);
@@ -554,10 +563,7 @@ class KnowledgeBaseService {
         if (page === 1 && typeof pageResult.total_count === "number") {
           totalFromServer = pageResult.total_count;
         }
-        if (
-          page === 1 &&
-          typeof pageResult.total_reliable === "boolean"
-        ) {
+        if (page === 1 && typeof pageResult.total_reliable === "boolean") {
           totalReliableFromServer = pageResult.total_reliable;
         }
 
@@ -589,7 +595,7 @@ class KnowledgeBaseService {
       // only shows KBs the user has access to.
       const url = new URL(
         API_ENDPOINTS.aidpMgmt.knowledgeBases,
-        globalThis.location.origin,
+        globalThis.location.origin
       );
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
@@ -604,15 +610,21 @@ class KnowledgeBaseService {
         const errorCode = result.code || response.status;
         const errorMessage =
           result.message || "Failed to fetch AIDP knowledge bases";
-        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        log.error("AIDP API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
       return {
         value: Array.isArray(result.value) ? result.value : [],
         total_count:
-          typeof result.total_count === "number" ? result.total_count : undefined,
-        next_link: typeof result.next_link === "string" ? result.next_link : null,
+          typeof result.total_count === "number"
+            ? result.total_count
+            : undefined,
+        next_link:
+          typeof result.next_link === "string" ? result.next_link : null,
         has_more:
           typeof result.has_more === "boolean" ? result.has_more : undefined,
         total_reliable:
@@ -785,6 +797,7 @@ class KnowledgeBaseService {
 
                   return {
                     id: kbId,
+                    knowledge_id: indexInfo.knowledge_id,
                     name: kbName,
                     index_name: kbId, // Internal index_name for API calls
                     display_name: indexInfo.display_name || indexInfo.name,
@@ -822,7 +835,8 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "nexent",
                     tenant_id: indexInfo.tenant_id,
-                    preserve_source_file: indexInfo.preserve_source_file ?? true,
+                    preserve_source_file:
+                      indexInfo.preserve_source_file ?? true,
                   };
                 }
               );
@@ -1165,9 +1179,7 @@ class KnowledgeBaseService {
   ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
       if (
-        files.some(
-          (file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES
-        )
+        files.some((file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES)
       ) {
         throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
       }
@@ -1411,20 +1423,31 @@ class KnowledgeBaseService {
     }
   }
 
-  async fetchSummaryFrequencyOptions(): Promise<{ value: string; label: string }[]> {
-    const response = await fetch(API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions, {
-      headers: getAuthHeaders(),
-    });
+  async fetchSummaryFrequencyOptions(): Promise<
+    { value: string; label: string }[]
+  > {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     const data = await response.json();
     return data.options || [];
   }
 
-  async updateKnowledgeBaseQuota(indexName: string, limitBytes: number | null): Promise<void> {
-    const response = await fetch(API_ENDPOINTS.knowledgeBase.updateIndex(indexName), {
-      method: "PATCH",
-      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ quota_limit_bytes: limitBytes }),
-    });
+  async updateKnowledgeBaseQuota(
+    indexName: string,
+    limitBytes: number | null
+  ): Promise<void> {
+    const response = await fetch(
+      API_ENDPOINTS.knowledgeBase.updateIndex(indexName),
+      {
+        method: "PATCH",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ quota_limit_bytes: limitBytes }),
+      }
+    );
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.detail || data.message || "Failed to update quota");

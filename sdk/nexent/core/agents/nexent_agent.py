@@ -255,6 +255,10 @@ class NexentAgent:
                     tool_config.metadata.get(
                         "document_paths") if tool_config.metadata else None
                 )
+                tools_obj.set_allowed_index_names(
+                    tool_config.metadata.get("allowed_index_names")
+                    if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()

@@ -53,8 +53,8 @@ def _parse_kds_list(kds_list: str) -> List[str]:
         parsed_kds = json.loads(kds_list) if isinstance(kds_list, str) else kds_list
     except json.JSONDecodeError as e:
         raise ValueError(f"kds_list must be a valid JSON array: {e}") from e
-    if not isinstance(parsed_kds, list) or not (1 <= len(parsed_kds) <= _MAX_KDS):
-        raise ValueError(f"kds_list must be a list of 1-{_MAX_KDS} knowledge base IDs")
+    if not isinstance(parsed_kds, list) or len(parsed_kds) > _MAX_KDS:
+        raise ValueError(f"kds_list must be a list of 0-{_MAX_KDS} knowledge base IDs")
     return [str(k) for k in parsed_kds]
 
 

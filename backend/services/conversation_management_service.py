@@ -34,6 +34,7 @@ from database.conversation_db import (
     save_history_summary,
     update_conversation_agent_id,
     update_conversation_chat_mode,
+    update_conversation_knowledge_scope,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -345,6 +346,7 @@ def create_new_conversation(
     user_id: str,
     agent_id: Optional[int] = None,
     chat_mode: Optional[str] = None,
+    knowledge_scope: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -359,12 +361,13 @@ def create_new_conversation(
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(
-            title,
-            user_id,
-            agent_id=agent_id,
-            chat_mode=chat_mode,
-        )
+        create_kwargs = {
+            "agent_id": agent_id,
+            "chat_mode": chat_mode,
+        }
+        if knowledge_scope is not None:
+            create_kwargs["knowledge_scope"] = knowledge_scope
+        conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -445,6 +448,34 @@ def update_conversation_chat_mode_service(
     except Exception as e:
         logging.error(f"Failed to update conversation chat mode: {str(e)}")
         raise Exception(str(e))
+
+
+def update_conversation_knowledge_scope_service(
+    conversation_id: int,
+    knowledge_scope: Optional[Dict[str, Any]],
+    user_id: str,
+    tenant_id: str,
+) -> bool:
+    """Replace scope only when the conversation belongs to the current identity."""
+    conversation = get_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    if conversation is None:
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or is not accessible"
+        )
+    success = update_conversation_knowledge_scope(
+        conversation_id=conversation_id,
+        knowledge_scope=knowledge_scope,
+        user_id=user_id,
+    )
+    if not success:
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or is not accessible"
+        )
+    return True
 
 
 def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
@@ -737,6 +768,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'conversation_id': str(history_data['conversation_id']),
             'agent_id': history_data.get('agent_id'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
+            'knowledge_scope': history_data.get('knowledge_scope'),
             'create_time': history_data['create_time'],
             'message': messages
         }

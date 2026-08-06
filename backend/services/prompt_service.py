@@ -125,33 +125,10 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         tool_info_list = get_enabled_tool_description_for_generate_prompt(
             tenant_id=tenant_id, agent_id=agent_id)
 
-    # Get knowledge base display names for few-shot examples
-    # Priority: frontend-provided > database query
-    if knowledge_base_display_names:
-        logger.debug(
-            f"Using frontend-provided knowledge base display names: {knowledge_base_display_names}")
-    else:
-        knowledge_base_display_names = get_knowledge_base_display_names(
-            tool_info_list=tool_info_list,
-            agent_id=agent_id,
-            tenant_id=tenant_id
-        )
-        logger.debug(
-            f"Using database query for knowledge base display names: {knowledge_base_display_names}")
-
-    # Get aidp knowledge base display names for few-shot examples
-    # Priority: frontend-provided > database query
-    if aidp_kb_display_names:
-        logger.debug(
-            f"Using frontend-provided aidp knowledge base display names: {aidp_kb_display_names}")
-    else:
-        aidp_kb_display_names = _resolve_aidp_kb_display_names(
-            tool_info_list=tool_info_list,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
-        logger.debug(
-            f"Using database query for aidp knowledge base display names: {aidp_kb_display_names}")
+    # Prompt generation describes capabilities only. Concrete knowledge base
+    # names and IDs are resolved at conversation runtime.
+    knowledge_base_display_names = None
+    aidp_kb_display_names = None
 
     # Handle sub-agent IDs
     if sub_agent_ids and len(sub_agent_ids) > 0:
@@ -432,12 +409,8 @@ def optimize_prompt_section_impl(
         tenant_id=tenant_id,
         tool_ids=tool_ids,
     )
-    knowledge_base_display_names = _resolve_knowledge_base_display_names(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        tool_info_list=tool_info_list,
-        knowledge_base_display_names=knowledge_base_display_names,
-    )
+    knowledge_base_display_names = None
+    aidp_kb_display_names = None
     sub_agent_info_list = _resolve_prompt_generation_sub_agents(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -862,6 +835,15 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
          for tool in tool_info_list])
     assistant_description = "\n".join(
         [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list])
+    scope_instruction = (
+        "知识库工具仅代表检索能力。不得在生成内容中写入具体知识库名称、知识库 ID、索引名称、"
+        "KDS ID、固定 index_names 或固定 kds_list；统一表述为当前会话允许的知识库范围。"
+        if language == LANGUAGE["ZH"] else
+        "Knowledge tools represent capabilities only. Do not include concrete knowledge base names, IDs, index "
+        "names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the knowledge scope allowed for "
+        "the current conversation."
+    )
+    tool_description = f"{tool_description}\n\n{scope_instruction}"
 
     # Build template context
     template_context = {
@@ -882,22 +864,12 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     # Always add knowledge_base_names to context (empty string when not available).
     # This is necessary because Jinja2 StrictUndefined raises an error for any
     # undefined variable, even inside an {% if %} block.
-    if knowledge_base_display_names:
-        kb_names_str = ", ".join(
-            f'"{name}"' for name in knowledge_base_display_names)
-    else:
-        kb_names_str = ""
-    template_context["knowledge_base_names"] = kb_names_str
+    template_context["knowledge_base_names"] = ""
 
     # Always add aidp_kb_names to context (empty string when not available).
     # This is necessary because Jinja2 StrictUndefined raises an error for any
     # undefined variable, even inside an {% if %} block.
-    if aidp_kb_display_names:
-        aidp_names_str = ", ".join(
-            f'"{name}"' for name in aidp_kb_display_names)
-    else:
-        aidp_names_str = ""
-    template_context["aidp_kb_names"] = aidp_names_str
+    template_context["aidp_kb_names"] = ""
 
     # Generate content using template
     content = Template(
@@ -929,17 +901,16 @@ def join_info_for_optimize_prompt_section(
         [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list]
     )
 
-    if knowledge_base_display_names:
-        kb_names_str = ", ".join(
-            f'"{name}"' for name in knowledge_base_display_names)
-    else:
-        kb_names_str = ""
-
-    if aidp_kb_display_names:
-        aidp_names_str = ", ".join(
-            f'"{name}"' for name in aidp_kb_display_names)
-    else:
-        aidp_names_str = ""
+    kb_names_str = ""
+    aidp_names_str = ""
+    scope_instruction = (
+        "优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names "
+        "或固定 kds_list；应改写为当前会话允许的知识库范围。"
+        if language == LANGUAGE["ZH"] else
+        "The optimized content must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
+        "fixed index_names, or fixed kds_list values. Refer to the scope allowed for the current conversation."
+    )
+    tool_description = f"{tool_description}\n\n{scope_instruction}"
 
     template_context = {
         "section_type": section_type,

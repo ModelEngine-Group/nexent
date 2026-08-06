@@ -272,7 +272,7 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(template_vars["section_type"], "constraint")
         self.assertEqual(template_vars["current_content"], "Original content")
         self.assertEqual(template_vars["feedback"], "Be clearer")
-        self.assertEqual(template_vars["knowledge_base_names"], '"kb-a", "kb-b"')
+        self.assertEqual(template_vars["knowledge_base_names"], "")
 
     @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.query_tools_by_ids')
@@ -1493,7 +1493,7 @@ class TestPromptService(unittest.TestCase):
         # Verify that knowledge_base_names was passed to template
         template_vars = mock_template_instance.render.call_args[0][0]
         self.assertIn("knowledge_base_names", template_vars)
-        self.assertEqual(template_vars["knowledge_base_names"], '"redis", "kafka"')
+        self.assertEqual(template_vars["knowledge_base_names"], "")
 
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
@@ -1901,7 +1901,7 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(result, "Rendered")
         render_args = mock_instance.render.call_args[0][0]
         self.assertEqual(render_args["section_type"], "constraint")
-        self.assertEqual(render_args["knowledge_base_names"], '"kb1"')
+        self.assertEqual(render_args["knowledge_base_names"], "")
 
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_optimize_prompt_section_without_kb(self, mock_template):
@@ -2487,10 +2487,7 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
             *mock_generate_system_prompt.call_args.args,
             **mock_generate_system_prompt.call_args.kwargs,
         )
-        self.assertEqual(
-            bound_args.arguments["aidp_kb_display_names"],
-            ["aidp-kb-1"],
-        )
+        self.assertIsNone(bound_args.arguments["aidp_kb_display_names"])
 
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -2527,13 +2524,7 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
         ))
 
         # Verify _resolve_aidp_kb_display_names was called with correct args
-        mock_resolve_aidp.assert_called_once_with(
-            tool_info_list=[
-                {"name": "tool1", "description": "d", "inputs": "{}", "output_type": "text"}
-            ],
-            user_id="user1",
-            tenant_id="tenant1",
-        )
+        mock_resolve_aidp.assert_not_called()
 
         # Verify downstream receives the resolved value
         mock_generate_system_prompt.assert_called_once()
@@ -2541,10 +2532,7 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
             *mock_generate_system_prompt.call_args.args,
             **mock_generate_system_prompt.call_args.kwargs,
         )
-        self.assertEqual(
-            bound_args.arguments["aidp_kb_display_names"],
-            ["db-resolved"],
-        )
+        self.assertIsNone(bound_args.arguments["aidp_kb_display_names"])
 
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -2580,7 +2568,7 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
             aidp_kb_display_names=[],
         ))
 
-        mock_resolve_aidp.assert_called_once()
+        mock_resolve_aidp.assert_not_called()
 
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
@@ -2627,10 +2615,7 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
             *mock_generate_system_prompt.call_args.args,
             **mock_generate_system_prompt.call_args.kwargs,
         )
-        self.assertEqual(
-            bound_args.arguments["aidp_kb_display_names"],
-            ["resolved-kb"],
-        )
+        self.assertIsNone(bound_args.arguments["aidp_kb_display_names"])
 
 
 class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
@@ -2654,7 +2639,7 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
         )
 
         template_vars = mock_template_instance.render.call_args[0][0]
-        self.assertEqual(template_vars["aidp_kb_names"], '"kb-1", "kb-2"')
+        self.assertEqual(template_vars["aidp_kb_names"], "")
 
     @patch('backend.services.prompt_service.Template')
     def test_empty_string_when_aidp_kb_display_names_none(self, mock_template):
@@ -2765,10 +2750,7 @@ class TestJoinInfoForOptimizePromptSectionAidpKbNames(unittest.TestCase):
         )
 
         template_vars = mock_template_instance.render.call_args[0][0]
-        self.assertEqual(
-            template_vars["aidp_kb_names"],
-            '"aidp-kb-a", "aidp-kb-b"',
-        )
+        self.assertEqual(template_vars["aidp_kb_names"], "")
 
 
 # ==================== Coverage boost tests ====================

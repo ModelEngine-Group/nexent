@@ -1,6 +1,12 @@
 "use client";
 
-import { useSyncExternalStore, type FC, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type FC,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
@@ -13,6 +19,7 @@ import {
   Circle,
   ListChecks,
   ChevronDown,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,6 +40,11 @@ import {
   planRegistry,
   type PlanData,
 } from "../adapter/remote-chat-model-adapter";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+} from "@/types/knowledgeScope";
+import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
 
 export type ChatMode = "planning" | "execution";
 
@@ -44,6 +56,11 @@ export interface ComposerProps {
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgeCapabilities?: KnowledgeCapabilities | null;
+  onKnowledgeScopeChange?: (
+    scope: ConversationKnowledgeScope | null
+  ) => Promise<void> | void;
 }
 
 // Simple tooltip wrapper
@@ -147,8 +164,36 @@ export const Composer: FC<ComposerProps> = ({
   onChatModeChange,
   showModelSelector = true,
   isDictationConfigured = false,
+  knowledgeScope = null,
+  knowledgeCapabilities = null,
+  onKnowledgeScopeChange,
 }) => {
   const { t } = useTranslation();
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+
+  const knowledgeSummary = useMemo(() => {
+    if (!knowledgeScope) return "知识库：跟随智能体默认";
+    const parts: string[] = [];
+    if (knowledgeCapabilities?.sources.local.enabled) {
+      parts.push(
+        knowledgeScope.local.mode === "disabled"
+          ? "本地已关闭"
+          : knowledgeScope.local.mode === "override"
+            ? `本地 ${knowledgeScope.local.knowledge_ids.length}`
+            : "本地默认"
+      );
+    }
+    if (knowledgeCapabilities?.sources.aidp.enabled) {
+      parts.push(
+        knowledgeScope.aidp.mode === "disabled"
+          ? "AIDP 已关闭"
+          : knowledgeScope.aidp.mode === "override"
+            ? `AIDP ${knowledgeScope.aidp.kds_ids.length}`
+            : "AIDP 默认"
+      );
+    }
+    return `知识库：${parts.join(" · ") || "不可用"}`;
+  }, [knowledgeScope, knowledgeCapabilities]);
 
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
@@ -191,8 +236,19 @@ export const Composer: FC<ComposerProps> = ({
           </Button>
         </div>
 
-        {/* Placeholder for alignment */}
-        <div className="w-16" />
+        {(knowledgeCapabilities?.sources.local.enabled ||
+          knowledgeCapabilities?.sources.aidp.enabled) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 max-w-64 gap-1.5 truncate text-xs text-muted-foreground"
+            onClick={() => setKnowledgeModalOpen(true)}
+          >
+            <Database className="size-3.5" />
+            <span className="truncate">{knowledgeSummary}</span>
+          </Button>
+        )}
       </div>
 
       {/* Composer Primitive Root */}
@@ -265,6 +321,20 @@ export const Composer: FC<ComposerProps> = ({
           </div>
         </div>
       </ComposerPrimitive.Root>
+      <ConversationKnowledgeScopeModal
+        open={knowledgeModalOpen}
+        value={knowledgeScope}
+        capabilities={knowledgeCapabilities}
+        onCancel={() => setKnowledgeModalOpen(false)}
+        onConfirm={async (scope) => {
+          await onKnowledgeScopeChange?.(scope);
+          setKnowledgeModalOpen(false);
+        }}
+        onRestoreDefault={async () => {
+          await onKnowledgeScopeChange?.(null);
+          setKnowledgeModalOpen(false);
+        }}
+      />
     </div>
   );
 };

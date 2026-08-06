@@ -53,6 +53,7 @@ from services.agent_service import (
     import_agent_with_skills_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
+from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.nl2agent_service import create_nl2agent_stream
 from services.agent_version_service import (
     publish_version_impl,
@@ -73,6 +74,34 @@ from utils.auth_utils import get_current_user_info, get_current_user_id
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
+
+
+@agent_config_router.get("/{agent_id}/knowledge-capabilities")
+async def get_agent_knowledge_capabilities_api(
+    agent_id: int,
+    version_no: Optional[int] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Return knowledge source capabilities across the resolved agent tree."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        return {
+            "code": 0,
+            "message": "success",
+            "data": get_agent_knowledge_capabilities(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                version_no=version_no,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to resolve agent knowledge capabilities")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to resolve agent knowledge capabilities.",
+        ) from exc
 
 
 # Define API route

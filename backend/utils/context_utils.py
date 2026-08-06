@@ -400,6 +400,8 @@ def build_context_inputs(
     long_term_memory_prompt: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
+    knowledge_scope_policy: Optional[str] = None,
+    knowledge_scope_resources: Optional[str] = None,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
@@ -437,6 +439,9 @@ def build_context_inputs(
 
     if automation_tool_policy:
         add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
+
+    if knowledge_scope_policy:
+        add_system("knowledge_scope_policy", knowledge_scope_policy, 98, "platform")
 
     if include_memory and long_term_memory_prompt:
         add_system(
@@ -504,6 +509,16 @@ def build_context_inputs(
             id="knowledge_base:summary", type=ContextItemType.KNOWLEDGE_BASE,
             content={"text": guidance + knowledge_base_summary, "role": "user"},
             source=tuple(f"knowledge_base:{kb_id}" for kb_id in (kb_ids or ())), priority=10,
+            metadata={"authority": "retrieved"},
+        ))
+
+    if include_knowledge_base and knowledge_scope_resources:
+        inputs.append(ContextItemInput(
+            id="knowledge_scope:resources",
+            type=ContextItemType.KNOWLEDGE_BASE,
+            content={"text": knowledge_scope_resources, "role": "user"},
+            source=("knowledge_scope:runtime",),
+            priority=20,
             metadata={"authority": "retrieved"},
         ))
 

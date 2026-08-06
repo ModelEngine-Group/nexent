@@ -796,6 +796,7 @@ async def create_agent_config(
     automation_user_message: Optional[str] = None,
     automation_model_id: Optional[int] = None,
     automation_has_attachments: bool = False,
+    runtime_knowledge_context: Optional[Dict[str, str]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -824,6 +825,7 @@ async def create_agent_config(
             tool_params=normalized_tool_params,
             conversation_id=conversation_id,
             include_automation_tool=False,
+            runtime_knowledge_context=runtime_knowledge_context,
         )
         managed_agents.append(sub_agent_config)
 
@@ -1095,31 +1097,34 @@ async def create_agent_config(
         except Exception as e:
             logger.error(f"Failed to load memory tools: {e}", exc_info=True)
 
-    # Build knowledge base summary
+    # Build the legacy knowledge base summary only when no conversation scope
+    # context was supplied. Scoped runs use a separate trusted policy and an
+    # untrusted retrieved resource list.
     knowledge_base_summary = ""
     kb_ids = []
     try:
-        for tool in tool_list:
-            if "KnowledgeBaseSearchTool" == tool.class_name:
-                index_names = tool.params.get("index_names")
-                if index_names:
-                    # Reuse the index_name -> display_name mapping from tool.metadata
-                    # (already computed in create_tool_config_list to avoid redundant DB query)
-                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
-                    for index_name in index_names:
-                        try:
-                            display_name = index_name_to_display_map.get(index_name, index_name)
-                            message = ElasticSearchService().get_summary(index_name=index_name)
-                            summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
-                            kb_ids.append(index_name)
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to get summary for knowledge base {index_name}: {e}")
-                else:
-                    # TODO: Prompt should be refactored to yaml file
-                    knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
-                break  # Only process the first KnowledgeBaseSearchTool found
+        if not runtime_knowledge_context:
+            for tool in tool_list:
+                if "KnowledgeBaseSearchTool" == tool.class_name:
+                    index_names = tool.params.get("index_names")
+                    if index_names:
+                        # Reuse the index_name -> display_name mapping from tool.metadata
+                        # (already computed in create_tool_config_list to avoid redundant DB query)
+                        index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
+                        for index_name in index_names:
+                            try:
+                                display_name = index_name_to_display_map.get(index_name, index_name)
+                                message = ElasticSearchService().get_summary(index_name=index_name)
+                                summary = message.get("summary", "")
+                                knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
+                                kb_ids.append(index_name)
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to get summary for knowledge base {index_name}: {e}")
+                    else:
+                        # TODO: Prompt should be refactored to yaml file
+                        knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
+                    break  # Only process the first KnowledgeBaseSearchTool found
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
@@ -1222,6 +1227,8 @@ async def create_agent_config(
         long_term_memory_prompt=long_term_memory_prompt,
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
+        knowledge_scope_policy=(runtime_knowledge_context or {}).get("policy"),
+        knowledge_scope_resources=(runtime_knowledge_context or {}).get("resources"),
     )
 
     logger.debug(
@@ -1438,6 +1445,28 @@ async def create_tool_config_list(
                 logger.warning(
                     "Aidp permission lookup failed: %s", exc,
                 )
+
+            configured_kds = param_dict.get("kds_list") or []
+            if isinstance(configured_kds, str):
+                try:
+                    configured_kds = json.loads(configured_kds)
+                except json.JSONDecodeError:
+                    configured_kds = []
+            if not isinstance(configured_kds, list):
+                configured_kds = []
+            configured_kds = [str(kds_id) for kds_id in configured_kds]
+            # The execution whitelist is the effective tool range, not every
+            # KDS the user could access. This prevents model-supplied arguments
+            # from expanding a conversation-scoped selection.
+            _allowed_kds_set.intersection_update(configured_kds)
+            param_dict["kds_list"] = [
+                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
+            ]
+            _kds_name_to_id_map = {
+                name: kds_id
+                for name, kds_id in _kds_name_to_id_map.items()
+                if kds_id in _allowed_kds_set
+            }
 
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
@@ -1870,6 +1899,7 @@ async def create_agent_run_info(
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
+    runtime_knowledge_context: Optional[Dict[str, str]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1901,6 +1931,8 @@ async def create_agent_run_info(
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
     }
+    if runtime_knowledge_context is not None:
+        create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if enable_automation_tool and not is_debug and conversation_id is not None:
         create_config_kwargs.update({
             "include_automation_tool": True,

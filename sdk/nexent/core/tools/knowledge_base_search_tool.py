@@ -173,6 +173,16 @@ class KnowledgeBaseSearchTool(Tool):
         """
         self._internal_document_paths = _unwrap_field_info(document_paths)
 
+    def set_allowed_index_names(self, index_names: Optional[List[str]]) -> None:
+        """Install the backend-computed execution whitelist.
+
+        ``None`` preserves legacy SDK-only behavior. An empty list is an
+        installed deny-all whitelist and must not be treated as unset.
+        """
+        self._allowed_index_names = (
+            None if index_names is None else {str(name) for name in index_names}
+        )
+
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
 
@@ -615,4 +625,3 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Return the final list to the caller
         return final_filtered_images
-

@@ -208,7 +208,6 @@ class TestAidpSearchToolInit:
         [
             ("", "jwt-token", '["kb1"]', "server_url is required and must be a non-empty string"),
             ("https://aidp.example.com", "", '["kb1"]', "api_key is required and must be a non-empty string"),
-            ("https://aidp.example.com", "jwt-token", "[]", "kds_list must be a list of 1-10 knowledge base IDs"),
         ],
     )
     def test_init_invalid_required_values(
@@ -921,12 +920,11 @@ class TestParseKdsListNonString:
         assert result == ["kb1", "kb2"]
 
     def test_too_many_kds_raises(self, aidp_module):
-        with pytest.raises(ValueError, match="1-10"):
+        with pytest.raises(ValueError, match="0-10"):
             aidp_module._parse_kds_list(["kb"] * 11)
 
-    def test_empty_list_raises(self, aidp_module):
-        with pytest.raises(ValueError, match="1-10"):
-            aidp_module._parse_kds_list([])
+    def test_empty_list_is_valid_deny_all_scope(self, aidp_module):
+        assert aidp_module._parse_kds_list([]) == []
 
 
 # ---------------------------------------------------------------------------
