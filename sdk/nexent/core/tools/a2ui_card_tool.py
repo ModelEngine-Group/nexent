@@ -135,7 +135,13 @@ class OutputCardTool(Tool):
         """
         from ..a2ui.a2ui_builder import A2UIBuilder
 
+        logger.info(
+            "OutputCardTool.forward called: card_type=%s, title=%s, message=%s, observer=%s",
+            card_type, title, message[:100] if message else "", self.observer is not None,
+        )
+
         if not self.observer:
+            logger.error("OutputCardTool: observer is not initialized!")
             return {
                 "success": False,
                 "error": "Observer not initialized. Cannot send card.",
@@ -178,7 +184,10 @@ class OutputCardTool(Tool):
                 "", ProcessType.A2UI_COMPONENTS, json.dumps(components_msg)
             )
 
-            logger.info("A2UI card output: type=%s", card_type)
+            logger.info(
+                "A2UI card sent successfully: type=%s, surface_id=%s, components_count=%d",
+                card_type, builder._sid, len(components_msg.get("components", [])),
+            )
 
             return {
                 "success": True,

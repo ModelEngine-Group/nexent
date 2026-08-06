@@ -388,6 +388,12 @@ def _build_a2ui_card_guide_text(language: str = "zh") -> str:
         lines = ["### 交互式卡片输出 (output_card 工具)"]
         lines.append("当需要向用户展示结构化信息或请求用户反馈时，请使用 output_card 工具生成交互式卡片：")
         lines.append("")
+        lines.append("重要规则：")
+        lines.append("- 必须调用 output_card 工具来生成卡片，不要在回复文本中直接编写 HTML 代码")
+        lines.append("- message 参数应使用纯文本，不要包含 HTML 标签")
+        lines.append("- 调用 output_card 工具后，只需简短回复'已为您生成卡片'即可，不要重复卡片内容")
+        lines.append("- 不要在最终回复中包含任何 HTML 标签或样式代码")
+        lines.append("")
         lines.append("卡片类型：")
         lines.append("- info: 信息卡片，展示标题和消息内容")
         lines.append("- feedback: 反馈表单卡片，包含问题和选项，用户可选择或填写")
@@ -410,6 +416,12 @@ def _build_a2ui_card_guide_text(language: str = "zh") -> str:
     else:
         lines = ["### Interactive Card Output (output_card tool)"]
         lines.append("When you need to display structured information or request user feedback, use the output_card tool to generate interactive cards:")
+        lines.append("")
+        lines.append("Important Rules:")
+        lines.append("- You MUST call the output_card tool to generate cards. Do NOT write HTML code in your text response.")
+        lines.append("- The message parameter should be plain text, do not include HTML tags.")
+        lines.append("- After calling output_card, simply reply with a brief message like 'Card generated.' Do not repeat the card content.")
+        lines.append("- Do not include any HTML tags or style code in your final response.")
         lines.append("")
         lines.append("Card Types:")
         lines.append("- info: Information card with title and message content")

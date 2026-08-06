@@ -58,6 +58,9 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
   formData,
   onFormSubmit,
 }) => {
+  // Debug: log each component being rendered
+  console.log("[A2UIComponentRenderer] rendering:", component.component, "text:", component.text, "variant:", component.variant);
+
   const [localFormData, setLocalFormData] = useState<Record<string, any>>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -152,9 +155,16 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     }
 
     case "Card": {
+      const cardTitle = component.text || component.label || "";
+      const titleIsHtml = /<[a-z][\s\S]*>/i.test(cardTitle);
+      const titleEl = titleIsHtml ? (
+        <span dangerouslySetInnerHTML={{ __html: cardTitle }} />
+      ) : (
+        cardTitle || undefined
+      );
       return (
         <Card
-          title={component.text || component.label}
+          title={titleEl}
           variant={component.variant === "borderless" ? "borderless" : "outlined"}
           style={{ marginBottom: 12 }}
         >
@@ -214,7 +224,15 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           }}
           style={{ marginRight: 8, marginBottom: 8 }}
         >
-          {component.text || component.label}
+          {(() => {
+            const btnText = component.text || component.label || "";
+            const btnIsHtml = /<[a-z][\s\S]*>/i.test(btnText);
+            return btnIsHtml ? (
+              <span dangerouslySetInnerHTML={{ __html: btnText }} />
+            ) : (
+              btnText
+            );
+          })()}
         </Button>
       );
     }
@@ -430,12 +448,15 @@ export const A2UIChatMessage: React.FC<A2UIChatMessageProps> = ({
   onAction,
   messageId,
 }) => {
+  // Debug: log surfaces data to help diagnose rendering issues
+  console.log("[A2UIChatMessage] surfaces:", surfaces, "messageId:", messageId);
+
   if ((!surfaces || surfaces.length === 0) && (!pendingInteractions || pendingInteractions.length === 0)) {
     return null;
   }
 
   return (
-    <div className="a2ui-chat-message" style={{ marginTop: 12 }}>
+    <div className="a2ui-chat-message" style={{ marginTop: 12, border: "2px dashed #1890ff", padding: 8, borderRadius: 8 }}>
       {pendingInteractions && pendingInteractions.length > 0 && (
         <div className="a2ui-pending-interactions" style={{ marginBottom: 12 }}>
           {pendingInteractions.map((interaction) => (
