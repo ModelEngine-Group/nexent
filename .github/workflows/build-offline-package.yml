@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      upload_to_obs:
+        description: 'Upload the final package to Huawei Cloud OBS'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-offline-package:
@@ -75,6 +80,7 @@ jobs:
           SOURCE_SUFFIX=""
           INCLUDE_SOURCE="${{ inputs.include_source || false }}"
           IMAGE_SOURCE="${{ inputs.image_source || 'general' }}"
+          UPLOAD_TO_OBS="${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.upload_to_obs }}"
           if [ "$INCLUDE_SOURCE" = "true" ]; then
             SOURCE_SUFFIX="-with-source"
           fi
@@ -83,6 +89,7 @@ jobs:
           echo "platform=$PLATFORM" >> "$GITHUB_OUTPUT"
           echo "include-source=$INCLUDE_SOURCE" >> "$GITHUB_OUTPUT"
           echo "image-source=$IMAGE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "upload_to_obs=$UPLOAD_TO_OBS" >> "$GITHUB_OUTPUT"
           echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Set deployment components
@@ -119,6 +126,7 @@ jobs:
           find ./offline-output -maxdepth 2 -type f | sort | head -50
 
       - name: Authenticate to Huawei Cloud
+        if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
         uses: huaweicloud/auth-action@v1.1.0
         with:
           access_key_id: ${{ secrets.HUAWEI_OBS_ACCESSKEY }}
@@ -126,6 +134,7 @@ jobs:
           region: 'cn-east-3'
 
       - name: Upload to Huawei Cloud OBS
+        if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
         uses: huaweicloud/obs-helper@v1.0.0
         with:
           bucket_name: 'nexent-images'
@@ -150,7 +159,6 @@ jobs:
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
-          echo "OBS object: packages/${{ steps.set-vars.outputs.package-name }}.zip"
           echo "Note: the GitHub artifact zip contains the offline package contents directly."
           echo "Components: ${{ steps.set-components.outputs.components }}"
           echo "Image source: ${{ steps.set-vars.outputs.image-source }}"
