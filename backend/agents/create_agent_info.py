@@ -676,6 +676,29 @@ def _get_skill_script_tools(
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
+            ),
+            ToolConfig(
+                class_name="OutputCardTool",
+                name="output_card",
+                description=(
+                    "Output an interactive A2UI card or form to the user. "
+                    "Supports info cards, feedback forms, confirmation dialogs, "
+                    "custom forms, and rating components. Use this when you need to "
+                    "display structured information or request user input."
+                ),
+                inputs=json.dumps({
+                    "card_type": {"type": "string", "description": "Type of card: info/feedback/confirmation/form/rating"},
+                    "title": {"type": "string", "description": "Card title text"},
+                    "message": {"type": "string", "description": "Card body message"},
+                    "options": {"type": "array", "description": "Option strings for feedback/confirmation cards"},
+                    "fields": {"type": "array", "description": "Form field definitions for custom form type"},
+                    "allow_custom_input": {"type": "boolean", "description": "Allow custom text input"},
+                }, ensure_ascii=False),
+                output_type="object",
+                params={},
+                source="builtin",
+                usage="builtin",
+                metadata=skill_context,
             )
         ]
     except Exception as e:
@@ -854,7 +877,7 @@ async def create_agent_config(
     ))
 
     # Append OutputCardTool as an always-available system-managed tool for A2UI card output.
-    tool_list.append(ToolConfig(
+    output_card_tool = ToolConfig(
         class_name="OutputCardTool",
         name="output_card",
         description=(
@@ -874,7 +897,9 @@ async def create_agent_config(
         output_type="object",
         params={},
         source="builtin",
-    ))
+    )
+    tool_list.append(output_card_tool)
+    print(f"[A2UI_debug] Added OutputCardTool to tool_list, total tools now: {len(tool_list)}")
 
     if (
         include_automation_tool
@@ -1158,6 +1183,14 @@ async def create_agent_config(
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
+
+    # Log tool names for debugging
+    tool_names = [tool.name for tool in available_tools]
+    print(f"[A2UI_DEBUG] Agent tools ({len(tool_names)}): {tool_names}")
+    print(f"[A2UI_debug] output_card in tools: {'output_card' in tool_names}")
+    logger.info(f"Agent tools ({len(tool_names)}): {tool_names}")
+    logger.info(f"output_card in tools: {'output_card' in tool_names}")
+
     memory_tool_policy = build_memory_tool_policy(
         language,
         (tool.name for tool in available_tools),
@@ -1285,6 +1318,10 @@ async def create_agent_config(
         policy_layers=policy_layers,
     )
 
+
+    # Final verification of tools
+    logger.info(f"Building AgentConfig with {len(available_tools)} tools")
+    logger.info(f"Available tool names: {[t.name for t in available_tools]}")
 
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],

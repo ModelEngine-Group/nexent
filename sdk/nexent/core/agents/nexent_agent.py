@@ -458,7 +458,11 @@ class NexentAgent:
             )
         elif class_name == "OutputCardTool":
             from nexent.core.tools.a2ui_card_tool import OutputCardTool
-            return OutputCardTool(observer=self.observer)
+            logger.info("Creating OutputCardTool with observer=%s", self.observer is not None)
+            tool = OutputCardTool(observer=self.observer)
+            logger.info("OutputCardTool created: name=%s, inputs=%s", tool.name, list(tool.inputs.keys())
+                        if hasattr(tool, 'inputs') else 'no inputs')
+            return tool
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -555,14 +559,22 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
+                tool_configs = agent_config.tools
+                print(f"[A2UI_debug] Creating tools from {len(tool_configs)} tool configs")
+                for tc in tool_configs:
+                    print(f"[A2UI_debug] ToolConfig: class_name={tc.class_name}, name={tc.name}, source={tc.source}")
                 tool_list = [
                     _wrap_tool_with_monitoring(
                         self.create_tool(tool_config),
                         agent_config.name,
                     )
-                    for tool_config in agent_config.tools
+                    for tool_config in tool_configs
                 ]
+                print(f"[A2UI_debug] Created {len(tool_list)} tools successfully")
             except Exception as e:
+                print(f"[A2UI_debug] Error creating tools: {e}")
+                import traceback
+                traceback.print_exc()
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:

@@ -20,12 +20,31 @@ def configure_logging(level=logging.INFO):
     Configure root logger with color formatter and stream handler.
     Call this at the top of your main service scripts.
     """
+    import os
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    handler = logging.StreamHandler()
-    formatter = ColorFormatter('[%(asctime)s %(levelname)-1s %(name)-1s] %(message)s', datefmt='%H:%M:%S')
-    handler.setFormatter(formatter)
-    root_logger.addHandler(handler)
+    log_format = '[%(asctime)s %(levelname)-1s %(name)-1s] %(message)s'
+    date_format = '%H:%M:%S'
+    formatter = ColorFormatter(log_format, datefmt=date_format)
+
+    # Console output
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # File output - save to backend.log in project root directory
+    # Project root is one level up from backend/ directory
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    log_file_path = os.path.join(project_root, 'backend.log')
+    try:
+        file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+        file_formatter = logging.Formatter(log_format, datefmt=date_format)
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+        print(f"[logging_utils] Log file saved to: {log_file_path}")
+    except Exception as e:
+        print(f"[logging_utils] Failed to create log file handler: {e}")
+
     root_logger.setLevel(level)
 
 def configure_elasticsearch_logging():
