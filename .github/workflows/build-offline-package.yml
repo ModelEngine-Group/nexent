@@ -134,13 +134,12 @@ jobs:
           operation_type: 'upload'
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.set-vars.outputs.package-name }}
-          path: ./offline-output
+          path: './${{ steps.set-vars.outputs.package-name }}.zip'
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 30
+          archive: false
 
       - name: Summary
         run: |

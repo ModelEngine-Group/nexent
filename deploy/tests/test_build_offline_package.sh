@@ -117,8 +117,9 @@ echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.output
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
 echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
 echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'packages/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
-echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
-! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
+echo "$WORKFLOW_CONTENT" | grep -q 'uses: actions/upload-artifact@v7' || fail "offline package workflow should use upload-artifact v7 for unarchived uploads"
+echo "$WORKFLOW_CONTENT" | grep -q "^[[:space:]]*path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip artifact"
+echo "$WORKFLOW_CONTENT" | grep -q '^[[:space:]]*archive: false' || fail "offline package workflow should upload the zip without adding another archive layer"
 echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"
 
 OFFLINE_HELP="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --help)"
