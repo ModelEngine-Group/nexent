@@ -99,7 +99,8 @@ jobs:
             --image-source "${{ inputs.image_source }}" \
             --components "${{ steps.set-components.outputs.components }}" \
             --target all \
-            --compress false
+            --package-name "${{ steps.set-vars.outputs.package-name }}" \
+            --compress true
 
       - name: Show offline package
         run: |
@@ -110,6 +111,21 @@ jobs:
 
           du -sh ./offline-output
           find ./offline-output -maxdepth 2 -type f | sort | head -50
+
+      - name: Authenticate to Huawei Cloud
+        uses: huaweicloud/auth-action@v1.1.0
+        with:
+          access_key_id: ${{ secrets.HUAWEI_OBS_ACCESSKEY }}
+          secret_access_key: ${{ secrets.HUAWEI_OBS_SECRETKEY }}
+          region: 'cn-east-3'
+
+      - name: Upload to Huawei Cloud OBS
+        uses: huaweicloud/obs-helper@v1.0.0
+        with:
+          bucket_name: 'nexent-images'
+          local_file_path: './${{ steps.set-vars.outputs.package-name }}.zip'
+          obs_file_path: 'packages/${{ steps.set-vars.outputs.package-name }}.zip'
+          operation_type: 'upload'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -129,8 +145,8 @@ jobs:
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
-          echo "Note: the downloaded artifact zip contains the offline package contents directly."
-          echo "Target: ${{ inputs.target }}"
+          echo "OBS object: packages/${{ steps.set-vars.outputs.package-name }}.zip"
+          echo "Note: the GitHub artifact zip contains the offline package contents directly."
           echo "Components: ${{ steps.set-components.outputs.components }}"
           echo "Image source: ${{ inputs.image_source }}"
           echo "Ref Type: ${{ github.ref_type }}"

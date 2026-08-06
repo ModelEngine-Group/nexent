@@ -108,13 +108,17 @@ create_fake_docker
 WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
 echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
-echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
+echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
+echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'package/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
 echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
 ! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
 echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"
 
 OFFLINE_HELP="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --help)"
 echo "$OFFLINE_HELP" | grep -q -- '--include-sandbox BOOL' || fail "offline package help should document --include-sandbox"
+echo "$OFFLINE_HELP" | grep -q -- '--package-name NAME' || fail "offline package help should document --package-name"
 
 SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
 echo "$SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: true' || fail "offline dry-run should show that the Sandbox image is enabled by default"
@@ -128,6 +132,11 @@ if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.s
   fail "--include-sandbox should accept only true or false"
 fi
 grep -q "Include sandbox must be 'true' or 'false'" "$TMP_DIR/invalid-include-sandbox.log" || fail "invalid --include-sandbox error should be explicit"
+
+if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --package-name ../invalid --dry-run >"$TMP_DIR/invalid-package-name.log" 2>&1; then
+  fail "--package-name should reject path traversal"
+fi
+grep -q "Package name may contain only" "$TMP_DIR/invalid-package-name.log" || fail "invalid --package-name error should be explicit"
 
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
@@ -302,6 +311,7 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --image-source general \
     --target docker \
     --compress true \
+    --package-name nexent-custom-latest.zip \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
@@ -507,7 +517,8 @@ second_line="$(sed -n '2p' "$offline_deploy_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "offline deploy.sh --push-images should push before deploy"
 [ "$second_line" = "deploy:defaults:true:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
 
-[ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
+[ -f "$OUT_DIR/nexent-custom-latest.zip" ] || fail "zip package should use the requested final package name"
+[ ! -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "custom package name should replace the generated package name"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
 grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
 grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should be pulled"
