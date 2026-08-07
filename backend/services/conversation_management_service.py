@@ -42,8 +42,8 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from nexent.core.models import OpenAIModel
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from services.model_gateway_service import get_llm_adapter_from_config
+from utils.config_utils import tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
@@ -288,18 +288,16 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
 
     timeout_seconds = model_config.get("timeout_seconds") if model_config else None
 
-    # Create OpenAIModel instance
-    llm = OpenAIModel(
-        model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "",
-        api_base=model_config.get("base_url", ""),
-        api_key=model_config.get("api_key", ""),
+    # Create OpenAIModel instance via the gateway
+    llm = get_llm_adapter_from_config(
+        model_config,
+        tenant_id,
         temperature=0.7,
         top_p=0.95,
-        model_factory=model_config.get("model_factory", None),
-        ssl_verify=model_config.get("ssl_verify", True),
-        timeout_seconds=timeout_seconds,
         stream=False,
-    )
+        timeout_seconds=timeout_seconds,
+        display_name=display_name or None,
+    )._inner
 
     # Build messages - use new template variable 'question' instead of 'content'
     user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({

@@ -2,11 +2,12 @@ import logging
 from typing import Optional
 
 from nexent.core import MessageObserver
-from nexent.core.models import OpenAIModel, OpenAIVLModel
+from nexent.core.models import OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
+from services.model_gateway_service import get_llm_adapter_from_config
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
@@ -215,14 +216,16 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await OpenAIModel(
-            observer,
-            model_id=model_name,
-            api_base=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify,
+        connectivity = await get_llm_adapter_from_config(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify, "timeout_seconds": timeout_seconds,
+             "display_name": display_name},
+            tenant_id=None,
+            observer=observer,
+            model_name=model_name,
             timeout_seconds=timeout_seconds,
-        ).check_connectivity()
+            display_name=display_name,
+        )._inner.check_connectivity()
     elif model_type == "rerank":
         rerank_model = OpenAICompatibleRerank(
             model_name=model_name,

@@ -11,10 +11,9 @@ import aiohttp
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
 from consts.const import MODEL_CONFIG_MAPPING
 from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager
 
-from nexent import MessageObserver
-from nexent.core.models import OpenAIVLModel
+from services.model_gateway_service import get_vlm_adapter_from_config
 
 logger = logging.getLogger("image_service")
 
@@ -309,23 +308,13 @@ def _get_model_config_by_id(tenant_id, model_id, expected_model_type):
     return model_config
 
 
-def _build_vlm_model(vlm_model_config):
+def _build_vlm_model(vlm_model_config, tenant_id=None, slot="vlm"):
     if not vlm_model_config:
         return None
-    return OpenAIVLModel(
-        observer=MessageObserver(),
-        model_id=get_model_name_from_config(
-            vlm_model_config) if vlm_model_config else "",
-        api_base=vlm_model_config.get("base_url", ""),
-        api_key=vlm_model_config.get("api_key", ""),
-        temperature=0.7,
-        top_p=0.7,
-        frequency_penalty=0.5,
-        max_tokens=512,
-        ssl_verify=vlm_model_config.get("ssl_verify", True),
-        model_factory=vlm_model_config.get("model_factory"),
-        display_name=vlm_model_config.get("display_name"),
-    )
+    # Route through the gateway; the OpenAIVLMAdapter builds OpenAIVLModel with
+    # its default sampling params (0.7/0.7/0.5/512) which match this service's
+    # historical construction, so behavior is preserved.
+    return get_vlm_adapter_from_config(vlm_model_config, tenant_id, slot=slot)._inner
 
 
 def get_vlm_model(tenant_id: str, model_id: Optional[int] = None):
@@ -339,7 +328,7 @@ def get_vlm_model(tenant_id: str, model_id: Optional[int] = None):
     else:
         vlm_model_config = tenant_config_manager.get_model_config(
             key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id)
-    return _build_vlm_model(vlm_model_config)
+    return _build_vlm_model(vlm_model_config, tenant_id, "vlm")
 
 
 def get_image_understanding_model(tenant_id: str):
@@ -353,4 +342,4 @@ def get_video_understanding_model(tenant_id: str, model_id: Optional[int] = None
     else:
         vlm_model_config = tenant_config_manager.get_model_config(
             key=MODEL_CONFIG_MAPPING["vlm3"], tenant_id=tenant_id)
-    return _build_vlm_model(vlm_model_config)
+    return _build_vlm_model(vlm_model_config, tenant_id, "vlm3")
