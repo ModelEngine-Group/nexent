@@ -767,7 +767,7 @@ def show_info_card(observer, title, message):
 
 **UI 预览**：
 
-![Info 卡片](a2ui_samples/info_card.png)
+![Info 卡片](a2ui_samples/info_card.jpg)
 
 **生成的组件结构**：
 
@@ -804,7 +804,7 @@ def show_feedback_card(observer, question, options, allow_custom=True):
 
 **UI 预览**：
 
-![Feedback 卡片](a2ui_samples/feedback_card.png)
+![Feedback 卡片](a2ui_samples/feedback_card.jpg)
 
 ### 5.3 Confirmation 卡片（操作确认）
 
@@ -836,7 +836,7 @@ def show_confirmation_card(observer, title, message,
 
 **UI 预览**：
 
-![Confirmation 卡片](a2ui_samples/confirmation_card.png)
+![Confirmation 卡片](a2ui_samples/confirmation_card.jpg)
 
 ### 5.4 Form 卡片（表单录入）
 
@@ -875,7 +875,7 @@ def show_form_card(observer, title, fields, submit_action, submit_payload=None):
 
 **UI 预览**：
 
-![Form 卡片](a2ui_samples/form_card.png)
+![Form 卡片](a2ui_samples/form_card.jpg)
 
 **调用示例**：
 
@@ -918,7 +918,7 @@ def show_rating_card(observer, title, allow_review=True, max_value=5):
 
 **UI 预览**：
 
-![Rating 卡片](a2ui_samples/rating_card.png)
+![Rating 卡片](a2ui_samples/rating_card.jpg)
 
 ### 5.6 OutputCardTool 调用示例
 
@@ -955,9 +955,336 @@ tool_calls = [{
 
 ---
 
-## 6. 人在回路交互机制
+## 6. Agent 配置与使用指导
 
-### 6.1 完整交互流程
+### 6.1 快速开始（3 步上手）
+
+#### 步骤 1：创建新 Agent 或编辑现有 Agent
+
+在 Nexent 平台进入 **Agent 管理** → 创建新 Agent 或编辑已有 Agent：
+
+```
+Agent 配置页面
+├── 基础信息
+│   ├── Agent 名称: card_gallery_assistant
+│   ├── 描述: A2UI 卡片演示助手
+│   └── 头像: （可选）
+├── 系统指令（Instructions）← 关键配置
+├── 模型设置
+├── 工具配置 ← output_card 自动注入
+└── 高级设置
+```
+
+#### 步骤 2：在系统指令中添加 A2UI 使用说明
+
+在 Agent 的 **系统指令（Instructions）** 区域，添加以下内容引导 Agent 使用 `output_card` 工具：
+
+```markdown
+## 交互式卡片输出规范
+
+当需要展示信息、收集用户反馈或请求确认时，必须使用 `output_card` 工具。
+
+### 严格规则：
+1. 必须使用 `<code>` 标签包裹工具调用代码
+2. 绝对不能以纯文本形式输出工具调用
+3. 调用 output_card 后，不要在文本中重复输出工具调用的参数
+
+### 调用示例（必须用 <code> 标签包裹）：
+
+信息卡片：
+<code>
+output_card(card_type="info", title="通知", message="这是一条重要通知")
+</code>
+
+反馈表单：
+<code>
+output_card(card_type="feedback", title="您的反馈", message="请分享您的想法", options=["非常满意", "满意", "一般", "不满意"])
+</code>
+
+确认对话框：
+<code>
+output_card(card_type="confirmation", title="确认操作", message="您确定要执行此操作吗？", options=["确认", "取消"])
+</code>
+
+自定义表单：
+<code>
+output_card(card_type="form", title="信息收集", fields=[{"name": "email", "label": "邮箱", "type": "textfield", "required": True}])
+</code>
+
+评分组件：
+<code>
+output_card(card_type="rating", title="请评分", message="您对本次服务的评价？")
+</code>
+
+### 卡片类型说明：
+- **info**: 展示结构化信息，如通知、数据摘要、操作结果
+- **feedback**: 收集用户反馈，支持预设选项和自定义输入
+- **confirmation**: 获取用户确认，用于关键操作确认
+- **form**: 收集结构化数据，支持多种字段类型
+- **rating**: 收集评分评价，用于产品/服务反馈
+```
+
+#### 步骤 3：保存并测试
+
+保存 Agent 配置后，即可开始对话测试：
+
+```
+用户: 展示一个信息卡片
+Agent: （自动调用 output_card，展示 Info 卡片）
+
+用户: 需要收集用户满意度反馈
+Agent: （自动调用 output_card，展示 Feedback 卡片）
+
+用户: 确认删除操作
+Agent: （自动调用 output_card，展示 Confirmation 卡片）
+```
+
+### 6.2 OutputCardTool 参数详解
+
+#### 6.2.1 工具元数据
+
+| 属性 | 值 | 说明 |
+|------|------|------|
+| 工具名称 | `output_card` | Agent 调用时使用的名称 |
+| 描述 | Output an interactive A2UI card or form to the user | 用于 LLM 理解工具用途 |
+| 来源 | builtin | 内置工具，无需额外配置 |
+| 输出类型 | object | 返回结构化 JSON |
+
+#### 6.2.2 输入参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `card_type` | string | ✅ | - | 卡片类型：info / feedback / confirmation / form / rating |
+| `title` | string | ❌ | None | 卡片标题，展示在卡片顶部 |
+| `message` | string | ❌ | None | 卡片正文消息，展示标题下方 |
+| `options` | array[string] | ❌ | None | 选项列表，用于 feedback/confirmation 卡片 |
+| `fields` | array[object] | ❌ | None | 表单字段定义，用于 form 卡片 |
+| `allow_custom_input` | boolean | ❌ | False | 是否允许用户自定义输入（feedback/rating） |
+
+#### 6.2.3 card_type 参数说明
+
+| card_type | 使用场景 | 必须参数 | 可选参数 |
+|-----------|---------|---------|---------|
+| `info` | 通知、状态展示、结果反馈 | card_type, title, message | - |
+| `feedback` | 满意度调查、意见收集 | card_type, title, message | options, allow_custom_input |
+| `confirmation` | 危险操作确认、二次验证 | card_type, title, message | options |
+| `form` | 数据录入、配置表单 | card_type, title, fields | - |
+| `rating` | 评分评价、星级打分 | card_type, title, message | allow_custom_input |
+
+#### 6.2.4 参数格式示例
+
+**options 参数格式**（feedback/confirmation）：
+```python
+# 简单字符串列表
+options=["确认", "取消"]
+
+# 或带有显示文本
+options=["非常满意", "满意", "一般", "不满意"]
+```
+
+**fields 参数格式**（form）：
+```python
+fields=[
+    {
+        "name": "email",           # 字段标识
+        "label": "邮箱",           # 显示标签
+        "type": "textfield",       # 字段类型: textfield / textarea
+        "placeholder": "请输入邮箱", # 占位文本
+        "required": True           # 是否必填
+    },
+    {
+        "name": "description",
+        "label": "详细描述",
+        "type": "textarea",
+        "placeholder": "请输入详细信息",
+        "required": False
+    }
+]
+```
+
+### 6.3 Agent 高级配置
+
+#### 6.3.1 推荐模型配置
+
+| 配置项 | 推荐值 | 说明 |
+|--------|--------|------|
+| 模型 | GPT-4 / Claude 3.5 | 支持工具调用的高级模型 |
+| Temperature | 0.3 - 0.5 | 较低温度以确保工具调用稳定性 |
+| Max Steps | 10 - 15 | 足够的推理步骤 |
+| Request Timeout | 60s+ | 避免超时中断工具调用 |
+
+#### 6.3.2 指令注入机制
+
+系统会自动检测 `output_card` 工具是否可用，并注入 A2UI 使用指令：
+
+```python
+# create_agent_info.py 中的自动注入逻辑
+if has_output_card:
+    # 1. 清理数据库中旧的 A2UI 指令（避免冲突）
+    cleaned_instructions = remove_old_a2ui_instructions(raw_instructions)
+    
+    # 2. 注入新的 A2UI 使用说明
+    instructions = cleaned_instructions + "\n" + NEW_A2UI_INSTRUCTIONS
+    
+    # 3. 日志确认注入成功
+    logger.info("[A2UI_debug] A2UI instructions injected")
+```
+
+**注意**：
+- 数据库中存储的旧指令（如「不要在回复中包含 HTML」）会被自动清理
+- 新指令会追加在现有指令之后
+- 若需自定义指令，可直接在 Agent 配置页面编辑
+
+#### 6.3.3 工具列表
+
+启用 A2UI 后，Agent 的可用工具列表将包含：
+
+```
+可用工具列表:
+├── create_scheduled_task_proposal  # 定时任务
+├── output_card                     # A2UI 卡片输出（新增）
+└── （其他已配置的工具...）
+```
+
+### 6.4 Agent 提示词模板
+
+#### 6.4.1 基础卡片 Agent 模板
+
+适用于简单的卡片展示需求：
+
+```markdown
+你是一个卡片演示助手，专门负责展示各类交互式 UI 卡片。
+
+## 核心能力
+- 使用 output_card 工具展示信息卡片
+- 收集用户反馈和评分
+- 确认危险操作
+
+## 卡片类型
+1. info: 展示通知、状态、结果
+2. feedback: 收集用户反馈
+3. confirmation: 请求操作确认
+4. form: 收集结构化数据
+5. rating: 收集评分
+
+## 使用示例
+当用户说「展示信息卡片」时：
+<code>
+output_card(card_type="info", title="演示标题", message="这是一条演示信息")
+</code>
+```
+
+#### 6.4.2 反馈收集 Agent 模板
+
+适用于调查、满意度收集场景：
+
+```markdown
+你是一个用户反馈收集助手。当用户请求反馈时，使用 output_card 工具展示反馈表单。
+
+## 反馈流程
+1. 用户请求反馈 → 展示 feedback 卡片
+2. 用户选择选项 → 记录反馈
+3. 展示感谢页面 → 使用 info 卡片
+
+## 示例
+<code>
+output_card(
+    card_type="feedback",
+    title="服务满意度调查",
+    message="请为本次服务打分",
+    options=["非常满意", "满意", "一般", "不满意"],
+    allow_custom_input=True
+)
+</code>
+```
+
+#### 6.4.3 数据录入 Agent 模板
+
+适用于信息收集、配置表单场景：
+
+```markdown
+你是一个信息收集助手。当需要收集用户信息时，使用 output_card 的 form 类型。
+
+## 表单字段支持
+- textfield: 单行文本
+- textarea: 多行文本
+- required: 标记必填字段
+
+## 示例
+<code>
+output_card(
+    card_type="form",
+    title="用户注册",
+    fields=[
+        {"name": "username", "label": "用户名", "type": "textfield", "required": True},
+        {"name": "email", "label": "邮箱", "type": "textfield", "required": True},
+        {"name": "bio", "label": "个人简介", "type": "textarea", "required": False}
+    ]
+)
+</code>
+```
+
+### 6.5 调试与验证
+
+#### 6.5.1 后端日志
+
+启动后端后，关注以下日志确认配置正确：
+
+```
+# A2UI 工具注入成功
+[A2UI_debug] ToolConfig: class_name=OutputCardTool, name=output_card, source=builtin
+
+# 工具创建成功
+[INFO nexent.core.agents.nexent_agent] Creating OutputCardTool with observer=True
+[INFO nexent.core.agents.nexent_agent] OutputCardTool created: name=output_card, inputs=[...]
+
+# A2UI 指令注入
+[A2UI_debug] A2UI instructions injected (XXXX chars)
+
+# Agent 配置完成
+[A2UI_debug] AgentConfig created with instructions length: XXXX
+```
+
+#### 6.5.2 验证 Checklist
+
+| 检查项 | 验证方法 | 预期结果 |
+|--------|---------|---------|
+| 工具注册 | 查看后端日志 | 显示 `OutputCardTool created` |
+| 指令注入 | 查看后端日志 | 显示 `A2UI instructions injected` |
+| 卡片渲染 | 发送「展示信息卡片」 | 前端显示卡片组件 |
+| 交互反馈 | 点击卡片按钮 | Agent 收到用户响应 |
+| 表单提交 | 填写表单并提交 | 数据正确返回 |
+
+#### 6.5.3 常见错误
+
+| 错误信息 | 原因 | 解决方案 |
+|---------|------|---------|
+| `Nullable argument 'card_type' should have key 'nullable' set to True` | inputs 定义缺少 nullable | 已修复，确保所有参数有 `"nullable": True` |
+| `duplicate names: ['output_card', 'output_card']` | 工具重复注册 | 已修复，移除重复 ToolConfig |
+| Agent 输出纯文本 `output_card(...)` | 模型忘记使用 `<code>` 标签 | 已添加回退提取机制 |
+| Agent 不识别 output_card | 指令未注入或被旧指令覆盖 | 检查日志确认指令注入 |
+| 卡片样式错误 | 前端组件映射问题 | 刷新前端页面，检查 A2UIRenderer 控制台错误 |
+
+#### 6.5.4 清理缓存
+
+如遇问题，可尝试清理缓存后重启：
+
+```bash
+# 清理 Python 缓存
+find backend -name "__pycache__" -type d -exec rm -rf {} +
+find sdk -name "__pycache__" -type d -exec rm -rf {} +
+
+# 清理前端缓存
+cd frontend && rm -rf .next node_modules/.cache
+
+# 重启服务
+```
+
+---
+
+## 7. 人在回路交互机制
+
+### 7.1 完整交互流程
 
 ```
 Agent 运行时                后端 API                   前端
@@ -980,7 +1307,7 @@ Agent 运行时                后端 API                   前端
     │  8. a2ui_delete_surface → 清理 UI
 ```
 
-### 6.2 使用示例
+### 7.2 使用示例
 
 ```python
 async def confirm_operation_tool(self, query: str):
