@@ -61,7 +61,7 @@ class JinaEmbeddingAdapter(EmbeddingAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..embedding_model import JinaEmbedding
+        from ...embedding_model import JinaEmbedding
 
         self._inner = JinaEmbedding(
             api_key=self._api_key,
@@ -123,7 +123,7 @@ class DashScopeEmbeddingAdapter(EmbeddingAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..embedding_model import DashScopeMultimodalEmbedding
+        from ...embedding_model import DashScopeMultimodalEmbedding
 
         self._inner = DashScopeMultimodalEmbedding(
             api_key=self._api_key,
@@ -180,7 +180,7 @@ class SiliconflowEmbeddingAdapter(EmbeddingAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..embedding_model import SiliconflowMultimodalEmbedding
+        from ...embedding_model import SiliconflowMultimodalEmbedding
 
         self._inner = SiliconflowMultimodalEmbedding(
             api_key=self._api_key,
@@ -237,7 +237,7 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..embedding_model import OpenAICompatibleEmbedding
+        from ...embedding_model import OpenAICompatibleEmbedding
 
         self._inner = OpenAICompatibleEmbedding(
             model_name=self._context.model_name,

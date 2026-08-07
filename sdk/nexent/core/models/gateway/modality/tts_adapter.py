@@ -57,16 +57,17 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..ali_tts_model import AliTTSConfig, AliTTSModel
+        from ...ali_tts_model import AliTTSConfig, AliTTSModel
 
+        extras = self._context.extra
         cfg = AliTTSConfig(
             api_key=self._context.api_key,
             model=self._context.model_name,
-            voice=self._context.voice or self._context.extra.get("voice"),
+            voice=self._context.voice or "Cherry",
             speech_rate=self._context.speed_ratio,
             ws_url=self._ws_url,
-            format=self._context.extra.get("format", "mp3"),
-            sample_rate=self._context.extra.get("sample_rate", 16000),
+            format=extras.get("format", "mp3"),
+            sample_rate=extras.get("sample_rate", 16000),
         )
         self._inner = AliTTSModel(cfg, self._context.audio_file_path)
 
@@ -111,7 +112,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..volc_tts_model import VolcTTSConfig, VolcTTSModel
+        from ...volc_tts_model import VolcTTSConfig, VolcTTSModel
 
         cfg = VolcTTSConfig(
             appid=self._context.model_appid or "",
@@ -170,7 +171,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..openai_llm import OpenAIModel
+        from ...openai_llm import OpenAIModel
 
         self._inner = OpenAIModel(
             observer=self._context.observer,

@@ -125,8 +125,8 @@ def _config_to_context(
         model_type=cfg.get("model_type") if modality in ("embedding", "multi_embedding") else None,
         model_appid=cfg.get("model_appid"),
         access_token=cfg.get("access_token"),
-        speed_ratio=float(cfg.get("speed_ratio", 1.0)) if modality == "tts" else 1.0,
-        voice=cfg.get("voice") if modality == "tts" else None,
+        speed_ratio=float(construct_extras.get("speed_ratio") or cfg.get("speed_ratio", 1.0)) if modality == "tts" else 1.0,
+        voice=construct_extras.get("voice") or (cfg.get("voice") if modality == "tts" else None),
         language=construct_extras.get("language", "zh") if modality == "stt" else "zh",
         audio_file_path=TEST_PCM_PATH if modality == "stt" else None,
         observer=observer,
@@ -145,6 +145,24 @@ def get_adapter_from_config(
     """Resolve and return the adapter for ``cfg`` (cached by the gateway)."""
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     return get_gateway().get_adapter(context)
+
+
+def build_adapter_fresh(
+    cfg: Optional[dict],
+    modality: str,
+    slot: str,
+    tenant_id: Optional[str] = None,
+    **construct_extras: Any,
+):
+    """Build a fresh adapter for ``cfg`` WITHOUT the gateway instance cache.
+
+    Used by per-call construction sites (e.g. voice streaming sessions) where
+    vendor config carries per-request params (api_key, ws_url, voice, …) that
+    must not collide across tenants under a shared cache key.
+    """
+    context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
+    cls = get_registry().resolve(context.factory, modality)
+    return cls(context)
 
 
 # ---- Convenience wrappers (modality-specific defaults) -------------------

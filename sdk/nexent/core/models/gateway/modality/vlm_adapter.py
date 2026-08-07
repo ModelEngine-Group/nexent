@@ -59,7 +59,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..openai_vlm import OpenAIVLModel
+        from ...openai_vlm import OpenAIVLModel
 
         # model_id / api_base / api_key forward via **kwargs to OpenAIServerModel.
         self._inner = OpenAIVLModel(
