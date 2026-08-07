@@ -4,12 +4,7 @@ from typing import Any, Dict, Optional
 
 from nexent.core.models.stt_model import BaseSTTModel
 from nexent.core.models.tts_model import BaseTTSModel
-from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
-from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
-from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
-from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
 
-from consts.const import TEST_VOICE_PATH, TEST_PCM_PATH
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
@@ -17,6 +12,7 @@ from consts.exceptions import (
 )
 from database.model_management_db import get_model_records
 from utils.config_utils import tenant_config_manager
+from services.model_gateway_service import build_adapter_fresh
 
 logger = logging.getLogger("voice_service")
 
@@ -49,32 +45,23 @@ class VoiceService:
         Returns:
             STT model instance based on configuration
         """
-        # Default to Ali Cloud if model_factory is not specified or is dashscope
-        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
-
-        if use_volc:
-            # Use Volcano Engine STT
-            volc_config = VolcSTTConfig(
-                appid=model_appid or "",
-                access_token=access_token or "",
-                ws_url=base_url if base_url else "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-                format="pcm",
-                rate=16000
-            )
-            return VolcSTTModel(volc_config, TEST_PCM_PATH)
-        else:
-            # Use Ali Cloud STT (default)
-            ali_config = AliSTTConfig(
-                api_key=api_key or "",
-                model=model_name or "qwen3-asr-flash-realtime",
-                language=language,
-                ws_url=base_url if base_url else None,
-                format="pcm",
-                rate=16000,
-                enable_vad=True,
-                timeout=5
-            )
-            return AliSTTModel(ali_config, TEST_PCM_PATH)
+        # Vendor dispatch (Ali vs Volc) is resolved by the adapter registry;
+        # per-vendor Config construction lives in the STT adapters. Built fresh
+        # per call (no gateway cache) since api_key/ws_url are per-request.
+        cfg = {
+            "model_factory": model_factory,
+            "model_name": model_name,
+            "api_key": api_key,
+            "model_appid": model_appid,
+            "access_token": access_token,
+            "base_url": base_url,
+        }
+        return build_adapter_fresh(
+            cfg, "stt", "stt", None,
+            language=language,
+            model_name=model_name or "qwen3-asr-flash-realtime",
+            timeout=5,
+        )._inner
 
     def _get_stt_model_from_tenant_config(
         self,
@@ -166,25 +153,21 @@ class VoiceService:
         Returns:
             TTS model instance based on configuration
         """
-        use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
-
-        if use_volc:
-            volc_config = VolcTTSConfig(
-                appid=model_appid or "",
-                token=access_token or "",
-                speed_ratio=speed_ratio,
-                ws_url=base_url or None,
-            )
-            return VolcTTSModel(volc_config)
-        else:
-            ali_config = AliTTSConfig(
-                api_key=api_key or "",
-                model=model or "qwen3-tts-flash",
-                voice="Cherry",
-                speech_rate=speed_ratio,
-                ws_url=base_url if base_url else None
-            )
-            return AliTTSModel(ali_config)
+        # Vendor dispatch (Ali vs Volc) is resolved by the adapter registry;
+        # per-vendor Config construction (Ali voice="Cherry", Volc voice_type
+        # default, etc.) lives in the TTS adapters. Built fresh per call.
+        cfg = {
+            "model_factory": model_factory,
+            "api_key": api_key,
+            "model_appid": model_appid,
+            "access_token": access_token,
+            "base_url": base_url,
+        }
+        return build_adapter_fresh(
+            cfg, "tts", "tts", None,
+            model_name=model or "qwen3-tts-flash",
+            speed_ratio=speed_ratio,
+        )._inner
 
     def _get_tts_model_from_tenant_config(
         self,

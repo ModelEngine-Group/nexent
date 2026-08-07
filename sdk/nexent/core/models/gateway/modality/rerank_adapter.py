@@ -60,7 +60,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..rerank_model import OpenAICompatibleRerank
+        from ...rerank_model import OpenAICompatibleRerank
 
         self._inner = OpenAICompatibleRerank(
             model_name=self._context.model_name,
@@ -102,7 +102,7 @@ class JinaRerankAdapter(RerankAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..rerank_model import JinaRerank
+        from ...rerank_model import JinaRerank
 
         self._inner = JinaRerank(
             api_key=self._api_key,
@@ -144,7 +144,7 @@ class CohereRerankAdapter(RerankAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..rerank_model import CohereRerank
+        from ...rerank_model import CohereRerank
 
         self._inner = CohereRerank(
             api_key=self._api_key,

@@ -67,7 +67,7 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..ali_stt_model import AliSTTConfig, AliSTTModel
+        from ...ali_stt_model import AliSTTConfig, AliSTTModel
 
         extras = self._context.extra
         cfg = AliSTTConfig(
@@ -125,7 +125,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..volc_stt_model import VolcSTTConfig, VolcSTTModel
+        from ...volc_stt_model import VolcSTTConfig, VolcSTTModel
 
         cfg = VolcSTTConfig(
             appid=self._context.model_appid or "",
@@ -187,7 +187,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         )
 
     def _build_inner(self) -> None:
-        from ..openai_llm import OpenAIModel
+        from ...openai_llm import OpenAIModel
 
         self._inner = OpenAIModel(
             observer=self._context.observer,
