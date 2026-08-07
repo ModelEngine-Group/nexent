@@ -311,10 +311,10 @@ def _get_model_config_by_id(tenant_id, model_id, expected_model_type):
 def _build_vlm_model(vlm_model_config, tenant_id=None, slot="vlm"):
     if not vlm_model_config:
         return None
-    # Route through the gateway; the OpenAIVLMAdapter builds OpenAIVLModel with
-    # its default sampling params (0.7/0.7/0.5/512) which match this service's
-    # historical construction, so behavior is preserved.
-    return get_vlm_adapter_from_config(vlm_model_config, tenant_id, slot=slot)._inner
+    # Return the adapter (a transparent _inner proxy via __getattr__) so tools
+    # can call vlm.invoke_sync(VLMRequest) / vlm.get_model_info(), and legacy
+    # direct calls (vlm.analyze_image / vlm.client_kwargs) still forward.
+    return get_vlm_adapter_from_config(vlm_model_config, tenant_id, slot=slot)
 
 
 def get_vlm_model(tenant_id: str, model_id: Optional[int] = None):

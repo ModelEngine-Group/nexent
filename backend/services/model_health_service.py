@@ -225,7 +225,7 @@ async def _perform_connectivity_check(
             model_name=model_name,
             timeout_seconds=timeout_seconds,
             display_name=display_name,
-        )._inner.check_connectivity()
+        ).health_check()
     elif model_type == "rerank":
         rerank_model = OpenAICompatibleRerank(
             model_name=model_name,

@@ -634,7 +634,7 @@ def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
         modality="llm_long_context",
         model_name=resolved_model_name,
         observer=MessageObserver(),
-    )._inner
+    )
     return long_text_to_text_model
 
 

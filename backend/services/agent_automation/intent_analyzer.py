@@ -296,7 +296,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             stream=False,
             display_name=self._model_config.get("display_name"),
             timeout_seconds=self._model_config.get("timeout_seconds"),
-        )._inner
+        )
         response = llm.generate([
             {
                 "role": MESSAGE_ROLE["SYSTEM"],

@@ -73,6 +73,24 @@ class MultimodalAdapter(ABC):
             "model_name": self._context.model_name,
         }
 
+    def __getattr__(self, name: str) -> Any:
+        """Fallback: forward unknown attributes to the wrapped ``_inner`` model.
+
+        ``_inner`` and ``_context`` are real instance attributes set in
+        ``__init__``, so accessing them never recurses. This makes every adapter
+        a transparent proxy for the wrapped model — callers that reach for
+        ``model.client`` / ``model.model_id`` / ``model.check_connectivity`` /
+        ``model.analyze_image`` / ``model.generate`` / ``model.client_kwargs``
+        keep working unchanged. LLMAdapter additionally defines ``__call__``
+        explicitly (Python special methods bypass ``__getattr__``).
+        """
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        inner = self.__dict__.get("_inner")
+        if inner is not None:
+            return getattr(inner, name)
+        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
+
     def _build_inner(self) -> None:
         """Construct the wrapped existing-model instance on first use.
 

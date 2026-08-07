@@ -81,7 +81,7 @@ def call_llm_for_system_prompt(
         top_p=0.95,
         display_name=display_name or None,
         timeout_seconds=timeout_seconds,
-    )._inner
+    )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
