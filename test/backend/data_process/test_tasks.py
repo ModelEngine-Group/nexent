@@ -46,26 +46,54 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     fake_ray = FakeRay(initialized=initialized)
     sys.modules["ray"] = fake_ray
     import importlib
-    # Stub celery module (required by app.py and tasks.py imported via __init__.py)
-    if "celery.backends.base" not in sys.modules:
-        backends_base_mod = types.ModuleType("celery.backends.base")
-        backends_base_mod.DisabledBackend = type("DisabledBackend", (), {})
-        sys.modules["celery.backends.base"] = backends_base_mod
 
-    if "celery.exceptions" not in sys.modules:
-        exceptions_mod = types.ModuleType("celery.exceptions")
-        exceptions_mod.Retry = type("Retry", (Exception,), {})
-        sys.modules["celery.exceptions"] = exceptions_mod
+    # IMPORTANT: install the celery stub BEFORE doing any
+    # ``import celery.exceptions`` / ``import celery.backends.base`` so that
+    # those ``__import__`` calls hit our stub rather than auto-loading the
+    # real celery package. We *always* install our stub (replacing whatever
+    # may already be in ``sys.modules``) so a sibling test that imported
+    # the real celery package doesn't poison ``tasks.chord`` etc.
+    celery_mod = types.ModuleType("celery")
+    # Mark as a package so ``import celery.exceptions`` resolves under
+    # the stub instead of falling back to the real one.
+    celery_mod.__path__ = []  # type: ignore[attr-defined]
 
-    if "celery.result" not in sys.modules:
-        result_mod = types.ModuleType("celery.result")
-        result_mod.AsyncResult = type("AsyncResult", (), {})
+    class _FakeBackend:
+        pass
 
-        @contextmanager
-        def _allow_join_result():
-            yield
-        result_mod.allow_join_result = _allow_join_result
-        sys.modules["celery.result"] = result_mod
+    class _FakeCelery:
+        def __init__(self, *args, **kwargs):
+            self.backend = _FakeBackend()
+            self.conf = types.SimpleNamespace(
+                update=lambda **kwargs: None)
+
+        def task(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+
+    celery_mod.Celery = _FakeCelery
+    celery_mod.Task = type("Task", (), {})
+    celery_mod.chain = lambda *args: None
+    celery_mod.group = lambda *args, **kwargs: []
+    celery_mod.chord = lambda *args, **kwargs: (
+        lambda callback: types.SimpleNamespace(
+            get=lambda: {
+                "success": True,
+                "total_indexed": 0,
+                "total_submitted": 0,
+            }
+        )
+    )
+    celery_mod.states = types.SimpleNamespace(
+        PENDING="PENDING",
+        STARTED="STARTED",
+        SUCCESS="SUCCESS",
+        FAILURE="FAILURE",
+        RETRY="RETRY",
+        REVOKED="REVOKED",
+    )
+    sys.modules["celery"] = celery_mod
 
     if "celery.signals" not in sys.modules:
         signals_mod = types.ModuleType("celery.signals")
@@ -83,49 +111,258 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         signals_mod.task_failure = FakeSignal()
         sys.modules["celery.signals"] = signals_mod
 
-    if "celery" not in sys.modules:
-        celery_mod = types.ModuleType("celery")
-        # Create a Celery class that accepts any arguments and has required attributes
+    # Stub celery module (required by app.py and tasks.py imported via __init__.py)
+    if "celery.backends.base" not in sys.modules:
+        backends_base_mod = types.ModuleType("celery.backends.base")
+        backends_base_mod.DisabledBackend = type("DisabledBackend", (), {})
+        sys.modules["celery.backends.base"] = backends_base_mod
+    # Augment any celery.backends.base stub with symbols celery.backends.*
+    # imports at runtime (e.g. _create_chord_error_with_cause used by
+    # celery.backends.redis). We keep the same module object across tests so
+    # already-imported `from celery.backends.base import X` references remain
+    # valid; we just add the missing names.
+    _bb_mod = sys.modules.get("celery.backends.base")
+    if _bb_mod is not None and not hasattr(_bb_mod, "BaseKeyValueStoreBackend"):
+        # Drop the stub so we can load the real module, then copy public
+        # + private helpers back onto the original stub object to keep identity.
+        sys.modules.pop("celery.backends.base", None)
+        try:
+            import celery.backends.base as _real_bb  # noqa: PLC0415
+            for _name in dir(_real_bb):
+                if _name.startswith("__"):
+                    continue
+                if not hasattr(_bb_mod, _name):
+                    setattr(_bb_mod, _name, getattr(_real_bb, _name))
+        except Exception:  # pragma: no cover
+            pass
+        # Restore the (now-augmented) original stub under its key.
+        sys.modules["celery.backends.base"] = _bb_mod
 
-        class FakeBackend:
+    # celery.exceptions must keep the SAME module object across tests so that
+    # already-bound names like `tasks.Retry` continue to refer to the same
+    # class instance — replacing the module would create a new Retry class
+    # object that wouldn't match `except Retry:` in tasks.py.
+    # We always create / reuse a stub module here. Because the celery
+    # ``__init__`` stub above blocks auto-import of the real
+    # ``celery.exceptions`` submodule, we cannot reliably ``__import__`` the
+    # real one; instead we provide the small set of symbols ``tasks.py``
+    # (and ``celery.platforms`` / ``celery.canvas``) actually reach for.
+    if "celery.exceptions" not in sys.modules:
+        exceptions_mod = types.ModuleType("celery.exceptions")
+        exceptions_mod.__path__ = []  # type: ignore[attr-defined]
+        exceptions_mod.Retry = type("Retry", (Exception,), {})
+        exceptions_mod.Ignore = type("Ignore", (Exception,), {})
+        exceptions_mod.ImproperlyConfigured = type(
+            "ImproperlyConfigured", (Exception,), {})
+        exceptions_mod.MaxRetriesExceededError = type(
+            "MaxRetriesExceededError", (Exception,), {})
+        exceptions_mod.Reject = type("Reject", (Exception,), {})
+        exceptions_mod.TaskPredicate = type("TaskPredicate", (), {})
+        exceptions_mod.CeleryError = type("CeleryError", (Exception,), {})
+        exceptions_mod.SecurityError = type("SecurityError", (Exception,), {})
+        exceptions_mod.SecurityWarning = type("SecurityWarning", (Warning,), {})
+        exceptions_mod.reraise = lambda exc, _tp=None, _tb=None: None
+        sys.modules["celery.exceptions"] = exceptions_mod
+
+    # celery.result transitively imports celery.canvas, which expects symbols
+    # from celery.exceptions. We rebuild celery.result as a stub that
+    # delegates everything to the real module except AsyncResult and
+    # allow_join_result.
+    sys.modules.pop("celery.result", None)
+    try:
+        import celery.result as _real_celery_result  # noqa: PLC0415
+    except Exception:  # pragma: no cover - only relevant if real celery missing
+        _real_celery_result = None
+
+    @contextmanager
+    def _allow_join_result():
+        yield
+    result_mod = types.ModuleType("celery.result")
+    result_mod.allow_join_result = _allow_join_result
+
+    class _AsyncResultStub:
+        """Lightweight stand-in for ``celery.result.AsyncResult``.
+
+        Celery internals (notably ``canvas.chord``) instantiate
+        ``AsyncResult`` with a task id and then call various
+        promise-style methods (``.then()``, ``.add_callback()``,
+        ``.get()``, ``.ready()``, ...). Tests never inspect the
+        returned object directly, so we accept any arguments and
+        return safe no-op values.
+        """
+
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        # Promise / chaining API used by ``celery.canvas.chord`` and
+        # ``chord.backend.apply``. Returning ``self`` keeps the
+        # fluent style working without raising ``AttributeError``.
+        def then(self, *args, **kwargs):
+            return self
+
+        def add_callback(self, *args, **kwargs):
+            return self
+
+        def add_errback(self, *args, **kwargs):
+            return self
+
+        # Result inspection methods. Returning ``None`` / ``True`` /
+        # ``False`` keeps callers from choking on missing return
+        # values; tests don't inspect any of these.
+        def get(self, *args, **kwargs):
+            return None
+
+        def ready(self):
+            return True
+
+        def successful(self):
+            return False
+
+        def failed(self):
+            return False
+
+        def forget(self):
+            return None
+
+        def revoke(self, *args, **kwargs):
+            return None
+
+        # Async result ``id``/``state`` attributes are occasionally
+        # accessed by canvas internals.
+        @property
+        def id(self):
+            return self.kwargs.get("id") or (
+                self.args[0] if self.args else None
+            )
+
+        @property
+        def state(self):
+            return "PENDING"
+
+    result_mod.AsyncResult = _AsyncResultStub
+    if _real_celery_result is not None:
+        for _name in dir(_real_celery_result):
+            if _name.startswith("_") or _name in (
+                "allow_join_result", "AsyncResult"
+            ):
+                continue
+            setattr(result_mod, _name, getattr(_real_celery_result, _name))
+    sys.modules["celery.result"] = result_mod
+
+    if "celery.signals" not in sys.modules:
+        signals_mod = types.ModuleType("celery.signals")
+        # Create fake signal objects with connect method
+
+        class FakeSignal:
+            def connect(self, func):
+                return func
+        signals_mod.worker_init = FakeSignal()
+        signals_mod.worker_process_init = FakeSignal()
+        signals_mod.worker_ready = FakeSignal()
+        signals_mod.worker_shutting_down = FakeSignal()
+        signals_mod.task_prerun = FakeSignal()
+        signals_mod.task_postrun = FakeSignal()
+        signals_mod.task_failure = FakeSignal()
+        sys.modules["celery.signals"] = signals_mod
+
+    # celery.exceptions / celery.platforms / celery.backends.base are NOT
+    # replaced here. The autouse fixture _restore_real_celery_modules handles
+    # augmenting those modules in-place; replacing the module object would
+    # create a fresh Retry class that breaks `except Retry:` in tasks.py
+    # because already-bound `tasks.Retry` references the OLD class.
+
+    # IMPORTANT: stub ``database.attachment_db`` (and friends) BEFORE
+    # importing anything that transitively reaches it. ``utils.file_management_utils``
+    # imports ``get_file_size_from_minio`` from there, so reloading that
+    # utility would pull in the *real* attachment module and try to talk
+    # to MinIO. By stubbing the database module up-front, subsequent
+    # ``import_module`` calls land on the stub.
+    if "database.attachment_db" not in sys.modules:
+        sys.modules["database.attachment_db"] = types.SimpleNamespace(
+            get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
+            get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            # NOSONAR
+            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",
+            upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
+        )
+    if "database.knowledge_db" not in sys.modules:
+        sys.modules["database.knowledge_db"] = types.SimpleNamespace(
+            get_knowledge_record=lambda query=None: {},
+        )
+    if "database.model_management_db" not in sys.modules:
+        sys.modules["database.model_management_db"] = types.SimpleNamespace(
+            get_model_by_model_id=lambda model_id, tenant_id=None: None
+        )
+    if "database" not in sys.modules:
+        db_pkg = types.ModuleType("database")
+        setattr(db_pkg, "__path__", [])
+        sys.modules["database"] = db_pkg
+    setattr(sys.modules["database"], "attachment_db",
+            sys.modules["database.attachment_db"])
+    setattr(sys.modules["database"], "model_management_db",
+            sys.modules["database.model_management_db"])
+    setattr(sys.modules["database"], "knowledge_db",
+            sys.modules["database.knowledge_db"])
+
+    # Backend utility / service modules that tasks.py imports directly may
+    # have been polluted by sibling tests. Reload only those modules whose
+    # existing stub is obviously wrong (a MagicMock with none of the
+    # attributes we need) so that tasks.py gets the real symbols when
+    # invoked.
+    for _real_module_name, _required in (
+        # ``utils.file_management_utils`` is imported by ``tasks.py`` and
+        # needs ``get_file_size``. Sibling tests stub it with only
+        # ``convert_office_to_pdf`` so we reload when the stub is missing
+        # our attribute. Reloading transitively re-imports
+        # ``database.attachment_db`` (which we stubbed above) and
+        # ``utils.auth_utils`` / ``utils.config_utils`` (also stubbed
+        # below), so the stubs land first.
+        ("utils.file_management_utils", ("get_file_size",)),
+        ("services.redis_service", ("get_redis_service",)),
+        ("consts.const", None),  # Always reload — MagicMock pollution.
+    ):
+        _existing = sys.modules.get(_real_module_name)
+        _needs_real = False
+        if _existing is None:
+            _needs_real = True
+        elif _required is None:
+            # Always reload when caller wants to force a fresh copy.
+            _needs_real = True
+        else:
+            from unittest.mock import MagicMock as _MagicMock
+            for _req in _required:
+                _val = getattr(_existing, _req, None)
+                # MagicMock instances will compare as equal to anything
+                # via ``__eq__`` default, but ``isinstance`` is reliable.
+                if _val is None or isinstance(_val, _MagicMock):
+                    _needs_real = True
+                    break
+        if not _needs_real:
+            continue
+        try:
+            sys.modules.pop(_real_module_name, None)
+            import importlib as _il2  # noqa: PLC0415
+            _mod = _il2.import_module(_real_module_name)
+            sys.modules[_real_module_name] = _mod
+        except Exception:  # pragma: no cover
             pass
 
-        class FakeCelery:
-            def __init__(self, *args, **kwargs):
-                # Set backend to a non-DisabledBackend instance
-                self.backend = FakeBackend()
-                # Create a conf object with update method
-                self.conf = types.SimpleNamespace(update=lambda **kwargs: None)
-
-            def task(self, *args, **kwargs):
-                # Return a decorator that returns the function unchanged
-                def decorator(func):
-                    return func
-                return decorator
-
-        # Stub classes and functions needed by tasks.py
-        celery_mod.Celery = FakeCelery
-        celery_mod.Task = type("Task", (), {})
-        celery_mod.chain = lambda *args: None
-        celery_mod.group = lambda *args, **kwargs: []
-        celery_mod.chord = lambda *args, **kwargs: (lambda callback: types.SimpleNamespace(
-            get=lambda: {"success": True, "total_indexed": 0, "total_submitted": 0}))
-        celery_mod.states = types.SimpleNamespace(
-            PENDING="PENDING",
-            STARTED="STARTED",
-            SUCCESS="SUCCESS",
-            FAILURE="FAILURE",
-            RETRY="RETRY",
-            REVOKED="REVOKED"
-        )
-        sys.modules["celery"] = celery_mod
-
-    # Stub modules that ray_actors depends on to avoid importing real MinIO
-    # Also stub consts package and consts.const module to provide required constants at import time
-    if "consts" not in sys.modules:
-        sys.modules["consts"] = types.ModuleType("consts")
-        setattr(sys.modules["consts"], "__path__", [])
-    if "consts.const" not in sys.modules:
+    # Stub consts.const unconditionally so that backend.data_process.app
+    # (which raises if REDIS_URL / REDIS_BACKEND_URL are unset) can be
+    # imported, even when a sibling test (or our own ``_real`` reload
+    # branch above) has already placed a partially-populated or
+    # env-derived ``consts.const`` into ``sys.modules``. Tests depend on
+    # this module providing valid Redis URLs and other DP constants
+    # without ever reaching a real Redis server.
+    const_mod = sys.modules.get("consts.const")
+    needs_replace = (
+        const_mod is None
+        or not getattr(const_mod, "REDIS_URL", None)
+        or not getattr(const_mod, "REDIS_BACKEND_URL", None)
+        or not getattr(const_mod, "RAY_NUM_CPUS", None)
+    )
+    if needs_replace:
         const_mod = types.ModuleType("consts.const")
         const_mod.ELASTICSEARCH_SERVICE = "http://api"
         const_mod.REDIS_BACKEND_URL = "redis://test"
@@ -150,7 +387,14 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.ROOT_DIR = "/mock/root"
         const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/mock/table_transformer_model"
         const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/mock/unstructured_params.json"
+        # Mark as a package so relative imports (``from .consts import X``)
+        # resolve against the stub.
+        setattr(const_mod, "__file__", "<consts.const stub>")
         sys.modules["consts.const"] = const_mod
+    else:
+        # Existing stub already has Redis URLs — just make sure the
+        # dashboard flag is set to the value tests expect.
+        sys.modules["consts.const"].DISABLE_RAY_DASHBOARD = False
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
         model_mod = types.ModuleType("consts.model")
@@ -163,34 +407,6 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
                 self.authorization = authorization
         model_mod.ProcessParams = ProcessParams
         sys.modules["consts.model"] = model_mod
-    if "database.attachment_db" not in sys.modules:
-        sys.modules["database.attachment_db"] = types.SimpleNamespace(
-            get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
-            get_file_size_from_minio=lambda object_name, bucket=None: 0,
-            # NOSONAR
-            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",
-            upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
-        )
-    if "database.knowledge_db" not in sys.modules:
-        sys.modules["database.knowledge_db"] = types.SimpleNamespace(
-            get_knowledge_record=lambda query=None: {},
-        )
-    # Stub model_management_db module required by ray_actors
-    if "database.model_management_db" not in sys.modules:
-        sys.modules["database.model_management_db"] = types.SimpleNamespace(
-            get_model_by_model_id=lambda model_id, tenant_id=None: None
-        )
-    # Ensure parent 'database' package exists and link submodules for proper import resolution
-    if "database" not in sys.modules:
-        db_pkg = types.ModuleType("database")
-        setattr(db_pkg, "__path__", [])
-        sys.modules["database"] = db_pkg
-    setattr(sys.modules["database"], "attachment_db",
-            sys.modules["database.attachment_db"])
-    setattr(sys.modules["database"], "model_management_db",
-            sys.modules["database.model_management_db"])
-    setattr(sys.modules["database"], "knowledge_db",
-            sys.modules["database.knowledge_db"])
 
     # Stub out auth and config utils to avoid importing real dependencies in file_management_utils
     if "utils.auth_utils" not in sys.modules:
@@ -291,17 +507,150 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
 
     class _SignatureShim:
         def __init__(self):
-            pass
+            # Delegate to a real Celery ``Signature`` so that all internal
+            # attributes/methods (``.options``, ``.clone()``, ``.freeze()``,
+            # ``.__or__()``, ``._app``, etc.) are available without us
+            # having to reimplement Celery's canvas API surface.
+            try:
+                from celery import Signature as _CelerySignature
+                self._inner = _CelerySignature("fake_task")
+            except Exception:  # pragma: no cover
+                self._inner = None
 
         def set(self, **_kw):
             return self
 
+        def __getattr__(self, name):
+            # Forward unknown attribute access to the wrapped real Signature
+            # so Celery internals (``.freeze``, ``.options``, ``._app``,
+            # ``.__or__``, ``.clone`` etc.) Just Work without us
+            # having to enumerate every method.
+            inner = object.__getattribute__(self, "_inner")
+            if inner is None:
+                raise AttributeError(name)
+            return getattr(inner, name)
+
+        def __getitem__(self, key):
+            return self
+
+        def __or__(self, other):
+            # ``chord`` returns a chain that is later composed with
+            # ``|`` — tests only inspect the resulting chain object, so
+            # we keep the identity stable.
+            return self
+
+        def __ror__(self, other):
+            return self
+
     class _CeleryTaskShim:
-        def __init__(self, run_func, preprocess=None):
+        """Test-side wrapper around a celery task.
+
+        When the shim is called, ``__call__`` re-binds a *curated* set
+        of names (``get_ray_actor``, ``_get_or_create_global_pool_manager``,
+        ``GlobalRayActorPoolManager``, ``ray``, ``requests``, ``save_error_to_redis``,
+        etc.) from the live ``tasks`` module dict onto the wrapped function's
+        ``__globals__``. This sidesteps the well-known Python pitfall that a
+        function's ``__globals__`` may not be the same dict object as the
+        module's ``__dict__`` after ``importlib.reload`` or when the wrapped
+        function is captured across reloads (the dicts merely contain the
+        same keys/values). Without this rebind, ``monkeypatch.setattr(tasks,
+        'get_ray_actor', lambda)`` would update ``tasks.__dict__`` only and
+        the original ``get_ray_actor`` function would still be invoked via
+        the stale ``__globals__`` reference, leading to ``AttributeError:
+        'GlobalRayActorPoolManager' has no attribute 'options'`` and friends.
+        """
+        # Names that tests commonly monkeypatch and that the tasks module
+        # functions look up via ``__globals__`` at call time.
+        _SYNC_NAMES = (
+            "get_ray_actor",
+            "_get_or_create_global_pool_manager",
+            "GlobalRayActorPoolManager",
+            "prewarm_ray_actors",
+            "ray",
+            "ray_init_lock",
+            "init_ray_in_worker",
+            "requests",
+            "aiohttp",
+            "run_async",
+            "save_error_to_redis",
+            "save_process_chunk_to_redis",
+            "load_chunks_from_redis",
+            "serialize_exception",
+            "truncate_reason",
+            "extract_error_code",
+            "get_knowledge_record",
+            "get_redis_service",
+            "get_file_size",
+            "build_balanced_batches",
+            "count_image_metadata_chunks",
+            "compute_split_wait_timeout",
+            "estimate_parallel_parts",
+            "wait_for_split_ready",
+            "save_progress_info",
+            "submit_process_forward_chain",
+            "process_and_forward",
+            "process_part",
+            "aggregate_store_chunks",
+            "forward_part",
+            "aggregate_forward_parts",
+            "cleanup_source",
+            "forward",
+            "process",
+            "process_sync",
+            "chain",
+            "group",
+            "chord",
+            "allow_join_result",
+            "states",
+            "Retry",
+            "ELASTICSEARCH_SERVICE",
+            "REDIS_BACKEND_URL",
+            "REDIS_URL",
+            "FORWARD_REDIS_RETRY_DELAY_S",
+            "FORWARD_REDIS_RETRY_MAX",
+            "DP_REDIS_CHUNKS_WAIT_TIMEOUT_S",
+            "DP_REDIS_CHUNKS_POLL_INTERVAL_MS",
+            "RAY_GLOBAL_ACTOR_POOL_NAME",
+            "RAY_GLOBAL_ACTOR_POOL_NAMESPACE",
+            "RAY_ACTOR_WARM_TIMEOUT_S",
+            "RAY_GLOBAL_ACTOR_POOL_SIZE",
+            "RAY_ACTOR_NUM_CPUS",
+            "ROOT_DIR",
+            "PER_WAVE_TIMEOUT",
+            "MAX_TIMEOUT",
+            "DISABLE_RAY_DASHBOARD",
+        )
+
+        def __init__(self, run_func, preprocess=None, tasks_module=None):
             self._run_func = run_func
             self._preprocess = preprocess
+            self._tasks_module = tasks_module
+
+        def _sync_globals(self):
+            """Copy selected names from ``tasks.__dict__`` onto the
+            wrapped function's ``__globals__`` so monkeypatches on the
+            live module propagate to the captured code.
+
+            We mirror the entire module dict rather than a curated subset
+            so monkeypatches on arbitrary names propagate. Tests commonly
+            patch ``get_ray_actor``, ``run_async``, ``chain``, ``group``,
+            ``chord``, ``allow_join_result``, ``states``, ``Retry``, etc.
+            Copying every entry is cheap and avoids needing to enumerate
+            each name.
+            """
+            if self._tasks_module is None:
+                return
+            tm = self._tasks_module
+            target = getattr(self._run_func, "__globals__", None)
+            if not isinstance(target, dict):
+                return
+            try:
+                target.update(tm.__dict__)
+            except Exception:  # pragma: no cover
+                pass
 
         def __call__(self, *args, **kwargs):
+            self._sync_globals()
             if self._preprocess is not None:
                 args, kwargs = self._preprocess(args, kwargs)
             return self._run_func(*args, **kwargs)
@@ -314,15 +663,24 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         """
         Return the underlying callable for a Celery task or plain function.
 
-        In production, Celery tasks are Task objects with a .run attribute.
-        In tests (with our FakeCelery), tasks are often plain functions.
+        In production, Celery tasks are Task objects (or PromiseProxy wrappers
+        around Task objects) with a .run attribute. The real Celery @app.task
+        decorator wraps the function in a celery.local.PromiseProxy, so we
+        must evaluate the proxy before reading .run.
         """
         if task_obj is None:
             return None
-        run_attr = getattr(task_obj, "run", None)
-        if run_attr is None:
-            # Plain function (already directly callable)
+        # Resolve PromiseProxy / lazy proxies to their underlying object.
+        if hasattr(task_obj, "_get_current_object"):
+            try:
+                task_obj = task_obj._get_current_object()
+            except Exception:  # pragma: no cover
+                pass
+        # Plain function or class with no .run attribute
+        if not hasattr(task_obj, "run") or not callable(getattr(task_obj, "run", None)):
+            # Already directly callable (function or object with __call__)
             return task_obj
+        run_attr = getattr(task_obj, "run", None)
         return getattr(run_attr, "__func__", run_attr)
 
     # Inject a default Ray actor so get_ray_actor works even when not monkeypatched in tests
@@ -366,13 +724,13 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     # Wrap tasks with shim
     maybe = _unbound_run(getattr(tasks, "process", None))
     if maybe is not None:
-        tasks.process = _CeleryTaskShim(maybe)
+        tasks.process = _CeleryTaskShim(maybe, tasks_module=tasks)
         # Ensure process is also available in the module namespace for process_and_forward
         import backend.data_process.tasks as tasks_module
         tasks_module.process = tasks.process
     maybe = _unbound_run(getattr(tasks, "forward", None))
     if maybe is not None:
-        tasks.forward = _CeleryTaskShim(maybe, preprocess=_forward_preprocess)
+        tasks.forward = _CeleryTaskShim(maybe, preprocess=_forward_preprocess, tasks_module=tasks)
         # Ensure forward is also available in the module namespace for process_and_forward
         import backend.data_process.tasks as tasks_module
         tasks_module.forward = tasks.forward
@@ -386,26 +744,78 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         if hasattr(maybe, '__globals__'):
             maybe.__globals__['process'] = tasks.process
             maybe.__globals__['forward'] = tasks.forward
-        tasks.process_and_forward = _CeleryTaskShim(maybe)
+        tasks.process_and_forward = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "process_sync", None))
     if maybe is not None:
-        tasks.process_sync = _CeleryTaskShim(maybe)
+        tasks.process_sync = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "forward_part", None))
     if maybe is not None:
-        tasks.forward_part = _CeleryTaskShim(maybe)
+        tasks.forward_part = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "aggregate_forward_parts", None))
     if maybe is not None:
-        tasks.aggregate_forward_parts = _CeleryTaskShim(maybe)
+        tasks.aggregate_forward_parts = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "process_part", None))
     if maybe is not None:
-        tasks.process_part = _CeleryTaskShim(maybe)
+        tasks.process_part = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "aggregate_store_chunks", None))
     if maybe is not None:
-        tasks.aggregate_store_chunks = _CeleryTaskShim(maybe)
+        tasks.aggregate_store_chunks = _CeleryTaskShim(maybe, tasks_module=tasks)
     maybe = _unbound_run(getattr(tasks, "cleanup_source", None))
     if maybe is not None:
-        tasks.cleanup_source = _CeleryTaskShim(maybe)
+        tasks.cleanup_source = _CeleryTaskShim(maybe, tasks_module=tasks)
     return tasks, fake_ray
+
+
+@pytest.fixture
+def import_tasks_with_fake_ray_fixture(monkeypatch):
+    """Pytest fixture wrapper around import_tasks_with_fake_ray.
+
+    Yields (tasks_module, fake_ray_instance). Used by sibling test modules that
+    only need the heavy stubbing but do not care about the tasks module.
+    """
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+    return tasks, fake_ray
+
+
+@pytest.fixture(autouse=True, scope="function")
+def _restore_real_celery_modules():
+    """Auto-applied fixture: ensure celery.exceptions and celery.backends.base
+    expose every symbol celery's own submodules need.
+
+    Sibling tests (e.g. test_utils.py) install stub celery.exceptions /
+    celery.backends.base modules that lack some names. When the producing
+    test tears down, monkeypatch reverts the stub — but a stub *module
+    object* can be reloaded with the real one.
+
+    Loading the real modules inside this fixture can cause a re-load that
+    creates a *new* class object for Retry distinct from the one bound at
+    tasks.py import time. To avoid breaking `except Retry:` in tasks.py we
+    instead patch missing attributes onto the existing module without
+    reloading it.
+    """
+    # celery.exceptions: ensure SecurityError/SecurityWarning/reraise/etc.
+    # exist. If celery is a stub package (set up by
+    # ``import_tasks_with_fake_ray``), ``__import__`` will fail — that's
+    # fine because the stub itself provides those names directly.
+    _exc_mod = sys.modules.get("celery.exceptions")
+    if _exc_mod is not None and not hasattr(_exc_mod, "SecurityError"):
+        try:
+            _real_exc = __import__("celery.exceptions")
+            for _attr in ("SecurityError", "SecurityWarning", "reraise"):
+                if not hasattr(_exc_mod, _attr):
+                    setattr(_exc_mod, _attr, getattr(_real_exc, _attr))
+        except Exception:  # pragma: no cover
+            pass
+    # celery.backends.base: ensure _create_chord_error_with_cause exists.
+    _bb_mod = sys.modules.get("celery.backends.base")
+    if _bb_mod is not None and not hasattr(_bb_mod, "_create_chord_error_with_cause"):
+        try:
+            _real_bb = __import__("celery.backends.base")
+            setattr(_bb_mod, "_create_chord_error_with_cause",
+                    getattr(_real_bb, "_create_chord_error_with_cause"))
+        except Exception:  # pragma: no cover
+            pass
+    yield
 
 
 def test_init_ray_in_worker_initializes_once(monkeypatch):
@@ -2502,10 +2912,11 @@ def test_cleanup_source_calls_delete_with_scope_source_only(monkeypatch):
         def json():
             return {"status": "success"}
 
-    def _delete(url, params=None, timeout=None):
+    def _delete(url, params=None, timeout=None, headers=None, **_extra):
         captured["url"] = url
         captured["params"] = params
         captured["timeout"] = timeout
+        captured["headers"] = headers
         return FakeResponse()
 
     monkeypatch.setattr(tasks.requests, "delete", _delete, raising=True)
@@ -2541,3 +2952,34 @@ def test_cleanup_source_failure_is_warning_only(monkeypatch):
     assert out["source_cleanup"]["attempted"] is True
     assert out["source_cleanup"]["success"] is False
     assert "boom" in (out["source_cleanup"]["error"] or "")
+
+
+def test_parse_failure_info_accepts_json_and_plain_text(monkeypatch):
+    import_tasks_with_fake_ray(monkeypatch)
+    utils = sys.modules["backend.data_process.utils"]
+
+    assert utils._parse_failure_info('{"message": "failed"}') == (
+        {"message": "failed"},
+        None,
+    )
+    assert utils._parse_failure_info("plain failure") == (
+        None,
+        "plain failure",
+    )
+    assert utils._parse_failure_info("") == (None, None)
+
+
+def test_get_all_task_ids_uses_scan_instead_of_keys(monkeypatch):
+    import_tasks_with_fake_ray(monkeypatch)
+    utils = sys.modules["backend.data_process.utils"]
+    redis_client = types.SimpleNamespace(
+        scan_iter=lambda **kwargs: iter([
+            b"celery-task-meta-task-1",
+            "celery-task-meta-task-2",
+        ]),
+    )
+
+    assert utils.get_all_task_ids_from_redis(redis_client) == [
+        "task-1",
+        "task-2",
+    ]

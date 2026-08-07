@@ -21,7 +21,7 @@ interface MineMcpServiceCardProps {
   toggling?: boolean;
   publishing?: boolean;
   unpublishing?: boolean;
-  refreshingToolCount?: boolean;
+  healthChecking?: boolean;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggle: (service: McpServiceItem) => void;
@@ -35,7 +35,7 @@ interface MineMcpServiceCardProps {
   ) => void;
   onDelete: (item: MineMcpCardItem) => void;
   onViewReviewProgress?: (item: MineMcpCardItem, onlineService?: CommunityMcpCard) => void;
-  onRefreshToolCount?: (item: MineMcpCardItem) => void;
+  onHealthCheck?: (item: MineMcpCardItem) => void;
 }
 
 export default function MineMcpServiceCard({
@@ -44,7 +44,7 @@ export default function MineMcpServiceCard({
   toggling,
   publishing,
   unpublishing,
-  refreshingToolCount,
+  healthChecking = false,
   onEditLocal,
   onEditCommunity,
   onToggle,
@@ -52,7 +52,7 @@ export default function MineMcpServiceCard({
   onUnpublishOnline,
   onDelete,
   onViewReviewProgress,
-  onRefreshToolCount,
+  onHealthCheck,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
   const service = item.service;
@@ -71,7 +71,10 @@ export default function MineMcpServiceCard({
     ? Boolean(onlineService) && (onlineService?.reviewStatus === "approved" || onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
-  const updatedAt = formatRegistryDate(service.updatedAt || "");
+  const timeSource = (item.service as any);
+  const createDate = formatRegistryDate(
+    item.kind === "local" ? (timeSource.createTime || "") : (timeSource.createdAt || "")
+  );
   const toolCount = resolveToolCount(item);
 
   // Owned = user-created MCP can be published/updated; community-installed
@@ -93,16 +96,19 @@ export default function MineMcpServiceCard({
 
     const items: MenuProps["items"] = [];
 
-    if (reviewStatus === "pending") {
+    // Show "view review progress" for any submitted status (pending/approved/rejected)
+    if (reviewStatus === "pending" || reviewStatus === "approved" || reviewStatus === "rejected") {
       items.push({
         key: "view-review-progress",
         label: t("mcpTools.mine.viewReviewProgress"),
         icon: <Clock className="h-3.5 w-3.5" />,
         onClick: () => onViewReviewProgress?.(item, onlineService),
       });
-    } else if (
-      deploymentType === McpDeploymentType.REMOTE_LINK ||
-      deploymentType === McpDeploymentType.CONTAINER
+    }
+
+    if (reviewStatus !== "approved" && reviewStatus !== "pending" &&
+      (deploymentType === McpDeploymentType.REMOTE_LINK ||
+      deploymentType === McpDeploymentType.CONTAINER)
     ) {
       // only remote link and container MCPs can be published to community
       items.push({
@@ -117,7 +123,9 @@ export default function MineMcpServiceCard({
     if (hasOnlineRecord) {
       items.push({
         key: "unpublish-online-version",
-        label: isPending ? "撤回审核" : t("mcpTools.mine.unpublishOnlineVersion"),
+        label: isPending
+          ? t("mcpTools.mine.reviewModal.cancelApply")
+          : t("mcpTools.mine.unpublishOnlineVersion"),
         icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
         danger: true,
         disabled: unpublishing,
@@ -127,13 +135,13 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (item.kind === "local") {
+    if (onHealthCheck) {
       items.push({
-        key: "refresh-tool-count",
-        label: t("mcpTools.mine.refreshToolCount"),
+        key: "health-check",
+        label: t("mcpConfig.serverList.button.healthCheck"),
         icon: <RefreshCw className="h-3.5 w-3.5" />,
-        disabled: refreshingToolCount,
-        onClick: () => onRefreshToolCount?.(item),
+        disabled: healthChecking,
+        onClick: () => onHealthCheck(item),
       });
     }
 
@@ -239,7 +247,7 @@ export default function MineMcpServiceCard({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
           <Clock className="h-3.5 w-3.5 text-slate-400" />
-          {updatedAt}
+          {createDate}
         </span>
       </div>
 

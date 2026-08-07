@@ -126,6 +126,10 @@ ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/..
 assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
 assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
 
+LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,monitoring --monitoring-provider langfuse --image-source general --target docker --dry-run)"
+assert_contains "$LANGFUSE_OFFLINE_DRY_RUN" "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" "offline Langfuse package should use the Quay MinIO image"
+assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" "docker.io/minio/minio" "offline Langfuse package should not use the Docker Hub MinIO image"
+
 if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
   echo "FAIL: unknown image build option should fail"
   exit 1
@@ -659,6 +663,8 @@ assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'quay.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}' "docker compose Langfuse should use the Quay MinIO image"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: quay.io/minio/minio" "k8s Langfuse should use the Quay MinIO image"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
@@ -724,6 +730,12 @@ assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_versio
 assert_eq "v-test" "$(deployment_read_version "v-test")" "explicit deployment version should win"
 
 assert_success "password validation should accept frontend-compatible passwords" deployment_validate_password "Nexent123"
+if NEXENT_DEPLOYMENT_OFFLINE=true NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_should_prompt_root_dir; then
+  echo "FAIL: default offline deployment should not prompt for ROOT_DIR"
+  exit 1
+fi
+assert_success "offline --config should prompt for ROOT_DIR on first deployment" env NEXENT_DEPLOYMENT_OFFLINE=true NEXENT_DEPLOY_CONFIG_MODE=tui bash -c 'source deploy/common/common.sh; deployment_should_prompt_root_dir'
+assert_success "online deployment should retain the ROOT_DIR prompt" env NEXENT_DEPLOYMENT_OFFLINE=false NEXENT_DEPLOY_CONFIG_MODE=defaults bash -c 'source deploy/common/common.sh; deployment_should_prompt_root_dir'
 if deployment_validate_password "nexent123"; then
   echo "FAIL: password without uppercase letters should be rejected"
   exit 1
@@ -770,13 +782,20 @@ K8S_SUPER_ADMIN_BLOCK="$(awk '/^create_supabase_super_admin_user\(\) {/{capture=
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "Docker super admin creation should use the shared prompt policy"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "Docker super admin creation should use the shared default password"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$display_password"' "Docker super admin creation should pass the password display policy"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'if bash "$script_path"; then' "Docker should reuse the normal creation path for an existing super admin"
 assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "K8s super admin creation should use the shared prompt policy"
 assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "K8s super admin creation should use the shared default password"
 assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: ${password}"' "K8s should display non-interactive super admin passwords"
 assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: [hidden]"' "K8s should hide interactively entered super admin passwords"
 DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
+K8S_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
 assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: ${password}"' "Docker should display non-interactive super admin passwords"
 assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: [hidden]"' "Docker should hide interactively entered super admin passwords"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "Docker should wait for the complete user_tenant_t schema contract"
+assert_contains "$K8S_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "K8s should wait for the complete user_tenant_t schema contract"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "Docker super admin writes should stop on SQL errors"
+assert_contains "$K8S_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "K8s super admin writes should stop on SQL errors"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" 'Error: Super admin user creation failed. Deployment aborted.' "K8s deployment should stop when super admin initialization fails"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
 
 ENV_TEST_ROOT="$TMP_DIR/env-root"

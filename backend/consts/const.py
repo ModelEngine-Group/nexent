@@ -111,7 +111,7 @@ SUPABASE_JWT_SECRET = os.getenv(
 
 
 # OAuth Configuration
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "").rstrip("/")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # OAuth login mode:
@@ -253,12 +253,11 @@ NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_S
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
-    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
-DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
-    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
-FORWARD_REDIS_RETRY_DELAY_S = int(
-    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "300"))
+DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
+REDIS_ERROR_INFO_TTL_SECONDS = int(os.getenv("REDIS_ERROR_INFO_TTL_SECONDS", str(1 * 24 * 60 * 60)))
+REDIS_ERROR_INFO_SCAN_COUNT = int(os.getenv("REDIS_ERROR_INFO_SCAN_COUNT", "500"))
+FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
@@ -419,6 +418,11 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 # Invite code
 INVITE_CODE = os.getenv("INVITE_CODE")
+
+# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+JWT_EXPIRY_SECONDS = int(os.getenv("JWT_EXPIRY", "7200") or 7200)
+if JWT_EXPIRY_SECONDS <= 0:
+    raise ValueError("JWT_EXPIRY must be a positive number of seconds")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)

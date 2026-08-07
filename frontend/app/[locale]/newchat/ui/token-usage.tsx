@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FC } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuiState, useMessageTiming } from "@assistant-ui/react";
 import { Zap } from "lucide-react";
 import {
@@ -17,6 +18,7 @@ interface TokenUsageProps {
  * Currently not implemented - reserved for total conversation token tracking.
  */
 export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const timing = useMessageTiming();
 
@@ -34,20 +36,20 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
       >
         <Zap className="size-3 text-amber-500" />
         <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">已使用</span>
+        <span className="text-muted-foreground/70">{t("chat.tokenUsage.used")}</span>
       </button>
 
       {/* Expanded details popover */}
       {expanded && (
         <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-lg border border-border bg-popover p-3 shadow-lg">
           <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-medium text-foreground">Token 使用详情</span>
+            <span className="text-xs font-medium text-foreground">{t("chat.tokenUsage.details")}</span>
             <button
               type="button"
               onClick={() => setExpanded(false)}
               className="text-muted-foreground hover:text-foreground"
             >
-              <span className="sr-only">关闭</span>
+              <span className="sr-only">{t("chat.tokenUsage.close")}</span>
               <svg
                 className="size-3.5"
                 fill="none"
@@ -67,7 +69,7 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
           {/* Progress bar */}
           <div className="mb-3">
             <div className="mb-1 flex justify-between text-xs">
-              <span className="text-muted-foreground">上下文使用</span>
+              <span className="text-muted-foreground">{t("chat.tokenUsage.context")}</span>
               <span className="font-medium text-foreground">
                 {tokenCount.toLocaleString()} / 128000
               </span>
@@ -85,7 +87,7 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <span className="size-2 rounded-full bg-blue-500" />
-                输出 Token
+                {t("chat.tokenUsage.output")}
               </span>
               <span className="font-medium text-foreground">
                 {tokenCount.toLocaleString()}
@@ -95,7 +97,7 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
                   <span className="size-2 rounded-full bg-green-500" />
-                  速度
+                  {t("chat.tokenUsage.speed")}
                 </span>
                 <span className="font-medium text-foreground">
                   {timing.tokensPerSecond.toFixed(1)} tok/s
@@ -131,6 +133,7 @@ interface SingleTurnTokenUsageProps {
  *   streaming runs.
  */
 export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className }) => {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   const messageSteps = useAuiState((s) => {
@@ -173,7 +176,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
       >
         <Zap className="size-3 text-amber-500" />
         <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">本轮</span>
+        <span className="text-muted-foreground/70">{t("chat.tokenUsage.turn")}</span>
       </button>
 
       {/* Expanded details popover */}
@@ -181,14 +184,14 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
         <div className="absolute bottom-full right-0 z-50 mb-1 w-72 rounded-lg border border-border bg-popover p-3 shadow-lg">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">
-              单轮 Token 使用详情
+              {t("chat.tokenUsage.turnDetails")}
             </span>
             <button
               type="button"
               onClick={() => setExpanded(false)}
               className="text-muted-foreground hover:text-foreground"
             >
-              <span className="sr-only">关闭</span>
+              <span className="sr-only">{t("chat.tokenUsage.close")}</span>
               <svg
                 className="size-3.5"
                 fill="none"
@@ -208,7 +211,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
           {/* Stacked progress bar */}
           <div className="mb-3">
             <div className="mb-1.5 flex justify-between text-xs">
-              <span className="text-muted-foreground">上下文使用</span>
+              <span className="text-muted-foreground">{t("chat.tokenUsage.context")}</span>
               <span className="font-medium text-foreground">
                 {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}
               </span>
@@ -227,7 +230,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
                     style={{
                       width: `${Math.min(stepPercent, 100 - (index > 0 ? steps.slice(0, index).reduce((sum, s) => sum + ((s.stepInputTokens + s.stepOutputTokens) / maxTokens) * 100, 0) : 0))}%`,
                     }}
-                    title={`Step ${step.stepNumber}: ${step.stepInputTokens} in + ${step.stepOutputTokens} out`}
+                    title={t("chat.tokenUsage.stepSummary", { step: step.stepNumber, input: step.stepInputTokens, output: step.stepOutputTokens })}
                   >
                     {/* Input portion (blue) */}
                     <div
@@ -259,15 +262,15 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
                 <span className="size-2.5 rounded-sm bg-blue-500" />
-                <span className="text-muted-foreground">输入</span>
+                <span className="text-muted-foreground">{t("chat.tokenUsage.input")}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="size-2.5 rounded-sm bg-amber-500" />
-                <span className="text-muted-foreground">输出</span>
+                <span className="text-muted-foreground">{t("chat.tokenUsage.output")}</span>
               </div>
             </div>
             <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-              {stepCount} Step{stepCount > 1 ? "s" : ""}
+              {t("chat.tokenUsage.steps", { count: stepCount })}
             </span>
           </div>
 
@@ -275,7 +278,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({ className 
           <div className="space-y-2 text-xs">
             <div className="flex items-center justify-between border-t border-border pt-2">
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="font-medium">总计</span>
+                <span className="font-medium">{t("chat.tokenUsage.total")}</span>
               </span>
               <span className="font-medium text-foreground">
                 {totalTokensUsed.toLocaleString()} / {maxTokens.toLocaleString()}

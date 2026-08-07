@@ -11,18 +11,23 @@ import {
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
 import { type FC, memo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
+
+import { MermaidDiagram } from "./mermaid-diagram";
 
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
+import { AuthenticatedImage } from "./authenticated-image";
 import { useSourcesPanel } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
 import {
   searchSourcesRegistry,
+  searchImagesRegistry,
   conversationSourcesRegistry,
   type SearchSource,
 } from "../adapter/remote-chat-model-adapter";
@@ -43,6 +48,7 @@ interface MessageSourcePart {
   objectName?: string;
   citeIndex?: number | string;
   isImage?: boolean;
+  imageKey?: string;
 }
 
 function normalizeCiteIndex(value: unknown): number | undefined {
@@ -56,7 +62,7 @@ function resolveCiteSources(
 ): SearchSource[] {
   const contentSources = content.flatMap((part) => {
     const citeIndex = normalizeCiteIndex(part.citeIndex);
-    if (part.type !== "source" || part.isImage || citeIndex === undefined) {
+    if (part.type !== "source" || citeIndex === undefined) {
       return [];
     }
 
@@ -69,6 +75,8 @@ function resolveCiteSources(
       filename: part.filename,
       downloadUrl: part.downloadUrl,
       objectName: part.objectName,
+      isImage: part.isImage,
+      imageKey: part.imageKey,
     }];
   });
 
@@ -101,6 +109,7 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     downloadUrl: source.downloadUrl,
     objectName: source.objectName,
     citeIndex: source.citeIndex,
+    isImage: source.isImage,
   };
 }
 
@@ -123,7 +132,9 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
   const messageSources = resolveCiteSources(messageId, content);
   const source = messageSources.find((item) => item.citeIndex === citeIndex);
   const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
-  const sources = messageSources.map(toPanelSource);
+  const panelItems = messageSources.map(toPanelSource);
+  const sources = panelItems.filter((item) => !item.isImage);
+  const images = panelItems.filter((item) => item.isImage);
 
   return (
     <CiteMarker
@@ -140,7 +151,7 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
                 messageId,
                 groupId: "citations",
                 sources,
-                images: [],
+                images,
                 selectedCiteIndex: source.citeIndex,
               })
           : undefined
@@ -172,6 +183,11 @@ const MarkdownTextImpl = () => {
       remarkPlugins={[remarkGfm, remarkCite]}
       className="aui-md"
       components={defaultComponents}
+      componentsByLanguage={{
+        mermaid: {
+          SyntaxHighlighter: MermaidDiagram,
+        },
+      }}
     />
   );
 };
@@ -179,6 +195,7 @@ const MarkdownTextImpl = () => {
 export const MarkdownText = memo(MarkdownTextImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  const { t } = useTranslation();
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   const onCopy = () => {
     if (!code || isCopied) return;
@@ -191,7 +208,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         {language}
       </span>
       <TooltipIconButton
-        tooltip="Copy"
+        tooltip={t("chat.thread.copy")}
         tooltipDelayDuration={0}
         className="size-6 p-1"
         onClick={onCopy}
@@ -235,8 +252,56 @@ const MarkdownSyntaxHighlighter: FC<
   Omit<SyntaxHighlighterProps, "node">
 > = (props) => <SyntaxHighlighter {...props} />;
 
+const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
+  src,
+  alt,
+  ...props
+}) => {
+  const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const messageContent = useAuiState(
+    (s) => s.message.content as readonly MessageSourcePart[],
+  );
+  const trustedImages = Array.isArray(messageContent)
+    ? messageContent.filter(
+        (part): part is MessageSourcePart & { url: string } =>
+          part.type === "source" &&
+          part.isImage === true &&
+          typeof part.url === "string",
+      )
+    : [];
+  const markerMatch = src?.match(
+    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i,
+  );
+  if (markerMatch) {
+    const contentImage = trustedImages.find(
+      (image) => image.imageKey === markerMatch[1],
+    );
+    const image = contentImage ?? (messageId
+      ? searchImagesRegistry.get(messageId)?.get(markerMatch[1])
+      : undefined);
+    if (!image) return null;
+    return (
+      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+        <AuthenticatedImage
+          src={image.url}
+          alt={alt || image.title}
+          className="max-h-[32rem] w-full cursor-zoom-in object-contain"
+          preview
+        />
+      </figure>
+    );
+  }
+
+  if (trustedImages.length > 0 || !src) {
+    return null;
+  }
+
+  return <AuthenticatedImage src={src} alt={alt} {...props} />;
+};
+
 const defaultComponents = memoizeMarkdownComponents({
   SyntaxHighlighter: MarkdownSyntaxHighlighter,
+  img: VerifiedMarkdownImage,
   h1: ({ className, ...props }) => (
     <h1
       className={cn(

@@ -137,6 +137,7 @@ export const conversationService = {
     mode: "all" | "selected";
     selected_user_message_ids?: number[];
     expire_time?: string | null;
+    render_version?: "legacy" | "newchat";
   }) {
     const response = await fetch(
       API_ENDPOINTS.share.createConversation(params.conversationId),
@@ -147,6 +148,7 @@ export const conversationService = {
           mode: params.mode,
           selected_user_message_ids: params.selected_user_message_ids || [],
           expire_time: params.expire_time || null,
+          render_version: params.render_version || "legacy",
         }),
       }
     );
@@ -924,6 +926,7 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
+      runtime_mode?: "nl2agent";
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void
@@ -956,7 +959,9 @@ export const conversationService = {
       }
 
       // Build URL with query parameters for resume mode
-      let url = API_ENDPOINTS.agent.run;
+      let url = params.runtime_mode === "nl2agent"
+        ? API_ENDPOINTS.agent.nl2agentRun
+        : API_ENDPOINTS.agent.run;
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");

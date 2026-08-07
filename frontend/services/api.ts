@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
+import { withBasePath } from "@/lib/basePath";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
@@ -13,7 +14,7 @@ import type {
 import type { MarketAgentListParams } from "@/types/market";
 import type { NotificationListParams } from "@/types/notification";
 
-const API_BASE_URL = "/api";
+export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
   user: {
@@ -78,6 +79,7 @@ export const API_ENDPOINTS = {
   },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
+    nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
@@ -158,6 +160,7 @@ export const API_ENDPOINTS = {
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
+    optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
   promptTemplates: {
     list: `${API_BASE_URL}/prompt_templates`,
@@ -187,10 +190,10 @@ export const API_ENDPOINTS = {
     delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
-    ws: `/api/voice/stt/ws`,
+    ws: `${API_BASE_URL}/voice/stt/ws`,
   },
   tts: {
-    ws: `/api/voice/tts/ws`,
+    ws: `${API_BASE_URL}/voice/tts/ws`,
   },
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
@@ -276,6 +279,7 @@ export const API_ENDPOINTS = {
   knowledgeBase: {
     // Elasticsearch service
     health: `${API_BASE_URL}/indices/health`,
+    summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
     listFiles: (indexName: string) =>
@@ -348,6 +352,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
   },
   config: {
+    frontend: `${API_BASE_URL}/frontend-config`,
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
@@ -392,6 +397,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
     agentProtocol: (agentId: string) =>
       `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentSecurityCredentials: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/security-credentials`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>
@@ -640,9 +647,8 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) =>
-      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
-    // Platform-level quota (SU/ASSET_OWNER only)
+    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    // Platform-level quota (SU/ASSET_OWNER/SPEED only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
     platformTenantQuota: (tenantId: string) =>
@@ -772,8 +778,19 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      // Handle request entity too large error (413)
+      // Preserve the tenant storage quota error so upload callers can present
+      // the correct recovery action instead of treating it as a per-file limit.
       if (response.status === 413) {
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData?.error === "TenantStorageFull") {
+            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+          }
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error;
+          }
+        }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
           "File size exceeds limit."

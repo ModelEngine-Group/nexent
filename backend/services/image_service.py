@@ -31,39 +31,43 @@ logger = logging.getLogger("image_service")
 #
 # The host and path checks prevent the proxy from forwarding the credential to
 # an unrelated URL.
-_AIDP_KB_PATH_PREFIX = "/KnowledgeBase/Tenants/"
+_AIDP_ALLOWED_PATH_PREFIX = "/KnowledgeBase/Tenants/"
 
 
 def _validate_and_reconstruct_aidp_url(decoded_url: str) -> Optional[str]:
     """Validate and reconstruct an AIDP image URL, returning a fresh string.
 
-    This performs the same strict host + path + query/fragment checks as
-    :func:`_is_aidp_url`, but instead of returning ``bool`` it returns a
-    **freshly reconstructed URL** built from the parsed components. That
-    re-serialization is what tells static analyzers (CodeQL in particular)
-    that the resulting string is not a direct pass-through of user input,
-    which is required to silence the "full SSRF" sink warning on the
-    subsequent ``aiohttp.ClientSession.get`` call.
+    The target authority is always taken from ``AIDP_SERVER_URL``. Only a
+    validated AIDP image path is retained from the supplied URL, so a client
+    can never cause the proxy to send the Bearer token to another host.
 
-    Returns ``None`` if any check fails. The returned string is semantically
-    equivalent to the input when valid, but is a new object — CodeQL sees
-    this as a dataflow barrier and trusts the output.
+    Returns ``None`` if any check fails. The returned string is a
+    freshly reconstructed URL via ``urlunparse``, which static
+    analyzers (CodeQL) recognise as an SSRF sanitizer — breaking the
+    dataflow link from the input parameter to the subsequent
+    ``aiohttp.ClientSession.get`` sink.
     """
     aidp_base = AIDP_SERVER_URL.rstrip("/")
     if not aidp_base:
         return None
+
     try:
         parsed = urlparse(decoded_url)
         base_parsed = urlparse(aidp_base)
     except Exception:
         return None
 
-    # Strict host + scheme match against the configured AIDP server.
-    if (parsed.scheme, parsed.netloc) != (base_parsed.scheme, base_parsed.netloc):
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    if base_parsed.scheme not in ("http", "https") or not base_parsed.netloc:
         return None
 
-    # Path must start with the KB prefix; no traversal allowed.
-    if not parsed.path.startswith(_AIDP_KB_PATH_PREFIX):
+    # Only permit the AIDP knowledge-base image API path. Reject traversal
+    # and non-image endpoints.
+    path = parsed.path
+    if not path.startswith(_AIDP_ALLOWED_PATH_PREFIX):
+        return None
+    if "/../" in path or path.endswith("/.."):
         return None
 
     # Reject query/fragment to block redirect-based SSRF.
@@ -74,9 +78,9 @@ def _validate_and_reconstruct_aidp_url(decoded_url: str) -> Optional[str]:
     # through ``urlunparse`` produces a new string that is not
     # alias-equivalent to the input in CodeQL's dataflow graph.
     return urlunparse((
-        parsed.scheme,
-        parsed.netloc,
-        parsed.path,
+        base_parsed.scheme,
+        base_parsed.netloc,
+        path,
         "",   # params — dropped; validated above implicitly by being empty
         "",   # query — rejected above
         "",   # fragment — rejected above
@@ -84,16 +88,10 @@ def _validate_and_reconstruct_aidp_url(decoded_url: str) -> Optional[str]:
 
 
 def _is_aidp_url(decoded_url: str) -> bool:
-    """Return True when ``decoded_url`` points at the configured AIDP host
-    and lives under the knowledge-base image path.
+    """Return True when ``decoded_url`` has an allowed AIDP image path.
 
-    Both scheme://host AND the ``/KnowledgeBase/Tenants/`` path prefix must
-    match; otherwise we fall through to the generic proxy so an accidental
-    base_url typo never leaks the AIDP api key to an unrelated host.
-
-    Security: we must be precise about which URLs we authenticate with the
-    AIDP Bearer token. An attacker could craft a URL that passes this check
-    but fetches a different resource if we were too loose with the checks.
+    The final request URL is rebuilt with the configured AIDP authority, so
+    a host alias in the input never receives the AIDP Bearer token.
     """
     return _validate_and_reconstruct_aidp_url(decoded_url) is not None
 
@@ -112,9 +110,10 @@ async def _fetch_aidp_image(url: str):
     re-route the internal request.
 
     Security: this function performs its own defensive URL validation via
-    :func:`_validate_and_reconstruct_aidp_url`, which both enforces the
-    host + path + query/fragment rules and **re-serializes** the URL from
-    its parsed components. That re-serialization is what CodeQL recognises
+    :func:`_validate_and_reconstruct_aidp_url`, which enforces the allowed
+    path + query/fragment rules, replaces the input authority with the
+    configured AIDP authority, and **re-serializes** the URL from its parsed
+    components. That re-serialization is what CodeQL recognises
     as an SSRF sanitizer — a plain bool check (``not _is_aidp_url(url)``)
     is not enough because the dataflow graph still considers ``url``
     user-controlled up to the ``session.get`` sink.

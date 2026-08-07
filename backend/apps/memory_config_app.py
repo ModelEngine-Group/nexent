@@ -50,7 +50,7 @@ from services.memory_record_service import (
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 router = APIRouter(prefix="/memory")
 
 

@@ -1,5 +1,6 @@
 import i18n, { ThirdPartyModule } from "i18next";
 import { initReactI18next } from "react-i18next";
+import { withBasePath } from "@/lib/basePath";
 
 const resources = {
   en: {
@@ -24,7 +25,7 @@ export const resourcesCustom = {
 export const loadLocaleMessages = async (locale: string) => {
   try {
     const localePath = locale === 'zh' ? 'zh' : 'en';
-    const response = await fetch(`/locales/${localePath}/common.json`);
+    const response = await fetch(withBasePath(`/locales/${localePath}/common.json`));
     const common = await response.json();
     if (resources[localePath]) {
       resources[localePath].common = common;
@@ -33,7 +34,7 @@ export const loadLocaleMessages = async (locale: string) => {
     const customLang = ['zh', 'en'];
     for (const index in customLang) {
       const lang = customLang[index] as 'zh' | 'en';
-      const responseCustom = await fetch(`/locales/${lang}/custom.json`);
+      const responseCustom = await fetch(withBasePath(`/locales/${lang}/custom.json`));
       const commonCustom = await responseCustom.json();
       if (resourcesCustom[lang]) {
         resourcesCustom[lang].custom = commonCustom;

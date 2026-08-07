@@ -30,6 +30,23 @@ export interface MemoryRecordUpdate {
   status?: MemoryStatus;
 }
 
+export interface MemoryStatusSyncResult {
+  records: MemoryRecord[];
+  failedCount: number;
+}
+
+export function getStatusForEmbeddingAvailability(
+  record: MemoryRecord
+): MemoryStatus {
+  if (record.embedding_compatible === false && record.status === "active") {
+    return "disabled";
+  }
+  if (record.embedding_compatible === true && record.status === "disabled") {
+    return "active";
+  }
+  return record.status;
+}
+
 async function requestJson<T>(url: string, options: RequestInit): Promise<T> {
   const response = await fetchWithErrorHandling(url, options);
   return response.json() as Promise<T>;
@@ -69,6 +86,28 @@ export async function updateMemoryRecord(
     headers: getAuthHeaders(),
     body: JSON.stringify(input),
   });
+}
+
+export async function synchronizeMemoryRecordStatuses(
+  records: MemoryRecord[]
+): Promise<MemoryStatusSyncResult> {
+  let failedCount = 0;
+  const synchronizedRecords = await Promise.all(
+    records.map(async (record) => {
+      const status = getStatusForEmbeddingAvailability(record);
+      if (status === record.status) return record;
+
+      try {
+        await updateMemoryRecord(record.memory_id, { status });
+        return { ...record, status };
+      } catch {
+        failedCount += 1;
+        return record;
+      }
+    })
+  );
+
+  return { records: synchronizedRecords, failedCount };
 }
 
 export async function deleteMemoryRecord(memoryId: number): Promise<void> {

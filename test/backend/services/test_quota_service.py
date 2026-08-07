@@ -590,6 +590,22 @@ class TestPlatformQuota:
 
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
+    def test_allocation_state_excludes_virtual_tenants(self):
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+        with patch(
+            "database.tenant_config_db.get_all_tenant_ids",
+            return_value=["tenant-1", DEFAULT_TENANT_ID, "", ASSET_OWNER_TENANT_ID],
+        ), patch(
+            "database.tenant_config_db.get_single_config_info",
+            return_value={"config_value": str(20 * GB)},
+        ) as mock_get_config:
+            result = QuotaService._get_allocation_state(ASSET_OWNER_TENANT_ID)
+
+        assert result["tenant_ids"] == ["tenant-1"]
+        assert result["total_allocated_bytes"] == 20 * GB
+        mock_get_config.assert_called_once_with("tenant-1", "KB_QUOTA_TENANT_HARD_LIMIT_BYTES")
+
     def test_platform_overview_marks_legacy_unmanaged_tenants(self):
         with patch.object(
             QuotaService,

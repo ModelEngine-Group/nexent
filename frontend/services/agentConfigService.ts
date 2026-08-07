@@ -91,15 +91,16 @@ export const fetchTools = async () => {
         ? tool.labels
         : typeof tool.labels === "string"
           ? (() => {
-              try {
-                const p = JSON.parse(tool.labels);
-                return Array.isArray(p) ? p : [];
-              } catch {
-                return [];
-              }
-            })()
+            try {
+              const p = JSON.parse(tool.labels);
+              return Array.isArray(p) ? p : [];
+            } catch {
+              return [];
+            }
+          })()
           : [],
       updated_by: tool.updated_by || "",
+      updated_by_name: tool.updated_by_name || "",
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -216,6 +217,7 @@ export const fetchPublishedAgentList = async () => {
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
+      version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
     }));
@@ -436,7 +438,13 @@ export interface UpdateAgentInfoPayload {
   prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
+  skill_instances?: Array<{
+    skill_id: number;
+    enabled?: boolean;
+    config_values?: Record<string, unknown>;
+  }>;
   related_agent_ids?: number[];
+  related_agents?: { agent_id: number; version_no: number }[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;
   greeting_message?: string;
@@ -526,9 +534,9 @@ export const exportAgent = async (agentId: number) => {
 
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
-      const filename =
-        response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
-      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename);
       return {
         success: true,
         data: null,
@@ -559,6 +567,22 @@ export const exportAgent = async (agentId: number) => {
       message: "Export failed, please try again later",
     };
   }
+};
+
+/**
+ * Extract filename from Content-Disposition header
+ * Handles both quoted and unquoted filename values
+ * @param contentDisposition The Content-Disposition header value
+ * @returns Extracted filename or null if not found
+ */
+const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+  const match = regex.exec(contentDisposition);
+  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
 };
 
 /**
@@ -805,9 +829,12 @@ export const searchAgentInfo = async (
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],
       sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
+      sub_agent_relations: data.sub_agent_relations || [],
+      external_sub_agent_id_list: data.external_sub_agent_id_list || [],
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
+      created_by: data.created_by ?? null,
       prompts_hidden: data.prompts_hidden === true,
       tools: data.tools
         ? data.tools.map((tool: any) => {
@@ -1531,8 +1558,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
+              .map((e: any) => e.msg || JSON.stringify(e))
+              .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

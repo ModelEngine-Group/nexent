@@ -6,7 +6,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -27,13 +32,12 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/lib/agentImportUtils";
+import { ImportAgentData, openImportWizardWithFile } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
@@ -49,6 +53,7 @@ export default function AgentSelectorHeader({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
@@ -57,10 +62,9 @@ export default function AgentSelectorHeader({
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
   const { token } = theme?.useToken?.() || {};
-  const { user } = useAuthorizationContext();
 
-  // Fetch agent list internally
-  const { agents } = useAgentList(user?.tenantId ?? null);
+  // Resolve tenant from auth (matches AgentManageComp / published_list; keeps ASSET_OWNER merge)
+  const { agents } = useAgentList("");
 
   // Store state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
@@ -146,44 +150,16 @@ export default function AgentSelectorHeader({
   );
 
   // Handle import agent
-  const handleImportAgent = () => {
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith(".json")) {
-        message.error(t("businessLogic.config.error.invalidFileType"));
-        return;
-      }
-
-      try {
-        const fileContent = await file.text();
-        let agentData: ImportAgentData;
-
-        try {
-          agentData = JSON.parse(fileContent);
-        } catch (parseError) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
-        if (!agentData.agent_id || !agentData.agent_info) {
-          message.error(t("businessLogic.config.error.invalidFileType"));
-          return;
-        }
-
+  const handleImportAgent = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
         setImportWizardData(agentData);
         setImportWizardVisible(true);
-      } catch (error) {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
-      }
-    };
-
-    fileInput.click();
+      },
+      message: message,
+      t: t,
+      log: log,
+    });
   };
 
   // Handle view call relationship
@@ -209,7 +185,12 @@ export default function AgentSelectorHeader({
   const handleExportAgent = async (agent: Agent) => {
     try {
       const result = await exportAgent(Number(agent.id));
-      if (result.success && result.data) {
+      if (!result.success) {
+        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        return;
+      }
+
+      if (result.data) {
         const blob = new Blob([JSON.stringify(result.data, null, 2)], {
           type: "application/json",
         });
@@ -221,12 +202,9 @@ export default function AgentSelectorHeader({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.message.agentExportSuccess"));
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.agentImportFailed")
-        );
       }
+
+      message.success(t("businessLogic.config.message.agentExportSuccess"));
     } catch (error) {
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
@@ -432,6 +410,9 @@ export default function AgentSelectorHeader({
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
         setCurrentAgent(result.data);
+        const nextSearchParams = new URLSearchParams(searchParams.toString());
+        nextSearchParams.set("agent_id", String(agent.id));
+        router.replace(`${pathname}?${nextSearchParams.toString()}`);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -606,6 +587,14 @@ export default function AgentSelectorHeader({
     router.push(`/${locale}/agent-space?tab=mine`);
   };
 
+  const handleCreateAgent = () => {
+    enterCreateMode();
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("agent_id");
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
+
   return (
     <>
       <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -622,16 +611,17 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex min-w-0"
           >
-            <Flex vertical className="min-w-0 w-full">
+            <Flex align="center" className="min-w-0 w-full" gap={4}>
               {showBackFromRepository ? (
-                <Button
-                  type="text"
-                  className="mb-1 flex w-fit items-center gap-1 px-2 text-gray-600"
-                  icon={<ChevronLeft className="size-4" aria-hidden />}
-                  onClick={handleBackToRepository}
-                >
-                  {t("agentRepository.mine.backToRepository")}
-                </Button>
+                <Tooltip title={t("agentRepository.mine.backToRepository")}>
+                  <Button
+                    type="text"
+                    aria-label={t("agentRepository.mine.backToRepository")}
+                    className="flex shrink-0 items-center px-2 text-gray-600"
+                    icon={<ChevronLeft className="size-4" aria-hidden />}
+                    onClick={handleBackToRepository}
+                  />
+                </Tooltip>
               ) : null}
               <Dropdown
               trigger={["click"]}
@@ -672,10 +662,11 @@ export default function AgentSelectorHeader({
               )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
               classNames={{ root: "agent-selector-dropdown" }}
+              className="min-w-0 flex-1"
               styles={{
                 root: {
-                  width: 'calc(100% - 32px)',
-                }
+                  width: showBackFromRepository ? "calc(100% - 68px)" :  'calc(100% - 32px)',
+                },
               }}
             >
               <div
@@ -716,7 +707,7 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex justify-end"
           >
-          <Flex align="center" gap={12} wrap="nowrap" justify="flex-end" className="w-full mr-6">
+          <Flex align="center" gap={12} wrap="wrap" justify="flex-end" className="w-full mr-6">
             {currentAgentId != null && agentInfo?.current_version_no !== 0 && total > 0 && (
               <div className="flex shrink-0 items-center gap-1 py-1.5 px-3 bg-gray-100 rounded-lg text-gray-700">
                 <History size={16} />
@@ -728,11 +719,11 @@ export default function AgentSelectorHeader({
                 </span>
               </div>
             )}
-            <Flex align="center" gap={12} wrap="nowrap">
-              <Flex align="center" gap={8} className="ml-4">
+            <Flex align="center" gap={12} wrap="wrap">
+              <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                 <Button
                   size="middle"
-                  onClick={enterCreateMode}
+                  onClick={handleCreateAgent}
                   className="flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />

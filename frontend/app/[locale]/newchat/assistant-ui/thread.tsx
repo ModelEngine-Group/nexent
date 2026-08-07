@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { SubAgentContainer } from "../ui/subagent";
@@ -17,10 +18,19 @@ import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
   ErrorPrimitive,
+  groupPartByType,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
@@ -45,8 +55,11 @@ import {
   ArrowLeft,
   SparklesIcon,
   PencilIcon,
+  Share2Icon,
   XCircleIcon,
+  XIcon,
 } from "lucide-react";
+import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { ModelOption } from "../ui/model-selector";
@@ -63,6 +76,8 @@ import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
+import { ToolRecommendations } from "../ui/tool-recommendations";
+import { AgentDraftCard } from "../ui/agent-draft-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -70,18 +85,30 @@ import {
 } from "../ui/tool-group";
 import {
   getAgentRunTime,
+  searchSourcesRegistry,
+  conversationSourcesRegistry,
   skillFileUploadsRegistry,
+  type Nl2aMessage,
+  type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
+import { AuthenticatedImage } from "../ui/authenticated-image";
+import { copyToClipboard } from "@/lib/clipboard";
+import { configService } from "@/services/configService";
+import { conversationService } from "@/services/conversationService";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
-  onBack: () => void;
+  conversationId?: number;
+  onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
 }
 
 /**
@@ -113,12 +140,16 @@ const useAgentModels = (agent: Agent | PublishedAgent): readonly ModelOption[] =
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  conversationId,
   onBack,
   selectedModelId,
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector = true,
+  isDictationConfigured = false,
 }) => {
+  const { t } = useTranslation();
   const models = useAgentModels(agent);
 
   const messages = useAuiState((s) => s.thread.messages);
@@ -129,8 +160,16 @@ export const Thread: FC<ThreadProps> = ({
     return currentThread?.title;
   });
   const hasMessages = messages.length > 0;
+  const isRunning = useAuiState((s) => s.thread.isRunning);
   const displayName = agent.display_name || agent.name;
-  const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || "New Chat";
+  const conversationTitle = generatedTitle?.trim() || currentThreadTitle?.trim() || t("chat.thread.newChat");
+  const [isShareMode, setIsShareMode] = useState(false);
+  const [selectedShareMessageIds, setSelectedShareMessageIds] = useState<Set<number>>(new Set());
+  const [backendMessageIdsByAuiId, setBackendMessageIdsByAuiId] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
 
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
@@ -164,6 +203,108 @@ export const Thread: FC<ThreadProps> = ({
     [selection, open, toggle, close],
   );
 
+  const shareableUserMessageIds = useMemo(
+    () => Array.from(backendMessageIdsByAuiId.values()),
+    [backendMessageIdsByAuiId],
+  );
+
+  const leaveShareMode = useCallback(() => {
+    setIsShareMode(false);
+    setSelectedShareMessageIds(new Set());
+    setBackendMessageIdsByAuiId(new Map());
+  }, []);
+
+  const enterShareMode = useCallback(async () => {
+    if (!conversationId || isRunning) return;
+    const auiUserMessageIds = messages
+      .filter((item) => item.role === "user")
+      .map((item) => String(item.id));
+    const directBackendMessageIds = auiUserMessageIds.map((id) => Number(id));
+    if (
+      directBackendMessageIds.length > 0 &&
+      directBackendMessageIds.every((id) => Number.isSafeInteger(id) && id > 0) &&
+      new Set(directBackendMessageIds).size === directBackendMessageIds.length
+    ) {
+      setBackendMessageIdsByAuiId(
+        new Map(auiUserMessageIds.map((id, index) => [id, directBackendMessageIds[index]])),
+      );
+      setSelectedShareMessageIds(new Set());
+      setIsShareMode(true);
+      return;
+    }
+
+    try {
+      const response = await conversationService.getDetail(conversationId);
+      const backendUserMessageIds = (response.data?.[0]?.message ?? [])
+        .filter((item) => item.role === "user" && Number.isInteger(item.message_id))
+        .map((item) => item.message_id as number);
+      if (!backendUserMessageIds.length || backendUserMessageIds.length !== auiUserMessageIds.length) {
+        message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+        return;
+      }
+      setBackendMessageIdsByAuiId(
+        new Map(auiUserMessageIds.map((id, index) => [id, backendUserMessageIds[index]])),
+      );
+      setSelectedShareMessageIds(new Set());
+      setIsShareMode(true);
+    } catch {
+      message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+    }
+  }, [conversationId, isRunning, messages, t]);
+
+  const toggleShareMessage = useCallback((messageId: number) => {
+    setSelectedShareMessageIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
+  const toggleShareAll = useCallback(() => {
+    setSelectedShareMessageIds((previous) =>
+      previous.size === shareableUserMessageIds.length
+        ? new Set()
+        : new Set(shareableUserMessageIds),
+    );
+  }, [shareableUserMessageIds]);
+
+  const createShare = useCallback(async () => {
+    if (!conversationId) return;
+    if (!selectedShareMessageIds.size) {
+      message.warning(t("chatInterface.selectShareMessages", "请至少选择一组问答"));
+      return;
+    }
+    setIsCreatingShare(true);
+    try {
+      const result = await conversationService.createShare({
+        conversationId,
+        mode: selectedShareMessageIds.size === shareableUserMessageIds.length ? "all" : "selected",
+        selected_user_message_ids: Array.from(selectedShareMessageIds),
+        render_version: "newchat",
+      });
+      const runtimeConfig = await configService
+        .fetchRuntimeFrontendConfig()
+        .catch((): { shareBaseUrl?: string } => ({}));
+      const baseUrl = (
+        runtimeConfig.shareBaseUrl || process.env.NEXT_PUBLIC_SHARE_BASE_URL || window.location.origin
+      ).replace(/\/$/, "");
+      const locale = window.location.pathname.split("/").filter(Boolean)[0] || "zh";
+      const shareUrl = `${baseUrl}/${locale}/share/${result.share_id}`;
+      try {
+        await copyToClipboard(shareUrl);
+        message.success(t("chatInterface.shareLinkCopied", "分享链接已复制"));
+      } catch {
+        setManualShareUrl(shareUrl);
+      }
+      leaveShareMode();
+    } catch {
+      message.error(t("chatInterface.shareCreateFailed", "创建分享链接失败"));
+    } finally {
+      setIsCreatingShare(false);
+    }
+  }, [conversationId, leaveShareMode, selectedShareMessageIds, shareableUserMessageIds, t]);
+
   return (
     <SourcesPanelProvider value={panelContextValue}>
       <ThreadView
@@ -174,27 +315,89 @@ export const Thread: FC<ThreadProps> = ({
         onModelChange={onModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
+        showModelSelector={showModelSelector}
+        isDictationConfigured={isDictationConfigured}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
+        conversationId={conversationId}
+        isRunning={isRunning}
+        isShareMode={isShareMode}
+        selectedShareMessageIds={selectedShareMessageIds}
+        backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+        isCreatingShare={isCreatingShare}
+        onEnterShareMode={enterShareMode}
+        onLeaveShareMode={leaveShareMode}
+        onToggleShareAll={toggleShareAll}
+        onToggleShareMessage={toggleShareMessage}
+        onCreateShare={createShare}
         selection={selection}
         onPanelClose={close}
       />
+      <Dialog open={Boolean(manualShareUrl)} onOpenChange={(open) => !open && setManualShareUrl(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("chatInterface.shareLinkReady", "分享链接已生成")}</DialogTitle>
+            <DialogDescription>
+              {t("chatInterface.shareCreatedCopyFailed", "分享链接已创建，但当前环境无法自动复制")}
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            value={manualShareUrl ?? ""}
+            readOnly
+            onFocus={(event) => event.currentTarget.select()}
+            className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setManualShareUrl(null)}>
+              {t("common.close", "关闭")}
+            </Button>
+            <Button
+              type="button"
+              onClick={async () => {
+                if (!manualShareUrl) return;
+                try {
+                  await copyToClipboard(manualShareUrl);
+                  message.success(t("chatInterface.shareLinkCopied", "分享链接已复制"));
+                  setManualShareUrl(null);
+                } catch {
+                  message.warning(t("chatInterface.shareManualCopyRequired", "请手动复制链接"));
+                }
+              }}
+            >
+              {t("chatInterface.copyShareLink", "复制链接")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SourcesPanelProvider>
   );
 };
 
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
-  onBack: () => void;
+  onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  showModelSelector: boolean;
+  isDictationConfigured: boolean;
   hasMessages: boolean;
   displayName: string;
   conversationTitle: string;
+  conversationId?: number;
+  isRunning: boolean;
+  isShareMode: boolean;
+  selectedShareMessageIds: Set<number>;
+  backendMessageIdsByAuiId: Map<string, number>;
+  isCreatingShare: boolean;
+  onEnterShareMode: () => void;
+  onLeaveShareMode: () => void;
+  onToggleShareAll: () => void;
+  onToggleShareMessage: (messageId: number) => void;
+  onCreateShare: () => void;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
 }
@@ -207,32 +410,111 @@ const ThreadView: FC<ThreadViewProps> = ({
   onModelChange,
   chatMode,
   onChatModeChange,
+  showModelSelector,
+  isDictationConfigured,
   hasMessages,
   displayName,
   conversationTitle,
+  conversationId,
+  isRunning,
+  isShareMode,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  isCreatingShare,
+  onEnterShareMode,
+  onLeaveShareMode,
+  onToggleShareAll,
+  onToggleShareMessage,
+  onCreateShare,
   selection,
   onPanelClose,
 }) => {
+  const { t } = useTranslation();
+
   return (
     <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground">
-              {hasMessages ? conversationTitle : displayName}
-            </span>
-            {hasMessages && (
-              <span className="text-xs text-muted-foreground">Conversation</span>
-            )}
-          </div>
+          {isShareMode ? (
+            <>
+              <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                {conversationTitle}
+              </div>
+              <Button variant="ghost" size="icon" onClick={onLeaveShareMode} aria-label={t("common.close", "关闭")}>
+                <XIcon className="size-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              {onBack && (
+                <Button variant="ghost" size="icon" onClick={onBack}>
+                  <ArrowLeft className="size-4" />
+                </Button>
+              )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-medium text-foreground">
+                  {hasMessages ? conversationTitle : displayName}
+                </span>
+                {hasMessages && (
+                  <span className="text-xs text-muted-foreground">{t("chat.thread.conversation")}</span>
+                )}
+              </div>
+              {hasMessages && conversationId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("chatInterface.shareConversation", "分享对话")}
+                  disabled={isRunning}
+                  onClick={onEnterShareMode}
+                >
+                  <Share2Icon className="size-4" />
+                </Button>
+              )}
+            </>
+          )}
         </header>
 
-        <ThreadPrimitive.Viewport className="flex flex-1 flex-col overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
+        {isShareMode && (
+          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={
+                  backendMessageIdsByAuiId.size > 0 &&
+                  selectedShareMessageIds.size === backendMessageIdsByAuiId.size
+                }
+                onChange={onToggleShareAll}
+              />
+              {t("common.selectAll", "全选")}
+            </label>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {t("chatInterface.selectedShareCount", {
+                  count: selectedShareMessageIds.size,
+                  defaultValue: "已选择 {{count}}",
+                })}
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={onLeaveShareMode}>
+                {t("common.cancel", "取消")}
+              </Button>
+              <Button type="button" size="sm" onClick={onCreateShare} disabled={isCreatingShare}>
+                {isCreatingShare
+                  ? t("common.loading", "处理中...")
+                  : t("chatInterface.copyShareLink", "复制链接")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ThreadPrimitive.Viewport className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
           {hasMessages ? (
-            <ThreadMessages agent={agent} />
+            <ThreadMessages
+              agent={agent}
+              shareMode={isShareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              onToggleShareMessage={onToggleShareMessage}
+            />
           ) : (
             <ThreadWelcomeContent agent={agent} />
           )}
@@ -246,6 +528,8 @@ const ThreadView: FC<ThreadViewProps> = ({
             onModelChange={onModelChange}
             chatMode={chatMode}
             onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
+            isDictationConfigured={isDictationConfigured}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -261,12 +545,59 @@ const ThreadView: FC<ThreadViewProps> = ({
   );
 };
 
+export const ReadOnlyConversation: FC<{
+  agent: Agent | PublishedAgent;
+  title: string;
+}> = ({ agent, title }) => {
+  const { t } = useTranslation();
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(null);
+  const open = useCallback((payload: SourcesPanelSelection) => setSelection(payload), []);
+  const toggle = useCallback((payload: SourcesPanelSelection) => {
+    setSelection((current) =>
+      current && current.messageId === payload.messageId && current.groupId === payload.groupId
+        ? null
+        : payload,
+    );
+  }, []);
+  const close = useCallback(() => setSelection(null), []);
+  const panelContextValue = useMemo(
+    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
+    [selection, open, toggle, close],
+  );
+
+  return (
+    <SourcesPanelProvider value={panelContextValue}>
+      <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
+        <main className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b px-6 py-4">
+            <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
+            </p>
+          </header>
+          <ThreadPrimitive.Viewport className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-8 py-6">
+            <ThreadMessages agent={agent} readOnly />
+          </ThreadPrimitive.Viewport>
+        </main>
+        <SourcesPanel
+          sources={selection?.sources ?? []}
+          images={selection?.images ?? []}
+          open={selection !== null}
+          selectedCiteIndex={selection?.selectedCiteIndex}
+          onClose={close}
+        />
+      </ThreadPrimitive.Root>
+    </SourcesPanelProvider>
+  );
+};
+
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
 }
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
   const aui = useAui();
+  const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
   const sampleQuestions = (agent.example_questions || []).slice(0, 4);
@@ -288,7 +619,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
 
           <div className="text-center">
             <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              你好，我是{displayName}
+              {t("chat.thread.helloAgent", { agent: displayName })}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
               {agent.greeting_message || agent.description}
@@ -299,7 +630,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
             <div className="w-full">
               <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <SparklesIcon className="size-3.5 text-primary" />
-                试试这些问题
+                {t("chat.thread.tryQuestions")}
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {sampleQuestions.map((q, index) => (
@@ -321,22 +652,112 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({ agent }) => {
   );
 };
 
-const ThreadMessages: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
+export const ThreadMessages: FC<{
+  agent: Agent | PublishedAgent;
+  readOnly?: boolean;
+  shareMode?: boolean;
+  selectedShareMessageIds?: Set<number>;
+  backendMessageIdsByAuiId?: Map<string, number>;
+  onToggleShareMessage?: (messageId: number) => void;
+}> = ({
+  agent,
+  readOnly = false,
+  shareMode = false,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  onToggleShareMessage,
+}) => {
+  const { t } = useTranslation();
+  const messages = useAuiState((s) => s.thread.messages);
+  const shareMessageGroups = useMemo(() => {
+    const groups: { key: string; messageIndexes: number[]; userMessageId?: number }[] = [];
+
+    messages.forEach((message, index) => {
+      if (message.role === "user") {
+        groups.push({
+          key: String(message.id),
+          messageIndexes: [index],
+          userMessageId: backendMessageIdsByAuiId?.get(String(message.id)),
+        });
+        return;
+      }
+
+      const currentGroup = groups.at(-1);
+      if (currentGroup) currentGroup.messageIndexes.push(index);
+      else groups.push({ key: String(message.id), messageIndexes: [index] });
+    });
+
+    return groups;
+  }, [backendMessageIdsByAuiId, messages]);
+
+  const messageComponents = useMemo(
+    () => ({
+      UserMessage: () => <UserMessage readOnly={readOnly} />,
+      AssistantMessage: () => <AssistantMessage agent={agent} readOnly={readOnly} />,
+    }),
+    [agent, readOnly],
+  );
+
+  if (shareMode) {
+    return (
+      <>
+        {shareMessageGroups.map((group) => {
+          const shareSelected =
+            group.userMessageId !== undefined && (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+          return (
+            <div
+              key={group.key}
+              className={`relative mb-4 w-full rounded-xl px-2 pt-1 pb-2 ${
+                shareSelected ? "bg-blue-100/80 shadow-[0_4px_18px_rgba(37,99,235,0.28)]" : ""
+              }`}
+            >
+              {group.userMessageId !== undefined && (
+                <label className="absolute -left-6 top-3 z-10 flex cursor-pointer items-center justify-center">
+                  <input
+                    type="checkbox"
+                    aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+                    checked={shareSelected}
+                    onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                  />
+                </label>
+              )}
+              {group.messageIndexes.map((index) => (
+                <ThreadPrimitive.MessageByIndex key={index} index={index} components={messageComponents} />
+              ))}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
   return (
     <ThreadPrimitive.Messages>
       {({ message }) => {
-        if (message.role === "user") return <UserMessage />;
-        return <AssistantMessage agent={agent} />;
+        if (message.role === "user") {
+          return (
+            <UserMessage
+              readOnly={readOnly}
+              shareMode={shareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              onToggleShareMessage={onToggleShareMessage}
+            />
+          );
+        }
+        return <AssistantMessage agent={agent} readOnly={readOnly} />;
       }}
     </ThreadPrimitive.Messages>
   );
 };
 
 const ThreadScrollToBottom: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <TooltipIconButton
-        tooltip="Scroll to bottom"
+        tooltip={t("chat.thread.scrollToBottom")}
         className="absolute -top-12 self-center rounded-full p-4"
       >
         <ArrowDownIcon />
@@ -356,6 +777,7 @@ const MessageError: FC = () => {
 };
 
 const AssistantWorkingIndicator: FC = () => {
+  const { t } = useTranslation();
   const isEmpty = useAuiState((s) => s.message.content.length === 0);
   if (isEmpty) {
     return (
@@ -364,7 +786,7 @@ const AssistantWorkingIndicator: FC = () => {
         className="text-muted-foreground inline-flex items-center gap-2 align-middle"
       >
         <DotMatrix state="connecting" aria-hidden />
-        <span className="text-sm">Connecting</span>
+        <span className="text-sm">{t("chat.thread.connecting")}</span>
       </span>
     );
   }
@@ -372,7 +794,7 @@ const AssistantWorkingIndicator: FC = () => {
     <span
       data-slot="aui_assistant-message-indicator"
       className="animate-pulse font-sans"
-      aria-label="Assistant is working"
+      aria-label={t("chat.thread.working")}
     >
       {"●"}
     </span>
@@ -380,6 +802,7 @@ const AssistantWorkingIndicator: FC = () => {
 };
 
 const AssistantCompletionIndicator: FC = () => {
+  const { t } = useTranslation();
   const isComplete = useAuiState(
     (s) => s.message.status?.type === "complete",
   );
@@ -393,12 +816,16 @@ const AssistantCompletionIndicator: FC = () => {
       role="status"
     >
       <DotMatrix state="success" aria-hidden />
-      <span>Complete</span>
+      <span>{t("chat.thread.complete")}</span>
     </span>
   );
 };
 
-const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
+const AssistantMessage: FC<{
+  agent: Agent | PublishedAgent;
+  readOnly?: boolean;
+}> = ({ agent, readOnly = false }) => {
+  const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -409,6 +836,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
   const agentName = agent.display_name || agent.name;
 
   const agentRunTime = getAgentRunTime();
+  const nl2a = useAuiState(
+    (s) =>
+      (
+        s.message.metadata?.custom as
+          | { nl2a?: Nl2aMessage }
+          | undefined
+      )?.nl2a,
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
@@ -431,11 +866,11 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
     <MessagePrimitive.Root
       data-slot="aui_assistant-message-root"
       data-role="assistant"
-      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto w-full max-w-(--thread-max-width) duration-150"
+      className="fade-in slide-in-from-bottom-1 animate-in relative mx-auto min-w-0 w-full max-w-(--thread-max-width) duration-150"
     >
       <div
         data-slot="aui_assistant-message-content"
-        className="text-foreground px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
+        className="text-foreground min-w-0 px-2 pt-3 pb-1 leading-relaxed wrap-break-word"
       >
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -455,8 +890,8 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
             <span
               data-slot="aui_assistant-message-run-time"
               className="text-xs text-muted-foreground"
-              aria-label={`Agent run started at ${agentRunTime}`}
-              title={`Run started at ${agentRunTime}`}
+              aria-label={t("chat.thread.runStartedAt", { time: agentRunTime })}
+              title={t("chat.thread.runStartedAt", { time: agentRunTime })}
             >
               {agentRunTime}
             </span>
@@ -504,8 +939,6 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               typeof partType === "string" &&
               partType.startsWith("group-subagent-")
             ) {
-              // `GroupPart` always carries `indices`; the runtime check
-              // above narrows the union so this cast is safe.
               const groupPart = part as unknown as {
                 type: string;
                 indices: readonly number[];
@@ -513,6 +946,20 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               };
               return renderSubAgentGroup(groupPart, children);
             }
+
+            if (partType === "verification-panel") {
+              const verificationPanel = part as typeof part & {
+                results?: VerificationContent[];
+                completed?: boolean;
+              };
+              return (
+                <VerificationPanel
+                  results={verificationPanel.results ?? []}
+                  completed={verificationPanel.completed === true}
+                />
+              );
+            }
+
             switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
@@ -520,14 +967,14 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 return (
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
+                      count={(part as typeof part & { indices?: unknown[] }).indices?.length ?? 0}
+                      active={(part as typeof part & { status?: { type?: string } }).status?.type === "running"}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
               case "group-reasoning": {
-                const running = part.status.type === "running";
+                const running = (part as typeof part & { status?: { type?: string } }).status?.type === "running";
                 return (
                   <Reasoning.Root defaultOpen={running} >
                     <GroupReasoningTrigger active={running} />
@@ -538,11 +985,19 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 );
               }
               case "group-source":
-                return <SourceGroupButton indices={part.indices} />;
+                return <SourceGroupButton indices={(part as typeof part & { indices?: unknown[] }).indices ?? []} />;
               case "group-default":
                 return <>{children}</>;
               case "text": {
-                const textPart = part as typeof part & { isError?: boolean };
+                const textPart = part as typeof part & {
+                  isError?: boolean;
+                  text?: string;
+                  isSearchImage?: boolean;
+                  imageSource?: SourcePartLike;
+                };
+                if (textPart.isSearchImage && textPart.imageSource) {
+                  return <GlobalSearchImage source={textPart.imageSource} />;
+                }
                 if (textPart.isError) {
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -556,7 +1011,7 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
               case "reasoning":
                 return <Reasoning {...part} /> ;
               case "tool-call":
-                return part.toolUI ?? <ToolFallback {...part} />;
+                return (part as typeof part & { toolUI?: unknown }).toolUI ?? <ToolFallback {...part} />;
               case "indicator":
                 return <AssistantWorkingIndicator />;
               case "source":
@@ -565,23 +1020,24 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
                 }
                 return <Sources {...part} />;
               case "data":
-                if (part.name === "automation-proposal") {
+                if ((part as typeof part & { name?: string }).name === "automation-proposal") {
                   return (
                     <AutomationProposalMessage
-                      proposal={part.data as AgentAutomationProposalData}
+                      proposal={(part as typeof part & { data?: unknown }).data as AgentAutomationProposalData}
                     />
                   );
                 }
-                // The `subagent-boundary` stamp part is the seat of the
-                // group's header information. We let the header renderer
-                // paint it instead of returning it inside the body, so
-                // suppress here when it lands as a leaf of the chain.
-                return part.dataRendererUI;
+                return (part as typeof part & { dataRendererUI?: unknown }).dataRendererUI as ReactNode ?? null;
               default:
                 return null;
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {nl2a?.content.subtype === "local_mcp_recommendation" ? (
+          <ToolRecommendations payload={nl2a.content} />
+        ) : nl2a?.content.subtype === "agent_draft" ? (
+          <AgentDraftCard draft={nl2a.content} />
+        ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
@@ -592,14 +1048,16 @@ const AssistantMessage: FC<{ agent: Agent | PublishedAgent }> = ({ agent }) => {
         data-slot="aui_assistant-message-footer"
         className={cn("ml-2 flex items-center", ACTION_BAR_HEIGHT)}
       >
-        <BranchPicker />
-        <AssistantActionBar />
+        {!readOnly && <BranchPicker />}
+        {!readOnly && <AssistantActionBar />}
       </div>
     </MessagePrimitive.Root>
   );
 };
 
 const AssistantActionBar: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -608,7 +1066,7 @@ const AssistantActionBar: FC = () => {
     >
       <div className="flex items-center gap-1">
         <ActionBarPrimitive.Copy asChild>
-          <TooltipIconButton tooltip="Copy">
+          <TooltipIconButton tooltip={t("chat.thread.copy")}>
             <AuiIf condition={(s) => s.message.isCopied}>
               <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
             </AuiIf>
@@ -618,14 +1076,14 @@ const AssistantActionBar: FC = () => {
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
         <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton tooltip="Refresh">
+          <TooltipIconButton tooltip={t("chat.thread.refresh")}>
             <RefreshCwIcon />
           </TooltipIconButton>
         </ActionBarPrimitive.Reload>
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton
-              tooltip="More"
+              tooltip={t("chat.thread.more")}
               className="data-[state=open]:bg-accent"
             >
               <MoreHorizontalIcon />
@@ -640,7 +1098,7 @@ const AssistantActionBar: FC = () => {
             <ActionBarPrimitive.ExportMarkdown asChild>
               <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
                 <DownloadIcon className="size-4" />
-                Export as Markdown
+                {t("chat.thread.exportMarkdown")}
               </ActionBarMorePrimitive.Item>
             </ActionBarPrimitive.ExportMarkdown>
           </ActionBarMorePrimitive.Content>
@@ -655,13 +1113,38 @@ const AssistantActionBar: FC = () => {
   );
 };
 
-const UserMessage: FC = () => {
+const UserMessage: FC<{
+  readOnly?: boolean;
+  shareMode?: boolean;
+  selectedShareMessageIds?: Set<number>;
+  backendMessageIdsByAuiId?: Map<string, number>;
+  onToggleShareMessage?: (messageId: number) => void;
+}> = ({
+  readOnly = false,
+  shareMode = false,
+  selectedShareMessageIds,
+  backendMessageIdsByAuiId,
+  onToggleShareMessage,
+}) => {
+  const { t } = useTranslation();
+  const auiMessageId = useAuiState((s) => String(s.message.id));
+  const backendMessageId = backendMessageIdsByAuiId?.get(auiMessageId);
   return (
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       data-role="user"
-      className="fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
+      className="relative fade-in slide-in-from-bottom-1 animate-in mx-auto grid w-full max-w-(--thread-max-width) auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2"
     >
+      {shareMode && backendMessageId !== undefined && (
+        <label className="absolute left-2 top-1/2 z-10 flex -translate-y-1/2 cursor-pointer items-center justify-center">
+          <input
+            type="checkbox"
+            aria-label={t("chatInterface.selectShareMessages", "请选择要分享的问答")}
+            checked={selectedShareMessageIds?.has(backendMessageId) ?? false}
+            onChange={() => onToggleShareMessage?.(backendMessageId)}
+          />
+        </label>
+      )}
       <div className="col-start-2 flex flex-col gap-2">
         <UserMessageAttachments />
 
@@ -672,21 +1155,27 @@ const UserMessage: FC = () => {
             </MessagePrimitive.Quote>
             <MessagePrimitive.Parts components={{ Text: DirectiveText }} />
           </div>
-          <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
-            <UserActionBar />
-          </div>
+          {!readOnly && (
+            <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
+              <UserActionBar />
+            </div>
+          )}
         </div>
       </div>
 
-      <BranchPicker
-        data-slot="aui_user-branch-picker"
-        className="col-span-full col-start-1 row-start-3 -mr-1 justify-end"
-      />
+      {!readOnly && (
+        <BranchPicker
+          data-slot="aui_user-branch-picker"
+          className="col-span-full col-start-1 row-start-3 -mr-1 justify-end"
+        />
+      )}
     </MessagePrimitive.Root>
   );
 };
 
 const UserActionBar: FC = () => {
+  const { t } = useTranslation();
+
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -694,7 +1183,7 @@ const UserActionBar: FC = () => {
       className="aui-user-action-bar-root flex flex-col items-end"
     >
       <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
+        <TooltipIconButton tooltip={t("chat.thread.edit")} className="aui-user-action-edit">
           <PencilIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
@@ -718,6 +1207,7 @@ interface SourcePartLike {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  messageId?: string;
 }
 
 /**
@@ -729,20 +1219,32 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
   const imageUrl = source.url || "";
   if (!imageUrl) return null;
   return (
-    <a
-      href={imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="aui-global-search-image block overflow-hidden rounded-md border bg-muted/50"
+    <figure
+      className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
       title={imageUrl}
     >
-      <img
+      <AuthenticatedImage
         src={imageUrl}
-        alt={imageUrl}
+        alt={source.title || imageUrl}
         loading="lazy"
-        className="size-20 object-cover"
+        preview
+        className="max-h-[28rem] w-full bg-muted/50 object-contain"
       />
-    </a>
+      {source.title || source.text ? (
+        <figcaption className="border-t bg-card px-3 py-2">
+          {source.title ? (
+            <div className="text-sm font-medium text-foreground">
+              {source.title}
+            </div>
+          ) : null}
+          {source.text ? (
+            <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+              {source.text}
+            </div>
+          ) : null}
+        </figcaption>
+      ) : null}
+    </figure>
   );
 };
 
@@ -891,6 +1393,7 @@ const SubAgentGroupRenderer: FC<{
 };
 
 const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
+  const { t } = useTranslation();
   // Subscribe to the current message so we can split the indices into image
   // vs. regular sources — `useAuiState` re-runs the selector on every change,
   // which keeps the counts accurate while a streaming run appends parts.
@@ -903,20 +1406,33 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   const { sources, images, total } = useMemo(() => {
     const srcs: PanelSourceItem[] = [];
     const imgs: PanelSourceItem[] = [];
-    for (const index of indices) {
+    const groupedSources = indices.flatMap((index) => {
       const raw = content[index] as SourcePartLike | undefined;
-      if (!raw || raw.type !== "source") continue;
-      const item: PanelSourceItem = {
-        sourceType: raw.sourceType,
-        url: raw.url,
-        title: raw.title,
-        text: raw.text,
-        filename: raw.filename,
-        downloadUrl: raw.downloadUrl,
-        objectName: raw.objectName,
-        isImage: raw.isImage,
-        citeIndex: raw.citeIndex,
-      };
+      return raw?.type === "source" ? [raw] : [];
+    });
+    const registryMessageId =
+      groupedSources.find((source) => source.messageId)?.messageId ?? messageId;
+    const registeredSources = registryMessageId
+      ? searchSourcesRegistry.get(registryMessageId) ??
+        conversationSourcesRegistry.get(registryMessageId)
+      : undefined;
+    const displaySources: PanelSourceItem[] = registeredSources?.length
+      ? registeredSources.map((source) => ({
+          sourceType:
+            source.sourceType === "file" || source.sourceType === "document"
+              ? "document"
+              : "url",
+          url: source.url,
+          title: source.title,
+          text: source.text,
+          filename: source.filename,
+          downloadUrl: source.downloadUrl,
+          objectName: source.objectName,
+          isImage: source.isImage,
+          citeIndex: source.citeIndex,
+        }))
+      : groupedSources;
+    for (const item of displaySources) {
       if (item.isImage) {
         imgs.push(item);
       } else {
@@ -924,7 +1440,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
       }
     }
     return { sources: srcs, images: imgs, total: srcs.length + imgs.length };
-  }, [content, indices]);
+  }, [content, indices, messageId]);
 
   const { toggle, selection, isOpen } = useSourcesPanel();
   const groupId = indices.length > 0 ? indices.join(",") : "default";
@@ -947,7 +1463,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   if (total === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 pt-3 pb-2">
+    <div className="pt-3 pb-2">
       <button
         type="button"
         onClick={handleClick}
@@ -957,12 +1473,12 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
       >
         <span aria-hidden className="inline-flex items-center gap-1 text-muted-foreground">
           <FileTextIcon className="size-3.5" />
-          检索结果
+          {t("chat.thread.searchResults")}
         </span>
         <span className="text-foreground">
-          {sources.length > 0 ? `${sources.length} 个来源` : ""}
+          {sources.length > 0 ? t("chat.thread.sourceCount", { count: sources.length }) : ""}
           {sources.length > 0 && images.length > 0 ? ", " : ""}
-          {images.length > 0 ? `${images.length} 张图片` : ""}
+          {images.length > 0 ? t("chat.thread.imageCount", { count: images.length }) : ""}
         </span>
         {images.length > 0 ? (
           <ImageIcon className="size-3.5 text-muted-foreground" aria-hidden />

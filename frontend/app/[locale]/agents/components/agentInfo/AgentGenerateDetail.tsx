@@ -37,6 +37,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
 import { canManageModels } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
@@ -50,6 +51,14 @@ import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
+
+/** Roles that can edit group settings for any agent (mirrors backend CAN_EDIT_ALL_USER_ROLES). */
+const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
 
 export default function AgentGenerateDetail({}) {
   const { t } = useTranslation("common");
@@ -71,10 +80,20 @@ export default function AgentGenerateDetail({}) {
   const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
   const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
   const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
+  const setSaveValidation = useAgentConfigStore((state) => state.setSaveValidation);
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
   const editable = !isReadOnly;
+
+  // Group settings (用户组 / 组内权限) are editable only by creator or admin roles
+  const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
+  const isCreator =
+    isCreatingMode ||
+    (!!editedAgent.created_by &&
+      !!user?.id &&
+      String(editedAgent.created_by) === String(user.id));
+  const canEditGroupSettings = isAdmin || isCreator;
 
   const { defaultLlmModelConfig } = useConfig();
   const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
@@ -125,12 +144,20 @@ export default function AgentGenerateDetail({}) {
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  const [guardrailContentKey, setGuardrailContentKey] = useState(0);
   const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
   useEffect(() => {
     clearExpiredGenerationCaches();
   }, []);
+
+  useEffect(() => {
+    setSaveValidation(async () => {
+      await form.validateFields();
+    });
+    return () => setSaveValidation(null);
+  }, [form, setSaveValidation]);
 
   // (e.g. business_description from a previously edited agent)
   useEffect(() => {
@@ -142,7 +169,6 @@ export default function AgentGenerateDetail({}) {
 
   // Use agent generation hook
   const { handleGenerateAgent } = useAgentGeneration({
-    setActiveTab,
     onStreamUpdate: ({ type, content }) => {
       const fieldMap: Record<string, string> = {
         [GENERATE_PROMPT_STREAM_TYPES.DUTY]: 'dutyPrompt',
@@ -183,6 +209,18 @@ export default function AgentGenerateDetail({}) {
         model.name === editedAgent.model
     );
   }, [availableLlmModels, editedAgent.model, editedAgent.model_ids]);
+
+  // The output reserve cap must be safe for every configured model — the user
+  // can switch models at chat time, so use the minimum max_output_tokens across
+  // all selected models as the upper bound.
+  const minModelMaxOutputTokens = useMemo(() => {
+    const ids = editedAgent.model_ids || [];
+    const tokens = availableLlmModels
+      .filter((m) => ids.includes(m.id))
+      .map((m) => m.maxOutputTokens)
+      .filter((t): t is number => t != null && t > 0);
+    return tokens.length > 0 ? Math.min(...tokens) : undefined;
+  }, [availableLlmModels, editedAgent.model_ids]);
 
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
@@ -264,7 +302,7 @@ export default function AgentGenerateDetail({}) {
         form.validateFields(["requestedOutputTokens"]).catch(() => {});
       }
     });
-  }, [form, selectedMainAgentModel?.maxOutputTokens]);
+  }, [form, minModelMaxOutputTokens]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -498,6 +536,12 @@ export default function AgentGenerateDetail({}) {
     setAdvancedSettingsOpen(true);
   };
 
+  const handleCloseAdvancedSettings = () => {
+    setAdvancedSettingsOpen(false);
+    // Remount only the guardrail panel to discard drafts and other temporary UI state.
+    setGuardrailContentKey((key) => key + 1);
+  };
+
   const handleSaveAdvancedSettings = async () => {
     const values = await advancedSettingsForm.validateFields();
     const groupIds = normalizeNumberArray(
@@ -589,6 +633,20 @@ export default function AgentGenerateDetail({}) {
       case "few-shots":
         return "fewShotsPrompt";
     }
+  };
+
+  const handlePromptTabChange = (nextTab: string) => {
+    const promptField = getPromptFieldKey(activeTab as "duty" | "constraint" | "few-shots");
+    if (promptField) {
+      const value = form.getFieldValue(promptField) || "";
+      const storeField = {
+        dutyPrompt: "duty_prompt",
+        constraintPrompt: "constraint_prompt",
+        fewShotsPrompt: "few_shots_prompt",
+      }[promptField] as "duty_prompt" | "constraint_prompt" | "few_shots_prompt";
+      updateAgentConfig({ [storeField]: value });
+    }
+    setActiveTab(nextTab);
   };
 
   const handleReplaceOptimizedContent = (
@@ -901,9 +959,7 @@ export default function AgentGenerateDetail({}) {
         <Col className="w-full h-full">
           <Tabs
             value={activeTab}
-            onValueChange={(value: string) => {
-              setActiveTab(value);
-            }}
+            onValueChange={handlePromptTabChange}
             className="agent-config-tabs flex flex-col h-full w-full"
           >
             <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
@@ -938,7 +994,7 @@ export default function AgentGenerateDetail({}) {
                       >
                         <Input
                           placeholder={t("agent.displayNamePlaceholder")}
-                          onBlur={(e) =>
+                          onChange={(e) =>
                             updateAgentConfig({ display_name: e.target.value })
                           }
                         />
@@ -1157,7 +1213,7 @@ export default function AgentGenerateDetail({}) {
         open={advancedSettingsOpen}
         centered
         destroyOnClose={false}
-        onCancel={() => setAdvancedSettingsOpen(false)}
+        onCancel={handleCloseAdvancedSettings}
         onOk={handleSaveAdvancedSettings}
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
@@ -1165,36 +1221,25 @@ export default function AgentGenerateDetail({}) {
         width={760}
         styles={{ body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 } }}
       >
-        {/* Tab bar — pill style */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-          {[
-            { key: "basic" as const, label: t("agent.advancedSettings.tab.basic") || "Basic settings" },
-            { key: "guardrail" as const, label: t("agent.guardrail.summaryTitle") || "Guardrail" },
-          ].map((tab) => {
-            const active = advancedSettingsTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setAdvancedSettingsTab(tab.key)}
-                style={{
-                  padding: "6px 18px",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: active ? "#fff" : "#5F5E5A",
-                  background: active ? "#185FA5" : "#F1EFE8",
-                  border: "none",
-                  borderRadius: 20,
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+        {/* Match the shared agent-detail tab style. */}
+        <Tabs
+          value={advancedSettingsTab}
+          onValueChange={(value) =>
+            setAdvancedSettingsTab(value as "basic" | "guardrail")
+          }
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="basic">
+              {t("agent.advancedSettings.tab.basic") || "Basic settings"}
+            </TabsTrigger>
+            <TabsTrigger value="guardrail">
+              {t("agent.guardrail.summaryTitle") || "Guardrail"}
+            </TabsTrigger>
+          </TabsList>
 
-        <div style={{ display: advancedSettingsTab === "basic" ? "block" : "none" }}>
+          {/* Keep both panels mounted so unsaved form and guardrail state survive tab switches. */}
+          <TabsContent value="basic" className="mt-4" forceMount>
         <Form form={advancedSettingsForm} layout="vertical" disabled={!editable || isGenerating}>
           <Row gutter={16}>
             <Col span={12}>
@@ -1230,6 +1275,7 @@ export default function AgentGenerateDetail({}) {
                     placeholder={t("agent.userGroup")}
                     options={groupSelectOptions}
                     allowClear
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>
@@ -1245,6 +1291,7 @@ export default function AgentGenerateDetail({}) {
                       { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
                       { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
                     ]}
+                    disabled={!editable || isGenerating || !canEditGroupSettings}
                   />
                 </Form.Item>
               </Col>
@@ -1286,12 +1333,12 @@ export default function AgentGenerateDetail({}) {
                 tooltip={t("agent.requestedOutputTokens.tooltip")}
                 rules={[
                   { type: "number", min: 1, message: t("agent.requestedOutputTokens.error") },
-                  ...(selectedMainAgentModel?.maxOutputTokens
+                  ...(minModelMaxOutputTokens
                     ? [{
                         type: "number" as const,
-                        max: selectedMainAgentModel.maxOutputTokens,
+                        max: minModelMaxOutputTokens,
                         message: t("agent.requestedOutputTokens.maxError", {
-                          max: selectedMainAgentModel.maxOutputTokens,
+                          max: minModelMaxOutputTokens,
                         }),
                       }]
                     : []),
@@ -1299,7 +1346,7 @@ export default function AgentGenerateDetail({}) {
               >
                 <InputNumber
                   min={1}
-                  max={selectedMainAgentModel?.maxOutputTokens}
+                  max={minModelMaxOutputTokens}
                   precision={0}
                   placeholder={selectedMainAgentModel?.defaultOutputReserveTokens
                     ? String(selectedMainAgentModel.defaultOutputReserveTokens)
@@ -1324,23 +1371,25 @@ export default function AgentGenerateDetail({}) {
             </Col>
           </Row>
         </Form>
-        </div>
+          </TabsContent>
 
         {/* Guardrail tab content */}
-        <div style={{ display: advancedSettingsTab === "guardrail" ? "block" : "none" }}>
-          <GuardrailConfigContent
-            ref={guardrailContentRef}
-            config={
-              (editedAgent.verification_config?.guardrail_config) || {
-                enabled: false,
-                rules: [],
-                default_action: "pass",
+          <TabsContent value="guardrail" className="mt-4" forceMount>
+            <GuardrailConfigContent
+              key={guardrailContentKey}
+              ref={guardrailContentRef}
+              config={
+                editedAgent.verification_config?.guardrail_config || {
+                  enabled: false,
+                  rules: [],
+                  default_action: "pass",
+                }
               }
-            }
-            llmModels={availableLlmModels}
-            defaultModelId={selectedMainAgentModel?.id}
-          />
-        </div>
+              llmModels={availableLlmModels}
+              defaultModelId={selectedMainAgentModel?.id}
+            />
+          </TabsContent>
+        </Tabs>
       </Modal>
 
       {/* Expand Edit Modal */}

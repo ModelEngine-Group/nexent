@@ -27,7 +27,7 @@ export class ConfigService {
    * @param config GlobalConfig to save
    */
   async fetchRuntimeFrontendConfig(): Promise<{ shareBaseUrl?: string }> {
-    const response = await fetch("/api/frontend-config", { cache: "no-store" });
+    const response = await fetch(API_ENDPOINTS.config.frontend, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
     }

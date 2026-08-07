@@ -1,3 +1,5 @@
+import { publicAsset } from "@/lib/publicAsset";
+
 // Model type constants
 export const MODEL_TYPES = {
   LLM: "llm",
@@ -67,19 +69,19 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
 
 // Icon filenames for providers
 export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
-  qwen: "/qwen.png",
-  openai: "/openai.png",
-  siliconflow: "/siliconflow.png",
-  jina: "/jina.png",
-  deepseek: "/deepseek.png",
-  aliyuncs: "/aliyuncs.png",
-  dashscope: "/aliyuncs.png",
-  tokenpony: "/tokenpony.png",
-  volcengine: "/volcengine.png",
+  qwen: publicAsset("/qwen.png"),
+  openai: publicAsset("/openai.png"),
+  siliconflow: publicAsset("/siliconflow.png"),
+  jina: publicAsset("/jina.png"),
+  deepseek: publicAsset("/deepseek.png"),
+  aliyuncs: publicAsset("/aliyuncs.png"),
+  dashscope: publicAsset("/aliyuncs.png"),
+  tokenpony: publicAsset("/tokenpony.png"),
+  volcengine: publicAsset("/volcengine.png"),
 };
 
-export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
-export const DEFAULT_PROVIDER_ICON = "/default-icon.png";
+export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
+export const DEFAULT_PROVIDER_ICON = publicAsset("/default-icon.png");
 
 // Provider official website links
 export const PROVIDER_LINKS: Record<string, string> = {

@@ -94,6 +94,13 @@ docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images
 # 🌐 Build web frontend image (current architecture only)
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
+# Deploy the frontend under a custom subpath (replace /your-subpath as needed)
+# CONFIGURED_BASE_PATH must be / or start with / without a trailing slash
+docker build --progress=plain --build-arg CONFIGURED_BASE_PATH=/your-subpath -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
+
+# Git Bash on Windows converts arguments that start with /; disable conversion to preserve the custom subpath
+MSYS_NO_PATHCONV=1 docker build --progress=plain --build-arg CONFIGURED_BASE_PATH=/your-subpath -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
+
 # 📚 Build documentation image (current architecture only)
 docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 

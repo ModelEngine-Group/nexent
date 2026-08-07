@@ -409,6 +409,15 @@ class TestAidpBuildImageUrl:
     def test_empty_file_url_returns_empty_string(self, aidp_tool):
         assert aidp_tool._build_image_url("") == ""
 
+    def test_view_image_path_is_joined_under_knowledge_bases_prefix(self, aidp_tool):
+        assert (
+            aidp_tool._build_image_url("75/ViewImage/image-id.png")
+            == (
+                "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+                "KnowledgeBases/75/ViewImage/image-id.png"
+            )
+        )
+
     def test_base_url_missing_trailing_slash_still_produces_valid_url(self, aidp_module, mock_observer):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
@@ -457,6 +466,48 @@ class TestAidpBuildImageUrl:
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/data/picture.png"
             in picture_call.args[2]
         )
+
+    def test_image_html_is_not_exposed_to_the_llm(self, aidp_tool):
+        ui_results, model_results, images_url = aidp_tool._process_records(
+            [
+                {
+                    "id": "img-1",
+                    "chunk_type": "image",
+                    "title": "Liver anatomy",
+                    "text": 'Description <img src="/md_image/76/image-id.jpg">',
+                    "file_url": "75/ViewImage/image-id.png",
+                    "metadata": {},
+                }
+            ]
+        )
+
+        assert model_results[0]["text"].startswith("Description \n\nImage marker: ")
+        assert "![AIDP image](/__aidp_image__/j1)" in model_results[0]["text"]
+        assert "aidp.example.com" not in model_results[0]["text"]
+        assert ui_results[0]["text"] == "Description "
+        assert ui_results[0]["image_key"] == "j1"
+        assert images_url == [
+            "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
+            "KnowledgeBases/75/ViewImage/image-id.png"
+        ]
+
+    def test_image_html_in_text_chunk_is_not_exposed_to_the_llm(self, aidp_tool):
+        ui_results, model_results, images_url = aidp_tool._process_records(
+            [
+                {
+                    "id": "text-1",
+                    "chunk_type": "text",
+                    "title": "Liver anatomy",
+                    "text": 'Description <img src="/md_image/76/image-id.jpg">',
+                    "file_url": "document.pdf",
+                    "metadata": {},
+                }
+            ]
+        )
+
+        assert model_results[0]["text"] == "Description "
+        assert ui_results[0]["text"] == "Description "
+        assert images_url == []
 
 
 class TestAidpSearchToolWhitelist:
@@ -902,3 +953,63 @@ class TestBuildRetrievePayload:
     def test_reranking_enabled_includes_reranking_mode(self, aidp_tool):
         payload = aidp_tool._build_retrieve_payload("q", ["kb1"])
         assert payload["reranking_mode"] == "high_accuracy"
+
+
+# ---------------------------------------------------------------------------
+# _convert_to_kds_ids (kds_name -> kds_id resolution)
+# ---------------------------------------------------------------------------
+
+
+class TestConvertKdsIds:
+    """Covers _convert_to_kds_ids and its integration with forward()."""
+
+    def test_convert_with_empty_map_returns_input_unchanged(self, aidp_tool):
+        """No kds_name_to_id_map -> input list returned as-is."""
+        aidp_tool.kds_name_to_id_map = {}
+        result = aidp_tool._convert_to_kds_ids(["kb-a", "kb-b"])
+        assert result == ["kb-a", "kb-b"]
+
+    def test_convert_with_map_replaces_known_names(self, aidp_tool):
+        """Map has entries -> known names are replaced with ids."""
+        aidp_tool.kds_name_to_id_map = {"kb-a": "id-1", "kb-b": "id-2"}
+        result = aidp_tool._convert_to_kds_ids(["kb-a", "kb-b"])
+        assert result == ["id-1", "id-2"]
+
+    def test_convert_keeps_unknown_names_unchanged(self, aidp_tool):
+        """Names not in the map pass through unchanged."""
+        aidp_tool.kds_name_to_id_map = {"kb-a": "id-1"}
+        result = aidp_tool._convert_to_kds_ids(["kb-a", "unknown"])
+        assert result == ["id-1", "unknown"]
+
+    def test_convert_with_string_id_passthrough(self, aidp_tool):
+        """Input that is already a kds_id (not in map) passes through."""
+        aidp_tool.kds_name_to_id_map = {"kb-a": "id-1"}
+        result = aidp_tool._convert_to_kds_ids(["id-1", "kb-a"])
+        assert result == ["id-1", "id-1"]
+
+    def test_forward_converts_kds_names_before_whitelist_filter(self, aidp_tool, aidp_module):
+        """End-to-end: set kds_name_to_id_map, call forward with kds_list
+        containing a kds_name, verify the HTTP call uses the converted kds_id."""
+        aidp_tool.kds_name_to_id_map = {"kb-a": "real-id-1"}
+        aidp_tool.set_allowed_kds(["real-id-1"])
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = _build_aidp_response(
+            records=[
+                {
+                    "id": "chunk-1", "chunk_type": "text", "title": "Doc",
+                    "text": "result", "file_url": "", "score": 0.9,
+                    "pages": [], "metadata": {},
+                }
+            ]
+        )
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        aidp_tool.forward("query", kds_list=["kb-a"])
+
+        call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
+        sent_payload = call_kwargs["json"]
+        # The HTTP call should use the resolved kds_id, not the kds_name
+        assert "real-id-1" in sent_payload["kds_list"]
+        assert "kb-a" not in sent_payload["kds_list"]

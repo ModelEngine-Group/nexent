@@ -276,19 +276,22 @@ def _screened_tool_forward(engine, tool_name, controller, logger, original_forwa
             kwargs = decision.masked_kwargs
     return original_forward(*args, **kwargs)
 def _coerce_observer_arguments(arguments: Any) -> Any:
-    """Coerce AST/Python-literal arguments into a JSON-serializable payload.
+    """Coerce arguments into a JSON-serializable payload.
 
-    smolagents may pass arguments either as a dict (after Python execution) or
-    as a JSON-encoded string (OpenAI-style). We accept both and emit a JSON-
-    friendly value into the observer so the downstream SSE chunk stays
-    consistent with the shape produced by builtin tools.
+    Recursively walks dicts, lists and tuples, replacing callable objects
+    with their ``name`` attribute so that downstream ``json.dumps`` never
+    encounters a Python function / Tool reference.
     """
     if arguments is None:
         return None
     if isinstance(arguments, (str, int, float, bool)):
         return arguments
-    if isinstance(arguments, (dict, list)):
-        return arguments
+    if callable(arguments):
+        return getattr(arguments, "name", str(arguments))
+    if isinstance(arguments, dict):
+        return {k: _coerce_observer_arguments(v) for k, v in arguments.items()}
+    if isinstance(arguments, (list, tuple)):
+        return type(arguments)(_coerce_observer_arguments(v) for v in arguments)
     return str(arguments)
 
 
@@ -744,6 +747,7 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
@@ -928,6 +932,10 @@ Additional Args:
         if code_output is not None and code_output.output is not None:
             truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
+            self.observer.add_message(
+                self.agent_name, ProcessType.EXECUTION_LOGS,
+                "Last output from code snippet:\n" + truncated_output,
+            )
         memory_step.observations = observation
 
         verification_controller = getattr(self, "verification_controller", None)
@@ -1388,6 +1396,7 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages

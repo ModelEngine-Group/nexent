@@ -297,13 +297,18 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       source: s.source as McpSource,
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
+      createTime: s.create_time,
       tags: s.tags || [],
       transportType:
-        s.config_json && typeof s.config_json === "object" && "openapi" in s.config_json
+        s.config_json &&
+        typeof s.config_json === "object" &&
+        "openapi" in s.config_json
           ? McpTransportType.URL
-          : (s.config_json !== undefined && s.config_json !== null) ||
-            (s.container_id !== undefined && s.container_id !== null) ||
-            (s.container_port !== undefined && s.container_port !== null)
+          : (s.container_id !== undefined && s.container_id !== null) ||
+              (s.container_port !== undefined && s.container_port !== null) ||
+              (s.config_json &&
+                typeof s.config_json === "object" &&
+                Object.keys(s.config_json).length > 0)
             ? McpTransportType.CONTAINER
             : McpTransportType.URL,
       serverUrl: s.mcp_url,

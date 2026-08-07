@@ -226,6 +226,23 @@ def get_proposal(proposal_id: int, tenant_id: str, user_id: str) -> Optional[Dic
         return as_dict(proposal) if proposal else None
 
 
+def get_proposal_by_source_message(
+    source_message_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    with get_db_session() as session:
+        proposal = session.execute(
+            select(AgentAutomationProposal).where(
+                AgentAutomationProposal.source_message_id == source_message_id,
+                AgentAutomationProposal.tenant_id == tenant_id,
+                AgentAutomationProposal.user_id == user_id,
+                AgentAutomationProposal.delete_flag == "N",
+            )
+        ).scalar_one_or_none()
+        return as_dict(proposal) if proposal else None
+
+
 def update_proposal_status(proposal_id: int, tenant_id: str, user_id: str, status: str) -> bool:
     with get_db_session() as session:
         result = session.execute(
@@ -263,6 +280,34 @@ def update_proposal_task(
             )
         )
         return bool(result.rowcount)
+
+
+def link_proposal_message_unit(
+    proposal_id: int,
+    tenant_id: str,
+    user_id: str,
+    message_id: int,
+    unit_id: int,
+) -> bool:
+    """Link a proposal to the assistant unit that rendered its confirmation card."""
+    with get_db_session() as session:
+        proposal = session.execute(
+            select(AgentAutomationProposal).where(
+                AgentAutomationProposal.proposal_id == proposal_id,
+                AgentAutomationProposal.tenant_id == tenant_id,
+                AgentAutomationProposal.user_id == user_id,
+                AgentAutomationProposal.delete_flag == "N",
+            )
+        ).scalar_one_or_none()
+        if proposal is None:
+            return False
+        proposed_task = dict(proposal.proposed_task or {})
+        proposed_task["_conversation_message_id"] = message_id
+        proposed_task["_conversation_unit_id"] = unit_id
+        proposal.proposed_task = proposed_task
+        proposal.update_time = _utcnow()
+        proposal.updated_by = user_id
+        return True
 
 
 def update_proposal(

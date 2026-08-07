@@ -1,12 +1,20 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Form, Input, Button, message, Card, UploadFile, Upload, Radio, Row, Col } from "antd";
+import { Form, Input, Button, message, Card, UploadFile, Upload, Radio, Row, Col, Tabs } from "antd";
 import { useTranslation } from "react-i18next";
 import { useGlobalConfigStore, useGlobalConfigStoreAllLanguage } from "@/stores/global";
 import { API_ENDPOINTS, ApiError } from "@/services/api";
+import { publicAsset } from "@/lib/publicAsset";
+import { PlatformQuotaPanel } from "./PlatformQuotaPanel";
 
-export default function ProjectConfigTab() {
+interface ProjectConfigTabProps {
+  showPlatformQuota?: boolean;
+}
+
+export default function ProjectConfigTab({
+  showPlatformQuota = false,
+}: ProjectConfigTabProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -89,10 +97,11 @@ export default function ProjectConfigTab() {
     try {
       await saveConfig(values, file as File, file2 as File);
       message.success(t('project.config.update.success'));
+      setLoading(false);
+      location.reload();
     } catch (error) {
       console.log(`Failed to update:`, error);
-      message.success(t('errorCode.990202'));
-    } finally {
+      message.error(t('errorCode.990202'));
       setLoading(false);
     }
   }
@@ -131,11 +140,8 @@ export default function ProjectConfigTab() {
     }
   }
  
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <Card
-        title={t("project.config")}
-      >
+  const projectConfigContent = (
+      <Card>
         <Form
           form={form}
           layout="vertical"
@@ -191,8 +197,7 @@ export default function ProjectConfigTab() {
           >
             <div className="flex items-center gap-4 mt-2 mb-4">
               <span>{t('project.config.page.simple.log')}</span>
-              <img className="h-7" src="/modelengine-logo.png" alt={"old logo2"}></img>
-              { previewUrl2 && <img className="h-7" src={previewUrl2} alt={"new logo2"}></img>}
+              <img className="h-7" src={previewUrl2 ? previewUrl2 : publicAsset("/modelengine-logo.png")} alt={"old logo2"}></img>
             </div>
             <Upload
                 beforeUpload={(fileRaw) => beforeUpload(fileRaw, true)}
@@ -209,6 +214,31 @@ export default function ProjectConfigTab() {
           </Form.Item>
         </Form>
       </Card>
+  );
+
+  if (showPlatformQuota) {
+    return (
+      <Tabs
+        defaultActiveKey="project"
+        items={[
+          {
+            key: "project",
+            label: t("project.config"),
+            children: projectConfigContent,
+          },
+          {
+            key: "platform-quota",
+            label: t("quota.platformOverview", "Platform Quota"),
+            children: <PlatformQuotaPanel showTenantAllocations={false} />,
+          },
+        ]}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {projectConfigContent}
     </div>
   );
 }

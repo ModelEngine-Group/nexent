@@ -89,7 +89,6 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         check_auth_service_health,
         signup_user_with_invitation,
         parse_supabase_response,
-        generate_tts_stt_4_admin,
         verify_invite_code,
         signin_user,
         refresh_user_token,
@@ -592,7 +591,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
-    @patch('backend.services.user_management_service.generate_tts_stt_4_admin')
     @patch('backend.services.user_management_service.insert_user_tenant')
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -600,7 +598,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_with_admin_invite_code(self, mock_get_client, mock_use_invite,
                                                      mock_check_available, mock_get_invite_code,
-                                                     mock_insert_tenant, mock_generate_tts, mock_parse_response, mock_add_groups):
+                                                     mock_insert_tenant, mock_parse_response, mock_add_groups):
         """Test user signup with ADMIN_INVITE code"""
         # Setup mocks
         mock_client = MagicMock()
@@ -635,9 +633,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools, \
              patch('backend.services.user_management_service.init_skill_list_for_tenant', new_callable=AsyncMock) as mock_init_skills:
             result = await signup_user_with_invitation("admin@example.com", "Password123", invite_code="ADMIN123")
-
-            # Verify generate_tts_stt_4_admin was called for admin user
-            mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
 
             self.assertEqual(result, {"user": "admin_data"})
             mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
@@ -799,7 +794,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
              patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
              patch('backend.services.user_management_service.use_invitation_code'), \
-             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts, \
              patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools, \
              patch('backend.services.user_management_service.init_skill_list_for_tenant', new_callable=AsyncMock) as mock_init_skills:
 
@@ -816,7 +810,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
             # Verify ADMIN role was assigned and TTS/STT generation was called
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
-            mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
             mock_parse.assert_called_with(False, mock_response, "ADMIN", True)
             mock_init_tools.assert_called_once_with("tenant_id", "user-123")
             mock_init_skills.assert_called_once_with("tenant_id", "user-123")
@@ -871,7 +864,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
-    @patch('backend.services.user_management_service.generate_tts_stt_4_admin')
     @patch('backend.services.user_management_service.insert_user_tenant')
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -879,7 +871,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_with_auto_login_false(self, mock_get_client, mock_use_invite,
                                                      mock_check_available, mock_get_invite_code,
-                                                     mock_insert_tenant, mock_generate_tts, mock_parse_response, mock_add_groups):
+                                                     mock_insert_tenant, mock_parse_response, mock_add_groups):
         """Test user signup with auto_login=False (tenant admin creation scenario)"""
         # Setup mocks
         mock_client = MagicMock()
@@ -919,7 +911,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
-    @patch('backend.services.user_management_service.generate_tts_stt_4_admin')
     @patch('backend.services.user_management_service.insert_user_tenant')
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -927,7 +918,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_with_auto_login_default(self, mock_get_client, mock_use_invite,
                                                      mock_check_available, mock_get_invite_code,
-                                                     mock_insert_tenant, mock_generate_tts, mock_parse_response, mock_add_groups):
+                                                     mock_insert_tenant, mock_parse_response, mock_add_groups):
         """Test user signup with default auto_login (True)"""
         # Setup mocks
         mock_client = MagicMock()
@@ -969,32 +960,18 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         from consts.error_code import ErrorCode
 
         with self.assertRaises(AppException) as context:
-            await signup_user_with_invitation("test@example.com", "weak")
+            await signup_user_with_invitation("test@example.com", "weak", invite_code="VALID123")
 
         self.assertEqual(context.exception.error_code, ErrorCode.PROFILE_PASSWORD_WEAK)
 
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_without_invite_code(self, mock_get_client):
-        """Test signup without invite code uses DEFAULT_TENANT_ID (line 201)"""
-        mock_client = MagicMock()
-        mock_user = MagicMock()
-        mock_user.id = "user-123"
-        mock_response = MagicMock()
-        mock_response.user = mock_user
-        mock_client.auth.sign_up.return_value = mock_response
-        mock_get_client.return_value = mock_client
+        """Test signup fails closed before contacting auth when invite code is missing."""
+        with self.assertRaises(ValidationError) as context:
+            await signup_user_with_invitation("test@example.com", "Password123")
 
-        with patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
-             patch('backend.services.user_management_service.parse_supabase_response', new_callable=AsyncMock) as mock_parse, \
-             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools, \
-             patch('backend.services.user_management_service.init_skill_list_for_tenant', new_callable=AsyncMock) as mock_init_skills:
-            mock_parse.return_value = {"user": "data"}
-
-            result = await signup_user_with_invitation("test@example.com", "Password123")
-
-            mock_insert_tenant.assert_called_once()
-            call_kwargs = mock_insert_tenant.call_args[1]
-            self.assertEqual(call_kwargs["user_role"], "USER")
+        self.assertIn("INVITE_CODE_REQUIRED", str(context.exception))
+        mock_get_client.assert_not_called()
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.get_invitation_by_code')
@@ -1024,16 +1001,24 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         mock_add_groups.return_value = []
         with patch('backend.services.user_management_service.insert_user_tenant'), \
              patch('backend.services.user_management_service.parse_supabase_response', new_callable=AsyncMock) as mock_parse, \
-             patch('backend.services.user_management_service.generate_tts_stt_4_admin'), \
              patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock), \
              patch('backend.services.user_management_service.init_skill_list_for_tenant', new_callable=AsyncMock):
             mock_parse.return_value = {"user": "data"}
             result = await signup_user_with_invitation("test@example.com", "Password123", invite_code="ADMIN123")
             self.assertEqual(result, {"user": "data"})
 
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
     @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signup_user_no_user_response(self, mock_get_client):
+    async def test_signup_user_no_user_response(self, mock_get_client, mock_check_available, mock_get_invite_code):
         """Test signup raises UserRegistrationException when no user returned (lines 253-255)"""
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "invitation_id": 1,
+            "code_type": "USER_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant_id",
+        }
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.user = None
@@ -1041,7 +1026,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
         mock_get_client.return_value = mock_client
 
         with self.assertRaises(UserRegistrationException) as context:
-            await signup_user_with_invitation("test@example.com", "Password123")
+            await signup_user_with_invitation("test@example.com", "Password123", invite_code="USER123")
 
         self.assertIn("temporarily unavailable", str(context.exception))
 
@@ -1073,7 +1058,6 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
         with patch('backend.services.user_management_service.insert_user_tenant'), \
              patch('backend.services.user_management_service.parse_supabase_response', new_callable=AsyncMock) as mock_parse, \
-             patch('backend.services.user_management_service.generate_tts_stt_4_admin'), \
              patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock), \
              patch('backend.services.user_management_service.init_skill_list_for_tenant', new_callable=AsyncMock):
             mock_parse.return_value = {"user": "data"}
@@ -1230,32 +1214,6 @@ class TestParseSupabaseResponse(unittest.IsolatedAsyncioTestCase):
 
         # Session should be None because Supabase didn't return it
         self.assertIsNone(result["session"])
-
-
-class TestGenerateTtsStt4Admin(unittest.IsolatedAsyncioTestCase):
-    """Test generate_tts_stt_4_admin"""
-
-    @patch('backend.services.user_management_service.create_model_record')
-    async def test_generate_tts_stt_models(self, mock_create_record):
-        """Test TTS and STT model generation for admin"""
-        await generate_tts_stt_4_admin("tenant-123", "user-123")
-
-        # Should be called twice - once for TTS, once for STT
-        self.assertEqual(mock_create_record.call_count, 2)
-
-        # Check TTS model call
-        tts_call = mock_create_record.call_args_list[0]
-        tts_data = tts_call[0][0]
-        self.assertEqual(tts_data["model_name"], "volcano_tts")
-        self.assertEqual(tts_data["model_type"], "tts")
-
-        # Check STT model call
-        stt_call = mock_create_record.call_args_list[1]
-        stt_data = stt_call[0][0]
-        self.assertEqual(stt_data["model_name"], "volcano_stt")
-        self.assertEqual(stt_data["model_type"], "stt")
-
-
 class TestVerifyInviteCode(unittest.IsolatedAsyncioTestCase):
     """Test verify_invite_code"""
 
@@ -1979,6 +1937,70 @@ class TestAssetOwnerUserManagement(unittest.IsolatedAsyncioTestCase):
 
         assert result is not None
         assert result["user"]["tenant_id"] == ASSET_OWNER_TENANT_ID
+
+
+class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
+    def test_validate_password_strength_boundaries(self):
+        from backend.services.user_management_service import validate_password_strength
+
+        self.assertFalse(validate_password_strength("Aa1"))
+        self.assertFalse(validate_password_strength("abcdefgh"))
+        self.assertFalse(validate_password_strength("ABCDEFGH"))
+        self.assertFalse(validate_password_strength("Abcdefgh"))
+        self.assertTrue(validate_password_strength("Abcdefg1"))
+
+    @patch("backend.services.user_management_service.get_current_user_from_client")
+    @patch("backend.services.user_management_service.set_auth_token_to_client")
+    @patch("backend.services.user_management_service.get_supabase_client")
+    @patch("backend.services.user_management_service.ensure_cas_session_active_from_authorization")
+    def test_validate_token_checks_cas_session(self, mock_cas, mock_get_client, mock_set_token, mock_get_user):
+        user = MagicMock()
+        mock_get_client.return_value = MagicMock()
+        mock_get_user.return_value = user
+
+        result = validate_token("token")
+
+        self.assertEqual(result, (True, user))
+        mock_cas.assert_called_once_with("token")
+
+    @patch("backend.services.user_management_service.get_user_tenant_by_user_id")
+    @patch("backend.services.user_management_service.get_jwt_expiry_seconds", return_value=60)
+    @patch("backend.services.user_management_service.calculate_expires_at", return_value=123)
+    @patch("backend.services.user_management_service.get_supabase_client")
+    async def test_signin_prefers_tenant_role(self, mock_get_client, mock_expires_at, mock_expiry, mock_get_tenant):
+        mock_get_tenant.return_value = {"user_role": "DEV"}
+        user = MagicMock(id="user-1", email="user@example.com", user_metadata={"role": "USER"})
+        session = MagicMock(access_token="access", refresh_token="refresh")
+        response = MagicMock(user=user, session=session)
+        client = MagicMock()
+        client.auth.sign_in_with_password.return_value = response
+        mock_get_client.return_value = client
+
+        result = await signin_user("user@example.com", "Password123")
+
+        self.assertEqual(result["data"]["user"]["role"], "DEV")
+
+    @patch("backend.services.user_management_service.aiohttp.ClientSession")
+    async def test_health_check_sends_supabase_credentials(self, session_cls):
+        response = MagicMock(ok=True)
+        response.json = AsyncMock(return_value={"name": "GoTrue"})
+        request = MagicMock()
+        request.__aenter__ = AsyncMock(return_value=response)
+        request.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
+        session.get.return_value = request
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+        session_cls.return_value = session_context
+
+        await check_auth_service_health()
+
+        session.get.assert_called_once()
+        _, kwargs = session.get.call_args
+        from backend.services import user_management_service as ums
+
+        self.assertEqual(kwargs["headers"], {"apikey": ums.SUPABASE_KEY})
 
 
 if __name__ == '__main__':

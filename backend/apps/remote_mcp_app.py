@@ -316,6 +316,8 @@ async def update_mcp_service_endpoint(
 
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpNameConflictError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:

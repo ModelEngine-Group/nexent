@@ -840,6 +840,11 @@ class TestIsContainerRecordApiType(unittest.TestCase):
         record = {"container_id": "abc123", "config_json": None}
         self.assertTrue(_is_container_record(record))
 
+    def test_empty_config_json_returns_false(self):
+        """_is_container_record should return False for an empty config_json (e.g. {})."""
+        record = {"config_json": {}, "container_id": None}
+        self.assertFalse(_is_container_record(record))
+
 
 # ============================================================================
 # update_mcp_service_enabled - API type tests
@@ -1000,10 +1005,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
     """Test update_mcp_service with custom_headers parameter."""
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_custom_headers(self, mock_get, mock_update):
+    def test_update_with_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes custom_headers to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         custom_headers = {"X-Update-Custom": "value123"}
         update_mcp_service(
@@ -1019,10 +1026,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['custom_headers'], custom_headers)
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_none_custom_headers(self, mock_get, mock_update):
+    def test_update_with_none_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service when custom_headers is None."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1037,10 +1046,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertIsNone(call_kwargs['custom_headers'])
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_group_ids(self, mock_get, mock_update):
+    def test_update_with_group_ids(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes group_ids to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1055,10 +1066,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['group_ids'], "2,4")
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_ingroup_permission(self, mock_get, mock_update):
+    def test_update_with_ingroup_permission(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes ingroup_permission to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         update_mcp_service(
             tenant_id='tid', user_id='uid', mcp_id=1,
@@ -1073,10 +1086,12 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    def test_update_with_shared_fields(self, mock_get, mock_update):
+    def test_update_with_shared_fields(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes shared_fields to database update."""
-        mock_get.return_value = {"mcp_id": 1, "source": "local", "config_json": None}
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False
 
         shared = {"serverUrl": True, "authorizationToken": False}
         update_mcp_service(
@@ -1093,6 +1108,66 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         self.assertEqual(call_kwargs['group_ids'], "2")
         self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
         self.assertEqual(call_kwargs['shared_fields'], shared)
+
+
+# ============================================================================
+# update_mcp_service - name conflict tests
+# ============================================================================
+
+class TestUpdateMcpServiceNameConflict(unittest.TestCase):
+    """Test update_mcp_service name uniqueness check."""
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_conflict_raises_error(self, mock_get, mock_check, mock_update):
+        """Renaming to an existing name in same tenant should raise McpNameConflictError."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = True  # name already exists
+
+        with self.assertRaises(McpNameConflictError):
+            update_mcp_service(
+                tenant_id='tid', user_id='uid', mcp_id=1,
+                new_name='existing-name', description='desc',
+                server_url='https://url', authorization_token=None,
+                custom_headers=None, tags=[], config_json=None, market_id=None,
+            )
+
+        mock_update.assert_not_called()  # should not proceed to update
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_unchanged_skips_check(self, mock_get, mock_check, mock_update):
+        """Not changing the name should skip the uniqueness check."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "same-name", "source": "local", "config_json": None}
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='same-name', description='desc',
+            server_url='https://url', authorization_token=None,
+            custom_headers=None, tags=[], config_json=None, market_id=None,
+        )
+
+        mock_check.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    def test_name_unique_allows_update(self, mock_get, mock_check, mock_update):
+        """Renaming to a unique name should proceed with the update."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
+        mock_check.return_value = False  # name is available
+
+        update_mcp_service(
+            tenant_id='tid', user_id='uid', mcp_id=1,
+            new_name='new-unique-name', description='desc',
+            server_url='https://url', authorization_token=None,
+            custom_headers=None, tags=[], config_json=None, market_id=None,
+        )
+
+        mock_check.assert_called_once_with(mcp_name='new-unique-name', tenant_id='tid')
+        mock_update.assert_called_once()
 
 
 # ============================================================================
@@ -1477,6 +1552,76 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             authorization_token='tok',
             custom_headers=None,
         )
+
+
+# ============================================================================
+# add_container_mcp_service deploy-time port conflict guard
+# ============================================================================
+
+class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
+    """Test the port-conflict guard in add_container_mcp_service.
+
+    The conflict check always runs: an occupied port is rejected before the
+    container is started, and a free port allows deployment to proceed.
+    """
+
+    def _make_mcp_config(self):
+        return MCPConfigRequest(mcpServers={
+            "test-svc": {"command": "echo", "args": [], "env": {}}
+        })
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_rejects_in_use_port(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """An occupied port is rejected before starting the container."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = False  # port already in use
+
+        with self.assertRaises(McpPortConflictError):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', tags=[],
+                authorization_token=None, registry_json=None,
+                market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            )
+
+        mock_port_check.assert_called_once_with(port=8080)
+        mock_mgr_cls.assert_not_called()
+        mock_add.assert_not_awaited()
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_proceeds_when_port_free(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """A free port passes the conflict check and deploys."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid",
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "test-svc-xyz",
+        })
+        mock_mgr_cls.return_value = mock_mgr
+
+        await add_container_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='local', tags=[],
+            authorization_token=None, registry_json=None,
+            market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+        )
+
+        mock_port_check.assert_called_once_with(port=8080)
+        mock_mgr.start_mcp_container.assert_awaited_once()
+        mock_add.assert_awaited_once()
 
 
 # ============================================================================
@@ -2009,3 +2154,520 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
         mock_create.assert_called_once()
         call_data = mock_create.call_args[1]['mcp_data']
         self.assertEqual(call_data['container_port'], 8080)
+
+
+# ============================================================================
+# list_mcp_service_tools_by_id - API type tests
+# ============================================================================
+
+class TestListMcpServiceToolsByIdApiType(unittest.IsolatedAsyncioTestCase):
+    """Test list_mcp_service_tools_by_id for API-type MCPs (OpenAPI)."""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_api_type_returns_tool_names(self, mock_get):
+        """API-type MCP should return tool names from registry_json._toolNames."""
+        mock_get.return_value = {
+            "mcp_name": "api-svc",
+            "mcp_server": "https://api.example.com",
+            "config_json": {"openapi": "3.0", "paths": {}},
+            "registry_json": {"_toolNames": ["getUsers", "createUser"]},
+        }
+        result = await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["name"], "getUsers")
+        self.assertEqual(result[1]["name"], "createUser")
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_api_type_no_tool_names(self, mock_get):
+        """API-type MCP with no _toolNames should return empty list."""
+        mock_get.return_value = {
+            "mcp_name": "api-svc",
+            "mcp_server": "https://api.example.com",
+            "config_json": {"openapi": "3.0", "paths": {}},
+            "registry_json": {},
+        }
+        result = await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
+        self.assertEqual(result, [])
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_non_api_type_calls_mcp_protocol(self, mock_get):
+        """Non-API-type MCP should still try MCP protocol (mcp_server required)."""
+        mock_get.return_value = {
+            "mcp_name": "regular-svc",
+            "mcp_server": "",
+            "config_json": {},
+            "registry_json": {},
+        }
+        with self.assertRaises(McpValidationError):
+            await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
+
+
+# ============================================================================
+# add_container_mcp_service - orphan container cleanup on failure
+# ============================================================================
+
+class TestAddContainerMcpServiceCleanupOnFailure(unittest.IsolatedAsyncioTestCase):
+    """Test add_container_mcp_service stops the started container when DB registration fails."""
+
+    def _make_mcp_config(self):
+        return MCPConfigRequest(mcpServers={
+            "test-svc": {"command": "echo", "args": [], "env": {}}
+        })
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_registration_failure_stops_started_container(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """Container started successfully but DB write fails => container is cleaned up."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "orphan-cid",
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "test-svc-xyz",
+        })
+        mock_mgr.stop_mcp_container = AsyncMock()
+        mock_mgr_cls.return_value = mock_mgr
+        mock_add.side_effect = RuntimeError("db write failed")
+
+        with self.assertRaises(RuntimeError):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', tags=[],
+                authorization_token=None, registry_json=None,
+                market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            )
+
+        mock_add.assert_awaited_once()
+        # The orphan container must be stopped to free the host port
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("orphan-cid")
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_cleanup_failure_swallowed_original_raised(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """Cleanup itself raising must not mask the original registration error."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "orphan-cid",
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "test-svc-xyz",
+        })
+        mock_mgr.stop_mcp_container = AsyncMock(side_effect=Exception("docker down"))
+        mock_mgr_cls.return_value = mock_mgr
+        mock_add.side_effect = RuntimeError("db write failed")
+
+        with self.assertRaises(RuntimeError):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', tags=[],
+                authorization_token=None, registry_json=None,
+                market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            )
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("orphan-cid")
+
+
+# ============================================================================
+# update_mcp_service_enabled - container rebuild: port validation, existing
+# container cleanup, orphan container recovery on port conflict
+# ============================================================================
+
+class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCase):
+    """Test the container re-enable path of update_mcp_service_enabled."""
+
+    def _make_container_record(self, **overrides):
+        base = {
+            "mcp_id": 1, "mcp_name": "test-svc", "mcp_server": None,
+            "container_id": None, "container_port": 8080,
+            "config_json": {"mcpServers": {"s": {"command": "echo", "args": [], "env": {}}}},
+            "authorization_token": None, "custom_headers": None,
+            "enabled": False, "source": "local",
+        }
+        base.update(overrides)
+        return base
+
+    def _mock_full_rebuild(self, mock_mgr_cls, *, container_id="new-cid"):
+        """Configure the container manager + health check for a successful rebuild."""
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": container_id,
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+        })
+        mock_mgr.stop_mcp_container = AsyncMock()
+        mock_mgr.list_mcp_containers = MagicMock(return_value=[])
+        mock_mgr_cls.return_value = mock_mgr
+        return mock_mgr
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_container_enable_missing_port_raises(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
+        mock_health, mock_cont_fields, mock_enabled,
+    ):
+        """Container record without a port cannot be rebuilt => McpValidationError."""
+        mock_get.return_value = self._make_container_record(container_port=None)
+        mock_records.return_value = []
+
+        with self.assertRaises(McpValidationError):
+            await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_mgr_cls.assert_not_called()
+        mock_enabled.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_container_enable_stops_existing_container_before_rebuild(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
+        mock_health, mock_cont_fields, mock_enabled,
+    ):
+        """Existing container is stopped before a fresh one is started."""
+        mock_get.return_value = self._make_container_record(container_id="old-cid")
+        mock_records.return_value = []
+        mock_port_check.return_value = True
+        mock_mgr = self._mock_full_rebuild(mock_mgr_cls)
+        mock_health.return_value = True
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("old-cid")
+        mock_mgr.start_mcp_container.assert_awaited_once()
+        mock_cont_fields.assert_called_once()
+        mock_enabled.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_container_enable_stop_existing_failure_continues(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
+        mock_health, mock_cont_fields, mock_enabled,
+    ):
+        """Failure to stop the old container is logged but the rebuild proceeds."""
+        mock_get.return_value = self._make_container_record(container_id="old-cid")
+        mock_records.return_value = []
+        mock_port_check.return_value = True
+        mock_mgr = self._mock_full_rebuild(mock_mgr_cls)
+        mock_mgr.stop_mcp_container = AsyncMock(side_effect=Exception("container gone"))
+        mock_health.return_value = True
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("old-cid")
+        mock_mgr.start_mcp_container.assert_awaited_once()
+        mock_cont_fields.assert_called_once()
+        mock_enabled.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_port_conflict_recovery_stops_orphan_then_succeeds(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
+        mock_health, mock_cont_fields, mock_enabled,
+    ):
+        """Orphan container on the port is found and stopped, then rebuild succeeds."""
+        mock_get.return_value = self._make_container_record()  # no container_id in DB
+        mock_records.return_value = []
+        # First availability check fails, second (after cleanup) succeeds
+        mock_port_check.side_effect = [False, True]
+        mock_mgr = self._mock_full_rebuild(mock_mgr_cls)
+        mock_mgr.list_mcp_containers = MagicMock(return_value=[
+            {"container_id": "orphan-cid", "host_port": 8080, "container_name": "mcp-orphan"},
+        ])
+        mock_health.return_value = True
+
+        await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("orphan-cid")
+        mock_mgr.start_mcp_container.assert_awaited_once()
+        mock_cont_fields.assert_called_once()
+        mock_enabled.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_port_conflict_no_orphan_raises(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls, mock_enabled,
+    ):
+        """Port still occupied after orphan scan => McpPortConflictError."""
+        mock_get.return_value = self._make_container_record()
+        mock_records.return_value = []
+        mock_port_check.return_value = False  # stays occupied
+        mock_mgr = MagicMock()
+        mock_mgr.list_mcp_containers = MagicMock(return_value=[])  # no orphan found
+        mock_mgr_cls.return_value = mock_mgr
+
+        with self.assertRaises(McpPortConflictError):
+            await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_enabled.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_port_conflict_orphan_scan_failure_raises(
+        self, mock_records, mock_get, mock_port_check, mock_mgr_cls, mock_enabled,
+    ):
+        """Orphan scan raising is logged, but a still-occupied port still raises."""
+        mock_get.return_value = self._make_container_record()
+        mock_records.return_value = []
+        mock_port_check.return_value = False
+        mock_mgr = MagicMock()
+        mock_mgr.list_mcp_containers = MagicMock(side_effect=Exception("docker api down"))
+        mock_mgr_cls.return_value = mock_mgr
+
+        with self.assertRaises(McpPortConflictError):
+            await update_mcp_service_enabled(tenant_id='tid', user_id='uid', mcp_id=1, enabled=True)
+
+        mock_enabled.assert_not_called()
+
+
+# ============================================================================
+# delete_mcp_service - mark MCP tools unavailable
+# ============================================================================
+
+class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
+    """Test delete_mcp_service hides the deleted MCP's tools."""
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_delete_marks_tools_unavailable(
+        self, mock_get, mock_mgr_cls, mock_tools, mock_delete,
+    ):
+        """set_mcp_tools_unavailable is called with the deleted MCP's name."""
+        mock_get.return_value = {
+            "mcp_id": 1, "mcp_name": "test-svc", "container_id": "cid",
+        }
+        mock_mgr = MagicMock()
+        mock_mgr.stop_mcp_container = AsyncMock()
+        mock_mgr_cls.return_value = mock_mgr
+
+        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with(container_id="cid")
+        mock_tools.assert_called_once_with(
+            tenant_id='tid',
+            mcp_server_name='test-svc',
+            user_id='uid',
+        )
+        mock_delete.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_tools_unavailable_failure_does_not_block_delete(
+        self, mock_get, mock_tools, mock_delete,
+    ):
+        """Even if marking tools fails, the MCP record is still deleted."""
+        mock_get.return_value = {"mcp_id": 1, "mcp_name": "test-svc", "container_id": None}
+        mock_tools.side_effect = Exception("tool db down")
+
+        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+
+        mock_tools.assert_called_once()
+        mock_delete.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_delete_not_found_raises(self, mock_get, mock_tools, mock_delete):
+        """Deleting a missing MCP raises McpNotFoundError and does not delete."""
+        mock_get.return_value = None
+
+        with self.assertRaises(McpNotFoundError):
+            await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=999)
+
+        mock_tools.assert_not_called()
+        mock_delete.assert_not_called()
+
+
+# ============================================================================
+# delete_mcp_by_container_id - mark MCP tools unavailable
+# ============================================================================
+
+class TestDeleteMcpByContainerIdToolsUnavailable(unittest.IsolatedAsyncioTestCase):
+    """Test delete_mcp_by_container_id hides tools for the matching record."""
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_delete_marks_matching_record_tools_unavailable(
+        self, mock_records, mock_tools, mock_delete,
+    ):
+        """The record with the target container_id gets its tools hidden."""
+        mock_records.return_value = [
+            {"container_id": "other-cid", "mcp_name": "other-svc"},
+            {"container_id": "target-cid", "mcp_name": "target-svc"},
+        ]
+
+        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+
+        mock_tools.assert_called_once_with(
+            tenant_id='tid',
+            mcp_server_name='target-svc',
+            user_id='uid',
+        )
+        mock_delete.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_delete_no_matching_record_skips_tools(
+        self, mock_records, mock_tools, mock_delete,
+    ):
+        """No record matches the container_id => tools not touched, delete still runs."""
+        mock_records.return_value = [
+            {"container_id": "other-cid", "mcp_name": "other-svc"},
+        ]
+
+        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='missing-cid')
+
+        mock_tools.assert_not_called()
+        mock_delete.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_tools_unavailable_failure_does_not_block_delete(
+        self, mock_records, mock_tools, mock_delete,
+    ):
+        """set_mcp_tools_unavailable raising is swallowed; delete still runs."""
+        mock_records.return_value = [
+            {"container_id": "target-cid", "mcp_name": "target-svc"},
+        ]
+        mock_tools.side_effect = Exception("tool db down")
+
+        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+
+        mock_tools.assert_called_once()
+        mock_delete.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_record_query_failure_does_not_block_delete(
+        self, mock_records, mock_tools, mock_delete,
+    ):
+        """get_mcp_records_by_tenant raising is swallowed; delete still runs."""
+        mock_records.side_effect = Exception("db down")
+
+        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+
+        mock_tools.assert_not_called()
+        mock_delete.assert_called_once()
+
+
+# ============================================================================
+# upload_and_start_mcp_image - orphan container cleanup on DB registration failure
+# ============================================================================
+
+class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCase):
+    """Test upload_and_start_mcp_image stops the container when DB registration fails."""
+
+    def _mock_container_manager(self, mock_mgr_cls, *, stop_side_effect=None):
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container_from_tar = AsyncMock(return_value={
+            "container_id": "image-cid",
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "mcp-test",
+        })
+        mock_mgr.stop_mcp_container = AsyncMock(side_effect=stop_side_effect)
+        mock_mgr_cls.return_value = mock_mgr
+        return mock_mgr
+
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_registration_failure_stops_started_container(
+        self, mock_check_name, mock_mgr_cls, mock_add,
+    ):
+        """Container started from tar but DB write fails => container is stopped."""
+        mock_check_name.return_value = False
+        mock_mgr = self._mock_container_manager(mock_mgr_cls)
+        mock_add.side_effect = RuntimeError("db write failed")
+
+        with self.assertRaises(RuntimeError):
+            await upload_and_start_mcp_image(
+                tenant_id='tid', user_id='uid',
+                file_content=b'dummy tar bytes', filename='test.tar',
+                port=8080,
+            )
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("image-cid")
+
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_cleanup_failure_swallowed_original_raised(
+        self, mock_check_name, mock_mgr_cls, mock_add,
+    ):
+        """Cleanup failing must not mask the original registration error."""
+        mock_check_name.return_value = False
+        mock_mgr = self._mock_container_manager(
+            mock_mgr_cls, stop_side_effect=Exception("docker down")
+        )
+        mock_add.side_effect = RuntimeError("db write failed")
+
+        with self.assertRaises(RuntimeError):
+            await upload_and_start_mcp_image(
+                tenant_id='tid', user_id='uid',
+                file_content=b'dummy tar bytes', filename='test.tar',
+                port=8080,
+            )
+
+        mock_mgr.stop_mcp_container.assert_awaited_once_with("image-cid")
+
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_non_tar_file_rejected_before_start(
+        self, mock_check_name, mock_mgr_cls, mock_add,
+    ):
+        """Non-.tar files are rejected before any container is started."""
+        mock_check_name.return_value = False
+
+        with self.assertRaises(ValueError):
+            await upload_and_start_mcp_image(
+                tenant_id='tid', user_id='uid',
+                file_content=b'dummy', filename='test.png',
+                port=8080,
+            )
+
+        mock_mgr_cls.assert_not_called()
+

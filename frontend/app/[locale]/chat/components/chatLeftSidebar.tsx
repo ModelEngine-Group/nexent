@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Clock,
   CalendarClock,
@@ -8,6 +9,7 @@ import {
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
+  Repeat2,
 } from "lucide-react";
 
 import { Button, Dropdown, Input, Layout, Tooltip, message } from "antd";
@@ -16,7 +18,7 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { conversationService } from "@/services/conversationService";
 import { hasAutomationForConversation } from "@/features/agentAutomation/chatAdapter";
 import { type ConversationManagement } from "@/hooks/chat/useConversationManagement";
-import { ConversationListItem, SettingsMenuItem } from "@/types/chat";
+import { ConversationListItem } from "@/types/chat";
 import log from "@/lib/logger";
 
 // conversation status indicator component
@@ -105,6 +107,7 @@ export function ChatSidebar({
   automationConversationIds = new Set(),
 }: ChatSidebarProps) {
   const { t } = useTranslation();
+  const router = useRouter();
   const { confirm } = useConfirmModal();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -410,6 +413,22 @@ export function ChatSidebar({
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        <div className="pb-3 flex justify-center">
+          <Tooltip
+            title={t("chat.sidebar.switchToNew")}
+            placement="right"
+          >
+            <Button
+              type="text"
+              size="middle"
+              className="h-10 w-10 min-w-[40px] p-0 flex-shrink-0 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center rounded-full transition-colors duration-200"
+              onClick={() => router.push("/newchat")}
+            >
+              <Repeat2 className="h-5 w-5" />
+            </Button>
+          </Tooltip>
+        </div>
       </>
     );
   };
@@ -486,6 +505,18 @@ export function ChatSidebar({
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="px-4 pb-4">
+            <Button
+              type="default"
+              size="middle"
+              className="flex h-10 w-full items-center justify-center gap-2 border border-slate-300 text-base transition-colors duration-200 hover:border-slate-400 hover:bg-white"
+              onClick={() => router.push("/newchat")}
+            >
+              <Repeat2 className="h-4 w-4 shrink-0" />
+              <span>{t("chat.sidebar.switchToNew")}</span>
+            </Button>
           </div>
         </div>
       ) : (

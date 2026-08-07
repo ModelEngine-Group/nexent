@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+
 # Environment variables are now configured in conftest.py
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1088,6 +1089,27 @@ class TestListAllToolsWithLabels:
         assert result[0]["tool_id"] == 1
         mock_query.assert_called_once_with("tenant1")
 
+    @patch('backend.services.tool_configuration_service.get_user_email_map')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    async def test_list_all_tools_resolves_updated_by_name(
+        self, mock_query, mock_descriptions, mock_user_email_map
+    ):
+        """The tool list exposes a readable last editor instead of an internal ID."""
+        mock_query.return_value = [
+            {"tool_id": 1, "name": "t1", "description": "d1", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": "",
+             "updated_by": "internal-user-id"}
+        ]
+        mock_descriptions.return_value = {}
+        mock_user_email_map.return_value = {"internal-user-id": "editor@example.com"}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert result[0]["updated_by_name"] == "editor@example.com"
+        mock_user_email_map.assert_called_once_with(["internal-user-id"])
+
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_tools_by_labels')
     async def test_list_all_tools_with_labels(self, mock_query_by_labels, mock_descriptions):
@@ -1858,7 +1880,8 @@ class TestIntegrationScenarios:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    async def test_full_tool_update_workflow(self, mock_get_remote_tools, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_full_tool_update_workflow(self, mock_get_mcp_records, mock_get_remote_tools, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
         """Test complete tool update workflow"""
         # 1. Mock local tools
         local_tools = [
@@ -1896,7 +1919,8 @@ class TestIntegrationScenarios:
         mock_update_table.assert_called_once_with(
             tenant_id="test_tenant",
             user_id="test_user",
-            tool_list=local_tools + mcp_tools
+            tool_list=local_tools + mcp_tools,
+            enabled_mcp_names=set(),
         )
 
 
@@ -3978,7 +4002,8 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.get_all_mcp_tools', new_callable=AsyncMock)
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
-    async def test_update_tool_list_success(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_update_tool_list_success(self, mock_get_mcp_records, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
         """Test successful tool list update"""
         # Mock tools
         mock_local_tools = [MagicMock(), MagicMock()]
@@ -4003,7 +4028,8 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.get_all_mcp_tools', new_callable=AsyncMock)
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
-    async def test_update_tool_list_combines_all_sources(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_update_tool_list_combines_all_sources(self, mock_get_mcp_records, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
         """Test that update_tool_list combines tools from all sources"""
         mock_local_tools = [MagicMock(name="local_tool_1")]
         mock_langchain_tools = [MagicMock(name="langchain_tool_1")]
@@ -5424,8 +5450,9 @@ class TestUpdateToolListMcpErrorExplicit:
     @patch("backend.services.tool_configuration_service.get_all_mcp_tools",
            new_callable=AsyncMock, side_effect=ConnectionError("MCP down"))
     @patch("backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list")
+    @patch("backend.services.tool_configuration_service.get_mcp_records_by_tenant", return_value=[])
     async def test_mcp_error_sets_empty_tools_and_continues(
-        self, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
+        self, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
     ):
         """MCP failure must set mcp_tools=[] and still call update_tool_table_from_scan_tool_list."""
         from backend.services.tool_configuration_service import update_tool_list
@@ -5434,6 +5461,7 @@ class TestUpdateToolListMcpErrorExplicit:
         # update_tool_table called with only local + langchain (mcp_tools is [])
         mock_update.assert_called_once_with(
             tenant_id="tenant1", user_id="user1", tool_list=[],
+            enabled_mcp_names=set(),
         )
 
 

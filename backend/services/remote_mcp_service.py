@@ -37,6 +37,7 @@ from database.remote_mcp_db import (
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
+from database.tool_db import set_mcp_tools_unavailable
 from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
@@ -207,7 +208,12 @@ def _is_container_record(record: dict | None) -> bool:
 
     A record is considered container-based if it has:
     - container_id (Docker container ID)
-    - config_json (container configuration)
+    - a non-empty config_json holding a container configuration
+
+    API-type MCPs store OpenAPI JSON in config_json and are never treated as
+    containers. An empty dict config_json (e.g. `{}`) is not a container
+    configuration either, so records with only an empty config_json are treated
+    as plain remote MCPs instead of being misclassified as containers.
     """
     if not record:
         return False
@@ -215,7 +221,9 @@ def _is_container_record(record: dict | None) -> bool:
     # API-type MCPs store OpenAPI JSON in config_json, not container config
     if isinstance(config_json, dict) and "openapi" in config_json:
         return False
-    return record.get("container_id") is not None or config_json is not None
+    return record.get("container_id") is not None or (
+        isinstance(config_json, dict) and bool(config_json)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +620,11 @@ async def add_container_mcp_service(
         )
     except Exception as exc:
         logger.warning(f"Failed to start container MCP service: {exc}")
+        # Clean up orphan container if it was started
+        try:
+            await container_manager.stop_mcp_container(container_info.get("container_id"))
+        except Exception:
+            pass
         raise
 
     return {
@@ -710,6 +723,12 @@ def update_mcp_service(
     if not current_record:
         raise McpNotFoundError("MCP record not found")
 
+    # Check name uniqueness (exclude the current record itself)
+    if new_name != current_record.get("mcp_name"):
+        if check_mcp_name_exists(mcp_name=new_name, tenant_id=tenant_id):
+            logger.error(f"MCP name already exists: {new_name} in tenant {tenant_id}")
+            raise McpNameConflictError("MCP name already exists")
+
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
     next_config_json = config_json if config_json is not None else current_config_json
 
@@ -779,8 +798,36 @@ async def update_mcp_service_enabled(
             port = current_record.get("container_port")
             if port is None:
                 raise McpValidationError("Container port is missing, cannot rebuild container")
+
+            # Clean up any existing container before starting a new one
+            old_container_id = current_record.get("container_id")
+            if old_container_id:
+                try:
+                    await MCPContainerManager().stop_mcp_container(old_container_id)
+                    logger.info("Stopped existing container %s before re-enabling", old_container_id)
+                except Exception as exc:
+                    logger.warning("Failed to stop existing container %s: %s", old_container_id, exc)
+
             if not check_runtime_host_port_available(port):
-                raise McpPortConflictError(f"Port {port} is already in use")
+                # Orphan container recovery: when the port is in use but the DB has no
+                # container_id (e.g. the previous enable request was aborted right after
+                # the container started but before the DB write), try to find and stop
+                # any MCP container occupying this port.
+                try:
+                    orphan_manager = MCPContainerManager()
+                    for candidate in orphan_manager.list_mcp_containers(tenant_id=tenant_id):
+                        if str(candidate.get("host_port")) == str(port):
+                            logger.warning(
+                                "Found orphan container %s on port %s, stopping it",
+                                candidate.get("container_id"), port,
+                            )
+                            await orphan_manager.stop_mcp_container(candidate["container_id"])
+                            break
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to clean up orphan container on port %s: %s", port, cleanup_exc)
+
+                if not check_runtime_host_port_available(port):
+                    raise McpPortConflictError(f"Port {port} is already in use")
 
             config_json = current_record.get("config_json")
             if not isinstance(config_json, dict):
@@ -959,6 +1006,17 @@ async def delete_mcp_service(
         except Exception as exc:
             logger.warning(f"Failed to stop container: {exc}, but continue to delete MCP record")
 
+    # Hide the deleted MCP's tools from the agent tool selection list so they
+    # no longer appear after deletion (tool rows are kept for agent references).
+    try:
+        set_mcp_tools_unavailable(
+            tenant_id=tenant_id,
+            mcp_server_name=current_record.get("mcp_name") or "",
+            user_id=user_id,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to mark MCP tools unavailable for '{current_record.get('mcp_name')}': {exc}")
+
     delete_mcp_record_by_id(
         mcp_id=mcp_id,
         tenant_id=tenant_id,
@@ -968,6 +1026,19 @@ async def delete_mcp_service(
 
 async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id: str) -> None:
     """Soft delete MCP record associated with a specific container ID."""
+    # Hide the deleted MCP's tools from the agent tool selection list.
+    try:
+        for record in get_mcp_records_by_tenant(tenant_id=tenant_id):
+            if str(record.get("container_id") or "") == str(container_id):
+                set_mcp_tools_unavailable(
+                    tenant_id=tenant_id,
+                    mcp_server_name=record.get("mcp_name") or "",
+                    user_id=user_id,
+                )
+                break
+    except Exception as exc:
+        logger.warning(f"Failed to mark MCP tools unavailable for container {container_id}: {exc}")
+
     delete_mcp_record_by_container_id(
         container_id=container_id,
         tenant_id=tenant_id,
@@ -1073,7 +1144,9 @@ async def get_remote_mcp_server_list(
         config_json = record.get("config_json")
         container_id = record.get("container_id")
 
-        is_container = container_id is not None or config_json is not None
+        # Reuse _is_container_record so an empty config_json (e.g. `{}`) is not
+        # misclassified as a container, matching the API/enable path behavior.
+        is_container = _is_container_record(record)
 
         container_status = None
         if is_container:
@@ -1093,6 +1166,7 @@ async def get_remote_mcp_server_list(
             "enabled": record.get("enabled"),
             "source": record.get("source"),
             "update_time": record.get("update_time"),
+            "create_time": record.get("create_time"),
             "tags": record.get("tags") or [],
             "container_port": record.get("container_port"),
             "registry_json": record.get("registry_json"),
@@ -1305,6 +1379,10 @@ async def check_mcp_service_health(
 async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[dict]:
     """Get tools from an MCP service by ID.
 
+    For API-type MCPs (OpenAPI), tools are already registered in the database
+    via import_openapi_service.  Return them from the tool registry instead of
+    attempting an MCP-protocol connection.
+
     Args:
         tenant_id: Tenant ID
         mcp_id: MCP record ID
@@ -1320,6 +1398,22 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not record:
         raise McpNotFoundError("MCP record not found")
+
+    config_json = record.get("config_json")
+    registry_json = record.get("registry_json")
+    is_api_type = isinstance(config_json, dict) and "openapi" in config_json
+    if is_api_type:
+        # API-type MCPs have no MCP protocol endpoint.
+        # Return the tool names that were extracted during registration.
+        tool_names = []
+        if isinstance(registry_json, dict):
+            raw = registry_json.get("_toolNames")
+            if isinstance(raw, list):
+                tool_names = raw
+        return [
+            {"name": name, "description": ""}
+            for name in tool_names
+        ]
 
     service_name = record.get("mcp_name")
     server_url = record.get("mcp_server")
@@ -1483,18 +1577,32 @@ async def upload_and_start_mcp_image(
     if parsed_env_vars:
         authorization_token = parsed_env_vars.get("authorization_token")
 
-    await add_remote_mcp_server_list(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        remote_mcp_server=container_info["mcp_url"],
-        remote_mcp_server_name=final_service_name,
-        container_id=container_info["container_id"],
-        authorization_token=authorization_token,
-        container_port=port,
-        group_ids=group_ids,
-        ingroup_permission=ingroup_permission,
-        shared_fields=shared_fields,
-    )
+    try:
+        await add_remote_mcp_server_list(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            remote_mcp_server=container_info["mcp_url"],
+            remote_mcp_server_name=final_service_name,
+            container_id=container_info["container_id"],
+            authorization_token=authorization_token,
+            container_port=port,
+            group_ids=group_ids,
+            ingroup_permission=ingroup_permission,
+            shared_fields=shared_fields,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to register uploaded-image MCP service: {exc}; "
+            "cleaning up the started container so it does not become an orphan "
+            "that keeps occupying the host port"
+        )
+        try:
+            await container_manager.stop_mcp_container(container_info["container_id"])
+        except Exception as cleanup_exc:
+            logger.warning(
+                f"Failed to clean up container {container_info['container_id']}: {cleanup_exc}"
+            )
+        raise
 
     return {
         "message": "MCP container started successfully from uploaded image",

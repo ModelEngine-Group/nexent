@@ -340,8 +340,13 @@ class NexentAgent:
                 else:
                     tools_obj.memory_context_service = None
             elif class_name == "AidpSearchTool":
-                tools_obj = tool_class(**params)
+                # kds_name_to_id_map is exclude=True; inject via metadata after init
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["kds_name_to_id_map"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.kds_name_to_id_map = tool_config.metadata.get(
+                    "kds_name_to_id_map", {}) if tool_config.metadata else {}
                 # Install the KDS whitelist so the tool only retrieves from
                 # KBs the current user is permitted to see.  Guard against
                 # ``metadata=None`` the same way every other branch does
@@ -366,6 +371,17 @@ class NexentAgent:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
                     tools_obj.observer = self.observer
+            if tool_config.inputs and hasattr(tools_obj, "inputs"):
+                parsed_inputs = tool_config.inputs
+                if isinstance(parsed_inputs, str):
+                    try:
+                        parsed_inputs = json.loads(parsed_inputs)
+                    except (TypeError, ValueError):
+                        parsed_inputs = None
+                if isinstance(parsed_inputs, dict):
+                    tools_obj.inputs = parsed_inputs
+            if tool_config.output_type and hasattr(tools_obj, "output_type"):
+                tools_obj.output_type = tool_config.output_type
             return tools_obj
 
     def create_langchain_tool(self, tool_config: ToolConfig):
@@ -434,6 +450,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                config_overrides=params.get("config_overrides"),
             )
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
@@ -441,6 +458,15 @@ class NexentAgent:
         elif class_name == "UpdatePlanStepTool":
             from nexent.core.tools.plan_tools import UpdatePlanStepTool
             return UpdatePlanStepTool()
+        elif class_name == "CreateScheduledTaskProposalTool":
+            from nexent.core.tools.create_scheduled_task_tool import (
+                CreateScheduledTaskProposalTool,
+            )
+            metadata = tool_config.metadata or {}
+            return CreateScheduledTaskProposalTool(
+                create_proposal=metadata.get("create_proposal"),
+                observer=self.observer,
+            )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -674,6 +700,7 @@ class NexentAgent:
                 conversation_id=self.conversation_id,
                 user_id=self.user_id,
                 executor=python_executor,
+                verification_config=getattr(agent_config, "verification_config", None),
             )
             agent.stop_event = self.stop_event
 
@@ -770,8 +797,10 @@ class NexentAgent:
                             total_output_tokens += step_output
 
                         estimated_context = None
+                        last_metric = None
                         if hasattr(self.agent, "step_metrics") and self.agent.step_metrics:
-                            estimated_context = self.agent.step_metrics[-1].get(
+                            last_metric = self.agent.step_metrics[-1]
+                            estimated_context = last_metric.get(
                                 "memory_state", {}
                             ).get("estimated_input_tokens")
 
@@ -803,6 +832,39 @@ class NexentAgent:
                                 None,
                             ),
                         }
+                        if last_metric:
+                            compression = last_metric.get("compression", {}) or {}
+                            token_data.update({
+                                "compression_calls": compression.get("calls", 0),
+                                "compression_input_tokens": compression.get("input_tokens", 0),
+                                "compression_output_tokens": compression.get("output_tokens", 0),
+                                "compression_cache_hits": compression.get("cache_hits", 0),
+                                "compression_cache_types": compression.get("cache_types", []),
+                                "compression_ratio": last_metric.get("compression_ratio", 0.0),
+                                "uncompressed_est_tokens": last_metric.get("uncompressed_mem_est_input", 0),
+                            })
+                        active_model = getattr(self.agent, "model", None)
+                        cache_usage = getattr(active_model, "last_prompt_cache_usage", None)
+                        cache_advice = getattr(active_model, "last_provider_cache_advice", None)
+                        if cache_usage is not None:
+                            metrics_source = getattr(cache_usage, "metrics_source", "capability_unknown")
+                            metrics_available = metrics_source not in {"none", "capability_unknown"}
+                            capability_supported = bool(getattr(cache_advice, "supported", False))
+                            token_data.update({
+                                "provider_cache_status": (
+                                    "available" if metrics_available else
+                                    "unavailable" if capability_supported else
+                                    "unsupported"
+                                ),
+                                "provider_cache_metrics_source": metrics_source,
+                                "provider_cache_hit": bool(getattr(cache_usage, "provider_cache_hit", False)),
+                                "provider_cached_input_tokens": int(
+                                    getattr(cache_usage, "cached_input_tokens", 0) or 0
+                                ),
+                                "provider_uncached_input_tokens": int(
+                                    getattr(cache_usage, "uncached_input_tokens", 0) or 0
+                                ),
+                            })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:

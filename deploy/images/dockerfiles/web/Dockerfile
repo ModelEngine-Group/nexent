@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH
+ARG CONFIGURED_BASE_PATH=/
+
+ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
 
 # Build Next.js application
 WORKDIR /opt/frontend
@@ -10,7 +13,7 @@ COPY frontend/package.json ./package.json
 # Use BuildKit named cache for npm downloads across builds.
 RUN --mount=type=cache,id=nexent-web-npm-${TARGETARCH},target=/root/.npm,sharing=locked \
     if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
-    npm install --verbose
+    npm install --verbose --legacy-peer-deps
 
 COPY frontend /opt/frontend
 
@@ -22,6 +25,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
     cp -r .next/static ../frontend-dist/.next/static && \
     cp -r public ../frontend-dist/ && \
     cp server.js ../frontend-dist/server.js && \
+    cp base-path.mjs ../frontend-dist/base-path.mjs && \
     cp build-config.js ../frontend-dist/build-config.js && \
     mkdir -p ../frontend-dist/node_modules/next/dist/compiled && \
     cp -r node_modules/next/dist/compiled/. ../frontend-dist/node_modules/next/dist/compiled/ && \
@@ -50,6 +54,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
 FROM node:20-alpine
 ARG APK_MIRROR
 ARG TARGETARCH
+ARG CONFIGURED_BASE_PATH=/
 LABEL authors="nexent"
 
 # Configure Alpine mirrors if specified
@@ -73,6 +78,7 @@ COPY --from=builder /opt/frontend-dist .
 
 ENV NODE_ENV=production
 ENV HOSTNAME=localhost
+ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
 
 # Expose the service port
 EXPOSE 3000

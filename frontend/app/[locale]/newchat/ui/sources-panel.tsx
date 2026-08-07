@@ -10,10 +10,15 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
+  fetchImageBlob,
+  isLocalStorageObjectUrl,
+  getLocalFilePreviewUrl,
   storageService,
 } from "@/services/storageService";
+import { AuthenticatedImage } from "./authenticated-image";
 
 /**
  * Loose typing for the source items handled by the side panel. Matches the
@@ -59,6 +64,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   className,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<PanelTab>(
     sources.length > 0 ? "sources" : "images",
   );
@@ -66,7 +72,12 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   useEffect(() => {
     if (!open) return;
 
-    if (selectedCiteIndex !== undefined || sources.length > 0) {
+    const selectedIsImage =
+      selectedCiteIndex !== undefined &&
+      images.some((item) => item.citeIndex === selectedCiteIndex);
+    if (selectedIsImage) {
+      setActiveTab("images");
+    } else if (selectedCiteIndex !== undefined || sources.length > 0) {
       setActiveTab("sources");
     } else if (images.length > 0) {
       setActiveTab("images");
@@ -85,15 +96,15 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         "flex h-full w-80 shrink-0 flex-col border-l bg-background",
         className,
       )}
-      aria-label="Sources panel"
+      aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <h2 className="text-sm font-semibold text-foreground">Sources</h2>
+        <h2 className="text-sm font-semibold text-foreground">{t("chat.sources.title")}</h2>
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
-          aria-label="Close sources panel"
+          aria-label={t("chat.sources.close")}
         >
           <XIcon className="size-4" />
         </Button>
@@ -101,18 +112,18 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 
       <div
         role="tablist"
-        aria-label="Sources panel tabs"
+        aria-label={t("chat.sources.tabs")}
         className="flex items-center gap-1 border-b px-2 py-2"
       >
         <TabButton
-          label="Sources"
+          label={t("chat.sources.sources")}
           count={sources.length}
           icon={<FileTextIcon className="size-3.5" />}
           active={showSources}
           onClick={() => setActiveTab("sources")}
         />
         <TabButton
-          label="Images"
+          label={t("chat.sources.images")}
           count={images.length}
           icon={<ImageIcon className="size-3.5" />}
           active={!showSources}
@@ -123,7 +134,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {showSources ? "No sources available." : "No images available."}
+            {showSources ? t("chat.sources.noSources") : t("chat.sources.noImages")}
           </p>
         ) : showSources ? (
           <ul className="flex flex-col gap-2">
@@ -207,6 +218,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   item,
   selected,
 }) => {
+  const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -246,9 +258,9 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
       if (!objectName) {
         throw new Error("Cannot determine the file location.");
       }
-      await storageService.downloadFile(objectName, filename);
+      await storageService.downloadFileWithAuth(objectName, filename);
     } catch {
-      setDownloadError("Download failed. Please try again.");
+      setDownloadError(t("chat.sources.downloadError"));
     } finally {
       setIsDownloading(false);
     }
@@ -257,38 +269,55 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   const selectedClassName = selected
     ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
     : undefined;
+  const previewUrl = getLocalFilePreviewUrl(
+    item.url,
+    item.filename || item.title,
+    item.objectName,
+  );
 
   if (item.sourceType === "document") {
     return (
       <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
-        <button
-          type="button"
-          onClick={handleDocumentDownload}
-          disabled={isDownloading}
-          className="group flex w-full items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent/40 disabled:cursor-wait disabled:opacity-70"
-          aria-label={`Download ${item.filename || item.title || "document"}`}
-        >
-          <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2">
-              <span className="min-w-0 flex-1 wrap-break-word font-medium text-foreground">
-                {item.title || item.filename || "Document"}
+        <div className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm">
+          <button
+            type="button"
+            onClick={() => previewUrl && window.open(previewUrl, "_blank", "noopener,noreferrer")}
+            disabled={!previewUrl}
+            className="group flex min-w-0 flex-1 items-start gap-2 text-left transition-colors hover:text-primary disabled:cursor-default disabled:hover:text-foreground"
+            aria-label={t("chat.sources.preview", {
+              name: item.filename || item.title || t("chat.sources.document"),
+            })}
+          >
+            <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <span className="block wrap-break-word font-medium text-foreground">
+                {item.title || item.filename || t("chat.sources.document")}
               </span>
-              {isDownloading ? (
-                <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : (
-                <DownloadIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-              )}
+              <span className="block truncate text-xs text-muted-foreground">
+                {t("chat.sources.knowledgeBase")}
+              </span>
+              <SourceSummary text={item.text} />
             </div>
-            <span className="block truncate text-xs text-muted-foreground">
-              知识库
-            </span>
-            <SourceSummary text={item.text} />
-            {downloadError && (
-              <p className="mt-1 text-xs text-destructive">{downloadError}</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDocumentDownload()}
+            disabled={isDownloading}
+            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+            aria-label={t("chat.sources.download", {
+              name: item.filename || item.title || t("chat.sources.document"),
+            })}
+          >
+            {isDownloading ? (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            ) : (
+              <DownloadIcon className="size-4" />
             )}
-          </div>
-        </button>
+          </button>
+        </div>
+        {downloadError && (
+          <p className="px-3 pb-2 text-xs text-destructive">{downloadError}</p>
+        )}
       </li>
     );
   }
@@ -327,7 +356,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
         selectedClassName,
       )}
     >
-      <span className="font-medium">{item.title || "Untitled source"}</span>
+      <span className="font-medium">{item.title || t("chat.sources.untitled")}</span>
       <SourceSummary text={item.text} />
     </li>
   );
@@ -335,21 +364,63 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
 
 const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
   const imageUrl = item.url || "";
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
+
+  useEffect(() => {
+    if (!imageUrl || !usesBackendStream) {
+      setResolvedUrl(null);
+      setLoadError(false);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setResolvedUrl(null);
+    setLoadError(false);
+
+    fetchImageBlob(imageUrl)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setResolvedUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl, usesBackendStream]);
+
   if (!imageUrl) return null;
+  if (usesBackendStream && !resolvedUrl && !loadError) {
+    return (
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50">
+        <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50 px-2 text-center text-xs text-muted-foreground">
+        {item.title || imageUrl}
+      </div>
+    );
+  }
+
   return (
-    <a
-      href={imageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="aui-global-search-image block overflow-hidden rounded-md border bg-muted/50"
-      title={imageUrl}
-    >
-      <img
-        src={imageUrl}
+    <div className="aui-global-search-image overflow-hidden rounded-md border bg-muted/50">
+      <AuthenticatedImage
+        src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"
+        preview
         className="aspect-square w-full object-cover"
       />
-    </a>
+    </div>
   );
 };

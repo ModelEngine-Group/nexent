@@ -119,6 +119,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    NL2A = "nl2a"
 
 
 @dataclass
@@ -886,6 +887,8 @@ def test_create_local_tool_success(nexent_agent_instance):
 
     mock_tool_class.assert_called_once_with(param1="value1", param2=42)
     assert result == mock_tool_instance
+    assert result.inputs == {}
+    assert result.output_type == "string"
 
 
 def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
@@ -1683,6 +1686,59 @@ def test_agent_run_with_observer_writes_aggregate_context_metrics(nexent_agent_i
     mock_print.assert_not_called()
 
 
+def test_agent_run_with_observer_forwards_compression_and_provider_cache_metrics(
+    nexent_agent_instance, mock_core_agent,
+):
+    nexent_agent_instance.agent = mock_core_agent
+    nexent_agent_instance._log_step_metrics = MagicMock()
+    mock_core_agent.stop_event.is_set.return_value = False
+    mock_core_agent.step_metrics = [{
+        "step_number": 1,
+        "timestamp": 0.0,
+        "main_llm": {"input_tokens": 100, "output_tokens": 5},
+        "compression": {
+            "calls": 2,
+            "input_tokens": 100,
+            "output_tokens": 40,
+            "cache_hits": 1,
+            "cache_types": ["summary"],
+        },
+        "memory_state": {"estimated_input_tokens": 60, "estimated_output_tokens": 5},
+        "compression_ratio": 40.0,
+        "uncompressed_mem_est_input": 100,
+        "cache_hit": True,
+        "cache_types": ["summary"],
+    }]
+    mock_core_agent.model = types.SimpleNamespace(
+        last_provider_cache_advice=types.SimpleNamespace(supported=True),
+        last_prompt_cache_usage=types.SimpleNamespace(
+            metrics_source="openai_prompt_tokens_details", provider_cache_hit=True,
+            cached_input_tokens=40, uncached_input_tokens=60,
+        ),
+    )
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.0)
+    mock_action_step.step_number = 1
+    mock_action_step.error = None
+    mock_action_step.output = "answer"
+    mock_action_step.token_usage = types.SimpleNamespace(
+        input_tokens=100,
+        output_tokens=5,
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    nexent_agent_instance.agent_run_with_observer("test query")
+    payload = [
+        json.loads(call.args[2]) for call in mock_core_agent.observer.add_message.call_args_list
+        if len(call.args) >= 3 and call.args[1] == ProcessType.TOKEN_COUNT
+    ][-1]
+    assert payload["compression_calls"] == 2
+    assert payload["compression_cache_hits"] == 1
+    assert payload["provider_cache_status"] == "available"
+    assert payload["provider_cache_hit"] is True
+    assert payload["provider_cached_input_tokens"] == 40
+    assert payload["provider_uncached_input_tokens"] == 60
+
+
 def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_instance, mock_core_agent):
     """Test successful agent_run_with_observer with string final answer."""
     # Setup
@@ -2240,7 +2296,6 @@ class TestCreateMcpTool:
         with pytest.raises(ValueError, match="test_tool not found in MCP server"):
             nexent_agent_instance.create_mcp_tool("test_tool")
 
-
 class TestCreateBuiltinTool:
     """Tests for create_builtin_tool method."""
 
@@ -2470,6 +2525,7 @@ class TestCreateBuiltinTool:
             agent_id=31,
             tenant_id="tenant_config",
             version_no=9,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -2506,6 +2562,7 @@ class TestCreateBuiltinTool:
             agent_id=None,
             tenant_id=None,
             version_no=0,
+            config_overrides=None,
         )
         assert result is mock_tool_instance
 
@@ -4260,6 +4317,7 @@ class TestCreateBuiltinTool:
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 version_no=1,
+                config_overrides=None,
             )
 
     def test_create_builtin_tool_unknown_tool(self, nexent_agent_instance):
@@ -5179,6 +5237,35 @@ class TestCreateBuiltinToolPlanTools:
 
         assert result is mock_tool_instance
         mock_tool_class.assert_called_once_with()
+
+    def test_create_builtin_tool_scheduled_task_proposal(self, nexent_agent_instance):
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+        create_proposal = MagicMock()
+        tool_config = ToolConfig(
+            class_name="CreateScheduledTaskProposalTool",
+            name="create_scheduled_task_proposal",
+            description="Create a scheduled-task proposal",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+            metadata={"create_proposal": create_proposal},
+        )
+
+        with patch.dict("sys.modules", {
+            "nexent.core.tools.create_scheduled_task_tool": MagicMock(
+                CreateScheduledTaskProposalTool=mock_tool_class,
+            ),
+        }):
+            result = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert result is mock_tool_instance
+        mock_tool_class.assert_called_once_with(
+            create_proposal=create_proposal,
+            observer=nexent_agent_instance.observer,
+        )
 
 
 # ----------------------------------------------------------------------------

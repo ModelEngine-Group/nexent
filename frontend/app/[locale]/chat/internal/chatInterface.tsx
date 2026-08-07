@@ -168,6 +168,7 @@ export function ChatInterface() {
   const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(
     new Map()
   );
+  const titleGenerationConversationIdsRef = useRef<Set<number>>(new Set());
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content.
@@ -930,6 +931,27 @@ export function ChatInterface() {
             t("chatInterface.newConversation"),
             agentIdForRun
           );
+
+          if (!titleGenerationConversationIdsRef.current.has(conversationId)) {
+            titleGenerationConversationIdsRef.current.add(conversationId);
+            void conversationService
+              .generateTitle({
+                conversation_id: conversationId,
+                question: userMessageContent,
+              })
+              .then((title) => {
+                if (title) {
+                  conversationManagement.setConversationTitle(title);
+                }
+                void conversationManagement.fetchConversationList().catch((error) => {
+                  log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
+                });
+              })
+              .catch((error) => {
+                titleGenerationConversationIdsRef.current.delete(conversationId);
+                log.error(t("chatStreamHandler.generateTitleFailed"), error);
+              });
+          }
         },
         false, // isDebug: false for normal chat mode
         t

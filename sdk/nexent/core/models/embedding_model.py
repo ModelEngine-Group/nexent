@@ -13,6 +13,23 @@ from ...monitor.monitoring import record_model_call
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets")
 
 
+def _detect_image_mime(img_bytes: bytes) -> str:
+    """Detect image MIME type from raw bytes. Falls back to image/jpeg when unknown."""
+    if not img_bytes:
+        return "image/jpeg"
+    if img_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if img_bytes[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if img_bytes[:4] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    if img_bytes[:2] == b"BM":
+        return "image/bmp"
+    return "image/jpeg"
+
+
 class BaseEmbedding(ABC):
     """
     Abstract base class for embedding models, defining methods that all embedding models should implement.
@@ -188,9 +205,28 @@ class JinaEmbedding(MultimodalEmbedding):
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
-    def _prepare_multimodal_input(self, inputs: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Prepare the input data for the API request."""
-        return {"model": self.model, "input": inputs, "truncate": True}
+    def _prepare_multimodal_input(self, inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Prepare the input data for the API request.
+
+        Args:
+            inputs: List of dictionaries with 'text' or 'image' keys.
+                - Text: {"text": "string"}
+                - Image: {"image": "url_string" | "data:..." | bytes}
+        """
+        prepared = []
+        for item in inputs:
+            if "text" in item:
+                prepared.append(item)
+            elif "image" in item:
+                img = item["image"]
+                # If img is bytes, encode to data URL with correct MIME type
+                if isinstance(img, bytes):
+                    mime = _detect_image_mime(img)
+                    img = f"data:{mime};base64,{base64.b64encode(img).decode('utf-8')}"
+                prepared.append({"image": img})
+            else:
+                prepared.append(item)
+        return {"model": self.model, "input": prepared, "truncate": True}
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
         """
@@ -360,6 +396,7 @@ class DashScopeMultimodalEmbedding(MultimodalEmbedding):
         self.model = model_name
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
+        self.model_type = "multimodal"
 
         self.session = requests.Session()
         self.session.trust_env = False
@@ -368,11 +405,24 @@ class DashScopeMultimodalEmbedding(MultimodalEmbedding):
             "Authorization": f"Bearer {self.api_key}"
         }
 
-    def _prepare_multimodal_input(self, inputs: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Prepare DashScope-compatible multimodal input format."""
+    def _prepare_multimodal_input(self, inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Prepare DashScope-compatible multimodal input format.
+
+        DashScope accepts image URLs or Base64 data URIs. Raw image bytes are
+        encoded as PNG data URIs before being sent to the API.
+        """
+        normalized = []
+        for item in inputs:
+            if "image" in item:
+                img = item["image"]
+                if isinstance(img, bytes):
+                    img = f"data:image/png;base64,{base64.b64encode(img).decode('utf-8')}"
+                normalized.append({"image": img})
+            else:
+                normalized.append(item)
         return {
             "model": self.model,
-            "input": {"contents": inputs}
+            "input": {"contents": normalized}
         }
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -463,8 +513,141 @@ class DashScopeMultimodalEmbedding(MultimodalEmbedding):
             return []
 
 
+class SiliconflowMultimodalEmbedding(MultimodalEmbedding):
+    """Siliconflow multimodal embedding model (Qwen/Qwen3-VL-Embedding-8B etc.)."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        embedding_dim: int = 1024,
+        ssl_verify: bool = True,
+    ):
+        """Initialize SiliconflowMultimodalEmbedding with configuration."""
+        self.api_key = api_key
+        self.api_url = base_url
+        self.model = model_name
+        self.embedding_dim = embedding_dim
+        self.ssl_verify = ssl_verify
+        self.model_type = "multimodal"
+
+        self.session = requests.Session()
+        self.session.trust_env = False
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+    def _prepare_multimodal_input(self, inputs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Prepare Siliconflow-compatible multimodal input format.
+
+        Siliconflow API expects:
+        - Text: {"text": "..."} or plain string
+        - Image: {"image": "data:image/xxx;base64,..."} or {"image": "url"}
+        """
+        prepared = []
+        for item in inputs:
+            if "text" in item:
+                prepared.append(item["text"])
+            elif "image" in item:
+                img = item["image"]
+                # If img is bytes, encode to data URL with correct MIME type
+                if isinstance(img, bytes):
+                    mime = _detect_image_mime(img)
+                    img = f"data:{mime};base64,{base64.b64encode(img).decode('utf-8')}"
+                prepared.append({"image": img})
+            else:
+                prepared.append(item)
+        return {"model": self.model, "input": prepared}
+
+    def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
+        response = self.session.post(
+            self.api_url,
+            headers=self.headers,
+            json=data,
+            timeout=timeout,
+            verify=self.ssl_verify
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_embeddings(
+        self,
+        inputs: Union[str, List[str]],
+        with_metadata: bool = False,
+        timeout: Optional[float] = None,
+        retries: int = 3,
+        retry_timeout_step: float = 5.0,
+    ) -> Union[List[List[float]], Dict[str, Any]]:
+        if isinstance(inputs, str):
+            multimodal_inputs = [{"text": inputs}]
+        else:
+            multimodal_inputs = [{"text": item} for item in inputs]
+        return self.get_multimodal_embeddings(multimodal_inputs, with_metadata, timeout, retries, retry_timeout_step)
+
+    def get_multimodal_embeddings(
+        self,
+        inputs: List[Dict[str, Any]],
+        with_metadata: bool = False,
+        timeout: Optional[float] = None,
+        retries: int = 3,
+        retry_timeout_step: float = 5.0,
+    ) -> Union[List[List[float]], Dict[str, Any]]:
+        with record_model_call("multi_embedding", self.model, display_name=self.model):
+            data = self._prepare_multimodal_input(inputs)
+
+            base_timeout = timeout if timeout is not None else retry_timeout_step
+            attempts = retries + 1
+            last_timeout: Optional[requests.exceptions.Timeout] = None
+            for attempt_index in range(attempts):
+                current_timeout = base_timeout + attempt_index * retry_timeout_step
+                try:
+                    response = self._make_request(data, timeout=current_timeout)
+
+                    if with_metadata:
+                        return response
+
+                    embeddings = [item["embedding"] for item in response["data"]]
+                    return embeddings
+                except requests.exceptions.Timeout as e:
+                    logging.warning(
+                        f"SiliconflowMultimodalEmbedding API timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
+                    )
+                    last_timeout = e
+                    if attempt_index == attempts - 1:
+                        logging.error("SiliconflowMultimodalEmbedding API timed out.")
+                        raise
+                    continue
+
+            if last_timeout:
+                raise last_timeout
+            return []
+
+    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
+        try:
+            test_image_path = os.path.join(ASSETS_DIR, "test.png")
+            with open(test_image_path, "rb") as f:
+                image_data = f.read()
+            test_inputs = [
+                {"text": "Hello, nexent!"},
+                {"image": image_data}
+            ]
+            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
+            return embeddings
+        except requests.exceptions.Timeout:
+            logging.error(f"SiliconflowMultimodalEmbedding connection timed out ({timeout} seconds)")
+            return []
+        except requests.exceptions.ConnectionError:
+            logging.error("SiliconflowMultimodalEmbedding connection error")
+            return []
+        except Exception as e:
+            logging.error(f"SiliconflowMultimodalEmbedding connection failed: {str(e)}")
+            return []
+
+
 class OpenAICompatibleEmbedding(TextEmbedding):
-    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "text", ssl_verify: bool = True):
+    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "embedding", ssl_verify: bool = True):
         """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
         self.api_key = api_key
         self.api_url = base_url

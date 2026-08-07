@@ -12,8 +12,6 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
-from nexent.core.agents.context_input import ContextInput
-from nexent.core.agents.context import ContextItemInput
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -44,6 +42,7 @@ from consts.model import (
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
+    batch_search_agent_display_names,
     create_agent,
     delete_agent_by_id,
     delete_agent_relationship,
@@ -74,7 +73,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -82,7 +81,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list, query_current_version_no
+from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -94,7 +93,7 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
+    generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     get_conversation_service,
     get_current_run_user_message_id,
     get_latest_assistant_message,
@@ -119,6 +118,7 @@ from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
+from utils.context_utils import build_authorized_context_input
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -940,7 +940,6 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -1045,9 +1044,6 @@ async def _stream_agent_chunks(
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
-
-            if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
                 artifact_content = data.get("content")
@@ -1199,6 +1195,7 @@ async def _stream_agent_chunks(
                                 user_id=user_id,
                                 unit_status="completed",
                                 tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(
@@ -1275,6 +1272,7 @@ async def _stream_agent_chunks(
                                 user_id=user_id,
                                 unit_status="streaming",
                                 tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
                             ).result()
                         except Exception as persistence_exc:
                             logger.error(
@@ -1290,6 +1288,24 @@ async def _stream_agent_chunks(
                                 "unit_index": next_unit_index,
                                 "mergeable": mergeable,
                             }
+                            if chunk_type == "automation_proposal":
+                                try:
+                                    from services.agent_automation.tool_adapter import (
+                                        link_persisted_proposal_card,
+                                    )
+
+                                    link_persisted_proposal_card(
+                                        persisted_content,
+                                        tenant_id,
+                                        user_id,
+                                        streaming_message_id,
+                                        new_unit_id,
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to link persisted automation proposal card",
+                                        exc_info=True,
+                                    )
                             next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
@@ -1490,9 +1506,80 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         sub_agent_id_list = query_sub_agents_id_list(
             main_agent_id=agent_id, tenant_id=tenant_id)
         agent_info["sub_agent_id_list"] = sub_agent_id_list
+
+        # Enrich sub-agent relations with version names (batch query)
+        relations = query_sub_agent_relations(agent_id, tenant_id, version_no)
+        enriched_relations = []
+
+        # Collect all agent_ids and (agent_id, version_no) pairs for batch lookup
+        all_agent_ids = set()
+        lookup_agent_ids = set()
+        lookup_version_nos = set()
+        # Track agents whose pinned version_no is null -> need to resolve latest published version
+        missing_version_agent_ids = set()
+        for rel in relations:
+            aid = rel.get("selected_agent_id")
+            if aid:
+                all_agent_ids.add(aid)
+            vno = rel.get("selected_agent_version_no")
+            if aid and vno is not None and vno != 0:
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(vno)
+            elif aid:
+                # Historical data: pinned version_no is null or 0 (draft), resolve from child's current published version
+                missing_version_agent_ids.add(aid)
+
+        # Batch query current published version_no for agents with missing pinned version
+        resolved_version_no_map: dict = {}
+        if missing_version_agent_ids:
+            resolved_version_no_map = batch_query_current_version_nos(
+                agent_ids=list(missing_version_agent_ids),
+                tenant_id=tenant_id,
+            )
+            # Merge resolved version_nos into the version name lookup set
+            for aid, resolved_vno in resolved_version_no_map.items():
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(resolved_vno)
+
+        # Batch query all version names at once
+        version_name_map: dict = {}
+        if lookup_agent_ids and lookup_version_nos:
+            batch_results = batch_search_version_names(
+                agent_ids=list(lookup_agent_ids),
+                tenant_id=tenant_id,
+                version_nos=list(lookup_version_nos),
+            )
+            for item in batch_results:
+                key = (item["agent_id"], item["version_no"])
+                version_name_map[key] = item["version_name"]
+
+        # Batch query all agent display names at once
+        agent_name_map = batch_search_agent_display_names(
+            agent_ids=list(all_agent_ids),
+            tenant_id=tenant_id,
+        )
+
+        for rel in relations:
+            selected_agent_id = rel.get("selected_agent_id")
+            selected_version_no = rel.get("selected_agent_version_no")
+            # Fallback to resolved latest published version_no when pinned version is null or 0 (draft)
+            if (selected_version_no is None or selected_version_no == 0) and selected_agent_id in resolved_version_no_map:
+                selected_version_no = resolved_version_no_map[selected_agent_id]
+            version_name = None
+            if selected_agent_id and selected_version_no is not None:
+                version_name = version_name_map.get((selected_agent_id, selected_version_no))
+            enriched_relations.append({
+                "agent_id": selected_agent_id,
+                "agent_name": agent_name_map.get(selected_agent_id) if selected_agent_id else None,
+                "version_no": selected_version_no,
+                "version_name": version_name,
+            })
+
+        agent_info["sub_agent_relations"] = enriched_relations
     except Exception as e:
         logger.error(f"Failed to get sub agent id list: {str(e)}")
         agent_info["sub_agent_id_list"] = []
+        agent_info["sub_agent_relations"] = []
 
     try:
         skill_service = SkillService()
@@ -1644,34 +1731,40 @@ def _validate_requested_output_tokens_for_agent(
     if requested_output_tokens is None:
         return
 
-    model_id = request.model_id
-    if model_id is None and request.agent_id is not None:
+    # Validate against every configured model — the user can switch models at
+    # chat time, so requested_output_tokens must not exceed any model's limit.
+    model_ids = list(request.model_ids or [])
+    if not model_ids and request.agent_id is not None:
         try:
             existing_agent = search_agent_info_by_agent_id(
                 agent_id=request.agent_id,
                 tenant_id=tenant_id,
                 version_no=request.version_no,
             )
-            model_id = existing_agent.get("model_id")
+            model_ids = list(existing_agent.get("model_ids") or [])
         except Exception as exc:
             logger.warning(
-                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                "Could not resolve existing agent models for requested_output_tokens validation: %s",
                 exc,
             )
 
-    if model_id is None:
+    if not model_ids:
         return
 
-    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            (
-                "requested_output_tokens cannot exceed the selected model "
-                f"max_output_tokens ({max_output_tokens})"
-            ),
-        )
+    for model_id in model_ids:
+        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+        if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+            model_display = (
+                model_info.get("display_name") if model_info else f"model_id={model_id}"
+            )
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                (
+                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
+                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
+                ),
+            )
 
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
@@ -1778,13 +1871,45 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
 
-    # Handle enabled skills saving when provided
+    # Handle enabled skills and their per-agent configuration.
     try:
-        if request.enabled_skill_ids is not None and agent_id is not None:
-            enabled_set = set(request.enabled_skill_ids)
+        requested_skill_instances = getattr(request, "skill_instances", None)
+        has_structured_skill_instances = isinstance(requested_skill_instances, list)
+        if (
+            (has_structured_skill_instances or request.enabled_skill_ids is not None)
+            and agent_id is not None
+        ):
+            raw_version_no = getattr(request, "version_no", 0)
+            request_version_no = raw_version_no if isinstance(raw_version_no, int) else 0
+            requested_by_id = {}
+            if has_structured_skill_instances:
+                for requested_instance in requested_skill_instances:
+                    skill_id = requested_instance.skill_id
+                    if skill_id in requested_by_id:
+                        raise ValueError(f"Duplicate skill_id in skill_instances: {skill_id}")
+                    requested_by_id[skill_id] = requested_instance
+                enabled_set = {
+                    skill_id
+                    for skill_id, requested_instance in requested_by_id.items()
+                    if requested_instance.enabled
+                }
+            else:
+                enabled_set = set(request.enabled_skill_ids or [])
+
+            if has_structured_skill_instances:
+                valid_skill_ids = skill_db.get_valid_skill_ids(
+                    tenant_id=tenant_id,
+                    skill_ids=list(enabled_set),
+                )
+                missing_skill_ids = enabled_set - valid_skill_ids
+                if missing_skill_ids:
+                    raise ValueError(
+                        f"Invalid or unavailable skill IDs: {sorted(missing_skill_ids)}"
+                    )
+
             # Query existing skill instances for this agent
             existing_instances = skill_db.query_skill_instances_by_agent_id(
-                agent_id, tenant_id)
+                agent_id, tenant_id, version_no=request_version_no)
 
             # Handle unselected skill (already exist instance) -> enabled=False
             for instance in existing_instances:
@@ -1794,39 +1919,37 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_info=SkillInstanceInfoRequest(
                             skill_id=inst_skill_id,
                             agent_id=agent_id,
-                            skill_description=instance.get(
-                                "skill_description"),
-                            skill_content=instance.get("skill_content"),
                             enabled=False,
                             config_values=instance.get("config_values"),
+                            version_no=request_version_no,
                         ),
                         tenant_id=tenant_id,
-                        user_id=user_id
+                        user_id=user_id,
+                        version_no=request_version_no,
                     )
 
             # Handle selected skill -> enabled=True (create or update)
             for skill_id in enabled_set:
-                # Keep existing skill_description and skill_content if any
                 existing_instance = next(
                     (inst for inst in existing_instances
                      if inst.get("skill_id") == skill_id),
                     None
                 )
-                skill_description = (existing_instance or {}).get(
-                    "skill_description")
-                skill_content = (existing_instance or {}).get("skill_content")
+                if has_structured_skill_instances:
+                    config_values = requested_by_id[skill_id].config_values
+                else:
+                    config_values = (existing_instance or {}).get("config_values")
                 skill_db.create_or_update_skill_by_skill_info(
                     skill_info=SkillInstanceInfoRequest(
                         skill_id=skill_id,
                         agent_id=agent_id,
-                        skill_description=skill_description,
-                        skill_content=skill_content,
                         enabled=True,
-                        config_values=(existing_instance or {}
-                                       ).get("config_values"),
+                        config_values=config_values,
+                        version_no=request_version_no,
                     ),
                     tenant_id=tenant_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    version_no=request_version_no,
                 )
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")
@@ -1853,12 +1976,23 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                     main_agent_id=left_ele, tenant_id=tenant_id)
                 search_list.extend(sub_ids)
 
-            # Update related agents
+            # Update related agents - use related_agents if provided, otherwise build from IDs
+            if request.related_agents:
+                related_agents_dicts = [
+                    {"agent_id": ra.agent_id, "version_no": ra.version_no}
+                    for ra in request.related_agents
+                ]
+            else:
+                related_agents_dicts = [
+                    {"agent_id": aid, "version_no": None}
+                    for aid in related_agent_ids
+                ]
+
             update_related_agents(
                 parent_agent_id=agent_id,
-                related_agent_ids=related_agent_ids,
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=user_id,
+                related_agents=related_agents_dicts,
             )
     except ValueError:
         # Re-raise ValueError (circular dependency) as-is
@@ -2254,12 +2388,13 @@ async def import_agent_impl(
             mapping_agent_id[need_import_agent_id] = new_agent_id
 
             agent_id_set.add(need_import_agent_id)
-            # Establish relationships with sub-agents
+            # Establish relationships with sub-agents - new sub-agents always use version 1
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
                                      tenant_id=tenant_id,
-                                     user_id=user_id)
+                                     user_id=user_id,
+                                     selected_agent_version_no=1)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)
@@ -2731,44 +2866,6 @@ def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):
         )
 
 
-def _build_authorized_context_input(agent_run_info, historical_context=None) -> ContextInput:
-    """Freeze configured context and authorized history into one item snapshot."""
-    if historical_context is None:
-        fallback_turns = []
-        pending_user = None
-        for index, entry in enumerate(agent_run_info.history or ()):
-            if entry.role == MESSAGE_ROLE["USER"]:
-                pending_user = (index, entry)
-            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
-                user_index, user_entry = pending_user
-                fallback_turns.append({
-                    "user_message": user_entry.content,
-                    "assistant_final_answer": entry.content,
-                    "attachments": [],
-                    "user_message_id": -(user_index + 1),
-                    "assistant_message_id": -(index + 1),
-                })
-                pending_user = None
-        historical_context = {"conversation_turns": fallback_turns}
-    history_items = []
-    summary = historical_context.get("history_summary")
-    if summary:
-        history_items.append(ContextItemInput(
-            id=f"history_summary:{summary['unit_id']}", type="history_summary",
-            content=summary, source=("conversation_history",),
-        ))
-    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
-        history_items.append(ContextItemInput(
-            id=f"conversation_turn:{turn['user_message_id']}:{turn['assistant_message_id']}",
-            type="conversation_turn", content=turn,
-            source=("conversation_history",),
-            metadata={"layout_order": order},
-        ))
-    return ContextInput(
-        items=tuple(agent_run_info.agent_config.context_items or ()) + tuple(history_items),
-    )
-
-
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -2784,23 +2881,28 @@ async def prepare_agent_run(
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
 
+    create_run_kwargs = {
+        "agent_id": agent_request.agent_id,
+        "minio_files": agent_request.minio_files,
+        "query": agent_request.query,
+        "history": agent_request.history,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "language": language,
+        "allow_memory_search": allow_memory_search,
+        "is_debug": agent_request.is_debug,
+        "override_version_no": agent_request.version_no,
+        "override_model_id": agent_request.model_id,
+        "requested_output_tokens": agent_request.requested_output_tokens,
+        "tool_params": agent_request.tool_params,
+        "conversation_id": agent_request.conversation_id,
+        "context_policy": agent_request.context_policy,
+        "enable_planning": agent_request.enable_plan,
+    }
+    if not agent_request.enable_automation_tool:
+        create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
-        agent_id=agent_request.agent_id,
-        minio_files=agent_request.minio_files,
-        query=agent_request.query,
-        history=agent_request.history,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        language=language,
-        allow_memory_search=allow_memory_search,
-        is_debug=agent_request.is_debug,
-        override_version_no=agent_request.version_no,
-        override_model_id=agent_request.model_id,
-        requested_output_tokens=agent_request.requested_output_tokens,
-        tool_params=agent_request.tool_params,
-        conversation_id=agent_request.conversation_id,
-        context_policy=agent_request.context_policy,
-        enable_planning=agent_request.enable_plan,
+        **create_run_kwargs,
     )
 
     historical_context = None
@@ -2815,7 +2917,7 @@ async def prepare_agent_run(
             historical_context = load_historical_context(
                 agent_request.conversation_id, current_message_id, user_id, tenant_id
             )
-    agent_run_info.context_input = _build_authorized_context_input(
+    agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
     agent_run_info.conversation_id = agent_request.conversation_id
@@ -3805,7 +3907,6 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
     Returns:
         A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
     """
-    from nexent.core.agents.sandbox import SandboxConfig
     from consts.const import (
         NEXENT_SANDBOX_DEFAULT_LEVEL,
         NEXENT_SANDBOX_DEFAULT_SCOPE,

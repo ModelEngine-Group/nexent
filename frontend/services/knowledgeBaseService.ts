@@ -5,7 +5,11 @@ import i18n from "i18next";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
+import {
+  FILE_TYPES,
+  EXTENSION_TO_TYPE_MAP,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from "@/const/knowledgeBase";
 import {
   Document,
   KnowledgeBase,
@@ -800,6 +804,7 @@ class KnowledgeBaseService {
                       indexInfo.embedding_model_name ||
                       stats.embedding_model ||
                       "unknown",
+                    embeddingModelId: indexInfo.embedding_model_id ?? null,
                     summaryFrequency: indexInfo.summary_frequency || null,
                     lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
@@ -993,17 +998,15 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embeddingModel?: string;
+        embedding_model_id: number;
         ingroup_permission?: string;
         group_ids?: number[];
-        is_multimodal?: boolean;
         preserve_source_file?: boolean;
         quota_limit_bytes?: number | null;
       } = {
         name: params.name,
         description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embedding_model_id: params.embeddingModelId,
       };
 
       // Include group permission and user groups if provided
@@ -1030,9 +1033,10 @@ class KnowledgeBaseService {
       );
 
       const result = await response.json();
-      // Modify judgment logic, backend returns status field instead of success field
-      if (result.status !== "success") {
-        throw new Error(result.message || "Failed to create knowledge base");
+      if (!response.ok || result.status !== "success") {
+        throw new Error(
+          result.detail || result.message || "Failed to create knowledge base"
+        );
       }
 
       // Create a full KnowledgeBase object with default values
@@ -1043,8 +1047,9 @@ class KnowledgeBaseService {
         documentCount: 0,
         chunkCount: 0,
         createdAt: new Date().toISOString(),
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embeddingModel: result.embedding_model_name || "",
+        embeddingModelId: params.embeddingModelId,
+        is_multimodal: result.model_type === "multi_embedding",
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -1159,6 +1164,14 @@ class KnowledgeBaseService {
     modelId?: number
   ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
+      if (
+        files.some(
+          (file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES
+        )
+      ) {
+        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+      }
+
       // Create FormData object
       const formData = new FormData();
       formData.append("index_name", kbId);
@@ -1399,7 +1412,7 @@ class KnowledgeBaseService {
   }
 
   async fetchSummaryFrequencyOptions(): Promise<{ value: string; label: string }[]> {
-    const response = await fetch("/api/indices/summary_frequency_options", {
+    const response = await fetch(API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions, {
       headers: getAuthHeaders(),
     });
     const data = await response.json();

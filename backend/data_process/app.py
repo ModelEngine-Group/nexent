@@ -64,8 +64,8 @@ app.conf.update(
     worker_prefetch_multiplier=1,  # Fair scheduling; avoid batchy prefetch
     worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
-    task_acks_late=True,       # Tasks are acknowledged after completion
-    task_reject_on_worker_lost=True,  # Tasks are rejected if worker is lost
+    task_acks_late=False,
+    task_reject_on_worker_lost=False,
     # Result storage settings
     result_expires=None,       # Results never expire
     result_persistent=True,    # Persist results to backend
@@ -84,7 +84,7 @@ app.conf.update(
     broker_connection_retry=True,
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=10,
-    broker_heartbeat=30,  # Heartbeat check
+    broker_heartbeat=300,  # Heartbeat check
     broker_pool_limit=10,  # Connection pool size
 
     # Add transport options

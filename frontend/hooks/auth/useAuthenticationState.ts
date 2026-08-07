@@ -172,7 +172,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
 
   // Register method
   const register = useCallback(
-    async (email: string, password: string, inviteCode?: string) => {
+    async (email: string, password: string, inviteCode: string) => {
       setIsLoading(true);
 
       try {

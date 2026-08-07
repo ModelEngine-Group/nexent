@@ -104,6 +104,8 @@ class ConversationMessageUnit(TableBase):
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
     tool_call_id = Column(
         String(36), doc="Unique ID of the originating tool invocation. Used to attribute side-channel units to the correct tool call when multiple calls run in parallel.")
+    invocation_id = Column(
+        String(36), doc="Identifies which sub-agent invocation produced this unit. Used by the frontend history adapter to route deep-thinking / reasoning chunks into the correct nested sub-agent card.")
 
 
 class AgentAutomationTask(TableBase):
@@ -227,6 +229,14 @@ class AgentAutomationProposal(TableBase):
             "status",
             postgresql_where=text("delete_flag = 'N'"),
         ),
+        Index(
+            "uq_agent_automation_proposal_source_message",
+            "tenant_id",
+            "user_id",
+            "source_message_id",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N' AND source_message_id IS NOT NULL"),
+        ),
         {"schema": SCHEMA},
     )
 
@@ -236,6 +246,7 @@ class AgentAutomationProposal(TableBase):
     user_id = Column(String(100), nullable=False, doc="Owner user ID")
     conversation_id = Column(BigInteger, nullable=False, doc="Source conversation ID")
     agent_id = Column(BigInteger, nullable=False, doc="Bound agent ID")
+    source_message_id = Column(BigInteger, nullable=True, doc="User message that requested the proposal")
     proposed_task = Column(JSONB, nullable=False, doc="Proposed automation task payload")
     capability_resolution = Column(JSONB, nullable=False, doc="Capability matching result")
     status = Column(String(32), nullable=False, doc="PENDING, ACCEPTED, REJECTED, or EXPIRED")
@@ -1233,18 +1244,19 @@ class UserTenant(TableBase):
 class AgentRelation(TableBase):
     """
     Agent parent-child relationship table
+    Primary key: (relation_id, version_no)
     """
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
     relation_id = Column(Integer, Sequence("ag_agent_relation_t_relation_id_seq", schema=SCHEMA),
                          primary_key=True, nullable=False, doc="Relationship ID, primary key")
+    version_no = Column(Integer, primary_key=True, default=0, nullable=False,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     selected_agent_id = Column(
-        Integer, primary_key=True, doc="Selected agent ID")
+        Integer, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
-    version_no = Column(Integer, default=0, nullable=False,
-                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     selected_agent_version_no = Column(
         Integer, nullable=True,
         doc="Pinned version of selected_agent_id. NULL = runtime fallback to child current_version_no",
@@ -1728,6 +1740,22 @@ class A2AExternalAgent(TableBase):
 
     # For URL mode
     source_url = Column(String(512), doc="Direct URL to agent card")
+    agent_card_headers = Column(
+        JSON,
+        doc="Headers used only to retrieve and refresh the Agent Card"
+    )
+
+    # Security declared by the Agent Card and credentials configured by the user
+    security_schemes = Column(JSON, doc="Security schemes declared by the Agent Card")
+    security_requirements = Column(JSON, doc="Security requirements declared by the Agent Card")
+    security_credentials = Column(
+        JSON,
+        doc="Credential values for Agent Card security schemes, never exposed by APIs"
+    )
+    selected_security_requirement_index = Column(
+        Integer,
+        doc="Selected Agent Card security requirement index used for external agent calls"
+    )
 
     # For Nacos mode
     nacos_config_id = Column(

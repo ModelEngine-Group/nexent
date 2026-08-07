@@ -13,6 +13,7 @@ perspective.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Callable, Iterable
 
 from ..utils.observer import MessageObserver
@@ -111,12 +112,20 @@ class SubAgentToolWrapper:
         we still emit ``subagent_end`` so the frontend nesting state stays
         balanced. Callers can still rely on the exception propagating up to
         smolagents for normal retry / fail semantics.
+
+        A unique ``invocation_id`` (UUID4) is generated for each call and
+        propagated to both ``subagent_start`` and ``subagent_end`` so the
+        observer — and downstream consumers — can group every chunk produced
+        during this invocation, even when sibling sub-agents execute in
+        parallel.
         """
         task_text = self._task_extractor(args, kwargs)
+        invocation_id = uuid.uuid4().hex
         self._observer.add_subagent_start(
             agent_id=self._agent_id,
             agent_name=self._agent_name,
             task=task_text,
+            invocation_id=invocation_id,
         )
         try:
             return self._inner(*args, **kwargs)
@@ -124,6 +133,7 @@ class SubAgentToolWrapper:
             self._observer.add_subagent_end(
                 agent_id=self._agent_id,
                 agent_name=self._agent_name,
+                invocation_id=invocation_id,
             )
 
     # Some smolagents versions dispatch via ``forward`` rather than
@@ -131,10 +141,12 @@ class SubAgentToolWrapper:
     # exists, but still wrap with the observer signals.
     def forward(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
         task_text = self._task_extractor(args, kwargs)
+        invocation_id = uuid.uuid4().hex
         self._observer.add_subagent_start(
             agent_id=self._agent_id,
             agent_name=self._agent_name,
             task=task_text,
+            invocation_id=invocation_id,
         )
         try:
             inner_forward = getattr(self._inner, "forward", None)
@@ -145,6 +157,7 @@ class SubAgentToolWrapper:
             self._observer.add_subagent_end(
                 agent_id=self._agent_id,
                 agent_name=self._agent_name,
+                invocation_id=invocation_id,
             )
 
 

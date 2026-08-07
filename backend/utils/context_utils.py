@@ -3,6 +3,65 @@
 from typing import Any, Dict, List, Optional
 
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.agents.context_input import ContextInput
+
+from consts.const import MESSAGE_ROLE
+
+
+def build_authorized_context_input(
+    agent_run_info,
+    historical_context=None,
+) -> ContextInput:
+    """Freeze configured context and authorized history into one item snapshot."""
+    if historical_context is None:
+        fallback_turns = []
+        pending_user = None
+        for index, entry in enumerate(agent_run_info.history or ()):
+            if entry.role == MESSAGE_ROLE["USER"]:
+                pending_user = (index, entry)
+            elif (
+                entry.role == MESSAGE_ROLE["ASSISTANT"]
+                and pending_user is not None
+            ):
+                user_index, user_entry = pending_user
+                fallback_turns.append({
+                    "user_message": user_entry.content,
+                    "assistant_final_answer": entry.content,
+                    "attachments": [],
+                    "user_message_id": -(user_index + 1),
+                    "assistant_message_id": -(index + 1),
+                })
+                pending_user = None
+        historical_context = {"conversation_turns": fallback_turns}
+
+    history_items = []
+    summary = historical_context.get("history_summary")
+    if summary:
+        history_items.append(ContextItemInput(
+            id=f"history_summary:{summary['unit_id']}",
+            type="history_summary",
+            content=summary,
+            source=("conversation_history",),
+        ))
+    for order, turn in enumerate(
+        historical_context.get("conversation_turns", ())
+    ):
+        history_items.append(ContextItemInput(
+            id=(
+                f"conversation_turn:{turn['user_message_id']}:"
+                f"{turn['assistant_message_id']}"
+            ),
+            type="conversation_turn",
+            content=turn,
+            source=("conversation_history",),
+            metadata={"layout_order": order},
+        ))
+    return ContextInput(
+        items=(
+            tuple(agent_run_info.agent_config.context_items or ())
+            + tuple(history_items)
+        ),
+    )
 
 # =============================================================================
 # SECTION 1: Long-text format functions (expanded from Jinja2 templates)
@@ -337,6 +396,7 @@ def build_context_inputs(
     memory_list: Optional[List[Any]] = None,
     memory_search_query: Optional[str] = None,
     memory_tool_policy: Optional[str] = None,
+    automation_tool_policy: Optional[str] = None,
     long_term_memory_prompt: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
@@ -374,6 +434,9 @@ def build_context_inputs(
 
     if memory_tool_policy:
         add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
+
+    if automation_tool_policy:
+        add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
 
     if include_memory and long_term_memory_prompt:
         add_system(

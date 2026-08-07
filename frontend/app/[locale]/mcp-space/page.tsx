@@ -26,10 +26,10 @@ import {
   deleteCommunityMcpTool,
   deleteMcpToolService,
   publishCommunityMcpTool,
-  refreshMcpToolCount,
   rejectCommunityMcpTool,
   updateCommunityMcpTool,
 } from "@/services/mcpToolsService";
+import { checkMcpServerHealth } from "@/services/mcpService";
 import type {
   CommunityMcpCard,
   McpContainerConfigPayload,
@@ -39,6 +39,7 @@ import type {
 import {
   FILTER_ALL,
   McpDeploymentType,
+  McpServiceStatus,
   MCP_TOOLS_QUERY_KEYS,
   McpToolsServicesTab,
   McpTransportType,
@@ -683,7 +684,13 @@ function MineView({
   };
 
   const refreshMineData = async () => {
-    await Promise.all([localList.refetch(), myPublished.refetch()]);
+    await queryClient.invalidateQueries({
+      queryKey: MCP_TOOLS_QUERY_KEYS.communityReview,
+    });
+    await Promise.all([
+      localList.refetch(),
+      myPublished.refetch(),
+    ]);
   };
 
   const handleSubmitVersionUpdate = (
@@ -692,7 +699,7 @@ function MineView({
   ) => {
     const sharedFields = item.service.sharedFields;
     if (!sharedFields || !Object.values(sharedFields).some(Boolean)) {
-      message.warning("未勾选共享配置信息");
+      message.warning(t("mcpTools.mine.sharedFieldsRequired"));
       return;
     }
     if (item.kind === "community") {
@@ -757,16 +764,28 @@ function MineView({
           content,
         });
       }
-      message.success("上架申请成功");
+      const isInitialPublish = item.kind === "local" && !onlineService?.marketId;
+      message.success(
+        isInitialPublish
+          ? t("mcpTools.mine.publishApplySuccess")
+          : t("mcpTools.mine.submitVersionUpdateSuccess")
+      );
       // Optimistically update local cache to show pending status
       updateLocalReviewStatus(item, "pending");
-      await refreshMineData();
     } catch {
-      message.error("上架申请失败");
-      throw new Error("Apply listing failed");
+      message.error(t("mcpTools.mine.publishApplyFailed"));
     } finally {
       setPublishingKey(null);
+      return;
     }
+    // Refresh caches after successful submission; never fail the submission
+    // when a cache refresh has a transient error.
+    try {
+      await refreshMineData();
+    } catch {
+      // cache refresh errors are non-fatal
+    }
+    setPublishingKey(null);
   };
 
   const updateLocalReviewStatus = (
@@ -792,7 +811,9 @@ function MineView({
     if (!onlineService.communityId) return;
     const isPendingReview = onlineService.reviewStatus === "pending";
     modal.confirm({
-      title: isPendingReview ? "确认撤回审核？" : t("mcpTools.mine.unpublishOnlineVersionTitle"),
+      title: isPendingReview
+        ? t("mcpTools.mine.reviewModal.confirmCancelApplyTitle")
+        : t("mcpTools.mine.unpublishOnlineVersionTitle"),
       content: isPendingReview
         ? t("repository.listingStatus.cancelApply")
         : t("mcpTools.mine.unpublishOnlineVersionDescription", {
@@ -859,16 +880,25 @@ function MineView({
     });
   };
 
-  const handleRefreshToolCount = async (item: MineMcpCardItem) => {
-    if (item.kind !== "local") return;
+  const handleHealthCheck = async (item: MineMcpCardItem) => {
+    const mcpId = item.kind === "local" ? item.service.mcpId : item.service.sourceMcpId;
+    if (!mcpId) return;
     const key = getMineItemKey(item);
     setRefreshingMineKey(key);
     try {
-      await refreshMcpToolCount(item.service.mcpId);
-      message.success(t("mcpTools.mine.refreshToolCountSuccess"));
+      const result = await checkMcpServerHealth(mcpId);
+      if (result.success) {
+        message.success(t("mcpConfig.message.healthCheckSuccess"));
+      } else {
+        message.error(t("mcpConfig.message.healthCheckFailed"));
+        // If MCP is enabled and health check fails, auto-disable it
+        if (item.kind === "local" && item.service.enabled === McpServiceStatus.ENABLED) {
+          await toggle.toggle(item.service);
+        }
+      }
       await refreshMineData();
     } catch {
-      message.error(t("mcpTools.mine.refreshToolCountFailed"));
+      message.error(t("mcpConfig.message.healthCheckFailed"));
     } finally {
       setRefreshingMineKey(null);
     }
@@ -946,7 +976,6 @@ function MineView({
                 }
                 publishing={publishingKey === key}
                 unpublishing={unpublishingKey === key}
-                refreshingToolCount={refreshingMineKey === key}
                 onEditLocal={onEditLocal}
                 onEditCommunity={onEditCommunity}
                 onToggle={handleToggle}
@@ -956,7 +985,8 @@ function MineView({
                 onViewReviewProgress={(item, os) =>
                   setReviewProgressItem({ item, onlineService: os })
                 }
-                onRefreshToolCount={handleRefreshToolCount}
+                onHealthCheck={handleHealthCheck}
+                healthChecking={refreshingMineKey === getMineItemKey(item)}
               />
             );
           })}

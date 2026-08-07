@@ -59,13 +59,13 @@ def _require_admin_or_su(authorization: Optional[str]) -> str:
     return role
 
 
-def _require_su_or_asset_owner(authorization: Optional[str]) -> str:
-    """Require SU or ASSET_OWNER role. Returns the role string."""
+def _require_platform_quota_manager(authorization: Optional[str]) -> str:
+    """Require a role that can manage platform-level quotas."""
     role = _get_user_role(authorization)
-    if role not in ("SU", "ASSET_OWNER"):
+    if role not in ("SU", "ASSET_OWNER", "SPEED"):
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU or ASSET_OWNER role",
+            detail="This operation requires SU, ASSET_OWNER, or SPEED role",
         )
     return role
 
@@ -317,7 +317,7 @@ def get_tenant_quota_usage(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Platform-Level Quota Endpoints (SU/ASSET_OWNER only)
+# Platform-Level Quota Endpoints (SU/ASSET_OWNER/SPEED only)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -327,10 +327,10 @@ def get_platform_overview(
 ):
     """
     Get platform-level storage overview: all tenants' quotas and usage.
-    Restricted to SU and ASSET_OWNER roles.
+    Restricted to SU, ASSET_OWNER, and SPEED roles.
     """
     try:
-        _require_su_or_asset_owner(authorization)
+        _require_platform_quota_manager(authorization)
         user_id, _ = get_current_user_id(authorization)
 
         overview = QuotaService.get_platform_overview(ASSET_OWNER_TENANT_ID)
@@ -352,10 +352,10 @@ def set_platform_capacity(
 ):
     """
     Set platform-wide declared storage capacity.
-    Restricted to SU and ASSET_OWNER roles.
+    Restricted to SU, ASSET_OWNER, and SPEED roles.
     """
     try:
-        _require_su_or_asset_owner(authorization)
+        _require_platform_quota_manager(authorization)
         user_id, _ = get_current_user_id(authorization)
 
         capacity_gb = payload.get("capacity_gb")
@@ -384,10 +384,10 @@ def delete_platform_capacity(
 ):
     """
     Remove platform capacity declaration.
-    Restricted to SU and ASSET_OWNER roles.
+    Restricted to SU, ASSET_OWNER, and SPEED roles.
     """
     try:
-        _require_su_or_asset_owner(authorization)
+        _require_platform_quota_manager(authorization)
         user_id, _ = get_current_user_id(authorization)
 
         QuotaService.set_platform_capacity(None, ASSET_OWNER_TENANT_ID, user_id)
@@ -413,10 +413,10 @@ def set_tenant_hard_quota(
 ):
     """
     SU sets a hard quota on a target tenant.
-    Restricted to SU and ASSET_OWNER roles.
+    Restricted to SU, ASSET_OWNER, and SPEED roles.
     """
     try:
-        _require_su_or_asset_owner(authorization)
+        _require_platform_quota_manager(authorization)
         user_id, _ = get_current_user_id(authorization)
 
         hard_limit_gb = payload.get("hard_limit_gb")
@@ -454,10 +454,10 @@ def delete_tenant_hard_quota(
 ):
     """
     SU removes a tenant's hard quota.
-    Restricted to SU and ASSET_OWNER roles.
+    Restricted to SU, ASSET_OWNER, and SPEED roles.
     """
     try:
-        _require_su_or_asset_owner(authorization)
+        _require_platform_quota_manager(authorization)
         user_id, _ = get_current_user_id(authorization)
 
         QuotaService.delete_tenant_hard_limit(tenant_id, user_id)
