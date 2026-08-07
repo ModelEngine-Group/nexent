@@ -1,0 +1,42 @@
+"""Multimodal model unified adaptation gateway.
+
+Provides a protocol-agnostic adapter layer that *composes* the existing,
+stable model classes (``OpenAIModel`` / ``OpenAIVLModel`` / ``AliSTTModel`` /
+``AliTTSModel`` / embedding / rerank …) behind a single
+:class:`MultimodalGateway` entry point. Adding a vendor becomes one
+``@register_adapter(factory, modality)`` decorator — backend services no
+longer hardcode ``if model_factory == ...`` dispatch.
+
+Importing :mod:`nexent.core.models.gateway` (or its :mod:`.modality` subpackage)
+registers all built-in adapters with the process-wide registry.
+
+See ``doc/multimodal-gateway-design.md`` for the full design.
+"""
+
+from .base import ModelInfo, MultimodalAdapter
+from .context import ModelContext
+from .gateway import MultimodalGateway, get_gateway
+from .registry import AdapterRegistry, get_registry, register_adapter
+from .transport import (
+    HttpTransportMixin,
+    Transport,
+    WebSocketTransportMixin,
+)
+
+# Importing .modality registers all built-in adapters via @register_adapter.
+from . import modality  # noqa: F401  (side-effect: registration)
+
+__all__ = [
+    "ModelInfo",
+    "MultimodalAdapter",
+    "ModelContext",
+    "MultimodalGateway",
+    "get_gateway",
+    "AdapterRegistry",
+    "get_registry",
+    "register_adapter",
+    "Transport",
+    "HttpTransportMixin",
+    "WebSocketTransportMixin",
+    "modality",
+]

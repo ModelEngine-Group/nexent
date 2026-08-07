@@ -29,6 +29,7 @@ from .capacity_budget import (
     compute_w2_fingerprint,
 )
 from . import tokenizer_registry
+from . import gateway
 
 __all__ = [
     "OpenAIModel",
@@ -62,4 +63,5 @@ __all__ = [
     "W2_RESOLVER_VERSION",
     "compute_w2_fingerprint",
     "tokenizer_registry",
+    "gateway",
 ]
