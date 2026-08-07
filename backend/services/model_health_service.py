@@ -5,9 +5,8 @@ from nexent.core import MessageObserver
 from nexent.core.models import OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
-from services.model_gateway_service import get_llm_adapter_from_config
+from services.model_gateway_service import build_adapter_fresh, get_llm_adapter_from_config
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
@@ -227,13 +226,11 @@ async def _perform_connectivity_check(
             display_name=display_name,
         ).health_check()
     elif model_type == "rerank":
-        rerank_model = OpenAICompatibleRerank(
-            model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify,
-        )
-        connectivity = await rerank_model.connectivity_check()
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify},
+            "rerank", "rerank", None, model_name=model_name,
+        ).health_check()
     elif model_type in ("vlm", "vlm2", "vlm3"):
         if (
             model_type in PROVIDER_CATALOG_HEALTHCHECK_TYPES

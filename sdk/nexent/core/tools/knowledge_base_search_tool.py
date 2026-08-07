@@ -9,7 +9,7 @@ from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
 from ..models.embedding_model import BaseEmbedding
-from ..models.rerank_model import BaseRerank
+from ..models.gateway.modality.rerank_adapter import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -107,7 +107,7 @@ class KnowledgeBaseSearchTool(Tool):
         embedding_model: BaseEmbedding = Field(
             description="The embedding model to use", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True
         ),
         vdb_core: VectorDatabaseCore = Field(
