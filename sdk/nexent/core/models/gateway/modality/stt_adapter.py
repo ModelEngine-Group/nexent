@@ -69,14 +69,16 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
     def _build_inner(self) -> None:
         from ..ali_stt_model import AliSTTConfig, AliSTTModel
 
+        extras = self._context.extra
         cfg = AliSTTConfig(
             api_key=self._context.api_key,
             model=self._context.model_name,
             language=self._context.language,
             ws_url=self._ws_url,
-            format=self._context.extra.get("format", "pcm"),
-            rate=self._context.extra.get("rate", 16000),
-            enable_vad=self._context.extra.get("enable_vad", True),
+            format=extras.get("format", "pcm"),
+            rate=extras.get("rate", 16000),
+            enable_vad=extras.get("enable_vad", True),
+            timeout=extras.get("timeout", 60),
         )
         self._inner = AliSTTModel(cfg, self._context.audio_file_path)
 

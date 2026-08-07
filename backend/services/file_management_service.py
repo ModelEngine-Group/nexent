@@ -45,7 +45,7 @@ from utils.file_management_utils import save_upload_file
 
 from nexent import MessageObserver
 from nexent.multi_modal.utils import parse_s3_url
-from nexent.core.models import OpenAILongContextModel
+from services.model_gateway_service import get_llm_adapter_from_config
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
@@ -628,17 +628,13 @@ def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
         resolved_model_name
     )
 
-    long_text_to_text_model = OpenAILongContextModel(
+    long_text_to_text_model = get_llm_adapter_from_config(
+        main_model_config,
+        tenant_id,
+        modality="llm_long_context",
+        model_name=resolved_model_name,
         observer=MessageObserver(),
-        model_id=resolved_model_name,
-        api_base=main_model_config.get("base_url"),
-        api_key=main_model_config.get("api_key"),
-        max_context_tokens=main_model_config.get("max_tokens"),
-        ssl_verify=main_model_config.get("ssl_verify", True),
-        timeout_seconds=timeout_seconds,
-        model_factory=main_model_config.get("model_factory"),
-        display_name=main_model_config.get("display_name"),
-    )
+    )._inner
     return long_text_to_text_model
 
 

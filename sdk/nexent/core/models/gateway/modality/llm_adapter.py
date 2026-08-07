@@ -91,7 +91,10 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         # model_id / api_base / api_key are consumed by smolagents
         # OpenAIServerModel via **kwargs forwarding; observer / ssl_verify /
         # model_factory / display_name / timeout_seconds are named on OpenAIModel.
-        self._inner = OpenAIModel(
+        # Per-call-site tuning (temperature/top_p/max_output_tokens/stream) is
+        # carried in context.extra so switching call sites is behavior-preserving.
+        extras = self._context.extra
+        kwargs = dict(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
@@ -99,10 +102,16 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            timeout_seconds=self._context.extra.get("timeout_seconds"),
-            extra_body=self._context.extra.get("extra_body"),
-            max_output_tokens=self._context.extra.get("max_output_tokens"),
+            timeout_seconds=extras.get("timeout_seconds"),
+            extra_body=extras.get("extra_body"),
+            max_output_tokens=extras.get("max_output_tokens"),
         )
+        # Only forward sampling/stream params when the call site set them, so
+        # OpenAIModel defaults apply otherwise.
+        for opt in ("temperature", "top_p", "stream"):
+            if extras.get(opt) is not None:
+                kwargs[opt] = extras.get(opt)
+        self._inner = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
         if self._inner is None:
@@ -155,21 +164,20 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
     def _build_inner(self) -> None:
         from ..openai_long_context_model import OpenAILongContextModel
 
+        extras = self._context.extra
         self._inner = OpenAILongContextModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
             api_key=self._api_key,
-            max_context_tokens=self._context.extra.get("max_tokens", 128000),
-            truncation_strategy=self._context.extra.get(
-                "truncation_strategy", "start"
-            ),
+            max_context_tokens=extras.get("max_tokens", 128000),
+            truncation_strategy=extras.get("truncation_strategy", "start"),
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            timeout_seconds=self._context.extra.get("timeout_seconds"),
-            extra_body=self._context.extra.get("extra_body"),
-            max_output_tokens=self._context.extra.get("max_output_tokens"),
+            timeout_seconds=extras.get("timeout_seconds"),
+            extra_body=extras.get("extra_body"),
+            max_output_tokens=extras.get("max_output_tokens"),
         )
 
     def get_model_info(self) -> ModelInfo:
