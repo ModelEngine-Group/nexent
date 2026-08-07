@@ -12,225 +12,19 @@ from consts.exceptions import (
 )
 from database.model_management_db import get_model_records
 from utils.config_utils import tenant_config_manager
-from services.model_gateway_service import build_adapter_fresh
+from services.model_gateway_service import (
+    build_adapter_fresh,
+    get_stt_adapter_from_params,
+    get_stt_adapter_from_tenant_config,
+    get_tts_adapter_from_params,
+    get_tts_adapter_from_tenant_config,
+)
 
 logger = logging.getLogger("voice_service")
 
 
 class VoiceService:
     """Voice service that handles STT and TTS operations"""
-
-    def _get_stt_model_from_config(
-        self,
-        model_factory: Optional[str] = None,
-        model_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model_appid: Optional[str] = None,
-        access_token: Optional[str] = None,
-        base_url: Optional[str] = None,
-        language: str = "zh"
-    ) -> BaseSTTModel:
-        """
-        Get the appropriate STT model based on model factory configuration.
-
-        Args:
-            model_factory: Model factory/vendor name
-            model_name: Model name
-            api_key: API key (for Ali STT)
-            model_appid: Application ID (for Volcano STT)
-            access_token: Access token (for Volcano STT)
-            base_url: Custom WebSocket URL (optional)
-            language: Language for speech recognition
-
-        Returns:
-            STT model instance based on configuration
-        """
-        # Vendor dispatch (Ali vs Volc) is resolved by the adapter registry;
-        # per-vendor Config construction lives in the STT adapters. Built fresh
-        # per call (no gateway cache) since api_key/ws_url are per-request.
-        cfg = {
-            "model_factory": model_factory,
-            "model_name": model_name,
-            "api_key": api_key,
-            "model_appid": model_appid,
-            "access_token": access_token,
-            "base_url": base_url,
-        }
-        return build_adapter_fresh(
-            cfg, "stt", "stt", None,
-            language=language,
-            model_name=model_name or "qwen3-asr-flash-realtime",
-            timeout=5,
-        )._inner
-
-    def _get_stt_model_from_tenant_config(
-        self,
-        tenant_id: str,
-        language: str = "zh"
-    ) -> BaseSTTModel:
-        """
-        Get STT model based on tenant's model configuration.
-
-        Args:
-            tenant_id: Tenant ID
-            language: Language for speech recognition
-
-        Returns:
-            STT model instance based on tenant's configuration
-        """
-        try:
-            # Get STT model configuration from tenant config
-            stt_config = tenant_config_manager.get_model_config(tenant_id, "stt")
-
-            if stt_config:
-                model_factory = stt_config.get("model_factory", "")
-                model_name = stt_config.get("model_name", "")
-                api_key = stt_config.get("api_key", "")
-                base_url = stt_config.get("base_url", "")
-                model_appid = stt_config.get("model_appid", "")
-                access_token_val = stt_config.get("access_token", "")
-
-                return self._get_stt_model_from_config(
-                    model_factory=model_factory,
-                    model_name=model_name,
-                    api_key=api_key,
-                    model_appid=model_appid,
-                    access_token=access_token_val,
-                    base_url=base_url,
-                    language=language
-                )
-
-            # Try to get from model records in database
-            model_records = get_model_records({"model_type": "stt"}, tenant_id)
-            if model_records:
-                record = model_records[0]
-                model_factory = record.get("model_factory", "")
-                model_name = record.get("model_name", "")
-                api_key = record.get("api_key", "")
-                base_url = record.get("base_url", "")
-                model_appid = record.get("model_appid", "")
-                access_token_val = record.get("access_token", "")
-
-                return self._get_stt_model_from_config(
-                    model_factory=model_factory,
-                    model_name=model_name,
-                    api_key=api_key,
-                    model_appid=model_appid,
-                    access_token=access_token_val,
-                    base_url=base_url,
-                    language=language
-                )
-
-            logger.warning(f"No STT model configuration found for tenant {tenant_id}, using default config")
-            return self._get_stt_model_from_config(language=language)
-
-        except Exception as e:
-            logger.error(f"Error getting STT model config for tenant {tenant_id}: {str(e)}")
-            return self._get_stt_model_from_config(language=language)
-
-    def _get_tts_model_from_config(
-        self,
-        model_factory: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model_appid: Optional[str] = None,
-        access_token: Optional[str] = None,
-        speed_ratio: float = 1.0,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None
-    ) -> BaseTTSModel:
-        """
-        Get the appropriate TTS model based on model factory configuration.
-
-        Args:
-            model_factory: Model factory/vendor name
-            api_key: API key (for Ali TTS)
-            model_appid: Application ID (for Volcano TTS)
-            access_token: Access token (for Volcano TTS)
-            speed_ratio: Speech speed ratio
-            base_url: Custom WebSocket URL (optional)
-            model: Model name (for Ali TTS)
-
-        Returns:
-            TTS model instance based on configuration
-        """
-        # Vendor dispatch (Ali vs Volc) is resolved by the adapter registry;
-        # per-vendor Config construction (Ali voice="Cherry", Volc voice_type
-        # default, etc.) lives in the TTS adapters. Built fresh per call.
-        cfg = {
-            "model_factory": model_factory,
-            "api_key": api_key,
-            "model_appid": model_appid,
-            "access_token": access_token,
-            "base_url": base_url,
-        }
-        return build_adapter_fresh(
-            cfg, "tts", "tts", None,
-            model_name=model or "qwen3-tts-flash",
-            speed_ratio=speed_ratio,
-        )._inner
-
-    def _get_tts_model_from_tenant_config(
-        self,
-        tenant_id: str
-    ) -> BaseTTSModel:
-        """
-        Get TTS model based on tenant's model configuration.
-
-        Args:
-            tenant_id: Tenant ID
-
-        Returns:
-            TTS model instance based on tenant's configuration
-        """
-        try:
-            tts_config = tenant_config_manager.get_model_config(tenant_id, "tts")
-
-            if tts_config:
-                model_factory = tts_config.get("model_factory", "")
-                api_key = tts_config.get("api_key", "")
-                model_appid = tts_config.get("model_appid", "")
-                access_token_val = tts_config.get("access_token", "")
-                speed_ratio = float(tts_config.get("speed_ratio", 1.0))
-                base_url = tts_config.get("base_url", "")
-                model = tts_config.get("model") or tts_config.get("model_name", "")
-
-                return self._get_tts_model_from_config(
-                    model_factory=model_factory,
-                    api_key=api_key,
-                    model_appid=model_appid,
-                    access_token=access_token_val,
-                    speed_ratio=speed_ratio,
-                    base_url=base_url if base_url else None,
-                    model=model if model else None
-                )
-
-            model_records = get_model_records({"model_type": "tts"}, tenant_id)
-            if model_records:
-                record = model_records[0]
-                model_factory = record.get("model_factory", "")
-                api_key = record.get("api_key", "")
-                model_appid = record.get("model_appid", "")
-                access_token_val = record.get("access_token", "")
-                speed_ratio = float(record.get("speed_ratio", 1.0))
-                base_url = record.get("base_url", "")
-                model = record.get("model_name", "")
-
-                return self._get_tts_model_from_config(
-                    model_factory=model_factory,
-                    api_key=api_key,
-                    model_appid=model_appid,
-                    access_token=access_token_val,
-                    speed_ratio=speed_ratio,
-                    base_url=base_url if base_url else None,
-                    model=model if model else None
-                )
-
-            logger.warning(f"No TTS model configuration found for tenant {tenant_id}, using default config")
-            return self._get_tts_model_from_config()
-
-        except Exception as e:
-            logger.error(f"Error getting TTS model config for tenant {tenant_id}: {str(e)}")
-            return self._get_tts_model_from_config()
 
     async def start_stt_streaming_session(
         self,
@@ -272,7 +66,7 @@ class VoiceService:
 
             # Get STT model based on configuration
             if model_factory or api_key or model_appid:
-                stt_model = self._get_stt_model_from_config(
+                stt_model = get_stt_adapter_from_params(
                     model_factory=model_factory,
                     model_name=model_name,
                     api_key=api_key,
@@ -282,10 +76,10 @@ class VoiceService:
                     language=language
                 )
             elif tenant_id:
-                stt_model = self._get_stt_model_from_tenant_config(tenant_id, language)
+                stt_model = get_stt_adapter_from_tenant_config(tenant_id, language)
             else:
                 logger.warning("No tenant_id provided and no explicit config, using default Ali STT")
-                stt_model = self._get_stt_model_from_config(
+                stt_model = get_stt_adapter_from_params(
                     api_key=api_key,
                     language=language
                 )
@@ -353,7 +147,7 @@ class VoiceService:
 
             if use_volc:
                 # Use Volcano TTS
-                tts_model = self._get_tts_model_from_config(
+                tts_model = get_tts_adapter_from_params(
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -365,7 +159,7 @@ class VoiceService:
                 logger.info(f"TTS model created: Volcano TTS (factory={model_factory})")
             elif api_key:
                 # Use Ali TTS with provided api_key
-                tts_model = self._get_tts_model_from_config(
+                tts_model = get_tts_adapter_from_params(
                     model_factory=model_factory,
                     api_key=api_key,
                     model_appid=model_appid,
@@ -376,11 +170,11 @@ class VoiceService:
                 )
                 logger.info(f"TTS model created: Ali TTS (api_key provided)")
             elif tenant_id:
-                tts_model = self._get_tts_model_from_tenant_config(tenant_id)
+                tts_model = get_tts_adapter_from_tenant_config(tenant_id)
                 logger.info(f"TTS model created from tenant config for tenant_id={tenant_id}")
             else:
                 logger.warning("No api_key, model_name, or tenant_id provided, using default TTS model")
-                tts_model = self._get_tts_model_from_config()
+                tts_model = get_tts_adapter_from_params()
 
             speech_result = await tts_model.generate_speech(text, stream=stream)
             return speech_result
@@ -472,7 +266,7 @@ class VoiceService:
         """
         try:
             # Get STT model based on factory
-            stt_model = self._get_stt_model_from_config(
+            stt_model = get_stt_adapter_from_params(
                 model_factory=model_factory,
                 model_name=model,
                 api_key=api_key,
@@ -524,7 +318,7 @@ class VoiceService:
             TTSConnectionException: If connectivity check fails
         """
         try:
-            tts_model = self._get_tts_model_from_config(
+            tts_model = get_tts_adapter_from_params(
                 model_factory=model_factory,
                 api_key=api_key,
                 model_appid=model_appid,
