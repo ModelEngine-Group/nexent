@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 
-from ..core.models.embedding_model import BaseEmbedding
+from ..core.models.gateway.modality.embedding_adapter import EmbeddingAdapter
 
 
 class VectorDatabaseCore(ABC):
@@ -75,7 +75,7 @@ class VectorDatabaseCore(ABC):
     def vectorize_documents(
         self,
         index_name: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         documents: List[Dict[str, Any]],
         batch_size: int = 64,
         content_field: str = "content",
@@ -237,7 +237,7 @@ class VectorDatabaseCore(ABC):
 
     @abstractmethod
     def semantic_search(
-        self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
+        self, index_names: List[str], query_text: str, embedding_model: EmbeddingAdapter, top_k: int = 5
     ) -> List[Dict[str, Any]]:
         """
         Search for similar documents using vector similarity across multiple indices.
@@ -258,7 +258,7 @@ class VectorDatabaseCore(ABC):
         self,
         index_names: List[str],
         query_text: str,
-        embedding_model: BaseEmbedding,
+        embedding_model: EmbeddingAdapter,
         top_k: int = 5,
         weight_accurate: float = 0.3,
     ) -> List[Dict[str, Any]]:

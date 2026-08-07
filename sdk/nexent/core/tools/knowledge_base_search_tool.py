@@ -8,7 +8,7 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
-from ..models.embedding_model import BaseEmbedding
+from ..models.gateway.modality.embedding_adapter import EmbeddingAdapter
 from ..models.gateway.modality.rerank_adapter import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
@@ -104,7 +104,7 @@ class KnowledgeBaseSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        embedding_model: BaseEmbedding = Field(
+        embedding_model: EmbeddingAdapter = Field(
             description="The embedding model to use", default=None, exclude=True
         ),
         rerank_model: RerankAdapter = Field(
