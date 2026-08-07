@@ -482,6 +482,7 @@ setattr(agents_pkg, "create_agent_info", create_agent_info_module)
 
 # Now import the symbols under test
 from backend.agents.create_agent_info import (
+    LOCAL_PYTHON_IMPORT_ALLOWLIST,
     discover_langchain_tools,
     create_tool_config_list,
     create_agent_config,
@@ -2044,6 +2045,35 @@ class TestCreateAgentConfig:
         assert "search_memory" not in policy
         assert "store_memory" in policy
         assert "instructions" not in mocks["agent_config"].call_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sandbox_default_level", "expected_authorized_imports"),
+        [
+            ("local", LOCAL_PYTHON_IMPORT_ALLOWLIST),
+            ("docker", None),
+        ],
+    )
+    async def test_create_agent_config_injects_import_policy_only_for_local_executor(
+        self,
+        sandbox_default_level,
+        expected_authorized_imports,
+    ):
+        with patch(
+            "backend.agents.create_agent_info.os.getenv",
+            return_value=sandbox_default_level,
+        ):
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        assert (
+            mocks["build_components"].call_args.kwargs[
+                "restricted_python_authorized_imports"
+            ]
+            == expected_authorized_imports
+        )
 
     @pytest.mark.asyncio
     async def test_create_agent_config_runs_fixed_search_once_without_exposing_tool(self):
