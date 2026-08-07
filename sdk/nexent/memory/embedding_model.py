@@ -11,7 +11,7 @@ This module provides:
       mem_{model_name}_{dimension}            # when model_repo is absent
 
 - ``get_embedding_client()``: a process-wide cache that reuses
-  ``OpenAICompatibleEmbedding`` instances keyed by ``(model_name, dimension)``.
+  ``OpenAICompatibleEmbeddingAdapter`` instances keyed by ``(model_name, dimension)``.
   Creating an HTTP client per memory write would add unnecessary latency;
   caching a single instance per model avoids that while keeping the SDK
   layer stateless.
@@ -28,7 +28,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from ..core.models.embedding_model import OpenAICompatibleEmbedding
+from ..core.models.gateway.modality.embedding_adapter import OpenAICompatibleEmbeddingAdapter
+from ..core.models.gateway import ModelContext
 
 logger = logging.getLogger("memory_embedding_model")
 
@@ -80,8 +81,8 @@ class EmbeddingModelInfo:
 # --------------------------------------------------------------------------- #
 # Process-wide HTTP client cache                                               #
 # --------------------------------------------------------------------------- #
-# Key = "model_name:dimension", Value = OpenAICompatibleEmbedding instance.
-_embedding_client_cache: dict[str, OpenAICompatibleEmbedding] = {}
+# Key = "model_name:dimension", Value = OpenAICompatibleEmbeddingAdapter instance.
+_embedding_client_cache: dict[str, OpenAICompatibleEmbeddingAdapter] = {}
 
 
 def get_embedding_client(
@@ -91,8 +92,8 @@ def get_embedding_client(
     api_key: str,
     model_repo: Optional[str] = None,
     ssl_verify: bool = True,
-) -> OpenAICompatibleEmbedding:
-    """Return a cached ``OpenAICompatibleEmbedding`` instance.
+) -> OpenAICompatibleEmbeddingAdapter:
+    """Return a cached ``OpenAICompatibleEmbeddingAdapter`` instance.
 
     Instances are cached by ``(model_repo, model_name, dimension)`` so that
     repeated memory writes within the same process reuse the underlying HTTP
@@ -112,18 +113,22 @@ def get_embedding_client(
         ssl_verify: Whether to verify SSL certificates.
 
     Returns:
-        A cached (or newly created) ``OpenAICompatibleEmbedding`` instance.
+        A cached (or newly created) ``OpenAICompatibleEmbeddingAdapter`` instance.
     """
     cache_key = f"{model_repo or ''}:{model_name}:{dimension}"
     if cache_key not in _embedding_client_cache:
         # Form the fully-qualified model name the API expects.
         full_model_name = f"{model_repo}/{model_name}" if model_repo else model_name
-        _embedding_client_cache[cache_key] = OpenAICompatibleEmbedding(
-            model_name=full_model_name,
-            base_url=base_url,
-            api_key=api_key,
-            embedding_dim=dimension,
-            ssl_verify=ssl_verify,
+        _embedding_client_cache[cache_key] = OpenAICompatibleEmbeddingAdapter(
+            ModelContext(
+                model_name=full_model_name,
+                base_url=base_url,
+                api_key=api_key,
+                modality="embedding",
+                factory="openai",
+                embedding_dim=dimension,
+                ssl_verify=ssl_verify,
+            )
         )
         logger.debug(
             "Created and cached embedding client for model=%s dim=%d",
