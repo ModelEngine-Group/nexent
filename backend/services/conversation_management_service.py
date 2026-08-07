@@ -297,7 +297,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         stream=False,
         timeout_seconds=timeout_seconds,
         display_name=display_name or None,
-    )._inner
+    )
 
     # Build messages - use new template variable 'question' instead of 'content'
     user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({

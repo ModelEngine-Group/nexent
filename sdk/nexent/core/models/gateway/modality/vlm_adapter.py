@@ -8,7 +8,6 @@ adapter reuses the same ``_inner`` class with a different ``factory`` tag.
 
 from __future__ import annotations
 
-import asyncio
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Dict, Optional, Union
@@ -73,6 +72,10 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: VLMRequest) -> Any:
+        return self.invoke_sync(request)
+
+    def invoke_sync(self, request: VLMRequest) -> Any:
+        """Synchronous invoke for sync smolagents tools (analyze_* are sync)."""
         if self._inner is None:
             self._build_inner()
         method = getattr(self._inner, _METHOD_MAP[request.media_type])
@@ -81,7 +84,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             call_kwargs["system_prompt"] = request.prompt
         if request.kwargs:
             call_kwargs.update(request.kwargs)
-        return await asyncio.to_thread(method, request.media_input, **call_kwargs)
+        return method(request.media_input, **call_kwargs)
 
     async def health_check(self) -> bool:
         if self._inner is None:

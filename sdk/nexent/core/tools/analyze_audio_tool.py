@@ -14,6 +14,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ...core.models import OpenAIVLModel
+from ...core.models.gateway.modality.vlm_adapter import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
@@ -165,10 +166,13 @@ class AnalyzeAudioTool(Tool):
                     content_type = "audio/mpeg"
                 audio_stream = BytesIO(audio_bytes)
                 try:
-                    response = self.vlm_model.analyze_audio(
-                        audio_input=audio_stream,
-                        system_prompt=system_prompt,
-                        content_type=content_type,
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="audio",
+                            media_input=audio_stream,
+                            prompt=system_prompt,
+                            kwargs={"content_type": content_type},
+                        )
                     )
                 except Exception as e:
                     error_msg_zh = f"音频{index}分析失败: {str(e)}。请检查视频理解模型配置是否正确。"

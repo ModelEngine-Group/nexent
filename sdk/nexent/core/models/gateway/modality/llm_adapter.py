@@ -45,28 +45,12 @@ class LLMAdapter(MultimodalAdapter):
         """Explicitly forward ``__call__`` so CoreAgent can use the adapter as its model.
 
         Python special methods do not route through ``__getattr__``.
+        Attribute forwarding (``model.client`` / ``model.model_id`` / ...) is
+        inherited from :class:`MultimodalAdapter.__getattr__`.
         """
         if self._inner is None:
             self._build_inner()
         return self._inner(messages, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        """Fallback: forward unknown attributes to ``_inner``.
-
-        ``_inner`` and ``_context`` are real instance attributes set in
-        ``__init__``, so accessing them here never recurses. This covers
-        ``model.client`` / ``model.model_id`` / ``model.temperature`` /
-        ``model.safe_input_budget_snapshot`` and any future smolagents
-        attribute — zero maintenance cost.
-        """
-        # Guard against the bootstrap window before __init__ sets _inner, and
-        # avoid recursing on private dunder lookups.
-        if name.startswith("__") and name.endswith("__"):
-            raise AttributeError(name)
-        inner = self.__dict__.get("_inner")
-        if inner is not None:
-            return getattr(inner, name)
-        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
 
 
 @register_adapter("openai", "llm")
