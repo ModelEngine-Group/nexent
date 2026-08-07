@@ -28,6 +28,7 @@ from nexent.core.models.capacity_budget import (
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -76,17 +77,6 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
-
-# The current LocalPythonExecutor import allowlist. This prompt-only list does
-# not change interpreter permissions; it prevents avoidable failed imports.
-LOCAL_PYTHON_IMPORT_ALLOWLIST = [
-    "array", "base64", "bisect", "calendar", "cmath", "collections", "copy",
-    "csv", "datetime", "decimal", "fractions", "functools", "hashlib", "heapq",
-    "hmac", "itertools", "json", "math", "operator", "pprint", "queue", "random",
-    "re", "stat", "statistics", "string", "textwrap", "time", "typing",
-    "unicodedata", "uuid",
-]
-
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
@@ -1243,7 +1233,7 @@ async def create_agent_config(
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
         restricted_python_authorized_imports=(
-            LOCAL_PYTHON_IMPORT_ALLOWLIST if is_local_python_executor else None
+            get_local_python_authorized_imports() if is_local_python_executor else None
         ),
     )
 

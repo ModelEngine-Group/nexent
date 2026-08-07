@@ -362,7 +362,8 @@ with patch.dict("sys.modules", module_mocks):
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import (
         NexentAgent, ActionStep, TaskStep, _has_host_tools, _is_retriever_tool,
-        _build_tool_input, _wrap_tool_with_monitoring, _tool_name
+        _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
+        SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
     )
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
@@ -506,6 +507,17 @@ def mock_core_agent():
 # ----------------------------------------------------------------------------
 # Tests for type-only imports and helper functions
 # ----------------------------------------------------------------------------
+
+
+def test_get_local_python_authorized_imports_matches_executor_defaults(monkeypatch):
+    """The prompt allowlist must mirror the local executor's imports."""
+    executor_module = types.ModuleType("smolagents.local_python_executor")
+    executor_module.BASE_BUILTIN_MODULES = ["json", "queue", "stat"]
+    monkeypatch.setitem(sys.modules, "smolagents.local_python_executor", executor_module)
+
+    assert get_local_python_authorized_imports() == sorted(
+        set(SAFE_PYTHON_INTERPRETER_IMPORTS) | {"json", "queue", "stat"}
+    )
 
 
 def test_type_checking_imports_resolve_context_and_subagent_types(monkeypatch):
