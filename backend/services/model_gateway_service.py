@@ -22,8 +22,9 @@ from typing import Any, Dict, Optional
 from nexent import MessageObserver
 from nexent.core.models.gateway import ModelContext, get_gateway
 from nexent.core.models.gateway.registry import get_registry
-from consts.const import TEST_PCM_PATH
-from utils.config_utils import get_model_name_from_config
+from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
+from database.model_management_db import get_model_by_model_id, get_model_records
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 logger = logging.getLogger("model_gateway_service")
 
@@ -185,6 +186,154 @@ def get_vlm_adapter_from_config(
     **construct_extras: Any,
 ):
     return get_adapter_from_config(cfg, "vlm", slot, tenant_id, **construct_extras)
+
+
+def _fetch_slot_config(tenant_id, model_id, expected_type, slot_key):
+    """Fetch a model config by model_id (with type check) or by slot key."""
+    if model_id:
+        cfg = get_model_by_model_id(int(model_id), tenant_id)
+        if not cfg:
+            raise ValueError(f"Model not found: {model_id}")
+        if cfg.get("model_type") != expected_type:
+            raise ValueError(
+                f"Selected model {model_id} is not a {expected_type} model"
+            )
+        return cfg
+    return tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING.get(slot_key, slot_key), tenant_id=tenant_id
+    )
+
+
+def get_vlm_adapter(tenant_id: str, model_id: Optional[int] = None, slot: str = "vlm"):
+    """Resolve the VLM adapter directly (bridge owns config-fetch).
+
+    Replaces ``image_service.get_vlm_model`` / ``get_video_understanding_model``.
+    ``slot`` = ``"vlm"`` (image) or ``"vlm3"`` (video/audio).
+    """
+    cfg = _fetch_slot_config(tenant_id, model_id, expected_type=slot, slot_key=slot)
+    if not cfg:
+        return None
+    return get_gateway().get_adapter(_config_to_context(cfg, "vlm", slot, tenant_id))
+
+
+def get_llm_adapter(tenant_id: str, model_id: Optional[int] = None, modality: str = "llm"):
+    """Resolve the LLM (or long-context) adapter directly (bridge owns config-fetch).
+
+    Replaces ``file_management_service.get_llm_model``. ``modality`` = ``"llm"``
+    (standard) or ``"llm_long_context"`` (AnalyzeTextFile long-context).
+    """
+    if model_id:
+        cfg = get_model_by_model_id(int(model_id), tenant_id)
+        if not cfg:
+            raise ValueError(f"Model not found: {model_id}")
+        if cfg.get("model_type") != "llm":
+            raise ValueError(f"Selected model {model_id} is not an LLM model")
+    else:
+        cfg = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+        )
+    if not cfg:
+        return None
+    return get_gateway().get_adapter(
+        _config_to_context(cfg, modality, "llm", tenant_id, observer=MessageObserver())
+    )
+
+
+def _fetch_voice_config(tenant_id, model_type):
+    """Fetch an STT/TTS config from tenant_config or model_records (voice fallback)."""
+    try:
+        cfg = tenant_config_manager.get_model_config(tenant_id, model_type)
+        if cfg and isinstance(cfg, dict):
+            return cfg
+    except Exception:
+        pass
+    try:
+        records = get_model_records({"model_type": model_type}, tenant_id)
+        if records:
+            return records[0]
+    except Exception:
+        pass
+    return None
+
+
+def get_stt_adapter_from_params(
+    model_factory: Optional[str] = None,
+    model_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    language: str = "zh",
+):
+    """STT adapter from explicit params. Replaces ``voice_service._get_stt_model_from_config``.
+
+    Signature mirrors the old method (minus ``self``); vendor dispatch (Ali vs Volc)
+    is resolved by the registry; per-vendor Config construction lives in the STT
+    adapters. Built fresh (no gateway cache) since api_key/ws_url are per-request.
+    """
+    cfg = {
+        "model_factory": model_factory,
+        "model_name": model_name,
+        "api_key": api_key,
+        "model_appid": model_appid,
+        "access_token": access_token,
+        "base_url": base_url,
+    }
+    return build_adapter_fresh(
+        cfg, "stt", "stt", None,
+        language=language,
+        model_name=model_name or "qwen3-asr-flash-realtime",
+        timeout=5,
+    )
+
+
+def get_stt_adapter_from_tenant_config(tenant_id: str, language: str = "zh"):
+    """STT adapter from tenant config. Replaces ``voice_service._get_stt_model_from_tenant_config``."""
+    cfg = _fetch_voice_config(tenant_id, "stt")
+    if not cfg:
+        return get_stt_adapter_from_params(language=language)
+    return build_adapter_fresh(
+        cfg, "stt", "stt", tenant_id,
+        language=language,
+        model_name=cfg.get("model_name") or "qwen3-asr-flash-realtime",
+        timeout=5,
+    )
+
+
+def get_tts_adapter_from_params(
+    model_factory: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    speed_ratio: float = 1.0,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+):
+    """TTS adapter from explicit params. Replaces ``voice_service._get_tts_model_from_config``."""
+    cfg = {
+        "model_factory": model_factory,
+        "api_key": api_key,
+        "model_appid": model_appid,
+        "access_token": access_token,
+        "base_url": base_url,
+    }
+    return build_adapter_fresh(
+        cfg, "tts", "tts", None,
+        model_name=model or "qwen3-tts-flash",
+        speed_ratio=speed_ratio,
+    )
+
+
+def get_tts_adapter_from_tenant_config(tenant_id: str):
+    """TTS adapter from tenant config. Replaces ``voice_service._get_tts_model_from_tenant_config``."""
+    cfg = _fetch_voice_config(tenant_id, "tts")
+    if not cfg:
+        return get_tts_adapter_from_params()
+    return build_adapter_fresh(
+        cfg, "tts", "tts", tenant_id,
+        model_name=cfg.get("model_name") or "qwen3-tts-flash",
+        speed_ratio=float(cfg.get("speed_ratio", 1.0)),
+    )
 
 
 def get_stt_adapter_from_config(

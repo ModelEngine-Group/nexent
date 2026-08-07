@@ -15,7 +15,6 @@ from consts.const import (
     DATA_PROCESS_SERVICE,
     FILE_PREVIEW_SIZE_LIMIT,
     MAX_CONCURRENT_UPLOADS,
-    MODEL_CONFIG_MAPPING,
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
@@ -38,14 +37,10 @@ from database.attachment_db import (
     list_files,
     upload_fileobj,
 )
-from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 
-from nexent import MessageObserver
 from nexent.multi_modal.utils import parse_s3_url
-from services.model_gateway_service import get_llm_adapter_from_config
 
 # Create upload directory
 upload_dir = Path(UPLOAD_FOLDER)
@@ -603,39 +598,6 @@ async def list_files_impl(prefix: str, limit: Optional[int] = None):
     if limit:
         files = files[:limit]
     return files
-
-
-def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
-    if model_id:
-        main_model_config = get_model_by_model_id(int(model_id), tenant_id)
-        if not main_model_config:
-            raise ValueError(f"Model not found: {model_id}")
-        if main_model_config.get("model_type") != "llm":
-            raise ValueError(f"Selected model {model_id} is not an LLM model")
-    else:
-        # Get the tenant config
-        main_model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    timeout_seconds = main_model_config.get(
-        "timeout_seconds") if main_model_config else None
-    
-    resolved_model_name = get_model_name_from_config(main_model_config)
-
-    logger.info(
-        "Using LLM model for analyze_text_file: model_id=%s, display_name=%s, model_name=%s",
-        model_id,
-        main_model_config.get("display_name") if main_model_config else None,
-        resolved_model_name
-    )
-
-    long_text_to_text_model = get_llm_adapter_from_config(
-        main_model_config,
-        tenant_id,
-        modality="llm_long_context",
-        model_name=resolved_model_name,
-        observer=MessageObserver(),
-    )
-    return long_text_to_text_model
 
 
 async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:

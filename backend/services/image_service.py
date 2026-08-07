@@ -9,11 +9,6 @@ from urllib.parse import urlparse, urlunparse
 import aiohttp
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
-from consts.const import MODEL_CONFIG_MAPPING
-from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager
-
-from services.model_gateway_service import get_vlm_adapter_from_config
 
 logger = logging.getLogger("image_service")
 
@@ -294,52 +289,3 @@ async def proxy_image_impl(decoded_url: str):
 
             result = await response.json()
             return result
-
-
-def _get_model_config_by_id(tenant_id, model_id, expected_model_type):
-    if not model_id:
-        return None
-
-    model_config = get_model_by_model_id(int(model_id), tenant_id)
-    if not model_config:
-        raise ValueError(f"Model not found: {model_id}")
-    if model_config.get("model_type") != expected_model_type:
-        raise ValueError(f"Selected model {model_id} is not a {expected_model_type} model")
-    return model_config
-
-
-def _build_vlm_model(vlm_model_config, tenant_id=None, slot="vlm"):
-    if not vlm_model_config:
-        return None
-    # Return the adapter (a transparent _inner proxy via __getattr__) so tools
-    # can call vlm.invoke_sync(VLMRequest) / vlm.get_model_info(), and legacy
-    # direct calls (vlm.analyze_image / vlm.client_kwargs) still forward.
-    return get_vlm_adapter_from_config(vlm_model_config, tenant_id, slot=slot)
-
-
-def get_vlm_model(tenant_id: str, model_id: Optional[int] = None):
-    """Return the configured image understanding model for AnalyzeImageTool.
-
-    The first multimodal model slot is still stored under MODEL_CONFIG_MAPPING["vlm"]
-    for compatibility, but it is the user-facing image understanding configuration.
-    """
-    if model_id:
-        vlm_model_config = _get_model_config_by_id(tenant_id, model_id, "vlm")
-    else:
-        vlm_model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id)
-    return _build_vlm_model(vlm_model_config, tenant_id, "vlm")
-
-
-def get_image_understanding_model(tenant_id: str):
-    return get_vlm_model(tenant_id=tenant_id)
-
-
-def get_video_understanding_model(tenant_id: str, model_id: Optional[int] = None):
-    """Return the configured video understanding model for multimodal tools."""
-    if model_id:
-        vlm_model_config = _get_model_config_by_id(tenant_id, model_id, "vlm3")
-    else:
-        vlm_model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["vlm3"], tenant_id=tenant_id)
-    return _build_vlm_model(vlm_model_config, tenant_id, "vlm3")
