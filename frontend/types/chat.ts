@@ -466,7 +466,7 @@ export interface A2UIComponent {
   placeholder?: string;
   value?: string;
   checked?: boolean;
-  action?: string;
+  action?: string | { event?: { name?: string; payload?: any } };
   dataBinding?: string;
   required?: boolean;
   distribution?: "start" | "center" | "end" | "between" | "around";

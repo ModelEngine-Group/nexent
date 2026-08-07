@@ -1,6 +1,21 @@
-# A2UI 集成设计方案 — Agent 卡片输出与人在回路交互
+# A2UI 集成设计方案（增强版）_test
 
-> **版本**: v2.0 | **日期**: 2026-08-05 | **状态**: 设计中
+> **版本**: v3.0 | **日期**: 2026-08-06 | **状态**: 实施中
+
+---
+
+## 目录
+
+1. 需求概述
+2. A2UI 协议原理
+3. 后端实现详解
+4. 前端实现详解
+5. 卡片类型与使用指导
+6. 人在回路交互机制
+7. 数据流全景
+8. API 端点设计
+9. 实施计划
+10. 风险与注意事项
 
 ---
 
@@ -8,12 +23,14 @@
 
 ### 1.1 需求背景
 
-Nexent 平台当前已具备基础的 Agent 卡片输出能力（通过 `ProcessType.CARD` 类型将 JSON 内容透传到前端渲染），但存在核心痛点：
+Nexent 平台当前已具备基础的 Agent 卡片输出能力（通过 ProcessType.CARD 类型将 JSON 内容透传到前端渲染），但存在核心痛点：
 
-1. **卡片表现力不足**：仅支持简单 JSON 文本透传，无法表达复杂布局结构
-2. **无交互闭环**：卡片仅用于展示，无法通过卡片操作向 Agent 反馈信息
-3. **组件不统一**：缺乏标准化组件库，渲染方式不一致
-4. **无增量更新**：组件无法动态更新，每次变更需全量重绘
+| 痛点 | 说明 |
+|------|------|
+| 卡片表现力不足 | 仅支持简单 JSON 透传，无法表达复杂布局结构 |
+| 无交互闭环 | 卡片仅用于展示，无法向 Agent 反馈信息 |
+| 组件不统一 | 缺乏标准化组件库，渲染方式不一致 |
+| 无增量更新 | 组件无法动态更新，每次变更需全量重绘 |
 
 通过引入 A2UI（Agent-to-UI）标准协议，Agent 可在运行时生成结构化 UI 组件树，结合"人在回路"（HITL）机制实现双向交互。
 
@@ -25,129 +42,139 @@ Nexent 平台当前已具备基础的 Agent 卡片输出能力（通过 `Process
 | G2 | 交互表单生成 | 动态生成表单、选项、输入框等交互组件 |
 | G3 | 用户反馈闭环 | 形成 Agent→UI→User→Agent 闭环 |
 | G4 | A2UI 标准协议 | 遵循 A2UI 规范，支持 Surface 管理和数据绑定 |
-| G5 | 向后兼容 | 保持现有 `CARD` 类型完整兼容 |
-
-### 1.3 参考
-
-- [A2UI 官方规范](https://a2ui.org/)
-- [openJiuwen 项目](https://github.com/openJiuwen-ai/jiuwenswarm)
-- 现有代码：`sdk/nexent/core/utils/observer.py`、`frontend/types/chat.ts`、`frontend/const/chatConfig.ts`、`frontend/app/[locale]/chat/streaming/chatStreamHandler.tsx`
+| G5 | 向后兼容 | 保持现有 CARD 类型完整兼容 |
 
 ---
 
-## 2. 现有功能分析
+## 2. A2UI 协议原理
 
-### 2.1 现有卡片处理机制
+### 2.1 核心概念
 
-#### 2.1.1 后端实现
+A2UI（Agent-to-UI）是一套让 AI Agent 在运行时生成结构化 UI 的协议。**Agent 不直接生成 UI 代码，而是输出符合 A2UI 规范的组件树描述，由前端的 A2UI Renderer 引擎解析并渲染**。
 
-**ProcessType 定义**（`sdk/nexent/core/utils/observer.py:15-47`）：
+#### 2.1.1 核心实体
 
-```python
-class ProcessType(Enum):
-    # 现有类型 (节选)
-    CARD = "card"               # 现有卡片类型
-    TOOL = "tool"
-    NL2A = "nl2a"
-    SKILL_ARTIFACT = "skill_artifact"
-    MEMORY_SEARCH = "memory_search"
-    MAX_STEPS_REACHED = "max_steps_reached"
-    VERIFICATION = "verification"
-    PLAN = "plan"
-    PLAN_STEP_UPDATE = "plan_step_update"
-    AUTOMATION_PROPOSAL = "automation_proposal"
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_END = "subagent_end"
-    # ... 其余类型
+| 实体 | 说明 | 类比 |
+|------|------|------|
+| **Surface** | 独立的 UI 渲染平面（容器） | 浏览器窗口 / 对话框 |
+| **Component** | 组件树中的一个节点 | DOM 元素 |
+| **DataModel** | 与 Surface 绑定的数据模型 | React State |
+| **Action** | 组件上的交互动作 | Event Handler |
+| **Catalog** | Surface 的业务分类 | CSS Class |
+
+#### 2.1.2 生命周期
+
+```
+CREATE_SURFACE → ADD_COMPONENTS → UPDATE_DATA_MODEL → DELETE_SURFACE
 ```
 
-**卡片发送方式**（`observer.py:443-492`）：
+#### 2.1.3 四种 SSE 消息类型
 
-```python
-self.observer.add_message(
-    agent_name="",
-    process_type=ProcessType.CARD,
-    content=json.dumps(card_content, ensure_ascii=False)
-)
-```
+| SSE type | 说明 | content 结构 |
+|----------|------|-------------|
+| a2ui_surface | 创建 Surface | {surfaceId, catalog, title, components, dataModel, rootIds} |
+| a2ui_components | 更新组件树 | {surfaceId, components, rootIds} |
+| a2ui_data_model | 更新数据模型 | {surfaceId, dataModel} |
+| a2ui_delete_surface | 删除 Surface | {surfaceId} |
 
-消息经 `Message.to_json()` 序列化为 JSON 格式后，通过 SSE（Server-Sent Events）经 `StreamingChannel` 推送到前端。
+#### 2.1.4 SSE 消息示例
 
-#### 2.1.2 前端实现
-
-**消息类型定义**（`frontend/const/chatConfig.ts:122-152`）：
-
-```typescript
-messageTypes: {
-    CARD: "card" as const,            // 现有卡片类型
-    FINAL_ANSWER: "final_answer" as const,
-    ERROR: "error" as const,
-    // ... 其他类型
+```json
+{
+  "type": "a2ui_surface",
+  "content": {
+    "surfaceId": "s_001",
+    "catalog": "basic",
+    "title": "搜索结果",
+    "components": [],
+    "dataModel": {},
+    "rootIds": []
+  },
+  "agent_id": "agent_xxx",
+  "agent_name": "搜索Agent",
+  "depth": 0,
+  "invocation_id": null
 }
 ```
 
-**卡片渲染处理**（`chatStreamHandler.tsx:753-784`）：
+### 2.2 组件树结构
 
-```typescript
-case chatConfig.messageTypes.CARD:
-    currentStep.contents.push({
-        id: `card-${Date.now()}-...`,
-        type: chatConfig.messageTypes.CARD,
-        content: messageContent,
-        expanded: true,
-        timestamp: Date.now(),
-    });
-    lastContentType = chatConfig.contentTypes.CARD;
-    break;
-```
-
-#### 2.1.3 数据流架构
+#### 2.2.1 组件类型体系
 
 ```
-Agent Runtime
-    │
-    ▼
-MessageObserver.add_message(process_type=CARD, content=JSON)
-    │
-    ▼
-Message.to_json() → JSON String
-    │
-    ▼
-SSE Stream (StreamingChannel)
-    │
-    ▼
-chatStreamHandler.tsx → handleStreamResponse()
-    │
-    ▼
-switch(messageType) → case "card":
-    │
-    ▼
-StepContent { type: "card", content: JSON }
-    │
-    ▼
-Chat UI 渲染（Card 组件）
+布局组件: Row (水平布局), Column (垂直布局), Card (卡片容器)
+内容组件: Text (文本), Button (按钮)
+表单组件: TextField (单行输入), TextArea (多行文本), Form (表单容器)
+交互组件: Rating (评分), QuickReplies (快捷回复按钮组)
 ```
 
-### 2.2 现有机制的局限性
+#### 2.2.2 组件 JSON 结构
 
-| 维度 | 现有实现 | 具体问题 |
-|------|---------|---------|
-| **卡片类型** | 简单 JSON 透传 | 无法表达结构化布局、组件嵌套 |
-| **布局能力** | 无布局支持 | 无法实现网格、表单、列表 |
-| **交互能力** | 仅展示无交互 | 无法获取用户操作反馈 |
-| **数据绑定** | 无绑定机制 | 组件无法动态响应变化 |
-| **增量更新** | 不支持 | 每次变更需全量重绘 |
-| **标准化** | 自定义格式 | 无统一标准 schema |
-| **超时恢复** | 无处理 | 超时后无法优雅降级 |
-| **多 Surface** | 单平面 | 无法管理多个独立 UI 区域 |
+```json
+{
+  "id": "card_abc123",
+  "component": "Card",
+  "children": ["text_title", "text_body", "row_actions"],
+  "text": null,
+  "variant": null,
+  "dataBinding": null,
+  "action": null,
+  "props": {}
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | ✅ | 组件唯一标识，同一 Surface 内唯一 |
+| component | string | ✅ | 组件类型名称 |
+| children | string[] | ❌ | 子组件 ID 列表，按顺序排列 |
+| text | string | ❌ | 文本内容 |
+| variant | string | ❌ | 变体样式（primary/secondary/body/subtitle/caption） |
+| dataBinding | string | ❌ | 数据绑定路径 |
+| action | object | ❌ | 交互动作 {event: {name, payload}} |
+| props | object | ❌ | 扩展属性（label, placeholder, gap 等） |
+
+#### 2.2.3 嵌套示例
+
+一张信息卡片的完整组件树：
+
+```
+Card (card_abc123)
+├── Text (text_title) → variant: "subtitle", text: "操作成功"
+├── Text (text_body)  → variant: "body", text: "订单已处理..."
+└── Row (row_actions)
+    ├── Button (btn_confirm) → text: "知道了", variant: "primary"
+    └── Button (btn_detail)  → text: "查看详情", variant: "secondary"
+```
+
+### 2.3 数据绑定机制
+
+组件通过 `dataBinding` 字段与 `dataModel` 双向绑定。当 dataModel 中的数据更新时，前端会自动重新渲染绑定了该路径的组件。
+
+```json
+// 组件定义
+{"id": "tf_name", "component": "TextField", "dataBinding": "form.name"}
+
+// DataModel
+{"form": {"name": "张三"}}
+```
+
+### 2.4 交互动作机制
+
+Action 结构：
+```json
+{"action": {"event": {"name": "confirm_delete", "payload": {"id": 123}}}}
+```
+
+交互流程：用户点击 → 提取 action.event → POST /api/a2ui/action → 后端唤醒 Agent
 
 ---
 
-## 3. A2UI 集成方案
+## 3. 后端实现详解
 
-### 3.1 架构设计
-
-#### 3.1.1 整体架构
+### 3.1 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -171,51 +198,12 @@ Chat UI 渲染（Card 组件）
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       前端应用                                       │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  A2UIRenderer.tsx → Ant Design Components (Row/Col/Card/...) │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  chatStreamHandler.tsx → 新增 a2ui_* 消息处理分支            │  │
+│  │  A2UIRenderer.tsx → Ant Design Components                   │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 3.1.2 A2UI 消息流
-
-```
-Agent 运行时                后端 API                   前端
-    │  1. builder.create_surface()                                    │
-    │     → SSE: {type:"a2ui_surface", content:{...}}                │
-    │ ─────────────────────────────────────────────────────────►     │
-    │                         │                        │ 创建 Surface
-    │  2. builder.build_update_components()                           │
-    │     → SSE: {type:"a2ui_components", content:{...}}             │
-    │ ─────────────────────────────────────────────────────────►     │
-    │                         │                        │ 渲染组件树
-    │                                         3. 用户操作
-    │              4. POST /api/a2ui/action ◄─────────────────────── │
-    │  5. HITLService 唤醒 Agent 继续执行
-    │  6. 更新组件 → SSE → 前端更新渲染
-    │  7. builder.build_delete_surface() → 清理
-```
-
-#### 3.1.3 SSE 消息格式
-
-所有 A2UI 消息遵循现有 SSE JSON 格式规范：
-
-```json
-{
-  "type": "a2ui_surface",
-  "content": { "surfaceId": "s_001", "catalog": "basic", "title": "搜索结果", ... },
-  "agent_id": "agent_xxx",
-  "agent_name": "搜索Agent",
-  "depth": 0,
-  "invocation_id": null
-}
-```
-
-### 3.2 后端修改方案
-
-#### 3.2.1 新增 ProcessType 定义
+### 3.2 ProcessType 扩展
 
 **修改文件**: `sdk/nexent/core/utils/observer.py`
 
@@ -223,9 +211,6 @@ Agent 运行时                后端 API                   前端
 
 ```python
 class ProcessType(Enum):
-    # === 现有类型保持不变 ===
-    # ... (省略)
-
     # === A2UI 新增类型 ===
     A2UI_SURFACE = "a2ui_surface"
     A2UI_COMPONENTS = "a2ui_components"
@@ -238,13 +223,12 @@ class ProcessType(Enum):
     HITL_TIMEOUT = "hitl_timeout"
 ```
 
-在 `_init_message_transformers()` 中注册新类型（使用默认透传）：
+在 `_init_message_transformers()` 中注册新类型：
 
 ```python
 def _init_message_transformers(self):
     default_transformer = DefaultTransformer()
     # ... (现有注册保持不变)
-
     self.transformers.update({
         ProcessType.A2UI_SURFACE: default_transformer,
         ProcessType.A2UI_COMPONENTS: default_transformer,
@@ -256,28 +240,16 @@ def _init_message_transformers(self):
     })
 ```
 
-#### 3.2.2 新增 A2UI 组件生成器
+### 3.3 A2UI Builder 实现
 
-**新文件**: `sdk/nexent/core/a2ui/__init__.py`
+**文件**: `sdk/nexent/core/a2ui/a2ui_builder.py`
 
-```python
-from .a2ui_builder import A2UIBuilder, A2UIComponent, A2UISurface
-__all__ = ["A2UIBuilder", "A2UIComponent", "A2UISurface"]
-```
-
-**新文件**: `sdk/nexent/core/a2ui/a2ui_builder.py`
+#### 3.3.1 A2UIComponent 数据类
 
 ```python
-"""
-A2UI Component Builder — 提供构建 A2UI 组件树的流式 API。
-"""
-from __future__ import annotations
-import json, uuid
-from dataclasses import dataclass, field
-from typing import Any, Optional
-
 @dataclass
 class A2UIComponent:
+    """A2UI 组件节点。"""
     id: str
     component: str
     children: list[str] = field(default_factory=list)
@@ -288,32 +260,34 @@ class A2UIComponent:
     action: Optional[dict] = None
     props: dict = field(default_factory=dict)
 
-    def to_dict(self):
-        r = {"id": self.id, "component": self.component}
-        if self.children: r["children"] = self.children
-        if self.text is not None: r["text"] = self.text
-        if self.variant is not None: r["variant"] = self.variant
-        if self.icon is not None: r["icon"] = self.icon
-        if self.data_binding is not None: r["dataBinding"] = self.data_binding
-        if self.action is not None: r["action"] = self.action
-        if self.props: r["props"] = self.props
-        return r
+    def to_dict(self) -> dict:
+        result: dict = {"id": self.id, "component": self.component}
+        if self.children: result["children"] = self.children
+        if self.text is not None: result["text"] = self.text
+        if self.variant is not None: result["variant"] = self.variant
+        if self.icon is not None: result["icon"] = self.icon
+        if self.data_binding is not None: result["dataBinding"] = self.data_binding
+        if self.action is not None: result["action"] = self.action
+        if self.props: result["props"] = self.props
+        return result
+```
 
+#### 3.3.2 A2UIBuilder 核心方法
+
+```python
 class A2UIBuilder:
     def __init__(self, surface_id=None):
         self._sid = surface_id or f"surface_{uuid.uuid4().hex[:8]}"
-        self._components = {}
-        self._root_ids = []
-        self._data_model = {}
-        self._created = False
+        self._components: dict[str, A2UIComponent] = {}
+        self._root_ids: list[str] = []
+        self._data_model: dict[str, Any] = {}
+        self._created: bool = False
 
     def create_surface(self, catalog="basic", title=None):
+        """创建 Surface。"""
         self._created = True
         return {"surfaceId": self._sid, "catalog": catalog, "title": title,
                 "components": [], "dataModel": {}, "rootIds": []}
-
-    def delete_surface(self):
-        return {"surfaceId": self._sid}
 
     def add_row(self, children=None, cid=None, gap="8px"):
         return self._add("Row", cid=cid, children=children, props={"gap": gap})
@@ -331,6 +305,7 @@ class A2UIBuilder:
             action={"event": {"name": action_name, "payload": action_payload or {}}})
 
     def add_card(self, title=None, body=None, actions=None, cid=None):
+        """卡片容器，自动构建标题、正文和操作按钮行。"""
         card_id = cid or f"card_{uuid.uuid4().hex[:8]}"
         child_ids = []
         if title:
@@ -352,6 +327,7 @@ class A2UIBuilder:
         return self._add("Card", cid=card_id, children=child_ids)
 
     def add_quick_replies(self, options, cid=None):
+        """快捷回复按钮组。"""
         btns = []
         for i, opt in enumerate(options):
             if isinstance(opt, str):
@@ -396,9 +372,6 @@ class A2UIBuilder:
             props={"maxValue": max_value},
             data_binding=data_binding or "rating.value")
 
-    def build_create_surface(self, catalog="basic", title=None):
-        return self.create_surface(catalog=catalog, title=title)
-
     def build_update_components(self):
         if not self._created: self.create_surface()
         return {"surfaceId": self._sid,
@@ -406,7 +379,7 @@ class A2UIBuilder:
                 "rootIds": self._root_ids, "dataModel": self._data_model}
 
     def build_delete_surface(self):
-        return self.delete_surface()
+        return {"surfaceId": self._sid}
 
     def _add(self, component, cid=None, children=None, text=None,
              variant=None, icon=None, data_binding=None, action=None, props=None):
@@ -428,23 +401,48 @@ class A2UIBuilder:
         return any(cid in c.children for c in self._components.values())
 ```
 
-#### 3.2.3 新增 HITL 交互服务
+### 3.4 OutputCardTool 工具实现
 
-**新文件**: `backend/services/a2ui_hitl_service.py`
+**文件**: `sdk/nexent/core/tools/a2ui_card_tool.py`
+
+`OutputCardTool` 是 A2UI 卡片输出的核心工具，Agent 通过调用此工具生成各类卡片：
 
 ```python
-"""
-A2UI Human-In-The-Loop (HITL) Interaction Service.
-管理 Agent 运行时的用户交互：创建交互 → 发送表单 → 等待响应 → 超时处理。
-"""
-from __future__ import annotations
-import asyncio, json, logging, time, uuid
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Optional
+class OutputCardTool(Tool):
+    name = "output_card"
+    description = "Output an interactive A2UI card or form to the user."
+    inputs = {
+        "card_type": {"type": "string", "description": "Type: info, feedback, confirmation, form, rating"},
+        "title": {"type": "string", "description": "Card title text"},
+        "message": {"type": "string", "description": "Card body message"},
+        "options": {"type": "array", "description": "Option strings for feedback/confirmation"},
+        "fields": {"type": "array", "description": "Form field definitions"},
+        "allow_custom_input": {"type": "boolean", "description": "Allow custom text input"},
+    }
+    output_type = "object"
+```
 
-logger = logging.getLogger(__name__)
+#### 3.4.1 工具注册流程
 
+1. **配置注入** (`backend/agents/create_agent_info.py`)：在 `_get_skill_script_tools` 中添加 `OutputCardTool` 的 `ToolConfig`
+2. **实例化** (`sdk/nexent/core/agents/nexent_agent.py`)：在 `create_builtin_tool` 方法中添加 `OutputCardTool` 的创建逻辑
+3. **工具列表**：`output_card` 出现在 Agent 可用工具列表中
+
+#### 3.4.2 卡片类型映射
+
+| card_type | 生成的组件结构 | 使用场景 |
+|-----------|--------------|---------|
+| info | Card + Text + Button | 通知、状态展示 |
+| feedback | Card + Text + QuickReplies + TextArea | 用户反馈收集 |
+| confirmation | Card + Text + Button×2 | 操作确认 |
+| form | Card + Form + TextField/TextArea | 数据录入 |
+| rating | Card + Rating + TextArea | 评分评价 |
+
+### 3.5 HITL 交互服务
+
+**文件**: `backend/services/a2ui_hitl_service.py`
+
+```python
 class InteractionStatus(str, Enum):
     PENDING = "pending"
     RESPONDED = "responded"
@@ -464,13 +462,8 @@ class PendingInteraction:
     created_at: float = field(default_factory=time.time)
     timeout_at: Optional[float] = None
 
-    def to_dict(self):
-        return {"interaction_id": self.interaction_id, "status": self.status.value,
-                "response": self.response, "question": self.question,
-                "payload": self.payload, "created_at": self.created_at}
-
 class A2UIHITLService:
-    """Singleton 服务，管理所有 HITL 交互。"""
+    """单例服务，管理所有 HITL 交互。"""
     _instance = None
 
     def __new__(cls):
@@ -480,190 +473,68 @@ class A2UIHITLService:
             cls._instance._events = {}
         return cls._instance
 
-    @classmethod
-    def get_instance(cls):
-        return cls()
-
     async def create_interaction(self, conversation_id, agent_id, user_id,
                                   question, payload=None, timeout_seconds=None):
-        iid = uuid.uuid4().hex
-        interaction = PendingInteraction(
-            interaction_id=iid, conversation_id=conversation_id,
-            agent_id=agent_id, user_id=user_id, question=question,
-            payload=payload or {},
-            timeout_at=time.time() + timeout_seconds if timeout_seconds else None)
-        self._interactions[iid] = interaction
-        self._events[iid] = asyncio.Event()
-        logger.info("Created interaction %s", iid)
-        return interaction
+        """创建待处理交互。"""
 
     async def wait_for_response(self, interaction_id, timeout=None):
-        interaction = self._interactions.get(interaction_id)
-        if not interaction or interaction.status != InteractionStatus.PENDING:
-            return interaction.response if interaction else None
-        event = self._events.get(interaction_id)
-        if not event: return None
-        effective = timeout
-        if effective is None and interaction.timeout_at:
-            effective = max(0, interaction.timeout_at - time.time())
-        try:
-            if effective is not None:
-                await asyncio.wait_for(event.wait(), timeout=effective)
-            else:
-                await event.wait()
-        except asyncio.TimeoutError:
-            interaction.status = InteractionStatus.TIMEOUT
-            self._cleanup(interaction_id)
-            return None
-        if interaction.status == InteractionStatus.RESPONDED:
-            return interaction.response
-        return None
+        """等待用户响应，超时返回 None。"""
 
     def submit_response(self, interaction_id, response):
-        interaction = self._interactions.get(interaction_id)
-        if not interaction or interaction.status != InteractionStatus.PENDING:
-            return False
-        interaction.status = InteractionStatus.RESPONDED
-        interaction.response = response
-        event = self._events.get(interaction_id)
-        if event: event.set()
-        return True
+        """前端提交用户响应，唤醒等待中的 Agent。"""
 
     def cancel_interaction(self, interaction_id):
-        interaction = self._interactions.get(interaction_id)
-        if not interaction: return False
-        if interaction.status == InteractionStatus.PENDING:
-            interaction.status = InteractionStatus.CANCELLED
-            event = self._events.get(interaction_id)
-            if event: event.set()
-        self._cleanup(interaction_id)
-        return True
+        """取消交互。"""
 
     def get_pending(self, conversation_id=None, user_id=None):
-        return [i for i in self._interactions.values()
-                if i.status == InteractionStatus.PENDING
-                and (not conversation_id or i.conversation_id == conversation_id)
-                and (not user_id or i.user_id == user_id)]
-
-    def _cleanup(self, iid):
-        self._interactions.pop(iid, None)
-        self._events.pop(iid, None)
-
-
-# ── 便捷方法 ────────────────────────────────────────────────────
-
-async def request_user_feedback(agent_run_info, conversation_id, user_id,
-                                 agent_id, question, options=None,
-                                 allow_custom_input=False,
-                                 timeout_seconds=None, observer=None):
-    """Agent 运行时请求用户反馈的高级入口。"""
-    from nexent.core.utils.observer import ProcessType
-    from nexent.core.a2ui.a2ui_builder import A2UIBuilder
-
-    service = A2UIHITLService.get_instance()
-    interaction = await service.create_interaction(
-        conversation_id=conversation_id, agent_id=agent_id,
-        user_id=user_id, question=question,
-        payload={"options": options or [], "allow_custom_input": allow_custom_input},
-        timeout_seconds=timeout_seconds)
-
-    if observer:
-        builder = A2UIBuilder(surface_id=f"hitl_{interaction.interaction_id}")
-        smsg = builder.build_create_surface(catalog="hitl", title=question)
-        observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
-
-        qt = builder.add_text(question, "hitl_q", "subtitle")
-        if options:
-            qr = builder.add_quick_replies(options, "hitl_opts")
-        if allow_custom_input:
-            ta = builder.add_text_area("补充说明", "请输入...", "hitl_ta", "hitl.custom_input")
-        cmsg = builder.build_update_components()
-        observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
-
-    response = await service.wait_for_response(interaction.interaction_id, timeout_seconds)
-
-    if observer:
-        observer.add_message("", ProcessType.HITL_FORM_RESPONSE,
-            json.dumps({"interaction_id": interaction.interaction_id,
-                        "status": interaction.status.value, "response": response},
-                       ensure_ascii=False))
-    return response
+        """查询待处理交互列表。"""
 ```
 
-#### 3.2.4 新增 API 端点
-
-**新文件**: `backend/apps/a2ui_app.py`
+#### 便捷入口
 
 ```python
-"""
-A2UI API 端点：用户操作提交、交互查询与取消。
-"""
-import logging
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from services.a2ui_hitl_service import A2UIHITLService
+async def request_user_feedback(agent_run_info, conversation_id, user_id,
+                                 agent_id, question, options=None,
+                                 allow_custom_input=False, timeout_seconds=None,
+                                 observer=None):
+    """一步完成：创建交互 + 构建卡片 + 等待响应。"""
+```
 
-logger = logging.getLogger("a2ui_app")
+### 3.6 API 端点
+
+**文件**: `backend/apps/a2ui_app.py`
+
+```python
 a2ui_router = APIRouter(prefix="/api/a2ui", tags=["A2UI"])
-
-class ActionSubmitRequest(BaseModel):
-    interaction_id: str
-    action: str = "quick_reply"
-    payload: dict | None = None
-    user_id: str | None = None
 
 @a2ui_router.post("/action")
 async def submit_action(request: ActionSubmitRequest):
-    """提交用户操作响应到待处理交互。"""
-    service = A2UIHITLService.get_instance()
-    interaction = service.get_interaction(request.interaction_id)
-    if not interaction:
-        raise HTTPException(status_code=404, detail="Interaction not found")
-    if interaction.status != "pending":
-        raise HTTPException(status_code=400, detail=f"Interaction is {interaction.status}")
-    if request.user_id and interaction.user_id != request.user_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    success = service.submit_response(request.interaction_id,
-        {"interaction_id": request.interaction_id, "action": request.action,
-         "payload": request.payload or {}})
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to submit")
-    return {"status": "ok", "interaction_id": request.interaction_id}
+    """提交用户操作响应。"""
 
 @a2ui_router.get("/interactions/{conversation_id}")
 async def get_pending_interactions(conversation_id: str, user_id: str | None = None):
-    """查询会话的所有待处理交互。"""
-    service = A2UIHITLService.get_instance()
-    interactions = service.get_pending(conversation_id=conversation_id, user_id=user_id)
-    return {"status": "ok", "interactions": [i.to_dict() for i in interactions]}
+    """查询会话的待处理交互（用于断线恢复）。"""
 
 @a2ui_router.delete("/interactions/{interaction_id}")
 async def cancel_interaction(interaction_id: str):
     """取消待处理交互。"""
-    service = A2UIHITLService.get_instance()
-    if not service.cancel_interaction(interaction_id):
-        raise HTTPException(status_code=404, detail="Interaction not found")
-    return {"status": "ok"}
 ```
 
-#### 3.2.5 注册到应用
-
-在主应用入口注册 `a2ui_router`：
-
+注册到 `runtime_service.py`：
 ```python
 from apps.a2ui_app import a2ui_router
 app.include_router(a2ui_router)
 ```
 
-### 3.3 前端修改方案
+---
 
-#### 3.3.1 新增 A2UI 类型定义
+## 4. 前端实现详解
 
-**修改文件**: `frontend/types/chat.ts`
+### 4.1 类型定义扩展
+
+**文件**: `frontend/types/chat.ts`
 
 ```typescript
-// ── A2UI Types ─────────────────────────────────────────────────
-
 export interface A2UIComponent {
   id: string;
   component: string;
@@ -690,73 +561,44 @@ export interface A2UIActionPayload {
   action: string;
   payload: Record<string, any>;
 }
-
-// ChatMessageType 扩展
-export interface ChatMessageType {
-  // ... 现有字段
-  a2uiSurfaces?: Record<string, A2UISurface>;
-}
-
-// StepContent 扩展
-export interface StepContent {
-  // ... 现有类型
-  type:
-    | typeof chatConfig.messageTypes.A2UI_SURFACE
-    | typeof chatConfig.messageTypes.A2UI_COMPONENTS
-    | typeof chatConfig.messageTypes.A2UI_DATA_MODEL
-    | typeof chatConfig.messageTypes.A2UI_DELETE_SURFACE
-    | typeof chatConfig.messageTypes.HITL_FORM
-    | typeof chatConfig.messageTypes.HITL_FORM_RESPONSE;
-  a2uiSurfaceId?: string;
-}
 ```
 
-#### 3.3.2 新增 A2UI 渲染引擎
+### 4.2 A2UI Renderer 引擎
 
-**新文件**: `frontend/app/[locale]/chat/a2ui/A2UIRenderer.tsx`
+**文件**: `frontend/app/[locale]/chat/a2ui/A2UIRenderer.tsx`
+
+#### 4.2.1 渲染架构
 
 ```tsx
-"use client";
-import React, { useCallback, useMemo } from "react";
-import { Card, Button, Input, Rate, Typography } from "antd";
-import type { A2UIComponent, A2UISurface, A2UIActionPayload } from "@/types/chat";
-
-const { Text: AntText } = Typography;
-const { TextArea } = Input;
-
-interface Props {
-  surface: A2UISurface;
-  onAction: (payload: A2UIActionPayload) => void;
-  readOnly?: boolean;
-}
-
 export function A2UIRenderer({ surface, onAction, readOnly }: Props) {
+  // 1. 构建组件 ID → 组件映射
   const map = useMemo(() => {
     const m = new Map<string, A2UIComponent>();
     surface.components.forEach(c => m.set(c.id, c));
     return m;
   }, [surface.components]);
 
-  const handleAction = useCallback((c: A2UIComponent) => {
-    if (readOnly || !c.action) return;
-    onAction({ interaction_id: surface.surfaceId,
-               action: c.action.event.name, payload: c.action.event.payload || {} });
-  }, [onAction, readOnly, surface.surfaceId]);
-
-  const roots = surface.rootIds.map(id => map.get(id))
+  // 2. 提取根组件
+  const roots = surface.rootIds
+    .map(id => map.get(id))
     .filter((c): c is A2UIComponent => c !== undefined);
-  if (!roots.length) return null;
 
+  // 3. 递归渲染组件树
   return (
     <div className="a2ui-surface" data-surface-id={surface.surfaceId}>
       {roots.map(c => (
         <ComponentRenderer key={c.id} comp={c} map={map}
-            dataModel={surface.dataModel} onAction={handleAction} readOnly={readOnly || false} />
+            dataModel={surface.dataModel} onAction={handleAction}
+            readOnly={readOnly || false} />
       ))}
     </div>
   );
 }
+```
 
+#### 4.2.2 组件渲染器（核心 switch）
+
+```tsx
 function ComponentRenderer({ comp, map, dataModel, onAction, readOnly }) {
   const text = comp.dataBinding && dataModel[comp.dataBinding] !== undefined
     ? String(dataModel[comp.dataBinding]) : (comp.text || "");
@@ -772,8 +614,7 @@ function ComponentRenderer({ comp, map, dataModel, onAction, readOnly }) {
     case "Column":
       return <div style={{display:"flex",flexDirection:"column",gap:comp.props?.gap||"8px"}}>{children}</div>;
     case "Text": {
-      const styles = { title:{fontSize:16,fontWeight:600}, subtitle:{fontSize:14,fontWeight:500},
-          body:{fontSize:14}, caption:{fontSize:12,color:"#8c8c8c"} };
+      const styles = {title:{fontSize:16,fontWeight:600},subtitle:{fontSize:14,fontWeight:500},body:{fontSize:14},caption:{fontSize:12,color:"#8c8c8c"}};
       return <AntText style={styles[comp.variant||"body"]}>{text}</AntText>;
     }
     case "Button":
@@ -790,8 +631,7 @@ function ComponentRenderer({ comp, map, dataModel, onAction, readOnly }) {
     case "TextArea":
       return <div>
         {comp.props?.label && <div style={{fontSize:12,color:"#595959",marginBottom:4}}>{comp.props.label}</div>}
-        <TextArea placeholder={comp.props?.placeholder} rows={comp.props?.rows||3}
-            disabled={readOnly} data-a2ui-binding={comp.dataBinding}/>
+        <TextArea placeholder={comp.props?.placeholder} rows={comp.props?.rows||3} disabled={readOnly} data-a2ui-binding={comp.dataBinding}/>
       </div>;
     case "Form":
       return <form onSubmit={e=>{e.preventDefault();if(readOnly)return;
@@ -809,30 +649,29 @@ function ComponentRenderer({ comp, map, dataModel, onAction, readOnly }) {
 }
 ```
 
-#### 3.3.3 修改消息类型配置
+### 4.3 消息流处理
 
-**修改文件**: `frontend/const/chatConfig.ts`
+#### 4.3.1 消息类型扩展
+
+**文件**: `frontend/const/chatConfig.ts`
 
 ```typescript
 messageTypes: {
-    // ... 现有类型
-
-    // A2UI message types
+    // A2UI
     A2UI_SURFACE: "a2ui_surface" as const,
     A2UI_COMPONENTS: "a2ui_components" as const,
     A2UI_DATA_MODEL: "a2ui_data_model" as const,
     A2UI_DELETE_SURFACE: "a2ui_delete_surface" as const,
-
-    // HITL message types
+    // HITL
     HITL_FORM: "hitl_form" as const,
     HITL_FORM_RESPONSE: "hitl_form_response" as const,
     HITL_TIMEOUT: "hitl_timeout" as const,
 }
 ```
 
-#### 3.3.4 修改 chatStreamHandler.tsx
+#### 4.3.2 SSE 消息处理
 
-在 `handleStreamResponse` 的 `switch(messageType)` 中新增：
+在 `chatStreamHandler.tsx` 的 `switch(messageType)` 中新增：
 
 ```typescript
 case chatConfig.messageTypes.A2UI_SURFACE: {
@@ -867,48 +706,283 @@ case chatConfig.messageTypes.A2UI_DELETE_SURFACE: {
     }));
     break;
 }
-case chatConfig.messageTypes.HITL_FORM:
-case chatConfig.messageTypes.HITL_FORM_RESPONSE:
-    break;
 ```
+
+#### 4.3.3 卡片渲染集成
+
+在消息渲染组件中检测并渲染 A2UI 卡片：
+
+```tsx
+{message.a2uiSurfaces && Object.entries(message.a2uiSurfaces).map(([sid, surface]) => (
+  <A2UIRenderer
+    key={sid}
+    surface={surface}
+    onAction={async (payload) => {
+      const res = await fetch("/api/a2ui/action", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Action failed");
+    }}
+    readOnly={message.role !== MESSAGE_ROLES.ASSISTANT}
+  />
+))}
 
 ---
 
-## 4. 人在回路交互机制
+## 5. 卡片类型与使用指导
 
-### 4.1 交互流程
+### 5.1 Info 卡片（信息展示）
 
-```
-Agent 决定需要用户输入
-    │
-    ▼
-调用 request_user_feedback()
-    │
-    ├── 1. A2UIHITLService.create_interaction() 创建待处理交互
-    ├── 2. A2UIBuilder 构建表单组件
-    ├── 3. observer.add_message 发送 A2UI_SURFACE + A2UI_COMPONENTS
-    ├── 4. SSE 推送到前端，渲染交互表单
-    │
-    ▼
-前端用户操作
-    │
-    ▼
-POST /api/a2ui/action {interaction_id, action, payload}
-    │
-    ▼
-A2UIHITLService.submit_response() 唤醒 asyncio.Event
-    │
-    ▼
-Agent 收到响应，继续执行
-    │
-    ▼
-发送 HITL_FORM_RESPONSE 消息 → 前端更新状态
-```
+**使用场景**：通知、状态展示、结果反馈
 
-### 4.2 使用示例
+**代码示例**：
 
 ```python
-# Agent 工具中使用 HITL
+from nexent.core.a2ui.a2ui_builder import A2UIBuilder
+from nexent.core.utils.observer import ProcessType
+import json
+
+def show_info_card(observer, title, message):
+    builder = A2UIBuilder(surface_id="info")
+
+    # 1. 创建 Surface
+    smsg = builder.build_create_surface(catalog="basic", title=title)
+    observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
+
+    # 2. 构建卡片
+    builder.add_card(
+        title=title,
+        body=message,
+        actions=[
+            {"text": "知道了", "name": "acknowledge", "payload": {"action": "acknowledged"}, "variant": "primary"},
+        ],
+    )
+
+    # 3. 发送组件
+    cmsg = builder.build_update_components()
+    observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
+```
+
+**UI 预览**：
+
+![Info 卡片](a2ui_samples/info_card.png)
+
+**生成的组件结构**：
+
+```
+Card
+├── Text (subtitle) → title
+├── Text (body) → message
+└── Row
+    └── Button (primary) → "知道了"
+```
+
+### 5.2 Feedback 卡片（反馈收集）
+
+**使用场景**：用户满意度调查、意见收集
+
+**代码示例**：
+
+```python
+def show_feedback_card(observer, question, options, allow_custom=True):
+    builder = A2UIBuilder(surface_id="feedback")
+
+    smsg = builder.build_create_surface(catalog="hitl", title=question)
+    observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
+
+    builder.add_text(question, "fb_q", "subtitle")
+    builder.add_quick_replies(options=options, cid="fb_opts")
+    if allow_custom:
+        builder.add_text_area("补充说明", "请输入您的建议...", "fb_ta", "feedback.custom_input")
+    builder.add_button("提交反馈", "submit_feedback", cid="fb_submit", variant="primary")
+
+    cmsg = builder.build_update_components()
+    observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
+```
+
+**UI 预览**：
+
+![Feedback 卡片](a2ui_samples/feedback_card.png)
+
+### 5.3 Confirmation 卡片（操作确认）
+
+**使用场景**：危险操作确认、二次验证
+
+**代码示例**：
+
+```python
+def show_confirmation_card(observer, title, message,
+                            confirm_text="确认", cancel_text="取消",
+                            confirm_payload=None):
+    builder = A2UIBuilder(surface_id="confirm")
+
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
+    observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
+
+    builder.add_card(
+        title=title,
+        body=message,
+        actions=[
+            {"text": cancel_text, "name": "cancel", "payload": {"action": "cancelled"}, "variant": "secondary"},
+            {"text": confirm_text, "name": "confirm", "payload": confirm_payload or {"action": "confirmed"}, "variant": "primary"},
+        ],
+    )
+
+    cmsg = builder.build_update_components()
+    observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
+```
+
+**UI 预览**：
+
+![Confirmation 卡片](a2ui_samples/confirmation_card.png)
+
+### 5.4 Form 卡片（表单录入）
+
+**使用场景**：数据录入、配置表单
+
+**代码示例**：
+
+```python
+def show_form_card(observer, title, fields, submit_action, submit_payload=None):
+    builder = A2UIBuilder(surface_id="form")
+
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
+    observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
+
+    # 构建字段
+    field_components = []
+    for i, f in enumerate(fields):
+        if f.get("type") == "text":
+            fc = builder.add_text_field(
+                label=f.get("label"), placeholder=f.get("placeholder"),
+                cid=f"field_{i}", data_binding=f.get("binding"),
+                required=f.get("required", False))
+        elif f.get("type") == "textarea":
+            fc = builder.add_text_area(
+                label=f.get("label"), placeholder=f.get("placeholder"),
+                cid=f"field_{i}", data_binding=f.get("binding"),
+                rows=f.get("rows", 3))
+        field_components.append(fc)
+
+    # 构建表单
+    builder.add_form(field_components, submit_action, submit_payload, title=title, cid="main_form")
+
+    cmsg = builder.build_update_components()
+    observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
+```
+
+**UI 预览**：
+
+![Form 卡片](a2ui_samples/form_card.png)
+
+**调用示例**：
+
+```python
+show_form_card(
+    observer=observer,
+    title="用户信息登记",
+    fields=[
+        {"type": "text", "label": "姓名", "placeholder": "请输入姓名", "binding": "user.name", "required": True},
+        {"type": "text", "label": "邮箱", "placeholder": "请输入邮箱", "binding": "user.email", "required": True},
+        {"type": "textarea", "label": "备注", "placeholder": "请输入备注", "binding": "user.notes"},
+    ],
+    submit_action="submit_user_info",
+    submit_payload={"source": "agent_form"},
+)
+```
+
+### 5.5 Rating 卡片（评分评价）
+
+**使用场景**：用户评分、满意度评价
+
+**代码示例**：
+
+```python
+def show_rating_card(observer, title, allow_review=True, max_value=5):
+    builder = A2UIBuilder(surface_id="rating")
+
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
+    observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
+
+    builder.add_text(title, "rating_title", "subtitle")
+    builder.add_rating(max_value=max_value, cid="main_rating", data_binding="rating.value")
+    if allow_review:
+        builder.add_text_area("您的评价", "请写下您的建议...", "review_ta", "rating.review", rows=3)
+    builder.add_button("提交评价", "submit_rating", cid="rating_submit", variant="primary")
+
+    cmsg = builder.build_update_components()
+    observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
+```
+
+**UI 预览**：
+
+![Rating 卡片](a2ui_samples/rating_card.png)
+
+### 5.6 OutputCardTool 调用示例
+
+Agent 可通过 `output_card` 工具直接生成卡片：
+
+```python
+# Agent 工具调用
+tool_calls = [{
+    "name": "output_card",
+    "arguments": {
+        "card_type": "feedback",
+        "title": "请确认操作",
+        "message": "即将删除 3 条记录，是否继续？",
+        "options": ["确认删除", "取消"],
+        "allow_custom_input": False,
+    }
+}]
+```
+
+### 5.7 组件类型速查表
+
+| 组件 | Builder 方法 | 关键参数 | 使用场景 |
+|------|-------------|---------|---------|
+| Row | `add_row()` | `children`, `gap` | 水平按钮组 |
+| Column | `add_column()` | `children`, `gap` | 垂直列表 |
+| Card | `add_card()` | `title`, `body`, `actions` | 信息卡片 |
+| Text | `add_text()` | `text`, `variant` | 标题/正文 |
+| Button | `add_button()` | `text`, `action_name`, `variant` | 操作按钮 |
+| TextField | `add_text_field()` | `label`, `placeholder`, `data_binding` | 单行输入 |
+| TextArea | `add_text_area()` | `label`, `placeholder`, `data_binding` | 多行输入 |
+| Form | `add_form()` | `fields`, `submit_action` | 表单容器 |
+| Rating | `add_rating()` | `max_value`, `data_binding` | 星级评分 |
+| QuickReplies | `add_quick_replies()` | `options` | 快捷回复按钮组 |
+
+---
+
+## 6. 人在回路交互机制
+
+### 6.1 完整交互流程
+
+```
+Agent 运行时                后端 API                   前端
+    │  1. request_user_feedback()
+    │     ├── A2UIHITLService.create_interaction()
+    │     │     → 生成 interaction_id
+    │     ├── A2UIBuilder 构建卡片
+    │     └── observer.add_message
+    │           → SSE: a2ui_surface + a2ui_components
+    │ ─────────────────────────────────────────────────►
+    │                         │               2. 渲染卡片
+    │                         │               3. 用户点击
+    │  4. POST /api/a2ui/action ◄────────────────────────
+    │     {interaction_id, action, payload}
+    │  5. A2UIHITLService.submit_response() → 唤醒 asyncio.Event
+    │  6. Agent 收到响应，继续执行
+    │     → SSE: hitl_form_response
+    │ ─────────────────────────────────────────────────►
+    │                         │               7. 更新状态
+    │  8. a2ui_delete_surface → 清理 UI
+```
+
+### 6.2 使用示例
+
+```python
 async def confirm_operation_tool(self, query: str):
     from services.a2ui_hitl_service import request_user_feedback
 
@@ -935,132 +1009,157 @@ async def confirm_operation_tool(self, query: str):
         return "操作已取消"
 ```
 
-### 4.3 超时与降级策略
+### 6.3 状态机
+
+```
+                    create_interaction()
+                          │
+                          ▼
+                      ┌─────────┐
+                      │ PENDING │◄──────────────┐
+                      └────┬────┘               │
+                           │                    │
+            submit_response()              cancel_interaction()
+                           │                    │
+                           ▼                    ▼
+                     ┌──────────┐          ┌───────────┐
+                     │ RESPONDED│          │ CANCELLED │
+                     └──────────┘          └───────────┘
+
+            timeout (无响应)
+                           │
+                           ▼
+                     ┌──────────┐
+                     │ TIMEOUT  │
+                     └──────────┘
+```
+
+### 6.4 超时与降级策略
 
 | 场景 | 处理方式 |
 |------|---------|
 | 用户在超时时间内响应 | 正常返回用户输入，Agent 继续执行 |
-| 超时未响应 | 返回 `None`，Agent 可选择重试或跳过 |
-| 用户取消 | 返回 `None`，Agent 正常终止流程 |
-| 网络断开后重连 | 前端通过 `GET /api/a2ui/interactions/{id}` 恢复状态 |
+| 超时未响应 | 返回 None，Agent 可选择重试或跳过 |
+| 用户取消 | 返回 None，Agent 正常终止流程 |
+| 网络断开后重连 | 前端通过 GET /api/a2ui/interactions/{id} 恢复状态 |
 | Agent 崩溃重启 | 交互状态可持久化到 Redis（Phase 3） |
 
 ---
 
-## 5. 现有功能 vs 修改后对比
+## 7. 数据流全景
 
-### 5.1 功能对比
+### 7.1 Agent 工具调用流
 
-| 功能 | 现有实现 | 修改后实现 |
-|------|---------|-----------|
-| 卡片类型 | 简单 JSON 透传 | Row/Column/Card/Form/Button/Rating 等 |
-| 布局能力 | 无布局支持 | 灵活的 Row/Column 嵌套布局 |
-| 交互能力 | 仅展示无交互 | 按钮、输入框、选择器、评分组件 |
-| 数据绑定 | 无 | 组件数据双向绑定，动态更新 |
-| 用户反馈 | 无 | HITL 机制，形成 Agent↔User 闭环 |
-| 标准协议 | 自定义格式 | A2UI 标准协议，便于扩展 |
-| 流式更新 | 不支持 | 支持增量组件更新 |
-| 多 Surface | 不支持 | 支持同时管理多个独立 Surface |
-| 超时恢复 | 无 | 可配置超时 + 优雅降级 |
+```
+Agent 决策调用 output_card 工具
+    │
+    ▼
+OutputCardTool.execute(card_type, title, message, ...)
+    │
+    ▼
+根据 card_type 选择构建策略:
+    ├── info         → builder.add_card(title, message, actions)
+    ├── feedback     → builder.add_text + add_quick_replies + add_text_area
+    ├── confirmation → builder.add_card(title, message, [cancel, confirm])
+    ├── form         → builder.add_form(fields, submit_action)
+    └── rating       → builder.add_rating + add_text_area
+    │
+    ▼
+observer.add_message(ProcessType.A2UI_SURFACE, surface_msg)
+observer.add_message(ProcessType.A2UI_COMPONENTS, components_msg)
+    │
+    ▼
+SSE → 前端 chatStreamHandler → A2UIRenderer → Ant Design 渲染
+```
 
-### 5.2 代码修改清单
+### 7.2 SSE 消息序列
 
-**新建文件**:
+```
+Event 1: {"type": "a2ui_surface", "content": "{surface_desc}"}
+Event 2: {"type": "a2ui_components", "content": "{component_tree}"}
+... (可能有多个 components 更新)
+Event N: {"type": "a2ui_delete_surface", "content": "{surface_id}"}
+```
 
-| 文件路径 | 说明 |
-|---------|------|
-| `sdk/nexent/core/a2ui/__init__.py` | A2UI 包入口 |
-| `sdk/nexent/core/a2ui/a2ui_builder.py` | A2UI 组件构建器 |
-| `backend/services/a2ui_hitl_service.py` | HITL 交互服务 |
-| `backend/apps/a2ui_app.py` | A2UI API 端点 |
-| `frontend/app/[locale]/chat/a2ui/A2UIRenderer.tsx` | A2UI 渲染引擎 |
+### 7.3 消息处理时序
 
-**修改文件**:
-
-| 文件路径 | 修改内容 |
-|---------|---------|
-| `sdk/nexent/core/utils/observer.py` | 新增 ProcessType 枚举值 + Transformer 注册 |
-| `frontend/types/chat.ts` | 新增 A2UI 相关类型定义 + ChatMessageType 扩展 |
-| `frontend/const/chatConfig.ts` | 新增 A2UI/HITL 消息类型常量 |
-| `frontend/app/[locale]/chat/streaming/chatStreamHandler.tsx` | 新增 a2ui_* 消息处理分支 |
-| 主应用入口 | 注册 a2ui_router 到 FastAPI 应用 |
+```
+时间轴  0ms    50ms   100ms  150ms  200ms  250ms
+        │      │      │      │      │      │
+Agent   ├─ SSE1─┤      │      │      │      │
+        │      ├─ SSE2─┤      │      │      │
+        │      │      ├─ SSE3─┤      │      │
+        │      │      │      ├─ SSE4─┤      │
+        │      │      │      │      ├─ SSE5─┤
+前端    ├─ 接收  ├─ 解析 ├─ 合并 ├─ 渲染 ├─ 更新
+        │      │      │      │      │      │
+UI          [卡片出现]  [交互可用]  [更新状态]
+```
 
 ---
 
-## 6. 扩展使用方法
+## 8. API 端点设计
 
-### 6.1 在工具中使用 A2UI
+### 8.1 端点列表
 
-```python
-from nexent.core.a2ui.a2ui_builder import A2UIBuilder
-from nexent.core.utils.observer import ProcessType
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/a2ui/action` | 提交用户操作响应 |
+| GET | `/api/a2ui/interactions/{conversation_id}` | 查询待处理交互列表 |
+| DELETE | `/api/a2ui/interactions/{interaction_id}` | 取消待处理交互 |
 
-class ProductSearchTool(BaseTool):
-    def execute(self, query: str):
-        builder = A2UIBuilder(surface_id="search_results")
-        builder.create_surface(catalog="basic", title="搜索结果")
+### 8.2 请求/响应格式
 
-        for product in products:
-            builder.add_card(
-                title=product.name,
-                body=f"价格: ¥{product.price}",
-                actions=[
-                    {"text": "加入购物车", "name": "add_to_cart", "payload": {"id": product.id}},
-                    {"text": "立即购买", "name": "buy_now", "payload": {"id": product.id}},
-                ],
-            )
+**POST /api/a2ui/action**
 
-        msg = builder.build_update_components()
-        self.observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(msg, ensure_ascii=False))
+请求：
+```json
+{
+  "interaction_id": "surface_abc123",
+  "action": "submit_feedback",
+  "payload": {
+    "feedback.custom_input": "非常好用",
+    "rating.value": 5
+  },
+  "user_id": "user_xxx"
+}
 ```
 
-### 6.2 在 Skill 脚本中使用
-
-```python
-# skill_script.py
-from nexent.core.a2ui.a2ui_builder import A2UIBuilder
-from nexent.core.utils.observer import ProcessType
-
-def generate_report_card(observer, report_data):
-    builder = A2UIBuilder(surface_id="report")
-    builder.create_surface(catalog="reports", title="分析报告")
-
-    # 摘要卡片
-    builder.add_card(
-        title="核心指标",
-        body=f"完成率: {report_data['completion_rate']}%",
-    )
-
-    # 操作按钮行
-    builder.add_quick_replies(
-        options=[
-            {"text": "查看详情", "name": "view_detail", "payload": {"report_id": report_data["id"]}},
-            {"text": "导出PDF", "name": "export_pdf", "payload": {"format": "pdf"}},
-        ],
-        component_id="report_actions",
-    )
-
-    observer.add_message("", ProcessType.A2UI_COMPONENTS,
-        json.dumps(builder.build_update_components(), ensure_ascii=False))
+响应：
+```json
+{"status": "ok", "interaction_id": "surface_abc123"}
 ```
 
-### 6.3 支持的组件类型
+**GET /api/a2ui/interactions/{conversation_id}**
 
-| 组件类型 | 说明 | 使用场景 |
-|---------|------|---------|
-| Row | 水平布局容器 | 按钮组、工具栏 |
-| Column | 垂直布局容器 | 表单、列表 |
-| Card | 卡片容器 | 信息展示、搜索结果 |
-| Text | 文本组件 | 标题、正文、说明 |
-| Button | 交互按钮 | 操作触发、提交 |
-| TextField | 单行输入框 | 简短输入 |
-| TextArea | 多行文本域 | 评论、长文本 |
-| Form | 表单容器 | 数据收集 |
-| Rating | 评分组件 | 用户评价 |
+响应：
+```json
+{
+  "status": "ok",
+  "interactions": [
+    {
+      "interaction_id": "abc123",
+      "status": "pending",
+      "question": "请确认操作",
+      "payload": {"options": ["确认", "取消"]},
+      "created_at": 1728192000.0
+    }
+  ]
+}
+```
+
+### 8.3 错误码
+
+| HTTP 状态码 | 说明 |
+|------------|------|
+| 404 | 交互不存在或已完成 |
+| 400 | 交互状态不允许操作 |
+| 403 | 用户无权限访问 |
+| 500 | 服务内部错误 |
 
 ---
 
-## 7. 实施计划
+## 9. 实施计划
 
 ### Phase 1: 基础设施（1-2 周）
 
@@ -1068,6 +1167,7 @@ def generate_report_card(observer, report_data):
 |------|--------|--------|
 | 新增 ProcessType | `observer.py` 枚举扩展 | SDK |
 | 实现 A2UI Builder | `a2ui_builder.py` | SDK |
+| 实现 OutputCardTool | `a2ui_card_tool.py` | SDK |
 | 实现 HITL Service | `a2ui_hitl_service.py` | 后端服务 |
 | 实现 API 端点 | `a2ui_app.py` | 后端 API |
 | 单元测试 | pytest 测试用例 | 全部 |
@@ -1102,66 +1202,38 @@ Week 5    ──► Phase 3 完成 + 全量测试
 
 ---
 
-## 8. 风险与注意事项
+## 10. 风险与注意事项
 
-### 8.1 兼容性
+### 10.1 兼容性
 
 - **现有 CARD 类型**：保持 100% 向后兼容，不修改现有 CARD 处理逻辑
 - **新功能独立**：A2UI 使用独立的 ProcessType 枚举值，与现有类型互不干扰
 - **渐进式部署**：可通过功能开关（feature flag）控制 A2UI 功能的启用/禁用
 
-### 8.2 性能
+### 10.2 性能
 
 - **组件数量**：单个 Surface 组件数量建议 < 50 个，避免渲染性能问题
 - **SSE 频率**：避免过于密集的 A2UI 消息推送，建议节流（100ms 最小间隔）
 - **数据量**：大体积数据（如表格）建议使用分页或懒加载
 - **内存管理**：Surface 使用完毕后及时调用 `delete_surface` 释放资源
 
-### 8.3 安全性
+### 10.3 安全性
 
-- **权限验证**：`POST /api/a2ui/action` 需验证用户对会话的访问权限
+- **权限验证**：POST /api/a2ui/action 需验证用户对会话的访问权限
 - **输入校验**：HITL 表单提交数据需在后端进行校验和清洗
 - **XSS 防护**：用户输入内容在前端渲染时需转义
 - **CSRF 防护**：API 端点需遵守项目现有认证机制
 
-### 8.4 用户体验
+### 10.4 用户体验
 
 - **HITL 超时**：超时后需给用户友好提示，Agent 应优雅降级
 - **网络断开**：前端重连后通过 API 恢复待处理交互状态
 - **加载状态**：组件渲染过程中显示适当的加载指示
 - **移动端适配**：组件布局需响应式设计，适配移动端
 
-### 8.5 技术债务
+### 10.5 技术债务
 
 - **内存存储**：当前 HITL 交互存储在内存中，服务重启会丢失。Phase 3 可引入 Redis
 - **组件映射**：Ant Design 组件映射覆盖有限，复杂组件需逐步完善
 - **国际化**：A2UI 组件文本需支持 i18n
 
----
-
-## 9. 总结
-
-本设计方案通过引入 A2UI 标准协议和人在回路（HITL）机制，将 Nexent 平台的 Agent 交互能力从简单的文本/JSON 输出升级为丰富的结构化卡片交互体验。
-
-### 核心价值
-
-| 价值 | 说明 |
-|------|------|
-| **更好的用户体验** | 卡片、表单、评分等组件让 Agent 输出更直观、更专业 |
-| **更强的交互能力** | 支持用户实时反馈，形成 Agent→UI→User 协作闭环 |
-| **标准化协议** | 遵循 A2UI 规范，便于与其他框架（如 openJiuwen）集成 |
-| **良好的扩展性** | 支持自定义 catalog 和组件扩展 |
-| **渐进式实施** | 分三阶段实施，风险可控，每阶段可独立交付 |
-
-### 实施要点
-
-1. **保持向后兼容**：现有 CARD 类型不受影响，A2UI 为独立新功能
-2. **关注点分离**：SDK 层负责消息构建，后端服务负责交互管理，前端负责渲染
-3. **端到端测试**：每个 Phase 完成后需进行完整的集成测试
-4. **性能前置**：在 Phase 2 即关注渲染性能，避免后期大规模重构
-
-### 后续展望
-
-- **Phase 3+**：Redis 持久化、更多组件类型（图表、表格）、拖拽交互
-- **生态集成**：与 openJiuwen 等 A2UI 生态项目对接
-- **自定义 Catalog**：支持业务方注册自定义组件 catalog

@@ -102,6 +102,25 @@ def parse_code_blobs(text: str) -> str:
     if run_matches:
         return "\n\n".join(match.strip() for match in run_matches)
 
+    # Fallback 2: Extract bare tool calls without <code> tags
+    # This handles cases where the model forgets to wrap tool calls in <code> tags
+    # but still outputs tool calls like: output_card(card_type="info", title="...", message="...")
+    import re
+    tool_call_pattern = r'(output_card\s*\([^)]*\)|create_scheduled_task_proposal\s*\([^)]*\)|final_answer\s*\([^)]*\))'
+    bare_tool_calls = re.findall(tool_call_pattern, text, re.DOTALL)
+    if bare_tool_calls:
+        # Filter out matches that are inside thinking/text blocks (not actual tool calls)
+        valid_calls = []
+        for call in bare_tool_calls:
+            # Check if this is a real tool call by verifying it's not in a text description
+            # Remove leading/trailing quotes and markdown artifacts
+            cleaned = call.strip()
+            if cleaned.startswith(('output_card(', 'create_scheduled_task_proposal(', 'final_answer(')):
+                valid_calls.append(cleaned)
+        
+        if valid_calls:
+            return "\n\n".join(valid_calls)
+
     raise ValueError(
         dedent(
             f"""
@@ -452,11 +471,10 @@ class CoreAgent(CodeAgent):
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
-        # Override smolagent default to prevent extracting ```python blocks from KB content.
-        # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
-        # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
-        # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
-        self.code_block_tags = ["", ""]
+        # Use default code block tags for tool call extraction.
+        # "<code>" and "</code>" are the standard tags that the system prompt
+        # template instructs the model to use for wrapping tool call code.
+        self.code_block_tags = ("<code>", "</code>")
         self.plan_repo: Optional[PlanRepo] = None
         self.current_plan = None
         self.current_step_index = 0

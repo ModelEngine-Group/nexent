@@ -17,15 +17,19 @@ import {
   ConfigProvider,
 } from "antd";
 import {
-  FontSizeOutlined,
+  CheckCircleFilled,
+  WarningFilled,
   FormOutlined,
   CheckSquareOutlined,
+  StarFilled,
+  ExclamationCircleFilled,
+  InfoCircleFilled,
   PushpinOutlined,
 } from "@ant-design/icons";
 import type { A2UIComponent, A2UISurface, HITLInteraction } from "@/types/chat";
 
 const { TextArea } = Input;
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 interface A2UIRendererProps {
   surfaces: A2UISurface[];
@@ -41,13 +45,24 @@ interface A2UIComponentRendererProps {
   onDataChange?: (binding: string, value: any) => void;
   formData?: Record<string, any>;
   onFormSubmit?: (interactionId: string, formData: Record<string, any>) => void;
+  surfaceId?: string;
+  surfaceCatalog?: string;
 }
 
 const iconMap: Record<string, React.ReactNode> = {
   pushpin: <PushpinOutlined />,
   form: <FormOutlined />,
   checkbox: <CheckSquareOutlined />,
-  textfield: <FontSizeOutlined />,
+  textfield: <FormOutlined />,
+};
+
+// Map card types to Chinese labels
+const cardTypeLabels: Record<string, string> = {
+  info: "Info · 信息卡片",
+  feedback: "Feedback · 反馈卡片",
+  confirmation: "Confirmation · 确认卡片",
+  form: "Form · 表单卡片",
+  rating: "Rating · 评分卡片",
 };
 
 const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
@@ -57,6 +72,8 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
   onDataChange,
   formData,
   onFormSubmit,
+  surfaceId,
+  surfaceCatalog,
 }) => {
   const [localFormData, setLocalFormData] = useState<Record<string, any>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -106,6 +123,8 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           onDataChange={handleDataChange}
           formData={localFormData}
           onFormSubmit={handleFormSubmit}
+          surfaceId={surfaceId}
+          surfaceCatalog={surfaceCatalog}
         />
       );
     }
@@ -119,22 +138,33 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           onDataChange={handleDataChange}
           formData={localFormData}
           onFormSubmit={handleFormSubmit}
+          surfaceId={surfaceId}
+          surfaceCatalog={surfaceCatalog}
         />
       ));
     }
     return null;
   };
 
+  // Get card type from surface or component
+  const getCardType = (): string | null => {
+    if (surfaceId) {
+      const match = surfaceId.match(/card_([^_]+)/);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  const cardType = getCardType();
+
   switch (component.component) {
     case "Row": {
       const distribution = component.distribution || "start";
-      const alignment = component.alignment || "stretch";
       return (
         <Row
-          gutter={component.spacing ?? 12}
+          gutter={component.spacing ?? 8}
           wrap={component.wrap ?? true}
           justify={distribution as any}
-          align={alignment as any}
           style={{ marginBottom: 8 }}
         >
           {renderChildren(component)}
@@ -159,14 +189,100 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
       ) : (
         cardTitle || undefined
       );
+
+      // Determine card type and icon
+      const typeLabel = cardType ? cardTypeLabels[cardType] : null;
+      const iconStyle: React.CSSProperties = {
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 20,
+        marginBottom: 12,
+      };
+
+      let decorationIcon: React.ReactNode = null;
+      let decorationStyle: React.CSSProperties = {};
+
+      if (cardType === "info") {
+        decorationIcon = <CheckCircleFilled style={{ color: "#52c41a" }} />;
+        decorationStyle = {
+          ...iconStyle,
+          background: "#f6ffed",
+        };
+      } else if (cardType === "confirmation") {
+        decorationIcon = <WarningFilled style={{ color: "#faad14" }} />;
+        decorationStyle = {
+          ...iconStyle,
+          background: "#fffbe6",
+        };
+      } else if (cardType === "feedback") {
+        decorationIcon = <InfoCircleFilled style={{ color: "#1677ff" }} />;
+        decorationStyle = {
+          ...iconStyle,
+          background: "#e6f4ff",
+        };
+      } else if (cardType === "rating") {
+        decorationIcon = <StarFilled style={{ color: "#faad14" }} />;
+        decorationStyle = {
+          ...iconStyle,
+          background: "#fffbe6",
+        };
+      } else if (cardType === "form") {
+        decorationIcon = <FormOutlined style={{ color: "#1677ff" }} />;
+        decorationStyle = {
+          ...iconStyle,
+          background: "#e6f4ff",
+        };
+      }
+
       return (
-        <Card
-          title={titleEl}
-          variant={component.variant === "borderless" ? "borderless" : "outlined"}
-          style={{ marginBottom: 12 }}
+        <div
+          style={{
+            background: "white",
+            borderRadius: 12,
+            boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
+            padding: 20,
+            marginBottom: 16,
+            maxWidth: 440,
+            fontFamily:
+              '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+          }}
         >
+          {typeLabel && (
+            <div
+              style={{
+                display: "inline-block",
+                background: "#e6f4ff",
+                color: "#1677ff",
+                padding: "2px 8px",
+                borderRadius: 4,
+                fontSize: 12,
+                marginBottom: 12,
+              }}
+            >
+              {typeLabel}
+            </div>
+          )}
+          {decorationIcon && (
+            <div style={decorationStyle}>{decorationIcon}</div>
+          )}
+          {cardTitle && (
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                marginBottom: 8,
+                color: "#1f1f1f",
+              }}
+            >
+              {titleEl}
+            </div>
+          )}
           {renderChildren(component)}
-        </Card>
+        </div>
       );
     }
 
@@ -176,41 +292,154 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
 
       if (isHtml) {
         if (component.variant === "h3" || component.variant === "title") {
-          return <h4 style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+          return (
+            <h4
+              style={{
+                margin: 0,
+                fontSize: 16,
+                fontWeight: 600,
+                marginBottom: 8,
+                color: "#1f1f1f",
+              }}
+              dangerouslySetInnerHTML={{ __html: textContent }}
+            />
+          );
         }
         if (component.variant === "subtitle") {
-          return <h5 style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+          return (
+            <h5
+              style={{ margin: 0, fontSize: 14, marginBottom: 8, color: "#1f1f1f" }}
+              dangerouslySetInnerHTML={{ __html: textContent }}
+            />
+          );
         }
         if (component.variant === "paragraph") {
-          return <p style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: textContent }} />;
+          return (
+            <p
+              style={{
+                margin: 0,
+                fontSize: 14,
+                color: "#595959",
+                marginBottom: 16,
+                lineHeight: 1.6,
+              }}
+              dangerouslySetInnerHTML={{ __html: textContent }}
+            />
+          );
         }
-        return <div dangerouslySetInnerHTML={{ __html: textContent }} />;
+        return (
+          <div
+            style={{
+              fontSize: 14,
+              color: "#595959",
+              lineHeight: 1.6,
+            }}
+            dangerouslySetInnerHTML={{ __html: textContent }}
+          />
+        );
       }
 
       if (component.variant === "h3" || component.variant === "title") {
-        return <Title level={4}>{textContent}</Title>;
+        return (
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 600,
+              marginBottom: 8,
+              color: "#1f1f1f",
+            }}
+          >
+            {textContent}
+          </div>
+        );
       }
       if (component.variant === "subtitle") {
-        return <Title level={5}>{textContent}</Title>;
+        return (
+          <div
+            style={{ fontSize: 14, marginBottom: 8, color: "#1f1f1f" }}
+          >
+            {textContent}
+          </div>
+        );
       }
       if (component.variant === "paragraph") {
-        return <Paragraph>{textContent}</Paragraph>;
+        return (
+          <div
+            style={{
+              fontSize: 14,
+              color: "#595959",
+              marginBottom: 16,
+              lineHeight: 1.6,
+            }}
+          >
+            {textContent}
+          </div>
+        );
       }
       if (component.variant === "secondary") {
-        return <Text type="secondary">{textContent}</Text>;
+        return (
+          <div style={{ fontSize: 14, color: "#8c8c8c" }}>
+            {textContent}
+          </div>
+        );
       }
-      return <Text>{textContent}</Text>;
+      return (
+        <div style={{ fontSize: 14, color: "#595959", lineHeight: 1.6 }}>
+          {textContent}
+        </div>
+      );
     }
 
     case "Button": {
       const variant = component.variant || "primary";
-      const actionName = component.action?.event?.name || component.action;
-      const actionPayload = component.action?.event?.payload;
-      const isFormSubmit = typeof actionName === "string" && actionName.startsWith("form:submit");
+      const action = component.action;
+      const actionName =
+        typeof action === "object" ? action?.event?.name : action;
+      const actionPayload =
+        typeof action === "object" ? action?.event?.payload : undefined;
+      const isFormSubmit =
+        typeof actionName === "string" && actionName.startsWith("form:submit");
+
+      // Map variant to Ant Design button type
+      let buttonType: "primary" | "default" | "dashed" = "default";
+      if (variant === "primary" || variant === "success") {
+        buttonType = "primary";
+      } else if (variant === "dashed") {
+        buttonType = "dashed";
+      }
+
+      const isDanger = variant === "danger";
+
+      // Custom style for different variants
+      let customStyle: React.CSSProperties = {
+        marginRight: 8,
+        marginBottom: 8,
+        borderRadius: 6,
+        padding: "6px 16px",
+        fontSize: 14,
+        height: "auto",
+      };
+
+      if (variant === "success") {
+        customStyle = {
+          ...customStyle,
+          background: "#52c41a",
+          borderColor: "#52c41a",
+          color: "white",
+        };
+      } else if (variant === "danger") {
+        customStyle = {
+          ...customStyle,
+          background: "#ff4d4f",
+          borderColor: "#ff4d4f",
+          color: "white",
+        };
+      }
+
       return (
         <Button
-          type={variant === "primary" ? "primary" : variant === "dashed" ? "dashed" : "default"}
-          danger={component.variant === "danger"}
+          type={buttonType}
+          danger={isDanger}
           loading={submitting && isFormSubmit}
           onClick={() => {
             if (isFormSubmit && component.dataBinding) {
@@ -219,7 +448,7 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
               handleAction(actionName, actionPayload || formData);
             }
           }}
-          style={{ marginRight: 8, marginBottom: 8 }}
+          style={customStyle}
         >
           {(() => {
             const btnText = component.text || component.label || "";
@@ -236,19 +465,43 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
 
     case "TextField": {
       const binding = component.dataBinding || component.id;
-      const label = (component.props?.label as string) || component.label || "";
-      const placeholder = (component.props?.placeholder as string) || component.placeholder || "";
-      const required = (component.props?.required as boolean) ?? component.required ?? false;
+      const label =
+        (component.props?.label as string) || component.label || "";
+      const placeholder =
+        (component.props?.placeholder as string) ||
+        component.placeholder ||
+        "";
+      const required =
+        (component.props?.required as boolean) ??
+        component.required ??
+        false;
       const defaultValue =
         (dataModel?.[binding] as string) || component.value || "";
       return (
-        <div style={{ marginBottom: 8 }}>
-          {label && <label style={{ display: "block", marginBottom: 4, fontSize: 14 }}>{label}{required && <span style={{ color: "red" }}> *</span>}</label>}
+        <div style={{ marginBottom: 12 }}>
+          {label && (
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontSize: 13,
+                color: "#595959",
+              }}
+            >
+              {label}
+              {required && <span style={{ color: "#ff4d4f" }}> *</span>}
+            </label>
+          )}
           <Input
             placeholder={placeholder}
             defaultValue={defaultValue}
             required={required}
             onChange={(e) => handleDataChange(binding, e.target.value)}
+            style={{
+              borderRadius: 6,
+              padding: "8px 12px",
+              fontSize: 14,
+            }}
           />
         </div>
       );
@@ -256,20 +509,45 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
 
     case "TextArea": {
       const binding = component.dataBinding || component.id;
-      const label = (component.props?.label as string) || component.label || "";
-      const placeholder = (component.props?.placeholder as string) || component.placeholder || "";
-      const required = (component.props?.required as boolean) ?? component.required ?? false;
+      const label =
+        (component.props?.label as string) || component.label || "";
+      const placeholder =
+        (component.props?.placeholder as string) ||
+        component.placeholder ||
+        "";
+      const required =
+        (component.props?.required as boolean) ??
+        component.required ??
+        false;
       const defaultValue =
         (dataModel?.[binding] as string) || component.value || "";
       return (
-        <div style={{ marginBottom: 8 }}>
-          {label && <label style={{ display: "block", marginBottom: 4, fontSize: 14 }}>{label}{required && <span style={{ color: "red" }}> *</span>}</label>}
+        <div style={{ marginBottom: 12 }}>
+          {label && (
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontSize: 13,
+                color: "#595959",
+              }}
+            >
+              {label}
+              {required && <span style={{ color: "#ff4d4f" }}> *</span>}
+            </label>
+          )}
           <TextArea
             placeholder={placeholder}
             defaultValue={defaultValue}
             required={required}
             onChange={(e) => handleDataChange(binding, e.target.value)}
-            autoSize={{ minRows: 2, maxRows: 6 }}
+            autoSize={{ minRows: 3, maxRows: 6 }}
+            style={{
+              borderRadius: 6,
+              padding: "8px 12px",
+              fontSize: 14,
+              minHeight: 60,
+            }}
           />
         </div>
       );
@@ -308,9 +586,16 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
         >
           {title && (
             <Form.Item>
-              <Title level={5} style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  marginBottom: 16,
+                  color: "#1f1f1f",
+                }}
+              >
                 {title}
-              </Title>
+              </div>
             </Form.Item>
           )}
           {renderChildren(component)}
@@ -321,8 +606,9 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
                   type="primary"
                   htmlType="submit"
                   loading={submitting}
+                  style={{ borderRadius: 6, padding: "6px 16px" }}
                 >
-                  Submit
+                  提交
                 </Button>
               </Space>
             </Form.Item>
@@ -341,10 +627,11 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
       const binding = component.dataBinding || "rating.value";
       const maxValue = (component.props?.maxValue as number) || 5;
       return (
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 12 }}>
           <Rate
             count={maxValue}
             onChange={(value) => handleDataChange(binding, value)}
+            style={{ fontSize: 28 }}
           />
         </div>
       );
@@ -376,7 +663,7 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({
         }
       } catch (err) {
         console.error("A2UI action error:", err);
-        message.error("Action failed. Please try again.");
+        message.error("操作失败，请重试。");
         throw err;
       }
     },
@@ -397,10 +684,10 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({
         if (!response.ok) {
           throw new Error(`Form submission failed: ${response.status}`);
         }
-        message.success("Form submitted successfully.");
+        message.success("表单提交成功！");
       } catch (err) {
         console.error("Form submission error:", err);
-        message.error("Form submission failed.");
+        message.error("表单提交失败，请重试。");
         throw err;
       }
     },
@@ -415,7 +702,11 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({
     <ConfigProvider>
       <div className="a2ui-renderer">
         {surfaces.map((surface) => (
-          <div key={surface.surfaceId} className="a2ui-surface" style={{ marginBottom: 16 }}>
+          <div
+            key={surface.surfaceId}
+            className="a2ui-surface"
+            style={{ marginBottom: 16 }}
+          >
             {surface.components.map((comp) => (
               <A2UIComponentRenderer
                 key={comp.id}
@@ -423,6 +714,8 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({
                 dataModel={surface.dataModel}
                 onAction={handleAction}
                 onFormSubmit={handleFormSubmit}
+                surfaceId={surface.surfaceId}
+                surfaceCatalog={surface.catalog}
               />
             ))}
           </div>
@@ -445,7 +738,10 @@ export const A2UIChatMessage: React.FC<A2UIChatMessageProps> = ({
   onAction,
   messageId,
 }) => {
-  if ((!surfaces || surfaces.length === 0) && (!pendingInteractions || pendingInteractions.length === 0)) {
+  if (
+    (!surfaces || surfaces.length === 0) &&
+    (!pendingInteractions || pendingInteractions.length === 0)
+  ) {
     return null;
   }
 
@@ -459,7 +755,7 @@ export const A2UIChatMessage: React.FC<A2UIChatMessageProps> = ({
               color="orange"
               style={{ marginBottom: 8 }}
             >
-              Pending interaction: {interaction.prompt || interaction.interaction_id}
+              待处理交互: {interaction.prompt || interaction.interaction_id}
             </Tag>
           ))}
         </div>

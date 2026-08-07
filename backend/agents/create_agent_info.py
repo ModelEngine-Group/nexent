@@ -3,6 +3,10 @@ import copy
 import json
 import logging
 import threading
+
+print("[A2UI_MODULE_LOADED] create_agent_info.py imported successfully (print)", flush=True)
+import sys
+logging.getLogger("a2ui_debug").warning("[A2UI_MODULE_LOADED] create_agent_info.py imported successfully (logger)")
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -677,29 +681,6 @@ def _get_skill_script_tools(
                 usage="builtin",
                 metadata=skill_context,
             ),
-            ToolConfig(
-                class_name="OutputCardTool",
-                name="output_card",
-                description=(
-                    "Output an interactive A2UI card or form to the user. "
-                    "Supports info cards, feedback forms, confirmation dialogs, "
-                    "custom forms, and rating components. Use this when you need to "
-                    "display structured information or request user input."
-                ),
-                inputs=json.dumps({
-                    "card_type": {"type": "string", "description": "Type of card: info/feedback/confirmation/form/rating"},
-                    "title": {"type": "string", "description": "Card title text"},
-                    "message": {"type": "string", "description": "Card body message"},
-                    "options": {"type": "array", "description": "Option strings for feedback/confirmation cards"},
-                    "fields": {"type": "array", "description": "Form field definitions for custom form type"},
-                    "allow_custom_input": {"type": "boolean", "description": "Allow custom text input"},
-                }, ensure_ascii=False),
-                output_type="object",
-                params={},
-                source="builtin",
-                usage="builtin",
-                metadata=skill_context,
-            )
         ]
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
@@ -820,6 +801,8 @@ async def create_agent_config(
     automation_model_id: Optional[int] = None,
     automation_has_attachments: bool = False,
 ):
+    print(f"[A2UI_ENTRY] create_agent_config called, agent_id={agent_id}, tenant_id={tenant_id}", flush=True)
+    logger.info(f"[A2UI_ENTRY] create_agent_config called, agent_id={agent_id}, tenant_id={tenant_id}")
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
@@ -1323,6 +1306,88 @@ async def create_agent_config(
     logger.info(f"Building AgentConfig with {len(available_tools)} tools")
     logger.info(f"Available tool names: {[t.name for t in available_tools]}")
 
+    # Build instructions with A2UI guidance if output_card tool is available
+    raw_instructions = agent_info.get("instructions", "")
+    has_output_card = any(t.name == "output_card" for t in available_tools)
+    if has_output_card:
+        a2ui_instructions = """
+## 重要：output_card 工具使用规范
+
+当你需要展示信息、收集用户反馈或请求确认时，必须使用 `output_card` 工具。
+
+### 严格规则：
+1. **必须使用 `<code>` 标签包裹工具调用代码**，系统才能识别并执行你的工具调用
+2. 绝对不能以纯文本形式输出工具调用（如直接写 `output_card(card_type="info", ...)`）
+3. 调用 output_card 后，不要在文本中重复输出工具调用的参数
+
+### 正确的工具调用格式：
+你必须将工具调用代码包裹在 `<code>` 和 `</code>` 标签之间，例如：
+
+<code>
+output_card(card_type="info", title="标题", message="信息内容")
+</code>
+
+### 各卡片类型调用示例（必须用 <code> 标签包裹）：
+
+信息卡片：
+<code>
+output_card(card_type="info", title="通知", message="这是一条重要通知，请查阅。")
+</code>
+
+反馈表单：
+<code>
+output_card(card_type="feedback", title="您的反馈", message="请分享您的想法", options=["非常满意", "满意", "一般", "不满意"])
+</code>
+
+确认对话框：
+<code>
+output_card(card_type="confirmation", title="确认操作", message="您确定要执行此操作吗？", options=["确认", "取消"])
+</code>
+
+自定义表单：
+<code>
+output_card(card_type="form", title="信息收集", fields=[{"name": "email", "label": "邮箱", "type": "textfield", "required": True}])
+</code>
+
+评分组件：
+<code>
+output_card(card_type="rating", title="请评分", message="您对本次服务的评价？")
+</code>
+
+### 卡片类型说明：
+- **info**: 展示结构化信息，如通知、数据摘要、操作结果
+- **feedback**: 收集用户反馈，支持预设选项和自定义输入
+- **confirmation**: 获取用户确认，用于关键操作确认
+- **form**: 收集结构化数据，支持多种字段类型
+- **rating**: 收集评分评价，用于产品/服务反馈
+"""
+        # Remove old A2UI instructions from database to avoid conflicts
+        import re
+        cleaned_instructions = raw_instructions
+        # Remove sections that might conflict with our new instructions
+        # 1. Remove any A2UI instruction blocks that say "不要包含 HTML/XML" or use non-code-tagged examples
+        a2ui_patterns_to_remove = [
+            r'###\s*交互式卡片输出[^#]*?(?=\n\s*3\.\s*技能|\n\s*###\s*可用资源|$)',
+            r'【绝对禁止】[^】]*?不要在回复中包含 HTML[^】]*?',
+            r'❌\s*不要在回复中包含 HTML[^】]*?',
+        ]
+        for pattern in a2ui_patterns_to_remove:
+            cleaned_instructions = re.sub(pattern, '', cleaned_instructions, flags=re.DOTALL)
+        
+        # Remove any old A2UI output_card instruction blocks
+        old_a2ui_pattern = r'(##\s*重要[：:]\s*output_card\s*工具使用规范.*?)(?=\n\s*[#1-9]|\n\s*$|$)'
+        cleaned_instructions = re.sub(old_a2ui_pattern, '', cleaned_instructions, flags=re.DOTALL)
+        
+        # Combine cleaned instructions with new A2UI instructions
+        cleaned_instructions = cleaned_instructions.strip()
+        instructions = (cleaned_instructions + "\n" + a2ui_instructions).strip()
+        
+        logger.info(f"[A2UI_debug] A2UI instructions injected ({len(a2ui_instructions)} chars)")
+        logger.info(f"[A2UI_debug] Final instructions length: {len(instructions)}")
+        logger.info(f"[A2UI_debug] Instructions preview (first 500 chars): {instructions[:500]}...")
+    else:
+        instructions = raw_instructions
+
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
@@ -1345,7 +1410,9 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
+        instructions=instructions if instructions else None,
     )
+    logger.info(f"[A2UI_debug] AgentConfig created with instructions length: {len(agent_config.instructions or '')}")
     return agent_config
 
 
@@ -1931,6 +1998,8 @@ async def create_agent_run_info(
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
 ):
+    print(f"[A2UI_RUN_INFO] create_agent_run_info called, agent_id={agent_id}", flush=True)
+
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
     # If is_debug=true, use version 0 (draft/editing state)

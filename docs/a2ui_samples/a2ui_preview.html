@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>A2UI 卡片预览</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; padding: 40px 20px; }
+  .card { background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 20px; margin-bottom: 30px; max-width: 420px; }
+  .card-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #1f1f1f; }
+  .card-body { font-size: 14px; color: #595959; margin-bottom: 16px; line-height: 1.6; }
+  .btn { border: 1px solid #d9d9d9; border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+  .btn-primary { background: #1677ff; color: white; border-color: #1677ff; }
+  .btn-primary:hover { background: #4096ff; }
+  .btn-secondary { background: white; color: #595959; }
+  .btn-secondary:hover { border-color: #1677ff; color: #1677ff; }
+  .btn-danger { background: #ff4d4f; color: white; border-color: #ff4d4f; }
+  .btn-success { background: #52c41a; color: white; border-color: #52c41a; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .input-field { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; }
+  .input-label { font-size: 13px; color: #595959; margin-bottom: 6px; display: block; }
+  .textarea-field { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; margin-bottom: 12px; box-sizing: border-box; resize: vertical; min-height: 60px; }
+  .star { font-size: 32px; color: #faad14; cursor: pointer; }
+  .star-empty { color: #e0e0e0; }
+  .rating-row { display: flex; gap: 8px; margin: 12px 0; }
+  .warning-icon { width: 40px; height: 40px; background: #fff7e6; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #faad14; margin-bottom: 12px; }
+  .success-icon { width: 40px; height: 40px; background: #f6ffed; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #52c41a; margin-bottom: 12px; }
+  .section-label { font-size: 12px; color: #8c8c8c; margin-bottom: 4px; }
+  .page-title { font-size: 20px; font-weight: 600; color: #1f1f1f; margin-bottom: 24px; }
+  .card-tag { display: inline-block; background: #e6f4ff; color: #1677ff; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="page-title">A2UI 卡片组件预览</div>
+
+<!-- Info Card -->
+<div class="card">
+  <div class="card-tag">Info · 信息卡片</div>
+  <div class="success-icon">✓</div>
+  <div class="card-title">操作成功</div>
+  <div class="card-body">您的订单已完成处理，商品将在 24 小时内发货。</div>
+  <div class="btn-row">
+    <button class="btn btn-primary">知道了</button>
+    <button class="btn btn-secondary">查看详情</button>
+  </div>
+</div>
+
+<!-- Feedback Card -->
+<div class="card">
+  <div class="card-tag">Feedback · 反馈卡片</div>
+  <div class="card-title">您觉得这次服务体验如何？</div>
+  <div class="btn-row" style="margin-bottom: 16px;">
+    <button class="btn btn-success">非常满意</button>
+    <button class="btn btn-secondary">一般</button>
+    <button class="btn btn-danger">不满意</button>
+  </div>
+  <label class="input-label">补充说明</label>
+  <textarea class="textarea-field" placeholder="请输入您的建议..."></textarea>
+  <div class="btn-row">
+    <button class="btn btn-primary">提交反馈</button>
+  </div>
+</div>
+
+<!-- Confirmation Card -->
+<div class="card">
+  <div class="card-tag">Confirmation · 确认卡片</div>
+  <div class="warning-icon">⚠</div>
+  <div class="card-title">确认删除</div>
+  <div class="card-body">此操作将永久删除当前对话记录，删除后不可恢复。</div>
+  <div class="btn-row">
+    <button class="btn btn-secondary">取消</button>
+    <button class="btn btn-danger">确认删除</button>
+  </div>
+</div>
+
+<!-- Form Card -->
+<div class="card">
+  <div class="card-tag">Form · 表单卡片</div>
+  <div class="card-title">用户信息登记</div>
+  <label class="input-label">姓名</label>
+  <input class="input-field" placeholder="请输入姓名">
+  <label class="input-label">邮箱</label>
+  <input class="input-field" placeholder="请输入邮箱">
+  <label class="input-label">部门</label>
+  <input class="input-field" placeholder="请输入部门">
+  <div class="btn-row" style="margin-top: 16px;">
+    <button class="btn btn-primary">提交表单</button>
+  </div>
+</div>
+
+<!-- Rating Card -->
+<div class="card">
+  <div class="card-tag">Rating · 评分卡片</div>
+  <div class="card-title">请为本次服务评分</div>
+  <div class="rating-row">
+    <span class="star">★</span>
+    <span class="star">★</span>
+    <span class="star">★</span>
+    <span class="star">★</span>
+    <span class="star star-empty">★</span>
+  </div>
+  <label class="input-label">评价内容</label>
+  <textarea class="textarea-field" placeholder="写下您的评价..."></textarea>
+  <div class="btn-row">
+    <button class="btn btn-primary">提交评价</button>
+  </div>
+</div>
+
+</body>
+</html>

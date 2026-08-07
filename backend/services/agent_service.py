@@ -2877,6 +2877,7 @@ async def prepare_agent_run(
     """
     Prepare for an agent run by creating context and run info, and registering the run.
     """
+    print(f"[A2UI_AGENT_SERVICE] prepare_agent_run called, agent_id={agent_request.agent_id}", flush=True)
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)

@@ -60,16 +60,19 @@ class OutputCardTool(Tool):
                 "'confirmation'（确认对话框）、'form'（自定义表单）、"
                 "'rating'（评分组件）"
             ),
+            "nullable": True,
         },
         "title": {
             "type": "string",
             "description": "Card title text",
             "description_zh": "卡片标题文本",
+            "nullable": True,
         },
         "message": {
             "type": "string",
             "description": "Card body message (for info cards)",
             "description_zh": "卡片正文消息（用于信息卡）",
+            "nullable": True,
         },
         "options": {
             "type": "array",
@@ -80,6 +83,7 @@ class OutputCardTool(Tool):
             "description_zh": (
                 "反馈/确认卡片的选项字符串列表。例如：['是', '否'] 或 ['确认', '取消']"
             ),
+            "nullable": True,
         },
         "fields": {
             "type": "array",
@@ -93,11 +97,13 @@ class OutputCardTool(Tool):
                 "type（textfield/textarea/select/checkbox）、placeholder（可选）、"
                 "options（select 类型）、required（布尔值）"
             ),
+            "nullable": True,
         },
         "allow_custom_input": {
             "type": "boolean",
             "description": "Whether to allow custom text input in feedback forms",
             "description_zh": "反馈表单是否允许自定义文本输入",
+            "nullable": True,
         },
     }
     output_type = "object"

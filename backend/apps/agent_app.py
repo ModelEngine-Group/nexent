@@ -87,6 +87,7 @@ async def agent_run_api(
     Agent execution API endpoint.
     If resume=true, attempts to continue streaming from where it left off after a tab switch.
     """
+    print(f"[A2UI_APP] agent_run_api called, agent_id={agent_request.agent_id}", flush=True)
     try:
         return await run_agent_stream(
             agent_request=agent_request,

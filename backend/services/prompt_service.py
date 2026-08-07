@@ -8,6 +8,7 @@ from typing import Optional, List
 from jinja2 import StrictUndefined, Template
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
+from nexent.core.tools.a2ui_card_tool import OutputCardTool
 
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
 from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
@@ -989,6 +990,18 @@ def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: s
             "params": [],
             "source": "local",
             "class_name": ParallelExecutorTool.__name__,
+        })
+
+    if OutputCardTool.name not in seen_names:
+        tool_info_list.append({
+            "name": OutputCardTool.name,
+            "description": OutputCardTool.description,
+            "description_zh": OutputCardTool.description_zh,
+            "inputs": json.dumps(OutputCardTool.inputs, ensure_ascii=False),
+            "output_type": OutputCardTool.output_type,
+            "params": [],
+            "source": "builtin",
+            "class_name": OutputCardTool.__name__,
         })
 
     return tool_info_list
