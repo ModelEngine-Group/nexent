@@ -6,7 +6,7 @@ import httpx
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..models.rerank_model import BaseRerank
+from ..models.gateway.modality.rerank_adapter import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
@@ -87,7 +87,7 @@ class DifySearchTool(Tool):
         ),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True),
     ):
         """Initialize the DifySearchTool.
