@@ -41,6 +41,19 @@ export default function AgentManageComp() {
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = async () => {
+    const showImportSuccess = (successCount: number, failedCount: number) => {
+      message.success(
+        t("agentRepository.mine.batchImport.success", {
+          success: successCount,
+          failed: failedCount,
+        })
+      );
+    };
+
+    const showImportError = (msg: string) => {
+      message.error(msg);
+    };
+
     const selection = await selectImportFile();
 
     if (selection.type === "cancelled") {
@@ -53,15 +66,10 @@ export default function AgentManageComp() {
         const result = await importAgentsBatch(selection.file);
         if (result.success && result.data) {
           const data = result.data;
-          message.success(
-            t("agentRepository.mine.batchImport.success", {
-              success: data.success_count,
-              failed: data.failed_count,
-            })
-          );
+          showImportSuccess(data.success_count, data.failed_count);
           refetch();
         } else {
-          message.error(result.message || t("agentRepository.mine.batchImport.failed"));
+          showImportError(result.message || t("agentRepository.mine.batchImport.failed"));
         }
       } finally {
         setIsBatchImporting(false);
@@ -72,14 +80,14 @@ export default function AgentManageComp() {
     // Single agent path: parse and open the wizard.
     const data = await parseAgentImportFile(selection.file, {
       onParseError: (msgKey) => {
-        message.error(t(msgKey) || msgKey);
+        showImportError(t(msgKey) || msgKey);
       },
       onValidationError: (msgKey) => {
-        message.error(t(msgKey) || msgKey);
+        showImportError(t(msgKey) || msgKey);
       },
       onGenericError: (error) => {
         log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed") || "Failed to import agent");
+        showImportError(t("businessLogic.config.error.agentImportFailed") || "Failed to import agent");
       },
     });
 
