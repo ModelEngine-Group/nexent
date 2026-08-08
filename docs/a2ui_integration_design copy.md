@@ -1,8 +1,8 @@
-# A2UI
+# A2UI 集成设计方案（增强版）_test
 
 > **版本**: v3.0 | **日期**: 2026-08-06 | **状态**: 实施中
 
-***
+---
 
 ## 目录
 
@@ -17,7 +17,7 @@
 9. 实施计划
 10. 风险与注意事项
 
-***
+---
 
 ## 1. 需求概述
 
@@ -25,32 +25,77 @@
 
 Nexent 平台当前已具备基础的 Agent 卡片输出能力（通过 ProcessType.CARD 类型将 JSON 内容透传到前端渲染），但存在核心痛点：
 
-| 痛点      | 说明                       |
-| ------- | ------------------------ |
+| 痛点 | 说明 |
+|------|------|
 | 卡片表现力不足 | 仅支持简单 JSON 透传，无法表达复杂布局结构 |
-| 无交互闭环   | 卡片仅用于展示，无法向 Agent 反馈信息   |
-| 组件不统一   | 缺乏标准化组件库，渲染方式不一致         |
-| 无增量更新   | 组件无法动态更新，每次变更需全量重绘       |
+| 无交互闭环 | 卡片仅用于展示，无法向 Agent 反馈信息 |
+| 组件不统一 | 缺乏标准化组件库，渲染方式不一致 |
+| 无增量更新 | 组件无法动态更新，每次变更需全量重绘 |
 
 通过引入 A2UI（Agent-to-UI）标准协议，Agent 可在运行时生成结构化 UI 组件树，结合"人在回路"（HITL）机制实现双向交互。
 
 ### 1.2 需求目标
 
-| 编号 | 目标          | 描述                            |
-| -- | ----------- | ----------------------------- |
-| G1 | Agent 输出卡片化 | 将结构化输出渲染为精美卡片组件               |
-| G2 | 交互表单生成      | 动态生成表单、选项、输入框等交互组件            |
-| G3 | 用户反馈闭环      | 形成 Agent→UI→User→Agent 闭环     |
-| G4 | A2UI 标准协议   | 遵循 A2UI 规范，支持 Surface 管理和数据绑定 |
-| G5 | 向后兼容        | 保持现有 CARD 类型完整兼容              |
+| 编号 | 目标 | 描述 |
+|------|------|------|
+| G1 | Agent 输出卡片化 | 将结构化输出渲染为精美卡片组件 |
+| G2 | 交互表单生成 | 动态生成表单、选项、输入框等交互组件 |
+| G3 | 用户反馈闭环 | 形成 Agent→UI→User→Agent 闭环 |
+| G4 | A2UI 标准协议 | 遵循 A2UI 规范，支持 Surface 管理和数据绑定 |
+| G5 | 向后兼容 | 保持现有 CARD 类型完整兼容 |
 
-***
+---
 
 ## 2. A2UI 协议原理
 
 ### 2.1 核心概念
 
 A2UI（Agent-to-UI）是一套让 AI Agent 在运行时生成结构化 UI 的协议。**Agent 不直接生成 UI 代码，而是输出符合 A2UI 规范的组件树描述，由前端的 A2UI Renderer 引擎解析并渲染**。
+
+#### 2.1.1 核心实体
+
+| 实体 | 说明 | 类比 |
+|------|------|------|
+| **Surface** | 独立的 UI 渲染平面（容器） | 浏览器窗口 / 对话框 |
+| **Component** | 组件树中的一个节点 | DOM 元素 |
+| **DataModel** | 与 Surface 绑定的数据模型 | React State |
+| **Action** | 组件上的交互动作 | Event Handler |
+| **Catalog** | Surface 的业务分类 | CSS Class |
+
+#### 2.1.2 生命周期
+
+```
+CREATE_SURFACE → ADD_COMPONENTS → UPDATE_DATA_MODEL → DELETE_SURFACE
+```
+
+#### 2.1.3 四种 SSE 消息类型
+
+| SSE type | 说明 | content 结构 |
+|----------|------|-------------|
+| a2ui_surface | 创建 Surface | {surfaceId, catalog, title, components, dataModel, rootIds} |
+| a2ui_components | 更新组件树 | {surfaceId, components, rootIds} |
+| a2ui_data_model | 更新数据模型 | {surfaceId, dataModel} |
+| a2ui_delete_surface | 删除 Surface | {surfaceId} |
+
+#### 2.1.4 SSE 消息示例
+
+```json
+{
+  "type": "a2ui_surface",
+  "content": {
+    "surfaceId": "s_001",
+    "catalog": "basic",
+    "title": "搜索结果",
+    "components": [],
+    "dataModel": {},
+    "rootIds": []
+  },
+  "agent_id": "agent_xxx",
+  "agent_name": "搜索Agent",
+  "depth": 0,
+  "invocation_id": null
+}
+```
 
 ### 2.2 组件树结构
 
@@ -80,16 +125,16 @@ A2UI（Agent-to-UI）是一套让 AI Agent 在运行时生成结构化 UI 的协
 
 **字段说明**：
 
-| 字段          | 类型        | 必填 | 说明                                            |
-| ----------- | --------- | -- | --------------------------------------------- |
-| id          | string    | ✅  | 组件唯一标识，同一 Surface 内唯一                         |
-| component   | string    | ✅  | 组件类型名称                                        |
-| children    | string\[] | ❌  | 子组件 ID 列表，按顺序排列                               |
-| text        | string    | ❌  | 文本内容                                          |
-| variant     | string    | ❌  | 变体样式（primary/secondary/body/subtitle/caption） |
-| dataBinding | string    | ❌  | 数据绑定路径                                        |
-| action      | object    | ❌  | 交互动作 {event: {name, payload}}                 |
-| props       | object    | ❌  | 扩展属性（label, placeholder, gap 等）               |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | ✅ | 组件唯一标识，同一 Surface 内唯一 |
+| component | string | ✅ | 组件类型名称 |
+| children | string[] | ❌ | 子组件 ID 列表，按顺序排列 |
+| text | string | ❌ | 文本内容 |
+| variant | string | ❌ | 变体样式（primary/secondary/body/subtitle/caption） |
+| dataBinding | string | ❌ | 数据绑定路径 |
+| action | object | ❌ | 交互动作 {event: {name, payload}} |
+| props | object | ❌ | 扩展属性（label, placeholder, gap 等） |
 
 #### 2.2.3 嵌套示例
 
@@ -119,14 +164,13 @@ Card (card_abc123)
 ### 2.4 交互动作机制
 
 Action 结构：
-
 ```json
 {"action": {"event": {"name": "confirm_delete", "payload": {"id": 123}}}}
 ```
 
 交互流程：用户点击 → 提取 action.event → POST /api/a2ui/action → 后端唤醒 Agent
 
-***
+---
 
 ## 3. 后端实现详解
 
@@ -386,13 +430,13 @@ class OutputCardTool(Tool):
 
 #### 3.4.2 卡片类型映射
 
-| card\_type   | 生成的组件结构                               | 使用场景    |
-| ------------ | ------------------------------------- | ------- |
-| info         | Card + Text + Button                  | 通知、状态展示 |
-| feedback     | Card + Text + QuickReplies + TextArea | 用户反馈收集  |
-| confirmation | Card + Text + Button×2                | 操作确认    |
-| form         | Card + Form + TextField/TextArea      | 数据录入    |
-| rating       | Card + Rating + TextArea              | 评分评价    |
+| card_type | 生成的组件结构 | 使用场景 |
+|-----------|--------------|---------|
+| info | Card + Text + Button | 通知、状态展示 |
+| feedback | Card + Text + QuickReplies + TextArea | 用户反馈收集 |
+| confirmation | Card + Text + Button×2 | 操作确认 |
+| form | Card + Form + TextField/TextArea | 数据录入 |
+| rating | Card + Rating + TextArea | 评分评价 |
 
 ### 3.5 HITL 交互服务
 
@@ -477,13 +521,12 @@ async def cancel_interaction(interaction_id: str):
 ```
 
 注册到 `runtime_service.py`：
-
 ```python
 from apps.a2ui_app import a2ui_router
 app.include_router(a2ui_router)
 ```
 
-***
+---
 
 ## 4. 前端实现详解
 
@@ -685,18 +728,16 @@ case chatConfig.messageTypes.A2UI_DELETE_SURFACE: {
     readOnly={message.role !== MESSAGE_ROLES.ASSISTANT}
   />
 ))}
-```
+
+---
 
 ## 5. 卡片类型与使用指导
-
-预先创建一个Agent
-![Agent 创建](a2ui_samples/agent_create.jpg)
 
 ### 5.1 Info 卡片（信息展示）
 
 **使用场景**：通知、状态展示、结果反馈
 
-**UI 预览**：
+**代码示例**：
 
 ```python
 from nexent.core.a2ui.a2ui_builder import A2UIBuilder
@@ -724,6 +765,8 @@ def show_info_card(observer, title, message):
     observer.add_message("", ProcessType.A2UI_COMPONENTS, json.dumps(cmsg, ensure_ascii=False))
 ```
 
+**UI 预览**：
+
 ![Info 卡片](a2ui_samples/info_card.jpg)
 
 **生成的组件结构**：
@@ -746,7 +789,7 @@ Card
 def show_feedback_card(observer, question, options, allow_custom=True):
     builder = A2UIBuilder(surface_id="feedback")
 
-    smsg = builder.create_surface(catalog="hitl", title=question)
+    smsg = builder.build_create_surface(catalog="hitl", title=question)
     observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
 
     builder.add_text(question, "fb_q", "subtitle")
@@ -775,7 +818,7 @@ def show_confirmation_card(observer, title, message,
                             confirm_payload=None):
     builder = A2UIBuilder(surface_id="confirm")
 
-    smsg = builder.create_surface(catalog="hitl", title=title)
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
     observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
 
     builder.add_card(
@@ -805,7 +848,7 @@ def show_confirmation_card(observer, title, message,
 def show_form_card(observer, title, fields, submit_action, submit_payload=None):
     builder = A2UIBuilder(surface_id="form")
 
-    smsg = builder.create_surface(catalog="hitl", title=title)
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
     observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
 
     # 构建字段
@@ -860,7 +903,7 @@ show_form_card(
 def show_rating_card(observer, title, allow_review=True, max_value=5):
     builder = A2UIBuilder(surface_id="rating")
 
-    smsg = builder.create_surface(catalog="hitl", title=title)
+    smsg = builder.build_create_surface(catalog="hitl", title=title)
     observer.add_message("", ProcessType.A2UI_SURFACE, json.dumps(smsg, ensure_ascii=False))
 
     builder.add_text(title, "rating_title", "subtitle")
@@ -897,20 +940,20 @@ tool_calls = [{
 
 ### 5.7 组件类型速查表
 
-| 组件           | Builder 方法            | 关键参数                                   | 使用场景    |
-| ------------ | --------------------- | -------------------------------------- | ------- |
-| Row          | `add_row()`           | `children`, `gap`                      | 水平按钮组   |
-| Column       | `add_column()`        | `children`, `gap`                      | 垂直列表    |
-| Card         | `add_card()`          | `title`, `body`, `actions`             | 信息卡片    |
-| Text         | `add_text()`          | `text`, `variant`                      | 标题/正文   |
-| Button       | `add_button()`        | `text`, `action_name`, `variant`       | 操作按钮    |
-| TextField    | `add_text_field()`    | `label`, `placeholder`, `data_binding` | 单行输入    |
-| TextArea     | `add_text_area()`     | `label`, `placeholder`, `data_binding` | 多行输入    |
-| Form         | `add_form()`          | `fields`, `submit_action`              | 表单容器    |
-| Rating       | `add_rating()`        | `max_value`, `data_binding`            | 星级评分    |
-| QuickReplies | `add_quick_replies()` | `options`                              | 快捷回复按钮组 |
+| 组件 | Builder 方法 | 关键参数 | 使用场景 |
+|------|-------------|---------|---------|
+| Row | `add_row()` | `children`, `gap` | 水平按钮组 |
+| Column | `add_column()` | `children`, `gap` | 垂直列表 |
+| Card | `add_card()` | `title`, `body`, `actions` | 信息卡片 |
+| Text | `add_text()` | `text`, `variant` | 标题/正文 |
+| Button | `add_button()` | `text`, `action_name`, `variant` | 操作按钮 |
+| TextField | `add_text_field()` | `label`, `placeholder`, `data_binding` | 单行输入 |
+| TextArea | `add_text_area()` | `label`, `placeholder`, `data_binding` | 多行输入 |
+| Form | `add_form()` | `fields`, `submit_action` | 表单容器 |
+| Rating | `add_rating()` | `max_value`, `data_binding` | 星级评分 |
+| QuickReplies | `add_quick_replies()` | `options` | 快捷回复按钮组 |
 
-***
+---
 
 ## 6. Agent 配置与使用指导
 
@@ -1000,38 +1043,37 @@ Agent: （自动调用 output_card，展示 Confirmation 卡片）
 
 #### 6.2.1 工具元数据
 
-| 属性   | 值                                                   | 说明             |
-| ---- | --------------------------------------------------- | -------------- |
-| 工具名称 | `output_card`                                       | Agent 调用时使用的名称 |
-| 描述   | Output an interactive A2UI card or form to the user | 用于 LLM 理解工具用途  |
-| 来源   | builtin                                             | 内置工具，无需额外配置    |
-| 输出类型 | object                                              | 返回结构化 JSON     |
+| 属性 | 值 | 说明 |
+|------|------|------|
+| 工具名称 | `output_card` | Agent 调用时使用的名称 |
+| 描述 | Output an interactive A2UI card or form to the user | 用于 LLM 理解工具用途 |
+| 来源 | builtin | 内置工具，无需额外配置 |
+| 输出类型 | object | 返回结构化 JSON |
 
 #### 6.2.2 输入参数
 
-| 参数                   | 类型             | 必填 | 默认值   | 说明                                                  |
-| -------------------- | -------------- | -- | ----- | --------------------------------------------------- |
-| `card_type`          | string         | ✅  | -     | 卡片类型：info / feedback / confirmation / form / rating |
-| `title`              | string         | ❌  | None  | 卡片标题，展示在卡片顶部                                        |
-| `message`            | string         | ❌  | None  | 卡片正文消息，展示标题下方                                       |
-| `options`            | array\[string] | ❌  | None  | 选项列表，用于 feedback/confirmation 卡片                    |
-| `fields`             | array\[object] | ❌  | None  | 表单字段定义，用于 form 卡片                                   |
-| `allow_custom_input` | boolean        | ❌  | False | 是否允许用户自定义输入（feedback/rating）                        |
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `card_type` | string | ✅ | - | 卡片类型：info / feedback / confirmation / form / rating |
+| `title` | string | ❌ | None | 卡片标题，展示在卡片顶部 |
+| `message` | string | ❌ | None | 卡片正文消息，展示标题下方 |
+| `options` | array[string] | ❌ | None | 选项列表，用于 feedback/confirmation 卡片 |
+| `fields` | array[object] | ❌ | None | 表单字段定义，用于 form 卡片 |
+| `allow_custom_input` | boolean | ❌ | False | 是否允许用户自定义输入（feedback/rating） |
 
-#### 6.2.3 card\_type 参数说明
+#### 6.2.3 card_type 参数说明
 
-| card\_type     | 使用场景         | 必须参数                       | 可选参数                          |
-| -------------- | ------------ | -------------------------- | ----------------------------- |
-| `info`         | 通知、状态展示、结果反馈 | card\_type, title, message | -                             |
-| `feedback`     | 满意度调查、意见收集   | card\_type, title, message | options, allow\_custom\_input |
-| `confirmation` | 危险操作确认、二次验证  | card\_type, title, message | options                       |
-| `form`         | 数据录入、配置表单    | card\_type, title, fields  | -                             |
-| `rating`       | 评分评价、星级打分    | card\_type, title, message | allow\_custom\_input          |
+| card_type | 使用场景 | 必须参数 | 可选参数 |
+|-----------|---------|---------|---------|
+| `info` | 通知、状态展示、结果反馈 | card_type, title, message | - |
+| `feedback` | 满意度调查、意见收集 | card_type, title, message | options, allow_custom_input |
+| `confirmation` | 危险操作确认、二次验证 | card_type, title, message | options |
+| `form` | 数据录入、配置表单 | card_type, title, fields | - |
+| `rating` | 评分评价、星级打分 | card_type, title, message | allow_custom_input |
 
 #### 6.2.4 参数格式示例
 
 **options 参数格式**（feedback/confirmation）：
-
 ```python
 # 简单字符串列表
 options=["确认", "取消"]
@@ -1041,7 +1083,6 @@ options=["非常满意", "满意", "一般", "不满意"]
 ```
 
 **fields 参数格式**（form）：
-
 ```python
 fields=[
     {
@@ -1065,12 +1106,12 @@ fields=[
 
 #### 6.3.1 推荐模型配置
 
-| 配置项             | 推荐值                | 说明             |
-| --------------- | ------------------ | -------------- |
-| 模型              | GPT-4 / Claude 3.5 | 支持工具调用的高级模型    |
-| Temperature     | 0.3 - 0.5          | 较低温度以确保工具调用稳定性 |
-| Max Steps       | 10 - 15            | 足够的推理步骤        |
-| Request Timeout | 60s+               | 避免超时中断工具调用     |
+| 配置项 | 推荐值 | 说明 |
+|--------|--------|------|
+| 模型 | GPT-4 / Claude 3.5 | 支持工具调用的高级模型 |
+| Temperature | 0.3 - 0.5 | 较低温度以确保工具调用稳定性 |
+| Max Steps | 10 - 15 | 足够的推理步骤 |
+| Request Timeout | 60s+ | 避免超时中断工具调用 |
 
 #### 6.3.2 指令注入机制
 
@@ -1090,7 +1131,6 @@ if has_output_card:
 ```
 
 **注意**：
-
 - 数据库中存储的旧指令（如「不要在回复中包含 HTML」）会被自动清理
 - 新指令会追加在现有指令之后
 - 若需自定义指令，可直接在 Agent 配置页面编辑
@@ -1184,7 +1224,63 @@ output_card(
 </code>
 ```
 
-***
+### 6.5 调试与验证
+
+#### 6.5.1 后端日志
+
+启动后端后，关注以下日志确认配置正确：
+
+```
+# A2UI 工具注入成功
+[A2UI_debug] ToolConfig: class_name=OutputCardTool, name=output_card, source=builtin
+
+# 工具创建成功
+[INFO nexent.core.agents.nexent_agent] Creating OutputCardTool with observer=True
+[INFO nexent.core.agents.nexent_agent] OutputCardTool created: name=output_card, inputs=[...]
+
+# A2UI 指令注入
+[A2UI_debug] A2UI instructions injected (XXXX chars)
+
+# Agent 配置完成
+[A2UI_debug] AgentConfig created with instructions length: XXXX
+```
+
+#### 6.5.2 验证 Checklist
+
+| 检查项 | 验证方法 | 预期结果 |
+|--------|---------|---------|
+| 工具注册 | 查看后端日志 | 显示 `OutputCardTool created` |
+| 指令注入 | 查看后端日志 | 显示 `A2UI instructions injected` |
+| 卡片渲染 | 发送「展示信息卡片」 | 前端显示卡片组件 |
+| 交互反馈 | 点击卡片按钮 | Agent 收到用户响应 |
+| 表单提交 | 填写表单并提交 | 数据正确返回 |
+
+#### 6.5.3 常见错误
+
+| 错误信息 | 原因 | 解决方案 |
+|---------|------|---------|
+| `Nullable argument 'card_type' should have key 'nullable' set to True` | inputs 定义缺少 nullable | 已修复，确保所有参数有 `"nullable": True` |
+| `duplicate names: ['output_card', 'output_card']` | 工具重复注册 | 已修复，移除重复 ToolConfig |
+| Agent 输出纯文本 `output_card(...)` | 模型忘记使用 `<code>` 标签 | 已添加回退提取机制 |
+| Agent 不识别 output_card | 指令未注入或被旧指令覆盖 | 检查日志确认指令注入 |
+| 卡片样式错误 | 前端组件映射问题 | 刷新前端页面，检查 A2UIRenderer 控制台错误 |
+
+#### 6.5.4 清理缓存
+
+如遇问题，可尝试清理缓存后重启：
+
+```bash
+# 清理 Python 缓存
+find backend -name "__pycache__" -type d -exec rm -rf {} +
+find sdk -name "__pycache__" -type d -exec rm -rf {} +
+
+# 清理前端缓存
+cd frontend && rm -rf .next node_modules/.cache
+
+# 重启服务
+```
+
+---
 
 ## 7. 人在回路交互机制
 
@@ -1267,15 +1363,15 @@ async def confirm_operation_tool(self, query: str):
 
 ### 6.4 超时与降级策略
 
-| 场景         | 处理方式                                      |
-| ---------- | ----------------------------------------- |
-| 用户在超时时间内响应 | 正常返回用户输入，Agent 继续执行                       |
-| 超时未响应      | 返回 None，Agent 可选择重试或跳过                    |
-| 用户取消       | 返回 None，Agent 正常终止流程                      |
-| 网络断开后重连    | 前端通过 GET /api/a2ui/interactions/{id} 恢复状态 |
-| Agent 崩溃重启 | 交互状态可持久化到 Redis（Phase 3）                  |
+| 场景 | 处理方式 |
+|------|---------|
+| 用户在超时时间内响应 | 正常返回用户输入，Agent 继续执行 |
+| 超时未响应 | 返回 None，Agent 可选择重试或跳过 |
+| 用户取消 | 返回 None，Agent 正常终止流程 |
+| 网络断开后重连 | 前端通过 GET /api/a2ui/interactions/{id} 恢复状态 |
+| Agent 崩溃重启 | 交互状态可持久化到 Redis（Phase 3） |
 
-***
+---
 
 ## 7. 数据流全景
 
@@ -1327,24 +1423,23 @@ Agent   ├─ SSE1─┤      │      │      │      │
 UI          [卡片出现]  [交互可用]  [更新状态]
 ```
 
-***
+---
 
 ## 8. API 端点设计
 
 ### 8.1 端点列表
 
-| 方法     | 路径                                         | 说明        |
-| ------ | ------------------------------------------ | --------- |
-| POST   | `/api/a2ui/action`                         | 提交用户操作响应  |
-| GET    | `/api/a2ui/interactions/{conversation_id}` | 查询待处理交互列表 |
-| DELETE | `/api/a2ui/interactions/{interaction_id}`  | 取消待处理交互   |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/a2ui/action` | 提交用户操作响应 |
+| GET | `/api/a2ui/interactions/{conversation_id}` | 查询待处理交互列表 |
+| DELETE | `/api/a2ui/interactions/{interaction_id}` | 取消待处理交互 |
 
 ### 8.2 请求/响应格式
 
 **POST /api/a2ui/action**
 
 请求：
-
 ```json
 {
   "interaction_id": "surface_abc123",
@@ -1358,15 +1453,13 @@ UI          [卡片出现]  [交互可用]  [更新状态]
 ```
 
 响应：
-
 ```json
 {"status": "ok", "interaction_id": "surface_abc123"}
 ```
 
-**GET /api/a2ui/interactions/{conversation\_id}**
+**GET /api/a2ui/interactions/{conversation_id}**
 
 响应：
-
 ```json
 {
   "status": "ok",
@@ -1384,12 +1477,90 @@ UI          [卡片出现]  [交互可用]  [更新状态]
 
 ### 8.3 错误码
 
-| HTTP 状态码 | 说明        |
-| -------- | --------- |
-| 404      | 交互不存在或已完成 |
-| 400      | 交互状态不允许操作 |
-| 403      | 用户无权限访问   |
-| 500      | 服务内部错误    |
+| HTTP 状态码 | 说明 |
+|------------|------|
+| 404 | 交互不存在或已完成 |
+| 400 | 交互状态不允许操作 |
+| 403 | 用户无权限访问 |
+| 500 | 服务内部错误 |
 
-***
+---
+
+## 9. 实施计划
+
+### Phase 1: 基础设施（1-2 周）
+
+| 任务 | 交付物 | 负责层 |
+|------|--------|--------|
+| 新增 ProcessType | `observer.py` 枚举扩展 | SDK |
+| 实现 A2UI Builder | `a2ui_builder.py` | SDK |
+| 实现 OutputCardTool | `a2ui_card_tool.py` | SDK |
+| 实现 HITL Service | `a2ui_hitl_service.py` | 后端服务 |
+| 实现 API 端点 | `a2ui_app.py` | 后端 API |
+| 单元测试 | pytest 测试用例 | 全部 |
+
+### Phase 2: 前端集成（1-2 周）
+
+| 任务 | 交付物 | 负责层 |
+|------|--------|--------|
+| TypeScript 类型定义 | `chat.ts` 扩展 | 前端 |
+| 消息类型常量 | `chatConfig.ts` 扩展 | 前端 |
+| A2UI Renderer | `A2UIRenderer.tsx` | 前端 |
+| Stream Handler 修改 | `chatStreamHandler.tsx` 分支 | 前端 |
+| Ant Design 集成 | 组件映射实现 | 前端 |
+
+### Phase 3: 测试与优化（1 周）
+
+| 任务 | 交付物 |
+|------|--------|
+| 集成测试 | Agent→SSE→前端 端到端验证 |
+| HITL 流程测试 | 超时、取消、恢复场景 |
+| 性能测试 | 大组件量渲染性能 |
+| 兼容性测试 | 现有 CARD 类型不受影响 |
+| 用户体验打磨 | 加载状态、动画效果 |
+
+### 里程碑
+
+```
+Week 1-2  ──► Phase 1 完成
+Week 3-4  ──► Phase 2 完成 + Phase 3 启动
+Week 5    ──► Phase 3 完成 + 全量测试
+```
+
+---
+
+## 10. 风险与注意事项
+
+### 10.1 兼容性
+
+- **现有 CARD 类型**：保持 100% 向后兼容，不修改现有 CARD 处理逻辑
+- **新功能独立**：A2UI 使用独立的 ProcessType 枚举值，与现有类型互不干扰
+- **渐进式部署**：可通过功能开关（feature flag）控制 A2UI 功能的启用/禁用
+
+### 10.2 性能
+
+- **组件数量**：单个 Surface 组件数量建议 < 50 个，避免渲染性能问题
+- **SSE 频率**：避免过于密集的 A2UI 消息推送，建议节流（100ms 最小间隔）
+- **数据量**：大体积数据（如表格）建议使用分页或懒加载
+- **内存管理**：Surface 使用完毕后及时调用 `delete_surface` 释放资源
+
+### 10.3 安全性
+
+- **权限验证**：POST /api/a2ui/action 需验证用户对会话的访问权限
+- **输入校验**：HITL 表单提交数据需在后端进行校验和清洗
+- **XSS 防护**：用户输入内容在前端渲染时需转义
+- **CSRF 防护**：API 端点需遵守项目现有认证机制
+
+### 10.4 用户体验
+
+- **HITL 超时**：超时后需给用户友好提示，Agent 应优雅降级
+- **网络断开**：前端重连后通过 API 恢复待处理交互状态
+- **加载状态**：组件渲染过程中显示适当的加载指示
+- **移动端适配**：组件布局需响应式设计，适配移动端
+
+### 10.5 技术债务
+
+- **内存存储**：当前 HITL 交互存储在内存中，服务重启会丢失。Phase 3 可引入 Redis
+- **组件映射**：Ant Design 组件映射覆盖有限，复杂组件需逐步完善
+- **国际化**：A2UI 组件文本需支持 i18n
 
