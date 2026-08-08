@@ -58,6 +58,65 @@ const STATUS_BADGE_CLASS: Record<
     "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
+function buildMenuItems(
+  menuActions: MineCardMenuAction[],
+  isApplying: boolean,
+  isDeleting: boolean,
+  onApplyListing: () => void,
+  onViewReview: (mode: "review" | "reviewUpdate") => void,
+  onDelete: () => void,
+  t: (key: string) => string
+): MenuProps["items"] {
+  const items: MenuProps["items"] = menuActions.map((action) => {
+    const icon =
+      action === "apply" ? (
+        <Share2 className="size-3.5" aria-hidden />
+      ) : (
+        <ClipboardCheck className="size-3.5" aria-hidden />
+      );
+
+    return {
+      key: action,
+      label: t(MENU_ACTION_I18N[action]),
+      icon,
+      disabled: action === "apply" && isApplying,
+      onClick: () => {
+        if (action === "apply") {
+          onApplyListing();
+        } else {
+          onViewReview(action === "reviewUpdate" ? "reviewUpdate" : "review");
+        }
+      },
+    };
+  });
+
+  if (menuActions.length > 0) {
+    items.push({ type: "divider" });
+  }
+
+  items.push({
+    key: "delete",
+    danger: true,
+    icon: <Trash2 className="size-3.5" aria-hidden />,
+    label: t("common.delete"),
+    disabled: isDeleting,
+    onClick: onDelete,
+  });
+
+  return items;
+}
+
+function handleCardClick(
+  e: React.MouseEvent<HTMLDivElement>,
+  selectionMode: boolean,
+  onToggleSelect?: () => void
+) {
+  if (!selectionMode) return;
+  const target = e.target as HTMLElement;
+  if (target.closest("button, a, .ant-checkbox-wrapper")) return;
+  onToggleSelect?.();
+}
+
 export function MyAgentCard({
   agent,
   onEdit,
@@ -89,41 +148,15 @@ export function MyAgentCard({
   const canEvaluate = canView;
   const menuActions = getMineCardMenuActions(agent);
 
-  const menuItems: MenuProps["items"] = menuActions.map((action) => {
-    const icon =
-      action === "apply" ? (
-        <Share2 className="size-3.5" aria-hidden />
-      ) : (
-        <ClipboardCheck className="size-3.5" aria-hidden />
-      );
-
-    return {
-      key: action,
-      label: t(MENU_ACTION_I18N[action]),
-      icon,
-      disabled: action === "apply" && isApplying,
-      onClick: () => {
-        if (action === "apply") {
-          onApplyListing();
-          return;
-        }
-        onViewReview(action === "reviewUpdate" ? "reviewUpdate" : "review");
-      },
-    };
-  });
-
-  if (menuActions.length > 0) {
-    menuItems.push({ type: "divider" });
-  }
-
-  menuItems.push({
-    key: "delete",
-    danger: true,
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    label: t("common.delete"),
-    disabled: isDeleting,
-    onClick: onDelete,
-  });
+  const menuItems = buildMenuItems(
+    menuActions,
+    isApplying,
+    isDeleting,
+    onApplyListing,
+    onViewReview,
+    onDelete,
+    t
+  );
 
   return (
     <Card
@@ -140,14 +173,7 @@ export function MyAgentCard({
           padding: 20,
         },
       }}
-      onClick={selectionMode ? (e) => {
-        // Avoid toggling when the user clicks on interactive elements inside the card.
-        const target = e.target as HTMLElement;
-        if (target.closest("button, a, .ant-checkbox-wrapper")) {
-          return;
-        }
-        onToggleSelect?.();
-      } : undefined}
+      onClick={(e) => handleCardClick(e, selectionMode, onToggleSelect)}
     >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-3">

@@ -386,7 +386,7 @@ async def export_agents_batch_api(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Agent batch export error: {str(e)}")
+        logger.exception(f"Agent batch export error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Agent batch export error.")
@@ -416,7 +416,7 @@ async def import_agents_batch_api(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Agent batch import error: {str(e)}")
+        logger.exception(f"Agent batch import error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Agent batch import error.")
