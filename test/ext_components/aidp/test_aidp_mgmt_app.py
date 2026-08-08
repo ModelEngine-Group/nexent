@@ -952,3 +952,113 @@ class TestSetPermissionEdgeCases:
                 json={"ingroup_permission": "EDIT", "group_ids": [999]},
             )
         assert response.status_code == HTTPStatus.BAD_REQUEST
+
+
+# ---------------------------------------------------------------------------
+# Create KB kds_name fallback chain (line 355)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateKnowledgeBaseKdsName:
+    """Covers the kds_name fallback chain in create_knowledge_base:
+    body.name -> aidp_result.kds_name -> aidp_result.name -> ''
+    """
+
+    def _run_create(self, aidp_result, body_name="KB"):
+        """Helper: POST create and capture create_permission kwargs."""
+        client = _client()
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch("ext_components.aidp.apps.aidp_mgmt_app.create_aidp_kb_impl",
+                    return_value=aidp_result), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission",
+                          return_value=1) as mock_perm, \
+             patch.object(aidp_permission_service, "update_resource_status",
+                          return_value=True), \
+             patch.object(aidp_permission_service, "_validate_group_ids_strict",
+                          side_effect=lambda g, t: list(g)):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": body_name, "ingroup_permission": "READ_ONLY",
+                      "group_ids": [1]},
+            )
+        assert response.status_code == HTTPStatus.OK
+        return mock_perm.call_args.kwargs
+
+    def test_create_passes_kds_name_from_body_name(self):
+        """body.name is used as kds_name."""
+        kwargs = self._run_create({"kds_id": "kb-1"}, body_name="My KB")
+        assert kwargs["kds_name"] == "My KB"
+
+    def test_create_falls_back_to_aidp_result_kds_name(self):
+        """body.name empty -> falls back to aidp_result['kds_name']."""
+        kwargs = self._run_create({"kds_id": "kb-1", "kds_name": "AIDP Name"},
+                                  body_name="")
+        assert kwargs["kds_name"] == "AIDP Name"
+
+    def test_create_falls_back_to_aidp_result_name(self):
+        """body.name empty, aidp_result has no kds_name -> falls back to aidp_result['name']."""
+        kwargs = self._run_create({"kds_id": "kb-1", "name": "AIDP Display"},
+                                  body_name="")
+        assert kwargs["kds_name"] == "AIDP Display"
+
+    def test_create_falls_back_to_empty_string(self):
+        """All fallbacks empty -> kds_name is ''."""
+        kwargs = self._run_create({"kds_id": "kb-1"}, body_name="")
+        assert kwargs["kds_name"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Update KB kds_name sync (lines 438-449)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateKnowledgeBaseKdsNameSync:
+    """Covers kds_name sync to permission table on update_knowledge_base."""
+
+    def test_update_syncs_kds_name_to_database_when_name_changes(self):
+        """body.name set -> perms.update_permission called with kds_name."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"kds_name": "Updated Name", "ok": True}), \
+             patch.object(aidp_mgmt_app.perms, "update_permission",
+                          return_value=True) as mock_update_perm:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"name": "Updated Name"},
+            )
+        assert response.status_code == HTTPStatus.OK
+        mock_update_perm.assert_called_once()
+        kwargs = mock_update_perm.call_args.kwargs
+        assert kwargs["kds_name"] == "Updated Name"
+
+    def test_update_skips_sync_when_no_name_change(self):
+        """body.name not set, aidp result has no kds_name ->
+        perms.update_permission NOT called with kds_name."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"description": "updated desc"}), \
+             patch.object(aidp_mgmt_app.perms, "update_permission",
+                          return_value=True) as mock_update_perm:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"description": "updated desc"},
+            )
+        assert response.status_code == HTTPStatus.OK
+        # kds_name is None/empty in both result and body -> sync skipped
+        mock_update_perm.assert_not_called()

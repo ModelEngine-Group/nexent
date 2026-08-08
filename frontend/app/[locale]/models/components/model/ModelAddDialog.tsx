@@ -1419,6 +1419,7 @@ export const ModelAddDialog = ({
             <Switch
               checked={form.isBatchImport}
               onChange={(checked) => handleFormChange("isBatchImport", checked)}
+              disabled={verifyingConnectivity}
             />
           </div>
           <div className="text-xs text-gray-500 mt-1">
@@ -1439,6 +1440,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="modelengine">
                 {t("model.provider.modelengine")}
@@ -1459,6 +1461,7 @@ export const ModelAddDialog = ({
                   onChange={(e) =>
                     handleFormChange("modelEngineUrl", e.target.value)
                   }
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1477,6 +1480,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1491,6 +1495,7 @@ export const ModelAddDialog = ({
             style={{ width: "100%" }}
             value={form.type}
             onChange={(value) => handleFormChange("type", value)}
+            disabled={verifyingConnectivity}
           >
             <Option value={MODEL_TYPES.LLM}>{t("model.type.llm")}</Option>
             <Option value={MODEL_TYPES.EMBEDDING}>
@@ -1539,6 +1544,7 @@ export const ModelAddDialog = ({
                 onChange={(checked) =>
                   handleFormChange("isMultimodal", checked)
                 }
+                disabled={verifyingConnectivity}
               />
             </div>
             <div className="text-xs text-gray-500 mt-1">
@@ -1564,6 +1570,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.name")}
               value={form.name}
               onChange={handleModelNameChange}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1582,6 +1589,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.displayName")}
               value={form.displayName}
               onChange={(e) => handleFormChange("displayName", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1609,6 +1617,7 @@ export const ModelAddDialog = ({
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1624,6 +1633,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.sttProvider}
               onChange={(value) => handleFormChange("sttProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1654,6 +1664,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1672,6 +1683,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1695,6 +1707,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1710,6 +1723,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.ttsProvider}
               onChange={(value) => handleFormChange("ttsProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1740,6 +1754,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1758,6 +1773,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1781,6 +1797,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1801,6 +1818,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1819,6 +1837,7 @@ export const ModelAddDialog = ({
                   chunkSizeRange: value,
                 }));
               }}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1841,6 +1860,7 @@ export const ModelAddDialog = ({
               onChange={(e) =>
                 handleFormChange("chunkingBatchSize", e.target.value)
               }
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1881,6 +1901,7 @@ export const ModelAddDialog = ({
                   size="small"
                   checked={capacitySuggestionEnabled}
                   onChange={setCapacitySuggestionEnabled}
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1900,6 +1921,7 @@ export const ModelAddDialog = ({
               suggestionLoading={topChecking}
               onUseSuggestion={() => applyCapacitySuggestion(topSuggestion)}
               acceptedSuggestion={topAccepted}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1919,6 +1941,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
               onChange={(value) => handleFormChange("maxTokens", value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -2088,6 +2111,7 @@ export const ModelAddDialog = ({
                             size="small"
                             checked={checked}
                             onChange={toggleSelect}
+                            disabled={verifyingConnectivity}
                           />
                         </div>
                       </div>
@@ -2447,7 +2471,7 @@ export const ModelAddDialog = ({
               !isFormValid() ||
               (!form.isBatchImport && connectivityStatus.status !== "available")
             }
-            loading={loading}
+            loading={loading || verifyingConnectivity}
           >
             {t("model.dialog.button.add")}
           </Button>
@@ -2487,6 +2511,7 @@ export const ModelAddDialog = ({
                       size="small"
                       checked={gearCapacitySuggestionEnabled}
                       onChange={setGearCapacitySuggestionEnabled}
+                      disabled={verifyingConnectivity}
                     />
                     <Button
                       size="small"

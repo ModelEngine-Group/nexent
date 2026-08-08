@@ -240,6 +240,21 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
 
   ---
 
+  任务9："查询出诊信息"
+
+  思考：我需要使用aidp_search工具在出诊信息库中搜索相关信息。
+  代码：
+  <code>
+  appointment_info = aidp_search(query="出诊信息", kds_list=["出诊信息库"])
+  print(appointment_info)
+  </code>
+  # 系统返回 Observation: 找到相关出诊信息...
+
+  思考：已获得出诊信息，现在我将生成最终回答。
+  根据出诊信息库中的查询结果...
+
+  ---
+
   ### 要求：
   1. 只展示你设计的提示词，仅涉及使用示例，不要显示无关内容或无关的格式。
   2. 严格按照示例模板的格式给出例子。
@@ -321,6 +336,13 @@ USER_PROMPT: |-
   在生成 few-shot 示例时，如果使用 knowledge_base_search 工具，必须使用以下实际配置的知识库名称：
   {{ knowledge_base_names | default('') }}
   请将这些名称直接用于示例中，例如：knowledge_base_search(query="xxx", index_names=[{{ knowledge_base_names | default('') }}])
+  {% endif %}
+
+  {% if aidp_kb_names %}
+  ### aidp_search 知识库配置说明：
+  kds_list 参数是可选的，不传时使用工具默认配置的知识库；如果需要指定搜索特定知识库，可通过 kds_list 传入以下名称（不是 index_names）：
+  {{ aidp_kb_names | default('') }}
+  示例：aidp_search(query="xxx", kds_list=[{{ aidp_kb_names | default('') }}])
   {% endif %}
 
 

@@ -747,6 +747,7 @@ Additional Args:
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
         )
+        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
@@ -931,6 +932,10 @@ Additional Args:
         if code_output is not None and code_output.output is not None:
             truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
+            self.observer.add_message(
+                self.agent_name, ProcessType.EXECUTION_LOGS,
+                "Last output from code snippet:\n" + truncated_output,
+            )
         memory_step.observations = observation
 
         verification_controller = getattr(self, "verification_controller", None)
@@ -1391,6 +1396,7 @@ You have been provided with these additional arguments, that you can access usin
             task=task,
             final_answer_templates=self.prompt_templates,
         )
+        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages

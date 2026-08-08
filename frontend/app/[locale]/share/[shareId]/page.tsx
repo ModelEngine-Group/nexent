@@ -4,21 +4,71 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Spin, Alert } from "antd";
 import { useTranslation } from "react-i18next";
+import {
+  AssistantRuntimeProvider,
+  useLocalRuntime,
+  useRemoteThreadListRuntime,
+  type AssistantRuntime,
+} from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
-import { ApiConversationDetail, ChatMessageType } from "@/types/chat";
+import type {
+  ApiConversationDetail as LegacyApiConversationDetail,
+  ChatMessageType,
+} from "@/types/chat";
+import type { ApiConversationDetail as NewChatApiConversationDetail } from "@/types/conversation";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 import { ChatStreamMain } from "@/app/chat/streaming/chatStreamMain";
 import { ChatRightPanel } from "@/app/chat/components/chatRightPanel";
+import { createShareThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
+import { ReadOnlyConversation } from "@/app/newchat/assistant-ui/thread";
+import { compositeAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { Agent } from "@/types/agentConfig";
 import "@/styles/chat.css";
 
 type SharePayload = {
   share_id: string;
   title: string;
-  snapshot: ApiConversationDetail & {
+  render_version?: "legacy" | "newchat";
+  snapshot: NewChatApiConversationDetail & {
     conversation_title?: string;
   };
 };
+
+const sharedAgent = {
+  id: "shared-agent",
+  name: "Nexent",
+  display_name: "Nexent",
+} as unknown as Agent;
+
+const useReadOnlyShareRuntime = (): AssistantRuntime =>
+  useLocalRuntime(remoteChatModelAdapter, {
+    adapters: {
+      attachments: compositeAttachmentAdapter,
+    },
+  });
+
+function NewChatShareView({ payload, title }: { payload: SharePayload; title: string }) {
+  const adapter = useMemo(
+    () => createShareThreadListAdapter(payload.snapshot),
+    [payload.snapshot],
+  );
+  const runtime = useRemoteThreadListRuntime({
+    runtimeHook: useReadOnlyShareRuntime,
+    adapter,
+    threadId: String(payload.snapshot.conversation_id),
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <TooltipProvider>
+        <ReadOnlyConversation agent={sharedAgent} title={title} />
+      </TooltipProvider>
+    </AssistantRuntimeProvider>
+  );
+}
 
 export default function ShareConversationPage() {
   const params = useParams<{ shareId: string }>();
@@ -56,7 +106,10 @@ export default function ShareConversationPage() {
     const snapshot = payload?.snapshot;
     if (!snapshot?.message) return [];
 
-    return formatConversationMessagesFromResponse(snapshot, t);
+    return formatConversationMessagesFromResponse(
+      snapshot as unknown as LegacyApiConversationDetail,
+      t,
+    );
   }, [payload, t]);
 
   const title =
@@ -86,6 +139,10 @@ export default function ShareConversationPage() {
         />
       </div>
     );
+  }
+
+  if (payload.render_version === "newchat") {
+    return <NewChatShareView payload={payload} title={title} />;
   }
 
   return (

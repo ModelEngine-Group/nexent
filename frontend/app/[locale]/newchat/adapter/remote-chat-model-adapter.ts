@@ -10,6 +10,24 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+
+// Backend SSE chunk format
+interface ImageMetadata {
+  source_file?: string;
+  image_url?: string;
+}
+
+function parseImageMetadata(value: unknown): ImageMetadata | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    const metadata = JSON.parse(value) as ImageMetadata;
+    return typeof metadata.image_url === "string" ? metadata : null;
+  } catch {
+    return null;
+  }
+}
 
 // Backend SSE chunk format
 interface SseChunk {
@@ -647,7 +665,20 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: { url: string; title: string },
+  item: {
+    url: string;
+    title: string;
+    text?: string;
+    sourceType?: string;
+    filename?: string;
+    sourceFile?: string;
+    downloadUrl?: string;
+    objectName?: string;
+    citeIndex?: number;
+    toolSign?: string;
+    isImage?: boolean;
+    imageKey?: string;
+  },
   toolCallId: string | undefined = undefined
 ): boolean {
   const targetToolCall = findMostRecentToolCall(contentParts, toolCallId);
@@ -655,32 +686,8 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (
-    item.url &&
-    !targetToolCall.searchContent.some(
-      (source: { url: string }) => source.url === item.url
-    )
-  ) {
+  if (item.url || item.sourceFile) {
     targetToolCall.searchContent.push(item);
-  }
-  return true;
-}
-
-/**
- * Attaches an image URL to its originating tool call.
- */
-export function attachSearchImageToTool(
-  contentParts: any[],
-  imageUrl: string,
-  toolCallId: string | undefined = undefined
-): boolean {
-  const targetToolCall = findMostRecentToolCall(contentParts, toolCallId);
-  if (!targetToolCall) return false;
-  if (!targetToolCall.searchImages) {
-    targetToolCall.searchImages = [];
-  }
-  if (!targetToolCall.searchImages.includes(imageUrl)) {
-    targetToolCall.searchImages.push(imageUrl);
   }
   return true;
 }
@@ -719,10 +726,39 @@ export interface SearchSource {
   searchType?: string;
   toolSign?: string;
   filename?: string;
+  sourceFile?: string;
   downloadUrl?: string;
   objectName?: string;
+  isImage?: boolean;
+  imageKey?: string;
 }
 export const searchSourcesRegistry = new Map<string, SearchSource[]>();
+
+// Maps the safe marker embedded in persisted answer markdown (for example
+// /__aidp_image__/j2) to the authenticated image URL received separately via
+// PICTURE_WEB. Real AIDP URLs are never exposed to the model.
+export const searchImagesRegistry = new Map<
+  string,
+  Map<string, SearchSource>
+>();
+
+const AIDP_IMAGE_MARKER_PATTERN = /\/__aidp_image__\/([a-z]+\d+)/gi;
+
+export function extractAidpImageKeys(texts: readonly string[]): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    AIDP_IMAGE_MARKER_PATTERN.lastIndex = 0;
+    for (const match of text.matchAll(AIDP_IMAGE_MARKER_PATTERN)) {
+      const key = match[1];
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    }
+  }
+  return keys;
+}
 
 // Conversation-level search sources registry for historical messages.
 // Keyed by the assistant-ui messageId so the lookup matches the
@@ -1326,23 +1362,52 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       };
     }
 
-    // Accumulate search sources and search images across the entire stream.
-    // After final_answer these are emitted as source / image parts at the end
-    // of the message. The same data is also attached to the most recent
-    // tool call so it can be rendered inline within `ToolFallback`.
+    // Accumulate search sources and verified images across the stream. Images
+    // are rendered at safe markers inside the answer markdown; source parts
+    // remain grouped at the end for the sources panel.
     //
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
-    const searchImagesAccumulator: string[] = [];
+    const searchImagesAccumulator: SearchSource[] = [];
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     let verificationPanel: VerificationPanelPart | null = null;
 
+    const appendSearchImages = (
+      imageUrls: string[],
+      toolCallId: string | undefined = undefined
+    ) => {
+      const imageMetadata = searchSourcesAccumulator.filter(
+        (source) => source.isImage
+      );
+
+      for (const imageUrl of imageUrls) {
+        if (!imageUrl) continue;
+
+        const metadata = imageMetadata[searchImagesAccumulator.length];
+        const imageSource: SearchSource = {
+          ...metadata,
+          url: imageUrl,
+          title: metadata?.title || imageUrl,
+          text: metadata?.text,
+          sourceType: "url",
+          isImage: true,
+          imageKey:
+            metadata?.imageKey ||
+            (metadata?.toolSign && metadata?.citeIndex !== undefined
+              ? `${metadata.toolSign}${metadata.citeIndex}`
+              : undefined),
+        };
+        searchImagesAccumulator.push(imageSource);
+        attachSearchContentToTool(contentParts, imageSource, toolCallId);
+      }
+    };
+
     const updateVerificationPanel = (result: VerificationContent): boolean => {
-      if (!verificationPanel) {
-        // The final-answer verifier emits `start` before evaluating the answer.
-        // Earlier step-level checks must not create a final verification panel.
-        if (result.phase !== "start") return false;
+      // Each verification lifecycle begins with `start`. Create its card as
+      // soon as that SSE event arrives so all following phases stream into it.
+      if (result.phase === "start") {
+        completeVerificationPanel();
         verificationPanel = {
           type: "verification-panel",
           results: [],
@@ -1350,6 +1415,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         };
         contentParts.push(verificationPanel);
       }
+      if (!verificationPanel) return false;
       verificationPanel.results.push(result);
       return true;
     };
@@ -1498,6 +1564,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
+          if (chunk.type === "automation_proposal") {
+            const proposal = parseAutomationProposal(chunk.content);
+            if (proposal) {
+              flushOpenReasoning();
+              contentParts.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
+              yield buildStreamResult(contentParts);
+            } else {
+              log.warn(
+                "[ChatModelAdapter] Failed to parse automation proposal"
+              );
+            }
+            continue;
+          }
+
           // Handle picture_web: accumulate image URLs and attach them to the
           // most recent tool call (matched by unit_index when available) so the
           // ToolFallback can render them inline.
@@ -1507,27 +1591,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              for (const imageUrl of imageUrls) {
-                if (!imageUrl) continue;
-                if (!searchImagesAccumulator.includes(imageUrl)) {
-                  searchImagesAccumulator.push(imageUrl);
-                }
-                attachSearchImageToTool(
-                  contentParts,
-                  imageUrl,
-                  chunk.tool_call_id
-                );
-              }
+              appendSearchImages(imageUrls, chunk.tool_call_id);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
-            // Do NOT yield image parts inline — they are emitted globally after
-            // final_answer below.
             continue;
           }
 
-          // Aggregate all verification events into one live panel. The first
-          // `start` event creates the panel; subsequent events update its results.
+          // Each verification `start` event creates a card immediately;
+          // following events for that lifecycle update the same card.
           if (chunk.type === "verification") {
             const parsed = parseVerification(chunk);
             if (parsed) {
@@ -1731,32 +1803,45 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const url = result.url || "";
                 const filename = result.filename || "";
                 const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
-                const title = result.title || filename || url;
-                const sourceKey = `${result.source_type || "url"}:${result.object_name || url || filename || title}`;
-                if (
-                  (url || filename || title) &&
-                  !searchSourcesAccumulator.some(
-                    (source) =>
-                      `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                      sourceKey
-                  )
-                ) {
+                const imageMetadata = parseImageMetadata(result.text);
+                const resolvedUrl = imageMetadata?.image_url || url;
+                const text = imageMetadata ? "" : result.text;
+                const isImage =
+                  result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
+                const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                if (url || filename || title) {
                   searchSourcesAccumulator.push({
                     citeIndex,
-                    url,
+                    url: resolvedUrl,
                     title,
-                    text: result.text,
+                    text,
                     sourceType: result.source_type,
                     searchType: result.search_type,
                     toolSign: result.tool_sign,
                     filename,
+                    sourceFile: result.source_file || imageMetadata?.source_file,
                     downloadUrl: result.download_url,
                     objectName: result.object_name,
+                    isImage,
+                    imageKey: result.image_key,
                   });
                 }
                 attachSearchContentToTool(
                   contentParts,
-                  { url, title },
+                  {
+                    url: resolvedUrl,
+                    title,
+                    text,
+                    sourceType: result.source_type,
+                    filename,
+                    sourceFile: result.source_file || imageMetadata?.source_file,
+                    downloadUrl: result.download_url,
+                    objectName: result.object_name,
+                    citeIndex,
+                    toolSign: result.tool_sign,
+                    isImage,
+                    imageKey: result.image_key,
+                  },
                   chunk.tool_call_id
                 );
               }
@@ -1788,6 +1873,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               nl2a = parsedNl2a;
               yield buildStreamResult(contentParts);
             }
+          } else if (chunk.type === "automation_proposal") {
+            const proposal = parseAutomationProposal(chunk.content);
+            if (proposal) {
+              if (currentReasoningPart) {
+                currentReasoningPart.status = { type: "done" };
+                contentParts.push(currentReasoningPart);
+                currentReasoningPart = null;
+              }
+              contentParts.push({
+                type: "data",
+                name: "automation-proposal",
+                data: proposal,
+              });
+              yield buildStreamResult(contentParts);
+            }
           } else if (chunk.type === "skill_files") {
             skillFileAttachments = [
               ...skillFileAttachments,
@@ -1807,17 +1907,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const imageUrls: string[] = Array.isArray(parsed?.images_url)
                 ? parsed.images_url
                 : [];
-              for (const imageUrl of imageUrls) {
-                if (!imageUrl) continue;
-                if (!searchImagesAccumulator.includes(imageUrl)) {
-                  searchImagesAccumulator.push(imageUrl);
-                }
-                attachSearchImageToTool(
-                  contentParts,
-                  imageUrl,
-                  chunk.tool_call_id
-                );
-              }
+              appendSearchImages(imageUrls, chunk.tool_call_id);
             } catch (e) {
               log.warn("[ChatModelAdapter] Failed to parse picture_web:", e);
             }
@@ -1920,32 +2010,45 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const url = result.url || "";
                   const filename = result.filename || "";
                   const citeIndex = result.cite_index ?? result.citeIndex ?? 0;
-                  const title = result.title || filename || url;
-                  const sourceKey = `${result.source_type || "url"}:${result.object_name || url || filename || title}`;
-                  if (
-                    (url || filename || title) &&
-                    !searchSourcesAccumulator.some(
-                      (source) =>
-                        `${source.sourceType || "url"}:${source.objectName || source.url || source.filename || source.title}` ===
-                        sourceKey
-                    )
-                  ) {
+                  const imageMetadata = parseImageMetadata(result.text);
+                  const resolvedUrl = imageMetadata?.image_url || url;
+                  const text = imageMetadata ? "" : result.text;
+                  const isImage =
+                    result.score_details?.chunk_type === "image" || Boolean(imageMetadata);
+                  const title = result.title || filename || imageMetadata?.source_file || resolvedUrl;
+                  if (url || filename || title) {
                     searchSourcesAccumulator.push({
                       citeIndex,
-                      url,
+                      url: resolvedUrl,
                       title,
-                      text: result.text,
+                      text,
                       sourceType: result.source_type,
                       searchType: result.search_type,
                       toolSign: result.tool_sign,
                       filename,
+                      sourceFile: result.source_file || imageMetadata?.source_file,
                       downloadUrl: result.download_url,
                       objectName: result.object_name,
+                      isImage,
+                      imageKey: result.image_key,
                     });
                   }
                   attachSearchContentToTool(
                     contentParts,
-                    { url, title },
+                    {
+                      url: resolvedUrl,
+                      title,
+                      text,
+                      sourceType: result.source_type,
+                      filename,
+                      sourceFile: result.source_file || imageMetadata?.source_file,
+                      downloadUrl: result.download_url,
+                      objectName: result.object_name,
+                      citeIndex,
+                      toolSign: result.tool_sign,
+                      isImage,
+                      imageKey: result.image_key,
+                    },
                     chunk.tool_call_id
                   );
                 }
@@ -1973,12 +2076,61 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       activeSubAgents.clear();
       activeInvocationId = null;
 
-      // Emit collected search sources as a block after final_answer so the UI
-      // shows a unified global sources section at the end of the message.
-      // Also register in the shared registry so MarkdownText can resolve [[b1]] refs.
+      // SEARCH_CONTENT and PICTURE_WEB can reach the browser in either order.
+      // Resolve them only after the stream is complete, using the markers that
+      // actually survived into the final answer as the authoritative keys.
+      const answerImageKeys = extractAidpImageKeys(
+        contentParts.flatMap((part) =>
+          part?.type === "text" && typeof part.text === "string"
+            ? [part.text]
+            : []
+        )
+      );
+      const imageMetadata = searchSourcesAccumulator.filter(
+        (source) => source.isImage
+      );
+      for (const [index, image] of searchImagesAccumulator.entries()) {
+        const metadata =
+          imageMetadata.find((source) => {
+            if (!source.url) return false;
+            const relativeUrl = source.url.replace(/^\/+/, "");
+            return image.url.endsWith(relativeUrl);
+          }) ?? imageMetadata[index];
+        const imageKey =
+          metadata?.imageKey ||
+          (metadata?.toolSign && metadata.citeIndex !== undefined
+            ? `${metadata.toolSign}${metadata.citeIndex}`
+            : undefined) ||
+          answerImageKeys[index] ||
+          image.imageKey;
+        searchImagesAccumulator[index] = {
+          ...image,
+          ...metadata,
+          url: image.url,
+          title: metadata?.title || image.title,
+          text: metadata?.text || image.text,
+          sourceType: "url",
+          isImage: true,
+          imageKey,
+        };
+      }
+
+      const imageMap = new Map<string, SearchSource>();
+      for (const image of searchImagesAccumulator) {
+        if (image.imageKey) imageMap.set(image.imageKey, image);
+      }
+      if (imageMap.size > 0) searchImagesRegistry.set(messageId, imageMap);
+
+      searchSourcesRegistry.set(messageId, [
+        ...searchSourcesAccumulator.filter((source) => !source.isImage),
+        ...searchImagesAccumulator,
+      ]);
+
+      // Emit one contiguous source block after the answer and image cards.
+      // Also register it so MarkdownText can resolve citation markers.
       if (searchSourcesAccumulator.length > 0) {
-        searchSourcesRegistry.set(messageId, searchSourcesAccumulator);
         for (const source of searchSourcesAccumulator) {
+          if (source.isImage) continue;
           contentParts.push({
             type: "source",
             sourceType: source.sourceType === "file" ? "document" : "url",
@@ -1994,23 +2146,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         }
       }
 
-      // Emit collected search image URLs as a global sources block. Each
-      // image is pushed as a `source` part of type `url` with an `isImage`
-      // marker so thread.tsx can render it as a thumbnail matching the
-      // per-tool ToolFallback.SearchContent rendering.
-      if (searchImagesAccumulator.length > 0) {
-        for (const imageUrl of searchImagesAccumulator) {
-          contentParts.push({
-            type: "source",
-            sourceType: "url",
-            url: imageUrl,
-            title: imageUrl,
-            isImage: true,
-          });
-        }
+      for (const image of searchImagesAccumulator) {
+        contentParts.push({
+          type: "source",
+          sourceType: "url",
+          url: image.url,
+          title: image.title,
+          text: image.text,
+          citeIndex: image.citeIndex,
+          isImage: true,
+          imageKey: image.imageKey,
+          messageId,
+        });
       }
 
-      const finalResult = buildStreamResult(collapseSubAgentParts(contentParts));
+      const finalResult = buildStreamResult(
+        collapseSubAgentParts(contentParts)
+      );
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);

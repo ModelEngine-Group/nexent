@@ -1,12 +1,14 @@
 name: Build Offline Deployment Package
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Image version tag, e.g. v2.2.0 or latest'
+        description: 'Image version tag; leave blank to use the selected Git tag or branch'
         required: false
-        default: 'latest'
       image_source:
         description: 'Image source'
         required: false
@@ -17,6 +19,11 @@ on:
           - mainland
       include_source:
         description: 'Include source code in the package'
+        required: false
+        default: false
+        type: boolean
+      upload_to_obs:
+        description: 'Upload the final package to Huawei Cloud OBS'
         required: false
         default: false
         type: boolean
@@ -71,13 +78,19 @@ jobs:
           fi
 
           SOURCE_SUFFIX=""
-          if [ "${{ inputs.include_source }}" = "true" ]; then
+          INCLUDE_SOURCE="${{ inputs.include_source || false }}"
+          IMAGE_SOURCE="${{ inputs.image_source || 'general' }}"
+          UPLOAD_TO_OBS="${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.upload_to_obs }}"
+          if [ "$INCLUDE_SOURCE" = "true" ]; then
             SOURCE_SUFFIX="-with-source"
           fi
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "platform=$PLATFORM" >> "$GITHUB_OUTPUT"
+          echo "include-source=$INCLUDE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "image-source=$IMAGE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "upload_to_obs=$UPLOAD_TO_OBS" >> "$GITHUB_OUTPUT"
+          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Set deployment components
         id: set-components
@@ -95,11 +108,12 @@ jobs:
             --version "${{ steps.set-vars.outputs.version }}" \
             --platform "${{ steps.set-vars.outputs.platform }}" \
             --output-dir ./offline-output \
-            --include-source "${{ inputs.include_source }}" \
-            --image-source "${{ inputs.image_source }}" \
+            --include-source "${{ steps.set-vars.outputs.include-source }}" \
+            --image-source "${{ steps.set-vars.outputs.image-source }}" \
             --components "${{ steps.set-components.outputs.components }}" \
             --target all \
-            --compress false
+            --package-name "${{ steps.set-vars.outputs.package-name }}" \
+            --compress true
 
       - name: Show offline package
         run: |
@@ -111,14 +125,30 @@ jobs:
           du -sh ./offline-output
           find ./offline-output -maxdepth 2 -type f | sort | head -50
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Authenticate to Huawei Cloud
+        if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
+        uses: huaweicloud/auth-action@v1.1.0
         with:
-          name: ${{ steps.set-vars.outputs.package-name }}
-          path: ./offline-output
+          access_key_id: ${{ secrets.HUAWEI_OBS_ACCESSKEY }}
+          secret_access_key: ${{ secrets.HUAWEI_OBS_SECRETKEY }}
+          region: 'cn-east-3'
+
+      - name: Upload to Huawei Cloud OBS
+        if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
+        uses: huaweicloud/obs-helper@v1.0.0
+        with:
+          bucket_name: 'nexent-images'
+          local_file_path: './${{ steps.set-vars.outputs.package-name }}.zip'
+          obs_file_path: 'packages/${{ steps.set-vars.outputs.package-name }}.zip'
+          operation_type: 'upload'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: './${{ steps.set-vars.outputs.package-name }}.zip'
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 30
+          archive: false
 
       - name: Summary
         run: |
@@ -129,10 +159,9 @@ jobs:
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
-          echo "Note: the downloaded artifact zip contains the offline package contents directly."
-          echo "Target: ${{ inputs.target }}"
+          echo "Note: the GitHub artifact zip contains the offline package contents directly."
           echo "Components: ${{ steps.set-components.outputs.components }}"
-          echo "Image source: ${{ inputs.image_source }}"
+          echo "Image source: ${{ steps.set-vars.outputs.image-source }}"
           echo "Ref Type: ${{ github.ref_type }}"
           echo "Ref Name: ${{ github.ref_name }}"
           echo "========================================"

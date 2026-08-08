@@ -1,19 +1,15 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
-from consts.model import AgentRequest, HistoryItem, MessageRequest, MessageUnit
+from consts.model import AgentRequest
 from database import agent_automation_db
 from services.agent_service import is_agent_running, run_agent_background, stop_agent_tasks
-from services.conversation_management_service import (
-    get_conversation_history_service,
-    save_message,
-    save_message_unit,
-)
 
 from .capability_resolver import validate_bindings_available
+from .conversation_adapter import automation_conversation_adapter
 from .models import AutomationRunStatus, ScheduleTrigger
 from .schedule_engine import compute_next_fire_at
 
@@ -31,30 +27,6 @@ def _parse_dt(value: Any) -> datetime:
     if isinstance(value, str):
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     return _utcnow()
-
-
-def _message_content(message: Dict[str, Any]) -> str:
-    content = message.get("message", "")
-    if isinstance(content, list):
-        final = next((unit.get("content") for unit in reversed(content) if unit.get("type") == "final_answer"), "")
-        visible_units = [
-            unit
-            for unit in content
-            if unit.get("type") not in {"automation_proposal"}
-        ]
-        content = final or " ".join(str(unit.get("content", "")) for unit in visible_units)
-    return str(content or "")
-
-
-def _history_items(history_payload: List[Dict[str, Any]]) -> List[HistoryItem]:
-    if not history_payload:
-        return []
-    items: List[HistoryItem] = []
-    for msg in history_payload[0].get("message", []):
-        content = _message_content(msg)
-        if content:
-            items.append(HistoryItem(role=msg.get("role", "user"), content=content))
-    return items
 
 
 class AgentAutomationRunner:
@@ -160,8 +132,6 @@ class AgentAutomationRunner:
                 "Required automation capability is unavailable.",
             )
 
-        history_payload = get_conversation_history_service(task["conversation_id"], task["user_id"])
-        history = _history_items(history_payload)
         stored_snapshot = task.get("runtime_snapshot") or {"agent_id": task["agent_id"]}
         current_resolution = capability_status.get("resolution") or {}
         current_agent_snapshot = current_resolution.get("agent_snapshot") or {}
@@ -176,30 +146,22 @@ class AgentAutomationRunner:
             ),
         }
         generated_prompt = task["instruction"].strip()
-        message_request = MessageRequest(
-            conversation_id=task["conversation_id"],
-            message_idx=len(history_payload[0].get("message", [])) if history_payload else 0,
-            role="user",
-            message=[MessageUnit(type="string", content=generated_prompt)],
-        )
-        user_message_id = save_message(message_request, task["user_id"], task["tenant_id"])
-        save_message_unit(
-            message_id=user_message_id,
-            conversation_id=task["conversation_id"],
-            unit_index=0,
-            unit_type="automation_prompt",
-            unit_content=generated_prompt,
-            user_id=task["user_id"],
+        turn = automation_conversation_adapter.append_run_prompt(
+            task["conversation_id"],
+            generated_prompt,
+            task["user_id"],
+            task["tenant_id"],
         )
 
         agent_request = AgentRequest(
             query=generated_prompt,
             conversation_id=task["conversation_id"],
-            history=history,
+            history=turn["history"],
             agent_id=task["agent_id"],
             model_id=runtime_snapshot.get("model_id"),
             version_no=task.get("agent_version_no"),
             tool_params=runtime_snapshot.get("tool_params"),
+            enable_automation_tool=False,
         )
         result = await run_agent_background(
             agent_request=agent_request,
@@ -209,7 +171,7 @@ class AgentAutomationRunner:
         )
         return self._finish_run(run, task, AutomationRunStatus.SUCCEEDED.value, {
             "generated_prompt": generated_prompt,
-            "user_message_id": user_message_id,
+            "user_message_id": turn["user_message_id"],
             "assistant_message_id": result.get("assistant_message_id"),
         })
 

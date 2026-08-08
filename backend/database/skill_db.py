@@ -253,6 +253,7 @@ def _replace_skill_tool_relations(
     session,
     skill_id: int,
     tool_ids: List[int],
+    updated_by: Optional[str] = None,
 ) -> None:
     session.query(SkillToolRelation).filter(
         SkillToolRelation.skill_id == skill_id
@@ -261,7 +262,10 @@ def _replace_skill_tool_relations(
         session.add(SkillToolRelation(
             skill_id=skill_id,
             tool_id=tool_id,
+            created_by=updated_by,
             create_time=datetime.now(),
+            updated_by=updated_by,
+            update_time=datetime.now(),
         ))
 
 
@@ -449,11 +453,16 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
 
         tool_ids = skill_data.get("tool_ids", [])
         if tool_ids:
+            relation_created_by = skill_data.get("created_by") or skill_data.get("updated_by")
+            relation_updated_by = skill_data.get("updated_by") or relation_created_by
             for tool_id in tool_ids:
                 rel = SkillToolRelation(
                     skill_id=skill_id,
                     tool_id=tool_id,
-                    create_time=datetime.now()
+                    created_by=relation_created_by,
+                    create_time=datetime.now(),
+                    updated_by=relation_updated_by,
+                    update_time=datetime.now(),
                 )
                 session.add(rel)
 
@@ -510,6 +519,7 @@ def update_skill(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()
@@ -578,6 +588,7 @@ def update_skill_by_id(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()

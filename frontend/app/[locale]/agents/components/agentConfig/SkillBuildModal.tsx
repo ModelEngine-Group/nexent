@@ -74,6 +74,7 @@ interface SkillBuildModalProps {
   onSuccess: () => void | Promise<void>;
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
+  zIndex?: number;
 }
 
 interface StreamedFrontmatter {
@@ -99,6 +100,17 @@ function parseStreamedFrontmatter(content: string): StreamedFrontmatter | null {
   } catch {
     return null;
   }
+}
+
+function stripLeadingSkillFrontmatter(content: string): string {
+  let normalizedContent = content;
+  const frontmatterPattern = /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/;
+
+  while (frontmatterPattern.test(normalizedContent)) {
+    normalizedContent = normalizedContent.replace(frontmatterPattern, "");
+  }
+
+  return normalizedContent;
 }
 
 function mergeGeneratedSkillTabs(
@@ -165,6 +177,7 @@ export default function SkillBuildModal({
   onSuccess,
   editingSkill,
   onBeforeEditSave,
+  zIndex = 1000,
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -450,7 +463,13 @@ export default function SkillBuildModal({
             if (content === null) {
               throw new Error(`Failed to load skill file: ${path}`);
             }
-            return { path, content };
+            return {
+              path,
+              content:
+                path === "SKILL.md"
+                  ? stripLeadingSkillFrontmatter(content)
+                  : content,
+            };
           })
         );
         if (!cancelled) {
@@ -1286,6 +1305,7 @@ export default function SkillBuildModal({
       }
       open={isOpen}
       onCancel={handleModalClose}
+      zIndex={zIndex}
       centered
       width="min(1180px, calc(100vw - 32px))"
       styles={{

@@ -483,7 +483,7 @@ export default function McpConfigModal({
       return;
     }
     if (!openApiJson.trim()) {
-      message.error(t("mcpConfig.openApiToMcp.jsonPlaceholder"));
+      message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
       return;
     }
 
@@ -491,7 +491,16 @@ export default function McpConfigModal({
     try {
       parsedJson = JSON.parse(openApiJson);
     } catch {
-      message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+      message.error(t("mcpConfig.openApiToMcp.message.invalidJsonFormat"));
+      return;
+    }
+    if (
+      !parsedJson ||
+      typeof parsedJson !== "object" ||
+      Array.isArray(parsedJson) ||
+      !("openapi" in parsedJson)
+    ) {
+      message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
       return;
     }
 
@@ -1211,6 +1220,9 @@ export default function McpConfigModal({
                         rows={6}
                         disabled={actionsLocked || importingOpenApi}
                       />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                      </Text>
                       <div
                         style={{
                           display: "flex",

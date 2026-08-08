@@ -178,7 +178,7 @@ export const authService = {
   signUp: async (
     email: string,
     password: string,
-    inviteCode?: string,
+    inviteCode: string,
     autoLogin: boolean = true
   ): Promise<SessionResponse> => {
     try {
@@ -190,7 +190,7 @@ export const authService = {
         body: JSON.stringify({
           email,
           password,
-          invite_code: inviteCode || null,
+          invite_code: inviteCode,
           auto_login: autoLogin,
         }),
       });

@@ -415,8 +415,9 @@ export default function AddMcpServiceLocalSection({
               <div>
                 <label className="mb-1 block text-sm font-normal text-slate-500">
                   {t("mcpConfig.openapiService.form.openapiJson")}
+                  <span className="ml-1 text-red-500">*</span>
                 </label>
-                <Form.Item name="openApiJson" className="mb-0">
+                <Form.Item name="openApiJson" rules={rules.openApiJson} className="mb-0">
                   <Input.TextArea
                     {...bindField("openApiJson")}
                     rows={6}
@@ -424,6 +425,9 @@ export default function AddMcpServiceLocalSection({
                     placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                   />
                 </Form.Item>
+                <p className="mt-1 text-xs text-slate-400">
+                  {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                </p>
               </div>
             </div>
           </div>
@@ -498,6 +502,7 @@ export default function AddMcpServiceLocalSection({
                 <div>
                   <ContainerPortField
                     scope="local"
+                    showSuggestButton={false}
                     containerPort={draft.containerPort}
                     setContainerPort={(value) => {
                       patchDraft({ containerPort: value });

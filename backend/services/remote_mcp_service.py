@@ -208,7 +208,12 @@ def _is_container_record(record: dict | None) -> bool:
 
     A record is considered container-based if it has:
     - container_id (Docker container ID)
-    - config_json (container configuration)
+    - a non-empty config_json holding a container configuration
+
+    API-type MCPs store OpenAPI JSON in config_json and are never treated as
+    containers. An empty dict config_json (e.g. `{}`) is not a container
+    configuration either, so records with only an empty config_json are treated
+    as plain remote MCPs instead of being misclassified as containers.
     """
     if not record:
         return False
@@ -216,7 +221,9 @@ def _is_container_record(record: dict | None) -> bool:
     # API-type MCPs store OpenAPI JSON in config_json, not container config
     if isinstance(config_json, dict) and "openapi" in config_json:
         return False
-    return record.get("container_id") is not None or config_json is not None
+    return record.get("container_id") is not None or (
+        isinstance(config_json, dict) and bool(config_json)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1137,7 +1144,9 @@ async def get_remote_mcp_server_list(
         config_json = record.get("config_json")
         container_id = record.get("container_id")
 
-        is_container = container_id is not None or config_json is not None
+        # Reuse _is_container_record so an empty config_json (e.g. `{}`) is not
+        # misclassified as a container, matching the API/enable path behavior.
+        is_container = _is_container_record(record)
 
         container_status = None
         if is_container:

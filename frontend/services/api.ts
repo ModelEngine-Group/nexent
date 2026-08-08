@@ -641,7 +641,7 @@ export const API_ENDPOINTS = {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
     usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
-    // Platform-level quota (SU/ASSET_OWNER only)
+    // Platform-level quota (SU/ASSET_OWNER/SPEED only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
     platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
@@ -770,8 +770,19 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      // Handle request entity too large error (413)
+      // Preserve the tenant storage quota error so upload callers can present
+      // the correct recovery action instead of treating it as a per-file limit.
       if (response.status === 413) {
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData?.error === "TenantStorageFull") {
+            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+          }
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error;
+          }
+        }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
           "File size exceeds limit."

@@ -69,10 +69,10 @@ const PersistentChatHome: FC = () => {
   );
 
   useEffect(() => {
-    const conversationId = new URLSearchParams(window.location.search).get(
-      "conversation_id",
-    );
-    setRequestedThreadId(conversationId || undefined);
+    const searchParams = new URLSearchParams(window.location.search);
+    const threadId =
+      searchParams.get("thread_id") ?? searchParams.get("conversation_id");
+    setRequestedThreadId(threadId || undefined);
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
@@ -355,6 +355,11 @@ const HomeContent: FC<{
       <div className="flex-1 min-w-0">
         <Chat
           generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
+          conversationId={
+            activeConversationId && Number(activeConversationId) > 0
+              ? Number(activeConversationId)
+              : undefined
+          }
           isLoadingAgents={isLoadingAgents}
           selectedAgent={selectedAgent}
           onAgentSelected={handleAgentSelectedFromLanding}

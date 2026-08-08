@@ -398,6 +398,7 @@ async def start_streaming_chat(
             tool_params=tool_params,
             model_id=model_id,
             version_no=latest_version_no,
+            enable_automation_tool=False,
         )
 
         # Persist the user message off the event loop before starting the stream.
@@ -480,30 +481,6 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     conversations = get_conversation_list_service(ctx.user_id)
     # get_conversation_list_service is sync
-
-    # Add meta_data from token usage log if available
-    if ctx.token_id > 0:
-        for item in conversations:
-            # Ensure we do not leak empty meta_data keys
-            if "meta_data" in item and not item.get("meta_data"):
-                item.pop("meta_data", None)
-
-            conversation_id = item.get("conversation_id")
-            if conversation_id:
-                try:
-                    meta_data = get_latest_usage_metadata(
-                        token_id=ctx.token_id,
-                        related_id=int(conversation_id),
-                        call_function_name="run_chat"
-                    )
-                    # Only return meta_data when there is a usage log record and meta_data is non-empty
-                    if meta_data:
-                        item["meta_data"] = meta_data
-                    else:
-                        item.pop("meta_data", None)
-                except Exception as e:
-                    logger.warning(f"Failed to get meta_data for conversation {conversation_id}: {str(e)}")
-                    item.pop("meta_data", None)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}

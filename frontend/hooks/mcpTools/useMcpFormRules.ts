@@ -107,13 +107,31 @@ export function useMcpFormRules() {
 
       openApiJson: [
         {
+          required: true,
+          whitespace: true,
+          message: t("mcpConfig.openApiToMcp.message.jsonRequired"),
+        },
+        {
           validator: async (_rule: Rule, value: unknown) => {
             const text = String(value || "").trim();
             if (!text) return;
+            let parsed: unknown;
             try {
-              JSON.parse(text);
+              parsed = JSON.parse(text);
             } catch {
-              throw new Error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+              throw new Error(
+                t("mcpConfig.openApiToMcp.message.invalidJsonFormat")
+              );
+            }
+            if (
+              !parsed ||
+              typeof parsed !== "object" ||
+              Array.isArray(parsed) ||
+              !("openapi" in (parsed as Record<string, unknown>))
+            ) {
+              throw new Error(
+                t("mcpConfig.openApiToMcp.message.invalidOpenApi")
+              );
             }
           },
         },
