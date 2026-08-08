@@ -188,6 +188,16 @@ export default defineConfig({
                 ],
               },
               {
+                text: "Skills",
+                items: [
+                  { text: "Overview", link: "/en/backend/skills/" },
+                  {
+                    text: "System Architecture",
+                    link: "/en/backend/skills/overview",
+                  },
+                ],
+              },
+              {
                 text: "Prompt Development",
                 link: "/en/backend/prompt-development",
               },
@@ -415,6 +425,16 @@ export default defineConfig({
                     link: "/zh/backend/tools/langchain",
                   },
                   { text: "MCP 工具", link: "/zh/backend/tools/mcp" },
+                ],
+              },
+              {
+                text: "技能",
+                items: [
+                  { text: "概览", link: "/zh/backend/skills/" },
+                  {
+                    text: "系统架构",
+                    link: "/zh/backend/skills/overview",
+                  },
                 ],
               },
               { text: "提示词开发", link: "/zh/backend/prompt-development" },
