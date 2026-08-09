@@ -15,6 +15,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -69,6 +70,9 @@ from services.asset_owner_visibility import postprocess_knowledge_visibility
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
+
+
+_HYBRID_NUMERIC_QUERY_PATTERN = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def _update_progress(task_id: str, processed: int, total: int):
@@ -2264,7 +2268,7 @@ class ElasticSearchService:
             query: str,
             tenant_id: str,
             top_k: int = 10,
-            weight_accurate: float = 0.5,
+            weight_accurate: Optional[float] = None,
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
@@ -2279,8 +2283,13 @@ class ElasticSearchService:
                 raise ValueError("At least one index name is required")
             if top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
-            if weight_accurate < 0 or weight_accurate > 1:
+            if weight_accurate is not None and (weight_accurate < 0 or weight_accurate > 1):
                 raise ValueError("weight_accurate must be between 0 and 1")
+            if weight_accurate is None:
+                # Preserve the REST endpoint's former 0.5 default for normal
+                # text, while giving a numeric query the same 0.7 preference
+                # for exact retrieval as the SDK's automatic path.
+                weight_accurate = 0.7 if _HYBRID_NUMERIC_QUERY_PATTERN.search(query) else 0.5
 
             # Get embedding model from the first index's knowledge base record
             if not index_names:

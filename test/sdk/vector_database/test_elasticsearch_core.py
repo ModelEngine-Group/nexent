@@ -1485,6 +1485,35 @@ def test_accurate_search_builds_multi_index_query(elasticsearch_core_instance):
         assert index_pattern == "index_a,index_b"
         assert search_query["size"] == 7
         assert search_query["_source"]["excludes"] == ["embedding"]
+        assert search_query["query"] == {"match_all": {}}
+
+
+def test_accurate_search_boosts_exact_numeric_matches(elasticsearch_core_instance):
+    """Numeric identifiers should be independently eligible for exact matching."""
+    with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec, \
+            patch.object(elasticsearch_core_module, "calculate_term_weights") as mock_weights, \
+            patch.object(elasticsearch_core_module, "build_weighted_query") as mock_build:
+        mock_weights.return_value = {"编号": 1.0}
+        legacy_query = {"function_score": {"query": {"match": {"content": "编号 95173042"}}}}
+        mock_build.return_value = {"query": legacy_query}
+        mock_exec.return_value = []
+
+        elasticsearch_core_instance.accurate_search(
+            ["test_index"], "请查找编号 95173042", top_k=3
+        )
+
+        _, search_query = mock_exec.call_args[0]
+        numeric_query = search_query["query"]["bool"]["should"][1]
+        assert search_query["query"]["bool"]["should"][0] == legacy_query
+        assert numeric_query == {
+            "bool": {
+                "should": [
+                    {"match_phrase": {"title": {"query": "95173042", "boost": 100.0}}},
+                    {"match_phrase": {"content": {"query": "95173042", "boost": 100.0}}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
 
 
 def test_semantic_search_success(elasticsearch_core_instance):
@@ -1563,6 +1592,32 @@ def test_semantic_search_sets_knn_parameters(elasticsearch_core_instance):
         assert search_query["knn"]["num_candidates"] == 8
         assert search_query["size"] == 4
         assert search_query["_source"]["excludes"] == ["embedding"]
+        assert "query" not in search_query
+
+
+def test_semantic_search_boosts_exact_numeric_matches(elasticsearch_core_instance):
+    """Numeric queries add an exact lexical clause to the same kNN request."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    mock_embedding_model.get_embeddings.return_value = [[0.2] * 8]
+
+    with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec:
+        mock_exec.return_value = []
+
+        elasticsearch_core_instance.semantic_search(
+            ["index_x"], "请查找编号 95173042", mock_embedding_model, top_k=4
+        )
+
+        _, search_query = mock_exec.call_args[0]
+        assert search_query["query"] == {
+            "bool": {
+                "should": [
+                    {"match_phrase": {"title": {"query": "95173042", "boost": 100.0}}},
+                    {"match_phrase": {"content": {"query": "95173042", "boost": 100.0}}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
 
 
 def test_hybrid_search_success(elasticsearch_core_instance):
@@ -1606,6 +1661,35 @@ def test_hybrid_search_success(elasticsearch_core_instance):
         assert all("document" in r for r in result)
         mock_accurate.assert_called_once()
         mock_semantic.assert_called_once()
+
+
+def test_hybrid_search_adapts_default_weight_for_numeric_queries(elasticsearch_core_instance):
+    """The default hybrid weight should favor an exact numeric identifier."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    accurate_results = [
+        {"score": 1.0, "document": {"id": "target"}, "index": "test_index"},
+        {"score": 0.2, "document": {"id": "distractor"}, "index": "test_index"},
+    ]
+    semantic_results = [
+        {"score": 1.0, "document": {"id": "distractor"}, "index": "test_index"},
+    ]
+
+    with patch.object(elasticsearch_core_instance, "accurate_search", return_value=accurate_results), \
+            patch.object(elasticsearch_core_instance, "semantic_search", return_value=semantic_results):
+        numeric_results = elasticsearch_core_instance.hybrid_search(
+            ["test_index"], "编号 95173042", mock_embedding_model, top_k=2
+        )
+        text_results = elasticsearch_core_instance.hybrid_search(
+            ["test_index"], "项目状态", mock_embedding_model, top_k=2
+        )
+        overridden_results = elasticsearch_core_instance.hybrid_search(
+            ["test_index"], "编号 95173042", mock_embedding_model, top_k=2, weight_accurate=0.3
+        )
+
+    assert numeric_results[0]["document"]["id"] == "target"
+    assert text_results[0]["document"]["id"] == "distractor"
+    assert overridden_results[0]["document"]["id"] == "distractor"
 
 
 def test_get_indices_detail_success(elasticsearch_core_instance):

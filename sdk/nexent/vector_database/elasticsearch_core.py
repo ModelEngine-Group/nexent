@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -31,6 +32,37 @@ class BulkOperation:
 
 SCROLL_TTL = "2m"
 DEFAULT_SCROLL_SIZE = 1000
+DEFAULT_HYBRID_ACCURATE_WEIGHT = 0.3
+NUMERIC_HYBRID_ACCURATE_WEIGHT = 0.7
+NUMERIC_EXACT_MATCH_BOOST = 100.0
+_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _build_numeric_exact_query(query_text: str) -> Optional[Dict[str, Any]]:
+    """Return an exact-match scoring clause for numeric tokens in a query.
+
+    Numeric identifiers and values carry more precision than the surrounding
+    natural-language query.  The regular lexical query remains in place; this
+    clause only gives exact numeric matches a clear score advantage when the
+    user actually supplied a number.
+    """
+    numeric_tokens = list(dict.fromkeys(_NUMERIC_TOKEN_PATTERN.findall(query_text or "")))
+    if not numeric_tokens:
+        return None
+
+    clauses = [
+        {
+            "match_phrase": {
+                field: {
+                    "query": token,
+                    "boost": NUMERIC_EXACT_MATCH_BOOST,
+                }
+            }
+        }
+        for token in numeric_tokens
+        for field in ("title", "content")
+    ]
+    return {"bool": {"should": clauses, "minimum_should_match": 1}}
 
 
 class ElasticSearchCore(VectorDatabaseCore):
@@ -1029,6 +1061,15 @@ class ElasticSearchCore(VectorDatabaseCore):
             "_source": {"excludes": ["embedding"]},
         }
 
+        numeric_exact_query = _build_numeric_exact_query(query_text)
+        if numeric_exact_query is not None:
+            search_query["query"] = {
+                "bool": {
+                    "should": [search_query["query"], numeric_exact_query],
+                    "minimum_should_match": 1,
+                }
+            }
+
         # Inject an additional AND-filter (memory index isolation, etc.).
         # When ``filter`` is None we keep the original behaviour bit-for-bit.
         if filter is not None:
@@ -1090,6 +1131,7 @@ class ElasticSearchCore(VectorDatabaseCore):
 
         # Prepare the search query
         knn_filter = filter if isinstance(filter, dict) else None
+        numeric_exact_query = _build_numeric_exact_query(query_text)
         if embedding_model.model_type == "multimodal":
             search_text_query = {
                 "knn": {
@@ -1102,6 +1144,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
             }
+            if numeric_exact_query is not None:
+                search_text_query["query"] = numeric_exact_query
             search_image_query = {
                 "knn": {
                         "field": "multi_embedding",
@@ -1113,6 +1157,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                 "size": top_k,
                 "_source": {"excludes": ["multi_embedding"]},
             }
+            if numeric_exact_query is not None:
+                search_image_query["query"] = numeric_exact_query
             raw_results = self.exec_query(index_pattern, search_text_query) + self.exec_query(index_pattern, search_image_query)
         else:
             search_query = {
@@ -1126,6 +1172,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
             }
+            if numeric_exact_query is not None:
+                search_query["query"] = numeric_exact_query
             raw_results = self.exec_query(index_pattern, search_query)
 
         return raw_results
@@ -1136,7 +1184,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_text: str,
         embedding_model: BaseEmbedding,
         top_k: int = 5,
-        weight_accurate: float = 0.3,
+        weight_accurate: Optional[float] = None,
         filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -1147,7 +1195,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
-            weight_accurate: The weight of the accurate matching score (0-1), the semantic search weight is 1-weight_accurate
+            weight_accurate: The weight of the accurate matching score (0-1). When omitted,
+                numeric queries use a higher accurate-search weight and other queries keep
+                the legacy default. The semantic search weight is 1-weight_accurate.
             filter: Optional Elasticsearch filter clause applied to both the
                 accurate and semantic sub-queries. When ``None`` (the default),
                 no extra filter is applied and legacy behaviour is preserved.
@@ -1155,6 +1205,14 @@ class ElasticSearchCore(VectorDatabaseCore):
         Returns:
             List of search results sorted by combined score
         """
+        effective_weight_accurate = weight_accurate
+        if effective_weight_accurate is None:
+            effective_weight_accurate = (
+                NUMERIC_HYBRID_ACCURATE_WEIGHT
+                if _build_numeric_exact_query(query_text) is not None
+                else DEFAULT_HYBRID_ACCURATE_WEIGHT
+            )
+
         # Get results from both searches
         accurate_results = self.accurate_search(
             index_names, query_text, top_k=top_k, filter=filter)
@@ -1227,8 +1285,8 @@ class ElasticSearchCore(VectorDatabaseCore):
                     normalized_semantic = semantic_score / max_semantic if max_semantic > 0 else 0
 
                 # Calculate weighted combined score
-                combined_score = weight_accurate * normalized_accurate + \
-                    (1 - weight_accurate) * normalized_semantic
+                combined_score = effective_weight_accurate * normalized_accurate + \
+                    (1 - effective_weight_accurate) * normalized_semantic
 
                 results.append(
                     {
