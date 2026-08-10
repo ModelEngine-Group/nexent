@@ -166,6 +166,7 @@ def _mock_service_impl(service_module, **impl_overrides):
         "create_evaluation_set_from_jsonl": MagicMock(return_value={"id": 1}),
         "create_evaluation_set_from_cases": MagicMock(return_value={"id": 2}),
         "delete_evaluation_set_impl": MagicMock(),
+        "count_evaluation_sets_impl": MagicMock(return_value=0),
         "get_evaluation_set_impl": MagicMock(return_value={"id": 1, "name": "set"}),
         # The list-cases endpoint reads result["data"] and result["total"].
         "list_evaluation_set_cases_impl": MagicMock(

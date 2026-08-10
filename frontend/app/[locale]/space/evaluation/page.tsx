@@ -2969,7 +2969,7 @@ function SetsTab() {
                     />
                     {genFiles.map((f, i) => (
                       <Tag
-                        key={i}
+                        key={`${f.name}_${f.size}`}
                         closable
                         onClose={() =>
                           setGenFiles((p) => p.filter((_, j) => j !== i))

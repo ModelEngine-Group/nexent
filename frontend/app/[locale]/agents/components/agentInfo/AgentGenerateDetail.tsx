@@ -280,9 +280,7 @@ export default function AgentGenerateDetail({}) {
     const modelIds = (editedAgent.model_ids || []).filter((id: unknown) =>
       Number.isFinite(Number(id))
     );
-    const mainAgentModelIds: number[] = modelIds.map((id: unknown) =>
-      Number(id)
-    );
+    const mainAgentModelIds: number[] = modelIds.map(Number);
     let mainAgentModels: string[] = mainAgentModelIds
       .map(
         (id: number) => availableLlmModels.find((m) => m.id === id)?.displayName

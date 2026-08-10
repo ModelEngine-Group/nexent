@@ -153,6 +153,7 @@ _LOG_PREFIX_RE = re.compile(
     r")\s*"
 )
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?})\s*```", re.DOTALL)
+_QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
 
 logger = logging.getLogger(__name__)
 
@@ -278,15 +279,12 @@ def validate_code_evaluator(code: str) -> None:
     # as a code-evaluator authoring facility; it is NOT generic code injection.
     local_vars: dict = {}
     try:
-        # noqa — suppress sandboxed execution CodeQL/Sonar/Bandit alerts:
-        # py/code-injection, py/unsafe-exec, py/command-injection,
-        # py/eval-injection, py/tainted-exec, py/shell-injection.
         # Four defences are applied BEFORE the evaluator reaches this call
         # (compile syntax check, AST shell-call scan, ALLOWED_BUILTINS
         # whitelist, evaluate() signature check) — see docstring.
-        exec(
-            code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
-        )  # lgtm[py/code-injection] lgtm[py/unsafe-exec] lgtm[py/command-injection] lgtm[py/eval-injection] lgtm[py/tainted-exec] lgtm[py/shell-injection] nosec B102 B307 B602 B603 NOSONAR
+        # NOSONAR — sandboxed evaluator execution (defence-in-depth, not injection)
+        # lgtm [py/code-injection] lgtm [py/unsafe-exec] nosec B102
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -1005,15 +1003,12 @@ def _score_with_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            # noqa — suppress sandboxed execution CodeQL/Sonar/Bandit alerts:
-            # py/code-injection, py/unsafe-exec, py/command-injection,
-            # py/eval-injection, py/tainted-exec, py/shell-injection.
             # Same ALLOWED_BUILTINS whitelist re-applied here for runtime
             # parity with validate_code_evaluator(), which rejected any
             # unsafe evaluator at authoring time.
-            exec(
-                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
-            )  # lgtm[py/code-injection] lgtm[py/unsafe-exec] lgtm[py/command-injection] lgtm[py/eval-injection] lgtm[py/tainted-exec] lgtm[py/shell-injection] nosec B102 B307 B602 B603 NOSONAR
+            # NOSONAR — sandboxed evaluator execution (defence-in-depth, not injection)
+            # lgtm [py/code-injection] lgtm [py/unsafe-exec] nosec B102
+            exec(ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
             fn = local_vars.get("evaluate")
             result = fn(
                 query=query,
@@ -1294,17 +1289,17 @@ def _generate_test_queries(
             except json.JSONDecodeError as exc:
                 raise AppException(
                     ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-                    "AI returned invalid format for test queries",
+                    _QUERY_FORMAT_ERR_MSG,
                 ) from exc
         else:
             raise AppException(
                 ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-                "AI returned invalid format for test queries",
+                _QUERY_FORMAT_ERR_MSG,
             )
     if not isinstance(cases, list) or not cases:
         raise AppException(
             ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-            "AI returned invalid format for test queries",
+            _QUERY_FORMAT_ERR_MSG,
         )
 
     # Extract query strings from case objects [{inputs: {query: ...}, label: {answer: ...}}]
@@ -1648,6 +1643,65 @@ def _setup_no_set_and_execute(
         )
 
 
+def _preload_evaluators_for_run(run: dict, tenant_id: str) -> Dict[int, Dict[str, Any]]:
+    """Preload PUBLISHED evaluators from the run's evaluator_config."""
+    evaluators: Dict[int, Dict[str, Any]] = {}
+    raw_config = run.get("evaluator_config")
+    if isinstance(raw_config, dict) and raw_config.get("evaluator_ids"):
+        for eid in raw_config["evaluator_ids"]:
+            ev = get_evaluator(eid, tenant_id)
+            if ev and ev.get("status") == "PUBLISHED":
+                evaluators[eid] = ev
+    return evaluators
+
+
+def _resolve_judge_context_window(judge_model_id: int, tenant_id: str) -> int:
+    """Resolve judge model context window, defaulting to 4096."""
+    context_window = 4096
+    with get_db_session() as s:
+        model_row = (
+            s.query(ModelRecord)
+            .filter(
+                ModelRecord.model_id == judge_model_id,
+                ModelRecord.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if model_row and getattr(model_row, "context_window_tokens", None):
+            context_window = model_row.context_window_tokens
+    return context_window
+
+
+def _load_all_evaluation_cases(agent_evaluation_id: int, tenant_id: str) -> List[dict]:
+    """Load ALL evaluation cases with pagination (page size 200)."""
+    all_cases: List[dict] = []
+    offset = 0
+    while True:
+        batch = list_agent_evaluation_cases(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            limit=200,
+            offset=offset,
+        )
+        page_items = (
+            batch.get("items", []) if isinstance(batch, dict) else (batch or [])
+        )
+        if not page_items:
+            break
+        all_cases.extend(page_items)
+        offset += len(page_items)
+    return all_cases
+
+
+def _group_cases_by_session(all_cases: List[dict]) -> Dict[str, List[dict]]:
+    """Group cases by session_id for multi-turn support."""
+    sessions: Dict[str, List[dict]] = defaultdict(list)
+    for c in all_cases:
+        sid = c.get("session_id") or f"__single__{c['agent_evaluation_case_id']}"
+        sessions[sid].append(c)
+    return sessions
+
+
 def execute_agent_evaluation_run(
     tenant_id: str,
     user_id: str,
@@ -1677,56 +1731,18 @@ def execute_agent_evaluation_run(
         adapter = JiuwenSDKAdapter(model_id=judge_model_id, tenant_id=tenant_id)
 
         # Preload evaluators and judge template (loaded once, reused for all cases)
-        evaluators: Dict[int, Dict[str, Any]] = {}
-        raw_config = run.get("evaluator_config")
-        if isinstance(raw_config, dict) and raw_config.get("evaluator_ids"):
-            for eid in raw_config["evaluator_ids"]:
-                ev = get_evaluator(eid, tenant_id)
-                if ev and ev.get("status") == "PUBLISHED":
-                    evaluators[eid] = ev
+        evaluators = _preload_evaluators_for_run(run, tenant_id)
         judge_system_prompt = get_prompt_template(
             "evaluation_judge_system", run.get("language", "zh")
         )["SYSTEM_PROMPT"]
 
         # Resolve judge model context window once (used for runtime_events trimming)
-        context_window = 4096
-        if judge_model_id:
-            with get_db_session() as s:
-                model_row = (
-                    s.query(ModelRecord)
-                    .filter(
-                        ModelRecord.model_id == judge_model_id,
-                        ModelRecord.tenant_id == tenant_id,
-                    )
-                    .first()
-                )
-                if model_row and getattr(model_row, "context_window_tokens", None):
-                    context_window = model_row.context_window_tokens
+        context_window = _resolve_judge_context_window(judge_model_id, tenant_id)
 
         # Load ALL cases first, then group by session_id for multi-turn support.
         # This avoids splitting sessions across pages (which would reset history).
-        all_cases: List[dict] = []
-        offset = 0
-        while True:
-            batch = list_agent_evaluation_cases(
-                agent_evaluation_id=agent_evaluation_id,
-                tenant_id=tenant_id,
-                limit=200,
-                offset=offset,
-            )
-            page_items = (
-                batch.get("items", []) if isinstance(batch, dict) else (batch or [])
-            )
-            if not page_items:
-                break
-            all_cases.extend(page_items)
-            offset += len(page_items)
-
-        # Group by session_id
-        sessions: Dict[str, List[dict]] = defaultdict(list)
-        for c in all_cases:
-            sid = c.get("session_id") or f"__single__{c['agent_evaluation_case_id']}"
-            sessions[sid].append(c)
+        all_cases = _load_all_evaluation_cases(agent_evaluation_id, tenant_id)
+        sessions = _group_cases_by_session(all_cases)
 
         scores: List[float] = []
         done_count = 0

@@ -172,8 +172,8 @@ def generate_evaluator_by_llm_impl(
             tenant_id=tenant_id,
         )
     except Exception as exc:
-        logger.error("LLM call failed for evaluator generation: %s", exc)
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,f"Evaluator generation failed: {exc}") from exc
+        logger.exception("LLM call failed for evaluator generation")
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Evaluator generation failed") from exc
 
     try:
         raw = response if isinstance(response, str) else str(response)
@@ -336,7 +336,7 @@ def import_evaluators_impl(
                 imported += 1
                 existing_keys.add((name, etype))
         except Exception as exc:
-            errors.append({"index": idx, "name": name, "reason": str(exc)})
-            logger.warning("Import failed for evaluator '%s': %s", name, exc)
+            errors.append({"index": idx, "name": name, "reason": "Invalid evaluator data"})
+            logger.warning("Import failed for evaluator '%s': %s", name, exc, exc_info=True)
 
     return {"imported": imported, "skipped": skipped, "errors": errors}

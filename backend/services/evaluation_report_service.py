@@ -23,11 +23,11 @@ from reportlab.platypus import (
 )
 
 from consts.evaluation_report_labels import get_report_labels
-from database.agent_evaluation_db import (
-    get_agent_evaluation,
-    list_agent_evaluation_cases,
+from database.agent_evaluation_db import get_agent_evaluation
+from services.agent_evaluation_service import (
+    _load_all_evaluation_cases,
+    get_evaluation_stats_impl,
 )
-from services.agent_evaluation_service import get_evaluation_stats_impl
 from utils.font_utils import setup_matplotlib_cjk, setup_reportlab_cjk
 
 
@@ -402,7 +402,6 @@ def _build_report_case_table(story, L, styles, all_cases, cn_font, evaluator_thr
             except Exception:
                 # Aggregate failures, don't log per row — noisy on legacy tenants.
                 coerce_fails += 1
-                scores = scores
         if isinstance(scores, dict):
             score_parts = []
             for k, v in scores.items():
@@ -469,7 +468,7 @@ def _build_report_case_table(story, L, styles, all_cases, cn_font, evaluator_thr
     return coerce_fails
 
 
-def _build_report_annotations(story, L, styles, cn_font, tenant_id, agent_evaluation_id, total, run):
+def _build_report_annotations(story, labels, styles, cn_font, tenant_id, agent_evaluation_id, total, run):
     """Add the annotations distribution section (one sub-table per schema).
 
     Import is lazy because annotation support is an optional feature of
@@ -515,7 +514,7 @@ def _build_report_annotations(story, L, styles, cn_font, tenant_id, agent_evalua
         s_small = styles["s_small"]
 
         story.append(PageBreak())
-        story.append(Paragraph(L["SECTION_ANNOTATIONS"], s_h1))
+        story.append(Paragraph(labels["SECTION_ANNOTATIONS"], s_h1))
         story.append(Spacer(1, 4 * mm))
 
         for schema in active_schemas:
@@ -533,14 +532,14 @@ def _build_report_annotations(story, L, styles, cn_font, tenant_id, agent_evalua
 
             story.append(
                 Paragraph(
-                    f"<b>{schema['name']}</b> — {L['ANNOTATION_COVERAGE'].format(coverage=coverage)}",
+                    f"<b>{schema['name']}</b> — {labels['ANNOTATION_COVERAGE'].format(coverage=coverage)}",
                     s_h2,
                 )
             )
             story.append(Spacer(1, 2 * mm))
 
             if not value_counts:
-                story.append(Paragraph(L["ANNOTATION_NO_DATA"], s_small))
+                story.append(Paragraph(labels["ANNOTATION_NO_DATA"], s_small))
                 story.append(Spacer(1, 2 * mm))
                 continue
 
@@ -575,6 +574,102 @@ def _build_report_annotations(story, L, styles, cn_font, tenant_id, agent_evalua
             story.append(Spacer(1, 4 * mm))
     except Exception as exc:
         logger.exception("Failed to add annotation section to report: %s", exc)
+
+
+# ── Report data helpers ─────────────────────────────────────────────
+
+
+def _load_evaluator_thresholds_for_report(run: dict, tenant_id: str):
+    """Load evaluator thresholds and score ranges for PDF report.
+
+    Missing metadata falls back to standard [0,1], threshold=0.5.
+    Returns (thresholds, ranges, error_count).
+    """
+    evaluator_thresholds: dict[str, float] = {}
+    evaluator_ranges: dict[str, tuple[float, float]] = {}
+    eval_meta_load_errors = 0
+    try:
+        from database.evaluator_db import get_evaluator
+
+        eids = (run.get("evaluator_config") or {}).get("evaluator_ids", []) or []
+        for eid in eids:
+            try:
+                ev = get_evaluator(int(eid), tenant_id)
+            except Exception:
+                eval_meta_load_errors += 1
+                ev = None
+            if not ev:
+                continue
+            name = str(ev.get("name") or "")
+            if not name:
+                continue
+            evaluator_thresholds[name] = float(ev.get("pass_threshold") or 0.5)
+            rmin = float(ev.get("score_range_min") or 0.0)
+            rmax = float(ev.get("score_range_max") or 1.0)
+            evaluator_ranges[name] = (rmin, rmax)
+    except Exception:
+        logger.warning("Failed to load evaluator metadata for PDF report", exc_info=True)
+    return evaluator_thresholds, evaluator_ranges, eval_meta_load_errors
+
+
+def _compute_normalized_avg_scores(all_cases: list, evaluator_ranges: dict) -> tuple:
+    """Compute per-case normalized average scores for histogram.
+
+    Each evaluator score is normalized into [0,1] using its own score_range
+    so custom [0,100] ranges don't collapse everything into the top bucket.
+    Returns (all_avg_scores, histogram_coerce_fails).
+    """
+    all_avg_scores: list = []
+    histogram_coerce_fails = 0
+    for c in all_cases:
+        scores = c.get("score")
+        if isinstance(scores, str):
+            try:
+                scores = json.loads(scores)
+            except Exception:
+                histogram_coerce_fails += 1
+                scores = {}
+        if isinstance(scores, dict):
+            normalized_vals = []
+            for k, v in scores.items():
+                if not isinstance(v, (int, float)):
+                    continue
+                rng = evaluator_ranges.get(str(k))
+                if rng:
+                    rmin, rmax = rng
+                    if rmax > rmin:
+                        nv = (float(v) - rmin) / (rmax - rmin)
+                    else:
+                        nv = 0.0
+                else:
+                    nv = float(v)
+                nv = max(0.0, min(1.0, nv))
+                normalized_vals.append(nv)
+            if normalized_vals:
+                all_avg_scores.append(sum(normalized_vals) / len(normalized_vals))
+    return all_avg_scores, histogram_coerce_fails
+
+
+def _build_report_styles(cn_font: str) -> dict:
+    """Build the style objects dictionary for the PDF report."""
+    dark = HexColor("#1a1a1a")
+    gray = HexColor("#666666")
+    return {
+        "blue": HexColor("#1677ff"),
+        "gray": gray,
+        "light_gray": HexColor("#f5f5f5"),
+        "dark": dark,
+        "s_report_title": _mk_style("RT", cn_font, fontSize=20, leading=24, textColor=dark, spaceAfter=2),
+        "s_subtitle": _mk_style("ST", cn_font, fontSize=10, leading=14, textColor=gray, spaceAfter=10),
+        "s_h1": _mk_style("H1", cn_font, fontSize=14, leading=18, textColor=dark, spaceBefore=14, spaceAfter=6),
+        "s_h2": _mk_style("H2", cn_font, fontSize=11, leading=14, textColor=dark, spaceBefore=10, spaceAfter=4),
+        "s_body": _mk_style("BD", cn_font),
+        "s_small": _mk_style("SM", cn_font, fontSize=9, leading=13, textColor=gray),
+        "s_bold": _mk_style("BDb", cn_font, textColor=dark),
+        "s_metric_val": _mk_style("MV", cn_font, fontSize=24, leading=28, textColor=dark),
+        "s_metric_lbl": _mk_style("ML", cn_font, fontSize=9, leading=12, textColor=gray),
+        "s_footer": _mk_style("FT", cn_font, fontSize=8, leading=10, textColor=HexColor("#999999")),
+    }
 
 
 # ── PDF report orchestrator ─────────────────────────────────────────
@@ -630,24 +725,7 @@ def generate_agent_evaluation_report_impl(
     run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
 
     # ── Load all cases for table display ──────────────────────────────────
-    # ``list_agent_evaluation_cases`` paginates; we pull pages of 200 until
-    # empty so a 10 000-case run still streams in without OOMing.
-    all_cases: list = []
-    offset = 0
-    page_count = 0
-    while True:
-        batch = list_agent_evaluation_cases(
-            agent_evaluation_id=agent_evaluation_id,
-            tenant_id=tenant_id,
-            limit=200,
-            offset=offset,
-        )
-        page_items = batch.get("items", []) if isinstance(batch, dict) else (batch or [])
-        if not page_items:
-            break
-        page_count += 1
-        all_cases.extend(page_items)
-        offset += len(page_items)
+    all_cases = _load_all_evaluation_cases(agent_evaluation_id, tenant_id)
 
     # ── Fetch stats from service layer ────────────────────────────────────
     stats = get_evaluation_stats_impl(agent_evaluation_id, tenant_id)
@@ -656,69 +734,15 @@ def generate_agent_evaluation_report_impl(
     total = stats["total"]
     avg_scores = {item["name"]: item["avg"] for item in stats["per_evaluator"]}
 
-    # ── Load evaluator metadata: name → threshold + score_range.
-    #    Missing metadata falls back to standard [0,1], threshold=0.5.
-    evaluator_thresholds: dict[str, float] = {}
-    evaluator_ranges: dict[str, tuple[float, float]] = {}
-    eval_meta_load_errors = 0
-    try:
-        from database.evaluator_db import get_evaluator
-
-        eids = (run.get("evaluator_config") or {}).get("evaluator_ids", []) or []
-        for eid in eids:
-            try:
-                ev = get_evaluator(int(eid), tenant_id)
-            except Exception:
-                eval_meta_load_errors += 1
-                ev = None
-            if not ev:
-                continue
-            name = str(ev.get("name") or "")
-            if not name:
-                continue
-            evaluator_thresholds[name] = float(ev.get("pass_threshold") or 0.5)
-            rmin = float(ev.get("score_range_min") or 0.0)
-            rmax = float(ev.get("score_range_max") or 1.0)
-            evaluator_ranges[name] = (rmin, rmax)
-    except Exception:
-        logger.warning("Failed to load evaluator metadata for PDF report", exc_info=True)
+    # ── Load evaluator metadata: name → threshold + score_range ─────────────
+    evaluator_thresholds, evaluator_ranges, eval_meta_load_errors = (
+        _load_evaluator_thresholds_for_report(run, tenant_id)
+    )
 
     # ── Compute per-case average scores for histogram ─────────────────────
-    # We normalize EACH evaluator score into [0,1] using its own
-    # ``score_range`` so custom [0,100] ranges don't collapse everything
-    # into the top bucket.  Rows where the DB stored JSON as a STRING are
-    # counted in ``histogram_coerce_fails`` rather than logged per-row.
-    all_avg_scores: list = []
-    histogram_coerce_fails = 0
-    for c in all_cases:
-        scores = c.get("score")
-        if isinstance(scores, str):
-            try:
-                scores = json.loads(scores)
-            except Exception:
-                histogram_coerce_fails += 1
-                scores = {}
-        if isinstance(scores, dict):
-            normalized_vals = []
-            for k, v in scores.items():
-                if not isinstance(v, (int, float)):
-                    continue
-                rng = evaluator_ranges.get(str(k))
-                if rng:
-                    rmin, rmax = rng
-                    if rmax > rmin:
-                        nv = (float(v) - rmin) / (rmax - rmin)
-                    else:
-                        # Zero-width range → single fixed score for this
-                        # evaluator; fall back to 0.0 so the bucket is
-                        # deterministic and never throws division-by-zero.
-                        nv = 0.0
-                else:
-                    nv = float(v)
-                nv = max(0.0, min(1.0, nv))
-                normalized_vals.append(nv)
-            if normalized_vals:
-                all_avg_scores.append(sum(normalized_vals) / len(normalized_vals))
+    all_avg_scores, histogram_coerce_fails = _compute_normalized_avg_scores(
+        all_cases, evaluator_ranges
+    )
 
     # ── Register CJK fonts ────────────────────────────────────────────────
     cn_font = setup_reportlab_cjk()
@@ -738,38 +762,7 @@ def generate_agent_evaluation_report_impl(
         logger.warning("Chart generation failed: %s", exc)
 
     # ── Build style objects ───────────────────────────────────────────────
-    blue = HexColor("#1677ff")
-    gray = HexColor("#666666")
-    light_gray = HexColor("#f5f5f5")
-    dark = HexColor("#1a1a1a")
-
-    s_report_title = _mk_style("RT", cn_font, fontSize=20, leading=24, textColor=dark, spaceAfter=2)
-    s_subtitle = _mk_style("ST", cn_font, fontSize=10, leading=14, textColor=gray, spaceAfter=10)
-    s_h1 = _mk_style("H1", cn_font, fontSize=14, leading=18, textColor=dark, spaceBefore=14, spaceAfter=6)
-    s_h2 = _mk_style("H2", cn_font, fontSize=11, leading=14, textColor=dark, spaceBefore=10, spaceAfter=4)
-    s_body = _mk_style("BD", cn_font)
-    s_small = _mk_style("SM", cn_font, fontSize=9, leading=13, textColor=gray)
-    s_bold = _mk_style("BDb", cn_font, textColor=dark)
-    s_metric_val = _mk_style("MV", cn_font, fontSize=24, leading=28, textColor=dark)
-    s_metric_lbl = _mk_style("ML", cn_font, fontSize=9, leading=12, textColor=gray)
-    s_footer = _mk_style("FT", cn_font, fontSize=8, leading=10, textColor=HexColor("#999999"))
-
-    styles = {
-        "blue": blue,
-        "gray": gray,
-        "light_gray": light_gray,
-        "dark": dark,
-        "s_report_title": s_report_title,
-        "s_subtitle": s_subtitle,
-        "s_h1": s_h1,
-        "s_h2": s_h2,
-        "s_body": s_body,
-        "s_small": s_small,
-        "s_bold": s_bold,
-        "s_metric_val": s_metric_val,
-        "s_metric_lbl": s_metric_lbl,
-        "s_footer": s_footer,
-    }
+    styles = _build_report_styles(cn_font)
 
     # ── Derived values ────────────────────────────────────────────────────
     agent_name = run.get("agent_name") or f"#{run.get('agent_id')}"
@@ -832,8 +825,8 @@ def generate_agent_evaluation_report_impl(
     )
     if total:
         summary_text += L["SUMMARY_EXTRA"].format(top=str(top_count), total=str(total), quality=quality)
-    story.append(Paragraph(L["SECTION_OVERVIEW"], s_h1))
-    story.append(Paragraph(summary_text, s_body))
+    story.append(Paragraph(L["SECTION_OVERVIEW"], styles["s_h1"]))
+    story.append(Paragraph(summary_text, styles["s_body"]))
     story.append(Spacer(1, 5 * mm))
 
     # Sections
@@ -848,7 +841,7 @@ def generate_agent_evaluation_report_impl(
     # Footer
     story.append(Spacer(1, 5 * mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#e8e8e8")))
-    story.append(Paragraph(L["FOOTER"].format(time=now_str), s_footer))
+    story.append(Paragraph(L["FOOTER"].format(time=now_str), styles["s_footer"]))
 
     doc.build(story)
 
@@ -877,7 +870,7 @@ def generate_agent_evaluation_report_impl(
         pass_count,
         fail_count,
         len(evaluator_thresholds),
-        page_count,
+        (len(all_cases) + 199) // 200,
         len(all_avg_scores),
         top_count,
         eval_meta_load_errors,

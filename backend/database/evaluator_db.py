@@ -304,6 +304,8 @@ def publish_evaluator(
     release_note: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Publish a DRAFT evaluator. On first publish, sets version_group_id."""
+    if release_note:
+        logger.info("Publishing evaluator %s with note: %s", evaluator_id, release_note)
     with get_db_session() as session:
         from database.db_models import Evaluator
 

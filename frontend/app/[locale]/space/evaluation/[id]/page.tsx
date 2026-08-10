@@ -1265,7 +1265,7 @@ export default function EvaluationDetailPage() {
                   {t("agentEvaluation.hotQuestions")}
                 </Text>
                 {analysisReport.top_issues.map((item: any, i: number) => (
-                  <Flex key={i} gap={8} align="center">
+                  <Flex key={`${item.problem}_${i}`} gap={8} align="center">
                     <Tag color={i === 0 ? "red" : "orange"}>
                       {item.frequency}
                     </Tag>
@@ -1289,7 +1289,7 @@ export default function EvaluationDetailPage() {
                 </Text>
                 {analysisReport.suggestions.map((s: any, i: number) => (
                   <Text
-                    key={i}
+                    key={`${s.action}_${i}`}
                     className="text-xs"
                     style={{ paddingLeft: 8, borderLeft: "2px solid #1677ff" }}
                   >
@@ -1504,7 +1504,7 @@ export default function EvaluationDetailPage() {
                   <YAxis tick={{ fontSize: 10 }} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={48}>
                     {histogram.map((entry: any, idx: number) => (
-                      <Cell key={idx} fill={entry.fill} />
+                      <Cell key={`${entry.name}_${idx}`} fill={entry.fill} />
                     ))}
                     <LabelList
                       dataKey="count"
@@ -1566,7 +1566,7 @@ export default function EvaluationDetailPage() {
                   {statItems.length > 0 ? (
                     <Flex vertical gap={4}>
                       {statItems.map((s: any, i: number) => (
-                        <Flex key={i} align="center" gap={8}>
+                        <Flex key={`${s.value}_${i}`} align="center" gap={8}>
                           <Tooltip styles={TOOLTIP_STYLE} title={s.value}>
                             <Text
                               className="text-xs"

@@ -551,7 +551,7 @@ async def get_agent_info_list(ctx: NorthboundContext) -> dict[str, Any]:
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
-        raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {e!s}")
+        raise RuntimeError(f"Failed to get agent info list for tenant {ctx.tenant_id}: {e!s}") from e
 
 
 async def get_agent_info_by_name_for_northbound(
