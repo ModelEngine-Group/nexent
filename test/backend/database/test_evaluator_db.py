@@ -28,32 +28,80 @@ from __future__ import annotations
 import sys
 import types
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+# ---------------------------------------------------------------------------
+# 1. Path setup + idempotent package registration (mirrors
+#    test_agent_evaluation_service.py pattern)
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+_BACKEND_DIR = _REPO_ROOT / "backend"
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+
+def _register_package(name: str) -> types.ModuleType:
+    """Register ``name`` as a real package on ``sys.modules``.
+
+    Real ``__path__`` (pointing to the matching backend dir when one applies)
+    is used so subsequent ``from X.Y import Z`` resolution can locate
+    submodules; this prevents sibling tests from seeing a stubbed package
+    with no resolvable submodules.
+
+    If ``sys.modules[name]`` already exposes ``__path__`` (e.g. a stub
+    created by a sibling test file) we reuse it so we don't fork the
+    package identity mid-session — module-level execution of one test
+    file would otherwise orphan the other file's package object, and
+    ``from package import X`` would then short-circuit through a stale
+    cache that has no entry in ``sys.modules``.
+    """
+    existing = sys.modules.get(name)
+    if existing is not None and hasattr(existing, "__path__"):
+        return existing
+    pkg = types.ModuleType(name)
+    backend_path = _BACKEND_DIR / name
+    if backend_path.is_dir():
+        pkg.__path__ = [str(backend_path)]
+    else:
+        pkg.__path__ = []
+    sys.modules[name] = pkg
+    return pkg
+
 
 # ---------------------------------------------------------------------------
-# 1. Sys.modules stub chain
+# 2. Sys.modules stub chain – permanent top-level install (no monkeypatch,
+#    no undo)
 # ---------------------------------------------------------------------------
 
 MODULE_UNDER_TEST = "database.evaluator_db"
 
 
-def _install_stubs(monkeypatch):
+def _install_stubs():
+    """Register placeholder modules for every transitive import of evaluator_db.
+
+    Runs once at module-collection time and is *never* undone – sibling tests
+    share the same stub objects via ``_register_package`` idempotency.
+
+    Returns a 4-tuple of the ORM stubs / exception class / status enum so the
+    ``evaluator_mod`` fixture can pin them onto the freshly loaded module.
+    """
 
     def mk_mod(name, **attrs):
         m = types.ModuleType(name)
         for k, v in attrs.items():
             setattr(m, k, v)
-        sys.modules.setdefault(name, m)
+        sys.modules[name] = m
         return m
 
     # ---- consts / exceptions ---------------------------------------------
-    _consts_pkg = types.ModuleType("consts")
-    _consts_pkg.__path__ = []
-    sys.modules.setdefault("consts", _consts_pkg)
+    _consts_pkg = _register_package("consts")
     _Err = type(
         "Err",
         (),
@@ -62,9 +110,11 @@ def _install_stubs(monkeypatch):
             "AGENT_EVALUATION_EVALUATOR_IN_USE": "AGENT_EVALUATION_EVALUATOR_IN_USE",
         },
     )
-    mk_mod("consts.error_code", ErrorCode=_Err)
+    _ec_mod = mk_mod("consts.error_code", ErrorCode=_Err)
+    _consts_pkg.error_code = _ec_mod
     _ERS = type("ERS", (), {"PENDING": "PENDING", "RUNNING": "RUNNING"})
-    mk_mod("consts.evaluation_status", EvalRunStatus=_ERS)
+    _es_mod = mk_mod("consts.evaluation_status", EvalRunStatus=_ERS)
+    _consts_pkg.evaluation_status = _es_mod
 
     class _AppException(Exception):
         def __init__(self, code: Any, msg: str = "", extra=None):
@@ -73,14 +123,14 @@ def _install_stubs(monkeypatch):
             self.message = msg
             self.extra = extra
 
-    mk_mod("consts.exceptions", AppException=_AppException)
+    _ex_mod = mk_mod("consts.exceptions", AppException=_AppException)
+    _consts_pkg.exceptions = _ex_mod
 
     # database.client.get_db_session – wired lazily by the harness per test.
-    _db_pkg = types.ModuleType("database")
-    _db_pkg.__path__ = []  # declare it a package so submodule lookups work
-    sys.modules.setdefault("database", _db_pkg)
-    sys.modules.setdefault("database.client", types.ModuleType("database.client"))
-    sys.modules["database.client"].get_db_session = None  # patched per test
+    _db_pkg = _register_package("database")
+    _dc_mod = mk_mod("database.client")
+    _dc_mod.get_db_session = None  # patched per test
+    _db_pkg.client = _dc_mod
 
     # db_models (ORM classes referenced by session.query(ClassName))
     _EvalCls = type("Evaluator", (), {})
@@ -90,11 +140,15 @@ def _install_stubs(monkeypatch):
         Evaluator=_EvalCls,
         AgentEvaluation=_AgentEvalCls,
     )
+    _db_pkg.db_models = db_mod
     return db_mod.Evaluator, db_mod.AgentEvaluation, _AppException, _ERS
 
 
+_INSTALLED = _install_stubs()
+
+
 @pytest.fixture(scope="module")
-def evaluator_mod(request):
+def evaluator_mod():
     """Module-scoped fresh import of evaluator_db with stubs installed.
 
     The module-under-test is loaded by ``importlib.util.spec_from_file_location``
@@ -104,44 +158,47 @@ def evaluator_mod(request):
     instead of the real implementations.  Using ``spec_from_file_location``
     lets us skip the ``database`` package-import step and still satisfy the
     ``from database.client import get_db_session`` line in the module.
+
+    Stubs are pre-installed at module-collection time (see ``_install_stubs``
+    above) and captured in ``_INSTALLED`` — no ``monkeypatch`` undo is needed
+    because the stubs are intentionally permanent (idempotent registration via
+    ``_register_package`` keeps them consistent across sibling test files).
     """
     import importlib.util as _ilu
-    import os as _os
 
-    import _pytest.monkeypatch as _mp
-
-    repo_root = _os.path.abspath(
-        _os.path.join(_os.path.dirname(__file__), "..", "..", "..")
-    )
-    backend_root = _os.path.join(repo_root, "backend")
-    for extra in (repo_root, backend_root):
+    repo_root = _REPO_ROOT
+    backend_root = _BACKEND_DIR
+    for extra in (str(repo_root), str(backend_root)):
         if extra not in sys.path:
             sys.path.insert(0, extra)
 
-    mp = _mp.MonkeyPatch()
-    try:
-        Evaluator, AgentEvaluation, AppExc, ERS = _install_stubs(mp)
+    Evaluator, AgentEvaluation, AppExc, ERS = _INSTALLED
 
-        if MODULE_UNDER_TEST in sys.modules:
-            del sys.modules[MODULE_UNDER_TEST]
+    if MODULE_UNDER_TEST in sys.modules:
+        del sys.modules[MODULE_UNDER_TEST]
+    db_pkg = _register_package("database")
+    if hasattr(db_pkg, "evaluator_db"):
+        try:
+            delattr(db_pkg, "evaluator_db")
+        except AttributeError:
+            pass
 
-        _src = _os.path.join(backend_root, "database", "evaluator_db.py")
-        _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, _src)
-        assert _spec is not None and _spec.loader is not None, (
-            f"cannot locate evaluator_db.py at {_src}"
-        )
-        mod = _ilu.module_from_spec(_spec)
-        sys.modules[MODULE_UNDER_TEST] = mod
-        _spec.loader.exec_module(mod)
+    _src = backend_root / "database" / "evaluator_db.py"
+    _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(_src))
+    assert _spec is not None and _spec.loader is not None, (
+        f"cannot locate evaluator_db.py at {_src}"
+    )
+    mod = _ilu.module_from_spec(_spec)
+    sys.modules[MODULE_UNDER_TEST] = mod
+    _spec.loader.exec_module(mod)
+    db_pkg.evaluator_db = mod
 
-        # Pin useful references on the module for tests
-        mod.EvaluatorCls = Evaluator
-        mod.AgentEvalCls = AgentEvaluation
-        mod.AppException = AppExc
-        mod.EvalRunStatus = ERS
-        yield mod
-    finally:
-        mp.undo()
+    # Pin useful references on the module for tests
+    mod.EvaluatorCls = Evaluator
+    mod.AgentEvalCls = AgentEvaluation
+    mod.AppException = AppExc
+    mod.EvalRunStatus = ERS
+    yield mod
 
 
 # ---------------------------------------------------------------------------

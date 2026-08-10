@@ -20,10 +20,10 @@ import ast
 import importlib
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # 1. Real AST-based safety scanner – mirrors what nexent sandbox does
@@ -120,16 +120,61 @@ def _scan_shell_calls(code: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Sys.modules stub chain – mirror test_agent_evaluation_service.py layout
+# 2. Path setup + idempotent package registration (mirrors
+#    test_agent_evaluation_service.py pattern)
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+_BACKEND_DIR = _REPO_ROOT / "backend"
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+
+def _register_package(name: str) -> types.ModuleType:
+    """Register ``name`` as a real package on ``sys.modules``.
+
+    Real ``__path__`` (pointing to the matching backend dir when one applies)
+    is used so subsequent ``from X.Y import Z`` resolution can locate
+    submodules; this prevents sibling tests from seeing a stubbed package
+    with no resolvable submodules.
+
+    If ``sys.modules[name]`` already exposes ``__path__`` (e.g. a stub
+    created by a sibling test file) we reuse it so we don't fork the
+    package identity mid-session — module-level execution of one test
+    file would otherwise orphan the other file's package object, and
+    ``from package import X`` would then short-circuit through a stale
+    cache that has no entry in ``sys.modules``.
+    """
+    existing = sys.modules.get(name)
+    if existing is not None and hasattr(existing, "__path__"):
+        return existing
+    pkg = types.ModuleType(name)
+    backend_path = _BACKEND_DIR / name
+    if backend_path.is_dir():
+        pkg.__path__ = [str(backend_path)]
+    else:
+        pkg.__path__ = []
+    sys.modules[name] = pkg
+    return pkg
+
+
+# ---------------------------------------------------------------------------
+# 3. Sys.modules stub chain – permanent top-level install (no monkeypatch,
+#    no undo)
 # ---------------------------------------------------------------------------
 
 
-def _install_sys_modules_stubs(monkeypatch) -> None:
+def _install_sys_modules_stubs() -> None:
     """Register placeholder modules for every transitive import of the service.
 
     Each stub module carries attributes for every ``from X import (y, z, ...)``
     call in the service, pre-populated with ``MagicMock`` instances so Python's
     import machinery does not raise ``ImportError: cannot import name``.
+
+    This runs once at module-collection time and is *never* undone — sibling
+    tests share the same stub objects via ``_register_package`` idempotency.
     """
     from unittest.mock import MagicMock
 
@@ -137,45 +182,47 @@ def _install_sys_modules_stubs(monkeypatch) -> None:
         m = types.ModuleType(name)
         for k, v in attrs.items():
             setattr(m, k, v)
-        sys.modules.setdefault(name, m)
+        sys.modules[name] = m
         return m
 
     # ---- nexent namespace --------------------------------------------------
-    nexent_mock = types.ModuleType("nexent")
-    nexent_core_mock = types.ModuleType("nexent.core")
-    nexent_agents_mock = types.ModuleType("nexent.core.agents")
+    _nexent_pkg = _register_package("nexent")
+    _nexent_core = _register_package("nexent.core")
+    _nexent_core_agents = _register_package("nexent.core.agents")
+    _nexent_core_utils = _register_package("nexent.core.utils")
+    _nexent_pkg.core = _nexent_core
+    _nexent_core.agents = _nexent_core_agents
+    _nexent_core.utils = _nexent_core_utils
+
     run_agent_mock = types.ModuleType("nexent.core.agents.run_agent")
-    sandbox_mock = types.ModuleType("nexent.core.agents.sandbox")
-    nexent_utils_mock = types.ModuleType("nexent.core.utils")
-
-    # Provide the *real* _scan_shell_calls implementation so validate_code_evaluator
-    # stage 2 exercises the AST paths.
-    sandbox_mock._scan_shell_calls = staticmethod(_scan_shell_calls)
-
     run_agent_mock.agent_run = lambda *a, **kw: None
+    sys.modules["nexent.core.agents.run_agent"] = run_agent_mock
+    _nexent_core_agents.run_agent = run_agent_mock
 
-    sys.modules.setdefault("nexent", nexent_mock)
-    sys.modules.setdefault("nexent.core", nexent_core_mock)
-    sys.modules.setdefault("nexent.core.agents", nexent_agents_mock)
-    sys.modules.setdefault("nexent.core.agents.run_agent", run_agent_mock)
-    sys.modules.setdefault("nexent.core.agents.sandbox", sandbox_mock)
-    sys.modules.setdefault("nexent.core.utils", nexent_utils_mock)
+    sandbox_mock = types.ModuleType("nexent.core.agents.sandbox")
+    sandbox_mock._scan_shell_calls = staticmethod(_scan_shell_calls)
+    sys.modules["nexent.core.agents.sandbox"] = sandbox_mock
+    _nexent_core_agents.sandbox = sandbox_mock
 
     # ---- adapters ----------------------------------------------------------
+    _adapters_pkg = _register_package("adapters")
     _jw_err_cls = type("JiuwenSDKUnavailableError", (Exception,), {})
     _exc_mod = _mk_mod("adapters.exception", JiuwenSDKUnavailableError=_jw_err_cls)
+    _adapters_pkg.exception = _exc_mod
     _jw_mod = _mk_mod("adapters.jiuwen_sdk_adapter", JiuwenSDKAdapter=None)
-    sys.modules.setdefault("adapters", types.ModuleType("adapters"))
+    _adapters_pkg.jiuwen_sdk_adapter = _jw_mod
 
     # ---- consts ------------------------------------------------------------
+    _consts_pkg = _register_package("consts")
     _ErrCode = type(
         "ErrorCode", (), {"COMMON_VALIDATION_ERROR": "COMMON_VALIDATION_ERROR"}
     )
-    _mk_mod(
+    _ec_mod = _mk_mod(
         "consts.error_code",
         ErrorCode=_ErrCode,
     )
-    _mk_mod(
+    _consts_pkg.error_code = _ec_mod
+    _el_mod = _mk_mod(
         "consts.evaluation_limits",
         DEFAULT_PASS_THRESHOLD=0.5,
         MAX_CONCURRENT_RUNS=5,
@@ -183,13 +230,15 @@ def _install_sys_modules_stubs(monkeypatch) -> None:
         MAX_TOTAL_RUNS=1000,
         MAX_TURNS_PER_SESSION=20,
     )
-    _mk_mod(
+    _consts_pkg.evaluation_limits = _el_mod
+    _es_mod = _mk_mod(
         "consts.evaluation_status",
         EvalCaseStatus=type("ECS", (), {}),
         EvalPassStatus=type("EPS", (), {}),
         EvalRunStatus=type("ERS", (), {}),
         MAX_FAILURE_EXAMPLES=5,
     )
+    _consts_pkg.evaluation_status = _es_mod
 
     class _AppException(Exception):
         def __init__(self, code: Any, msg: str = ""):
@@ -197,12 +246,14 @@ def _install_sys_modules_stubs(monkeypatch) -> None:
             self.code = code
             self.message = msg
 
-    _mk_mod("consts.exceptions", AppException=_AppException)
-    _mk_mod("consts.model", AgentRequest=type("AgentRequest", (), {}))
-    sys.modules.setdefault("consts", types.ModuleType("consts"))
+    _ex_mod = _mk_mod("consts.exceptions", AppException=_AppException)
+    _consts_pkg.exceptions = _ex_mod
+    _m_mod = _mk_mod("consts.model", AgentRequest=type("AgentRequest", (), {}))
+    _consts_pkg.model = _m_mod
 
     # ---- database – every imported name wired as MagicMock -----------------
-    _mk_mod(
+    _db_pkg = _register_package("database")
+    _aedb_mod = _mk_mod(
         "database.agent_evaluation_db",
         count_active_runs=MagicMock(),
         count_total_runs=MagicMock(),
@@ -217,73 +268,87 @@ def _install_sys_modules_stubs(monkeypatch) -> None:
         update_agent_evaluation_case_result=MagicMock(),
         update_agent_evaluation_status=MagicMock(),
     )
-    _mk_mod("database.client", get_db_session=MagicMock())
-    _mk_mod(
+    _db_pkg.agent_evaluation_db = _aedb_mod
+    _dc_mod = _mk_mod("database.client", get_db_session=MagicMock())
+    _db_pkg.client = _dc_mod
+    _dm_mod = _mk_mod(
         "database.db_models",
         AgentEvaluation=type("AgentEvaluation", (), {}),
         ModelRecord=type("ModelRecord", (), {}),
     )
-    _mk_mod(
+    _db_pkg.db_models = _dm_mod
+    _esdb_mod = _mk_mod(
         "database.evaluation_set_db",
         create_evaluation_set=MagicMock(),
         get_evaluation_set_cases_all=MagicMock(),
         insert_evaluation_set_cases=MagicMock(),
         update_evaluation_set_case_count=MagicMock(),
     )
-    _mk_mod(
+    _db_pkg.evaluation_set_db = _esdb_mod
+    _evdb_mod = _mk_mod(
         "database.evaluator_db",
         get_evaluator=MagicMock(),
     )
-    sys.modules.setdefault("database", types.ModuleType("database"))
+    _db_pkg.evaluator_db = _evdb_mod
 
     # ---- services / utils --------------------------------------------------
-    _mk_mod("services.agent_service", prepare_agent_run=MagicMock())
-    _mk_mod(
+    _services_pkg = _register_package("services")
+    _as_mod = _mk_mod("services.agent_service", prepare_agent_run=MagicMock())
+    _services_pkg.agent_service = _as_mod
+    _ess_mod = _mk_mod(
         "services.evaluation_set_service",
         resolve_latest_published_version_no=MagicMock(),
     )
-    sys.modules.setdefault("services", types.ModuleType("services"))
+    _services_pkg.evaluation_set_service = _ess_mod
 
-    _mk_mod("utils.llm_utils", call_llm_for_system_prompt=MagicMock())
-    _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
-    _mk_mod("utils.thread_utils", pool=MagicMock())
-    sys.modules.setdefault("utils", types.ModuleType("utils"))
+    _utils_pkg = _register_package("utils")
+    _lu_mod = _mk_mod("utils.llm_utils", call_llm_for_system_prompt=MagicMock())
+    _utils_pkg.llm_utils = _lu_mod
+    _ptu_mod = _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
+    _utils_pkg.prompt_template_utils = _ptu_mod
+    _tu_mod = _mk_mod("utils.thread_utils", pool=MagicMock())
+    _utils_pkg.thread_utils = _tu_mod
+
+
+_install_sys_modules_stubs()
 
 
 # ---------------------------------------------------------------------------
-# 3. Fixture – fresh import of the real agent_evaluation_service module
+# 4. Fixture – fresh import of the real agent_evaluation_service module
 # ---------------------------------------------------------------------------
 
-SERVICE_PATH = "backend.services.agent_evaluation_service"
+SERVICE_PATH = "services.agent_evaluation_service"
 
 
 @pytest.fixture(scope="module")
-def service_module(request):
-    """Module-scoped fresh import of the real service – only pure-logic functions are used."""
-    # Use the builtin monkeypatch indirectly via a module-level setup/teardown helper.
-    import os as _os
+def service_module():
+    """Module-scoped fresh import of the real service – only pure-logic functions are used.
 
-    # Ensure backend is on sys.path (mirror the test_agent_evaluation_service convention)
-    repo_root = _os.path.abspath(
-        _os.path.join(_os.path.dirname(__file__), "..", "..", "..")
-    )
-    backend_root = _os.path.join(repo_root, "backend")
-    for extra in (repo_root, backend_root):
+    Stubs are pre-installed at module-collection time (see ``_install_sys_modules_stubs``
+    above) so this fixture only needs to ensure ``sys.path`` contains the backend
+    roots, drop any cached copy of the target module, and perform a clean import.
+    No ``monkeypatch`` undo is required because the stubs are intentionally
+    permanent (idempotent registration via ``_register_package`` keeps them
+    consistent across sibling test files).
+    """
+    repo_root = _REPO_ROOT
+    backend_root = _BACKEND_DIR
+    for extra in (str(repo_root), str(backend_root)):
         if extra not in sys.path:
             sys.path.insert(0, extra)
 
-    # Install stubs BEFORE importing the target module.
-    import _pytest.monkeypatch as _mp
+    if SERVICE_PATH in sys.modules:
+        del sys.modules[SERVICE_PATH]
+    services_pkg = _register_package("services")
+    if hasattr(services_pkg, "agent_evaluation_service"):
+        try:
+            delattr(services_pkg, "agent_evaluation_service")
+        except AttributeError:
+            pass
 
-    mp = _mp.MonkeyPatch()
-    try:
-        _install_sys_modules_stubs(mp)
-        if SERVICE_PATH in sys.modules:
-            del sys.modules[SERVICE_PATH]
-        mod = importlib.import_module(SERVICE_PATH)
-        yield mod
-    finally:
-        mp.undo()
+    mod = importlib.import_module(SERVICE_PATH)
+    services_pkg.agent_evaluation_service = mod
+    yield mod
 
 
 # ---------------------------------------------------------------------------

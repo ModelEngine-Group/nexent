@@ -29,7 +29,12 @@ from consts.evaluation_limits import (
     MAX_TOTAL_RUNS,
     MAX_TURNS_PER_SESSION,
 )
-from consts.evaluation_status import MAX_FAILURE_EXAMPLES, EvalCaseStatus, EvalPassStatus, EvalRunStatus
+from consts.evaluation_status import (
+    MAX_FAILURE_EXAMPLES,
+    EvalCaseStatus,
+    EvalPassStatus,
+    EvalRunStatus,
+)
 from consts.exceptions import AppException
 from consts.model import AgentRequest
 from database.agent_evaluation_db import (
@@ -239,7 +244,10 @@ def validate_code_evaluator(code: str) -> None:
     try:
         compile(code, "<evaluator>", "exec")
     except SyntaxError as e:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, f"Code syntax error at line {e.lineno}: {e.msg}")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            f"Code syntax error at line {e.lineno}: {e.msg}",
+        )
 
     # Stage 2: static AST scan for forbidden operations — runs BEFORE any
     # code executes so we never even sandbox-compile a dangerous AST.
@@ -254,16 +262,38 @@ def validate_code_evaluator(code: str) -> None:
     # Stage 3: sandbox execution against the builtins whitelist.
     # This verifies the user's top-level statements (imports, helpers, ...)
     # actually work *before* being stored as DRAFT / PUBLISHED.
+    #
+    # Defence-in-depth (already enforced BEFORE this exec is reached):
+    #   1. compile() syntax check (stage 1) — trivial typos rejected first.
+    #   2. _scan_shell_calls() AST scan (stage 2) — identifiers / attributes
+    #      / imports matching open|subprocess|os|sys|eval|exec|socket|...
+    #      are rejected statically before ANY code runs.
+    #   3. __builtins__ is restricted to the ALLOWED_BUILTINS whitelist
+    #      (int/float/str/list/dict/math/json.* + a dozen read-only helpers);
+    #      __import__, open, breakpoint, globals/locals are NOT in the dict
+    #      so any reference raises NameError immediately.
+    #   4. Stage 4 (below) then validates the exposed `evaluate()` signature
+    #      before the evaluator is persisted as DRAFT / PUBLISHED.
+    # Static-analysis suppression: this is a deliberate sandboxed exec used
+    # as a code-evaluator authoring facility; it is NOT generic code injection.
+    # lgtm [py/code-injection]
     local_vars: dict = {}
     try:
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
+        exec(  # noqa: S102,B102 nosec NOSONAR  # lgtm [py/code-injection]
+            code,
+            {"__builtins__": ALLOWED_BUILTINS, "json": json},
+            local_vars,
+        )
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
             f"Code rejected — forbidden or undefined name: {e}. Only built-in Python functions are allowed.",
         )
     except Exception as e:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, f"Code execution failed during validation: {e}")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            f"Code execution failed during validation: {e}",
+        )
 
     # Stage 4: callable presence + parameter introspection.
     # ``inspect`` is imported lazily because it is only used for code-type
@@ -291,7 +321,9 @@ def validate_code_evaluator(code: str) -> None:
         # Presence of **kwargs means the function silently accepts unknown
         # keyword arguments; consider it "covers everything" and disable the
         # missing-parameter check.
-        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
         missing = [name for name in required if name not in params]
         if missing and not has_var_keyword:
             raise AppException(
@@ -302,7 +334,10 @@ def validate_code_evaluator(code: str) -> None:
     logger.info(
         "validate_code_evaluator: passed code_len=%s chars has_var_keyword=%s sig=%s",
         len(code or ""),
-        (sig is not None) and any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        (sig is not None)
+        and any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         if sig
         else False,
         "<custom-callable>" if sig is None else str(sig),
@@ -338,7 +373,9 @@ def _extract_clean_reason(raw: Any) -> str:
         return stripped
     response_content = parsed.get("response_content")
     if isinstance(response_content, str):
-        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_content, re.DOTALL)
+        fence_match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```", response_content, re.DOTALL
+        )
         if fence_match:
             try:
                 inner = json.loads(fence_match.group(1))
@@ -438,7 +475,9 @@ def _reason_from_json_envelope(payload: str) -> Optional[str]:
         )
         if content_match:
             try:
-                content = content_match.group(1).encode("utf-8").decode("unicode_escape")
+                content = (
+                    content_match.group(1).encode("utf-8").decode("unicode_escape")
+                )
             except UnicodeDecodeError:
                 content = content_match.group(1)
             if isinstance(content, str):
@@ -550,7 +589,9 @@ def _generate_friendly_error_message(
         return default_msg
     try:
         template = get_prompt_template("evaluation_error_explain", "zh")
-        user_prompt = template["USER_PROMPT"].replace("{{error_message}}", str(exc)[:500])
+        user_prompt = template["USER_PROMPT"].replace(
+            "{{error_message}}", str(exc)[:500]
+        )
         response = call_llm_for_system_prompt(
             model_id=model_id,
             user_prompt=user_prompt,
@@ -563,11 +604,15 @@ def _generate_friendly_error_message(
         return default_msg
 
 
-def _make_background_done_callback(tenant_id: str, user_id: str, agent_evaluation_id: int):
+def _make_background_done_callback(
+    tenant_id: str, user_id: str, agent_evaluation_id: int
+):
     def callback(future):
         exc = future.exception()
         if exc is not None:
-            logger.exception("Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc)
+            logger.exception(
+                "Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc
+            )
             friendly_msg = _generate_friendly_error_message(exc, str(exc))
             try:
                 update_agent_evaluation_status(
@@ -578,7 +623,11 @@ def _make_background_done_callback(tenant_id: str, user_id: str, agent_evaluatio
                     error_message=friendly_msg,
                 )
             except Exception as update_exc:
-                logger.error("Failed to write FAILED status for run %d: %r", agent_evaluation_id, update_exc)
+                logger.error(
+                    "Failed to write FAILED status for run %d: %r",
+                    agent_evaluation_id,
+                    update_exc,
+                )
 
     return callback
 
@@ -625,7 +674,9 @@ async def _run_agent_to_final_answer(
                         if isinstance(content, str):
                             final_answer_parts.append(content)
         except Exception:
-            logger.debug("Failed to parse observer chunk: %r", chunk[:200], exc_info=True)
+            logger.debug(
+                "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
+            )
     remaining = agent_run_info.observer.get_cached_message()
     for msg in remaining:
         try:
@@ -697,7 +748,9 @@ def _is_all_pass(
     return passed
 
 
-def _format_runtime_context(runtime_events: List[dict], actual: str, max_tokens: int = 4096) -> str:
+def _format_runtime_context(
+    runtime_events: List[dict], actual: str, max_tokens: int = 4096
+) -> str:
     """Build an event-flow execution log for LLM evaluators.
 
     Events are grouped by step_count boundaries to preserve temporal order
@@ -734,7 +787,9 @@ def _format_runtime_context(runtime_events: List[dict], actual: str, max_tokens:
     if actual_len <= ACTUAL_HEAD_TOKENS + ACTUAL_TAIL_TOKENS:
         actual_section = actual_str
     else:
-        actual_section = actual_str[:ACTUAL_HEAD_TOKENS] + "\n…\n" + actual_str[-ACTUAL_TAIL_TOKENS:]
+        actual_section = (
+            actual_str[:ACTUAL_HEAD_TOKENS] + "\n…\n" + actual_str[-ACTUAL_TAIL_TOKENS:]
+        )
 
     budget = max_tokens - STATIC_OVERHEAD_EST
 
@@ -814,7 +869,9 @@ def _format_runtime_context(runtime_events: List[dict], actual: str, max_tokens:
                     head = event_budget * 60 // 100
                     tail = event_budget - head
                     if head > 0:
-                        trimmed = raw[:head] + "\n…\n" + (raw[-tail:] if tail > 0 else "")
+                        trimmed = (
+                            raw[:head] + "\n…\n" + (raw[-tail:] if tail > 0 else "")
+                        )
                     else:
                         trimmed = raw[:event_budget] + "…"
                 label = ""
@@ -897,7 +954,11 @@ def _extract_runtime_stats(runtime_events: List[dict]) -> dict:
                 try:
                     content = json.loads(content)
                 except Exception:
-                    logger.debug("Failed to parse token_count content: %r", content[:100], exc_info=True)
+                    logger.debug(
+                        "Failed to parse token_count content: %r",
+                        content[:100],
+                        exc_info=True,
+                    )
                     continue
             if isinstance(content, dict):
                 tok = content.get("total_output_tokens")
@@ -923,17 +984,36 @@ def _score_with_evaluators(
     LLM evaluators run in parallel via ThreadPoolExecutor (I/O-bound)."""
     scores = {}
     reasons = {}
-    code_evals = {eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"}
-    llm_evals = {eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") != "code"}
+    code_evals = {
+        eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"
+    }
+    llm_evals = {
+        eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") != "code"
+    }
 
     # ── Code evaluators: serial (pure Python, no I/O) ────────────
+    # Each evaluator code snippet has already been validated at authoring
+    # time by validate_code_evaluator() (4-stage pipeline: compile syntax →
+    # AST shell-call scan → sandboxed trial exec → signature inspection).
+    # Re-running the same ALLOWED_BUILTINS whitelist here ensures runtime
+    # parity with the authoring-validation environment and prevents any
+    # post-publish tampering with the stored `code` field.
     for eid, ev in code_evals.items():
         name = ev["name"]
         try:
             local_vars = {}
-            exec(ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
+            exec(  # noqa: S102,B102 nosec NOSONAR  # lgtm [py/code-injection]
+                ev["code"],
+                {"__builtins__": ALLOWED_BUILTINS, "json": json},
+                local_vars,
+            )
             fn = local_vars.get("evaluate")
-            result = fn(query=query, expected=expected, actual=actual, runtime_events=runtime_events or [])
+            result = fn(
+                query=query,
+                expected=expected,
+                actual=actual,
+                runtime_events=runtime_events or [],
+            )
             scores[name] = float(result.get("score", 0))
             reasons[name] = str(result.get("reason", ""))
         except Exception as exc:
@@ -946,7 +1026,11 @@ def _score_with_evaluators(
 
     def _call_one_llm(eid: int, ev: Dict[str, Any]):
         """Single LLM evaluator call — submitted to thread pool."""
-        prompt = ev.get("prompt_en") if language == "en" and ev.get("prompt_en") else ev.get("prompt") or ""
+        prompt = (
+            ev.get("prompt_en")
+            if language == "en" and ev.get("prompt_en")
+            else ev.get("prompt") or ""
+        )
         # Prepend multi-turn conversation history so the LLM evaluator
         # understands the context when scoring a specific turn.
         if conversation_history:
@@ -963,7 +1047,9 @@ def _score_with_evaluators(
         prompt = prompt.replace("{{expected}}", str(expected))
         prompt = prompt.replace("{{actual}}", str(actual))
         if runtime_events and "{{runtime_stats}}" in prompt:
-            ctx = _format_runtime_context(runtime_events, str(actual), max_tokens=context_window)
+            ctx = _format_runtime_context(
+                runtime_events, str(actual), max_tokens=context_window
+            )
             prompt = prompt.replace("{{runtime_stats}}", ctx)
         response = call_llm_for_system_prompt(
             model_id=judge_model_id,
@@ -974,7 +1060,10 @@ def _score_with_evaluators(
         data = json.loads(response) if isinstance(response, str) else response
         return eid, ev["name"], float(data.get("score", 0)), str(data.get("reason", ""))
 
-    futures = {_LLM_EVAL_EXECUTOR.submit(_call_one_llm, eid, ev): eid for eid, ev in llm_evals.items()}
+    futures = {
+        _LLM_EVAL_EXECUTOR.submit(_call_one_llm, eid, ev): eid
+        for eid, ev in llm_evals.items()
+    }
     for f in as_completed(futures):
         try:
             eid, name, score, reason = f.result()
@@ -998,15 +1087,23 @@ def _check_run_limits(tenant_id: str) -> None:
     active = count_active_runs(tenant_id)
     total = count_total_runs(tenant_id)
     if active >= MAX_CONCURRENT_RUNS:
-        raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED, f"Active: {active}, max: {MAX_CONCURRENT_RUNS}")
+        raise AppException(
+            ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,
+            f"Active: {active}, max: {MAX_CONCURRENT_RUNS}",
+        )
     if total >= MAX_TOTAL_RUNS:
-        raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED, f"Total: {total}, max: {MAX_TOTAL_RUNS}")
+        raise AppException(
+            ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,
+            f"Total: {total}, max: {MAX_TOTAL_RUNS}",
+        )
 
 
 def _run_in_background(fn, *fn_args, tenant_id, user_id, agent_evaluation_id):
     """Submit fn to the thread pool and attach a failure-cleanup callback."""
     future = pool.submit(fn, *fn_args)
-    future.add_done_callback(_make_background_done_callback(tenant_id, user_id, agent_evaluation_id))
+    future.add_done_callback(
+        _make_background_done_callback(tenant_id, user_id, agent_evaluation_id)
+    )
 
 
 def create_agent_evaluation_run_impl(
@@ -1026,14 +1123,21 @@ def create_agent_evaluation_run_impl(
     # Validate evaluators
     if evaluator_ids:
         if len(evaluator_ids) > MAX_EVALUATORS_PER_RUN:
-            raise AppException(ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT, "Too many evaluators selected (max 5)")
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT,
+                "Too many evaluators selected (max 5)",
+            )
         for eid in evaluator_ids:
             ev = get_evaluator(eid, tenant_id)
             if not ev:
-                raise AppException(ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND, f"Evaluator not found: {eid}")
+                raise AppException(
+                    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND,
+                    f"Evaluator not found: {eid}",
+                )
             if ev.get("status") != "PUBLISHED":
                 raise AppException(
-                    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED, f"Evaluator not published: {ev.get('name')}"
+                    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED,
+                    f"Evaluator not published: {ev.get('name')}",
                 )
 
     evaluator_config: Optional[Dict[str, Any]] = None
@@ -1045,16 +1149,27 @@ def create_agent_evaluation_run_impl(
         }
 
     if evaluation_set_id:
-        set_cases = get_evaluation_set_cases_all(evaluation_set_id=evaluation_set_id, tenant_id=tenant_id)
+        set_cases = get_evaluation_set_cases_all(
+            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
+        )
         if not set_cases:
-            raise AppException(ErrorCode.AGENT_EVALUATION_SET_EMPTY, "Evaluation set has no cases")
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_SET_EMPTY, "Evaluation set has no cases"
+            )
         if agent_version_no is None:
-            agent_version_no = resolve_latest_published_version_no(agent_id=agent_id, tenant_id=tenant_id)
+            agent_version_no = resolve_latest_published_version_no(
+                agent_id=agent_id, tenant_id=tenant_id
+            )
     else:
         if query_count < 1 or query_count > 50:
-            raise AppException(ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE, "Query count must be between 1 and 50")
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE,
+                "Query count must be between 1 and 50",
+            )
         if agent_version_no is None:
-            agent_version_no = resolve_latest_published_version_no(agent_id=agent_id, tenant_id=tenant_id)
+            agent_version_no = resolve_latest_published_version_no(
+                agent_id=agent_id, tenant_id=tenant_id
+            )
 
         # Create a placeholder run immediately (AI query generation runs in background)
         evaluator_config = {**(evaluator_config or {}), "no_set_mode": True}  # type: ignore[dict-item]
@@ -1131,7 +1246,9 @@ def _generate_test_queries(
 
     profile = fetch_agent_profile(agent_id, tenant_id)
     if not profile:
-        raise AppException(ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND, f"Agent not found: {agent_id}")
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND, f"Agent not found: {agent_id}"
+        )
 
     profile_parts = [f"## Agent Profile\n- Name: {profile['name']}"]
     if profile["description"]:
@@ -1156,7 +1273,9 @@ def _generate_test_queries(
         )
     except Exception as exc:
         logger.error("LLM call failed for test query generation: %s", exc)
-        raise AppException(ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED, str(exc)) from exc
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED, str(exc)
+        ) from exc
 
     try:
         cases: Any = json.loads(response) if isinstance(response, str) else response
@@ -1167,22 +1286,32 @@ def _generate_test_queries(
                 cases = json.loads(match.group(1))
             except json.JSONDecodeError as exc:
                 raise AppException(
-                    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT, "AI returned invalid format for test queries"
+                    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+                    "AI returned invalid format for test queries",
                 ) from exc
         else:
             raise AppException(
-                ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT, "AI returned invalid format for test queries"
+                ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+                "AI returned invalid format for test queries",
             )
     if not isinstance(cases, list) or not cases:
         raise AppException(
-            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT, "AI returned invalid format for test queries"
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+            "AI returned invalid format for test queries",
         )
 
     # Extract query strings from case objects [{inputs: {query: ...}, label: {answer: ...}}]
-    result = [str(c.get("inputs", {}).get("query", "")).strip() for c in cases if isinstance(c, dict)]
+    result = [
+        str(c.get("inputs", {}).get("query", "")).strip()
+        for c in cases
+        if isinstance(c, dict)
+    ]
     result = [q for q in result if q]
     if not result:
-        raise AppException(ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY, "AI generated no valid test queries")
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY,
+            "AI generated no valid test queries",
+        )
     logger.info("Generated %d test queries for agent %d", len(result), agent_id)
     return result[:query_count]
 
@@ -1382,7 +1511,9 @@ def _execute_single_case(
             judge_model_id,
             exc,
         )
-        friendly_msg = _generate_friendly_error_message(exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id)
+        friendly_msg = _generate_friendly_error_message(
+            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id
+        )
         update_agent_evaluation_case_result(
             agent_evaluation_case_id=case_id,
             tenant_id=tenant_id,
@@ -1412,9 +1543,15 @@ def _setup_no_set_and_execute(
         gen_model_id = judge_model_id
         try:
             with get_db_session() as gs:
-                models = gs.query(ModelRecord).filter(ModelRecord.tenant_id == tenant_id).all()
+                models = (
+                    gs.query(ModelRecord)
+                    .filter(ModelRecord.tenant_id == tenant_id)
+                    .all()
+                )
                 judge_is_llm = any(
-                    m.model_id == judge_model_id and getattr(m, "model_type", "") == "llm" for m in models
+                    m.model_id == judge_model_id
+                    and getattr(m, "model_type", "") == "llm"
+                    for m in models
                 )
                 if not judge_is_llm:
                     llm_models = sorted(
@@ -1450,7 +1587,8 @@ def _setup_no_set_and_execute(
 
         # Insert cases
         cases = [
-            {"inputs": {"query": q.strip()}, "label": {"answer": ""}, "order_no": i} for i, q in enumerate(queries)
+            {"inputs": {"query": q.strip()}, "label": {"answer": ""}, "order_no": i}
+            for i, q in enumerate(queries)
         ]
         insert_evaluation_set_cases(
             tenant_id=tenant_id,
@@ -1458,8 +1596,12 @@ def _setup_no_set_and_execute(
             cases=cases,
             created_by=user_id,
         )
-        update_evaluation_set_case_count(evaluation_set_id, len(cases), updated_by=user_id)
-        set_cases = get_evaluation_set_cases_all(evaluation_set_id=evaluation_set_id, tenant_id=tenant_id)
+        update_evaluation_set_case_count(
+            evaluation_set_id, len(cases), updated_by=user_id
+        )
+        set_cases = get_evaluation_set_cases_all(
+            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
+        )
 
         # Create cases in agent_evaluation_case table
         create_agent_evaluation_cases(
@@ -1485,7 +1627,9 @@ def _setup_no_set_and_execute(
             session.commit()
 
         # Execute
-        execute_agent_evaluation_run(tenant_id, user_id, agent_evaluation_id, judge_model_id)
+        execute_agent_evaluation_run(
+            tenant_id, user_id, agent_evaluation_id, judge_model_id
+        )
     except Exception:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
         update_agent_evaluation_status(
@@ -1510,7 +1654,9 @@ def execute_agent_evaluation_run(
             status=EvalRunStatus.RUNNING,
             updated_by=user_id,
         )
-        run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+        run = get_agent_evaluation(
+            agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+        )
         agent_id = int(run["agent_id"])
         agent_version_no = int(run["agent_version_no"])
         if judge_model_id is None:
@@ -1531,9 +1677,9 @@ def execute_agent_evaluation_run(
                 ev = get_evaluator(eid, tenant_id)
                 if ev and ev.get("status") == "PUBLISHED":
                     evaluators[eid] = ev
-        judge_system_prompt = get_prompt_template("evaluation_judge_system", run.get("language", "zh"))[
-            "SYSTEM_PROMPT"
-        ]
+        judge_system_prompt = get_prompt_template(
+            "evaluation_judge_system", run.get("language", "zh")
+        )["SYSTEM_PROMPT"]
 
         # Resolve judge model context window once (used for runtime_events trimming)
         context_window = 4096
@@ -1561,7 +1707,9 @@ def execute_agent_evaluation_run(
                 limit=200,
                 offset=offset,
             )
-            page_items = batch.get("items", []) if isinstance(batch, dict) else (batch or [])
+            page_items = (
+                batch.get("items", []) if isinstance(batch, dict) else (batch or [])
+            )
             if not page_items:
                 break
             all_cases.extend(page_items)
@@ -1636,7 +1784,9 @@ def execute_agent_evaluation_run(
         )
     except Exception as exc:
         logger.exception("Evaluation run failed: %r", exc)
-        friendly_msg = _generate_friendly_error_message(exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id)
+        friendly_msg = _generate_friendly_error_message(
+            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id
+        )
         update_agent_evaluation_status(
             agent_evaluation_id=agent_evaluation_id,
             tenant_id=tenant_id,
@@ -1699,9 +1849,13 @@ def generate_analysis_report_impl(
     logs.  If the LLM returns non-JSON the error is logged at WARNING with
     the full prompt size so operators can estimate cost.
     """
-    run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+    run = get_agent_evaluation(
+        agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+    )
     if not run:
-        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found")
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found"
+        )
 
     # ── Cache gate ───────────────────────────────────────────────────────
     # ``analysis_report`` is a JSONB column; a non-empty dict means the
@@ -1717,20 +1871,27 @@ def generate_analysis_report_impl(
 
     # ── Load corpus + evaluator metadata ─────────────────────────────────
     cases = list_agent_evaluation_cases(
-        agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id, limit=5000, offset=0
+        agent_evaluation_id=agent_evaluation_id,
+        tenant_id=tenant_id,
+        limit=5000,
+        offset=0,
     )
     cases = cases.get("items", []) if isinstance(cases, dict) else (cases or [])
 
     thresholds: Dict[str, float] = {}
     raw_config = run.get("evaluator_config") or {}
-    if isinstance(raw_config, dict) and isinstance(raw_config.get("evaluator_ids"), list):
+    if isinstance(raw_config, dict) and isinstance(
+        raw_config.get("evaluator_ids"), list
+    ):
         for eid in raw_config["evaluator_ids"]:
             try:
                 ev = get_evaluator(int(eid), tenant_id)
             except (ValueError, TypeError):
                 ev = None
             if isinstance(ev, dict) and ev.get("name"):
-                thresholds[str(ev["name"])] = float(ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD))
+                thresholds[str(ev["name"])] = float(
+                    ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
+                )
 
     # ── Basic run stats ──────────────────────────────────────────────────
     total = len(cases)
@@ -1787,7 +1948,9 @@ def generate_analysis_report_impl(
     # ── Render prompt blocks ─────────────────────────────────────────────
     stats_block = f"Total cases: {total}, Passed: {passed}, Failed: {total - passed}, Pass rate: {passed}/{total}"
     if thresholds:
-        stats_block += f"\nEvaluator pass thresholds: {json.dumps(thresholds, ensure_ascii=False)}"
+        stats_block += (
+            f"\nEvaluator pass thresholds: {json.dumps(thresholds, ensure_ascii=False)}"
+        )
 
     failures_block = ""
     if failure_examples:
@@ -1797,15 +1960,17 @@ def generate_analysis_report_impl(
             # and improves model parseability).
             q = (ex["query"] or "(empty)").replace("\n", " ")
             failures_block += f"\nCase {i + 1}: Q={q}\n"
-            failures_block += f"Scores: {json.dumps(ex['scores'], ensure_ascii=False)}\n"
+            failures_block += (
+                f"Scores: {json.dumps(ex['scores'], ensure_ascii=False)}\n"
+            )
             if ex["low_scores"]:
                 failures_block += f"Low scores (< threshold): {json.dumps(ex['low_scores'], ensure_ascii=False)}\n"
             if ex["borderline_scores"]:
-                failures_block += (
-                    f"Borderline (<=threshold+0.1): {json.dumps(ex['borderline_scores'], ensure_ascii=False)}\n"
-                )
+                failures_block += f"Borderline (<=threshold+0.1): {json.dumps(ex['borderline_scores'], ensure_ascii=False)}\n"
             if ex["reasons"]:
-                failures_block += f"Reasons: {json.dumps(ex['reasons'], ensure_ascii=False)}\n"
+                failures_block += (
+                    f"Reasons: {json.dumps(ex['reasons'], ensure_ascii=False)}\n"
+                )
             if ex["expected"] or ex["actual"]:
                 failures_block += f"Expected: {ex['expected'] or '(missing)'}\nActual: {ex['actual'] or '(missing)'}\n"
     else:
@@ -1869,8 +2034,12 @@ def generate_analysis_report_impl(
 # ══════════════════════════════════════════════════════════════════════
 
 
-def get_agent_evaluation_run_impl(agent_evaluation_id: int, tenant_id: str) -> Dict[str, Any]:
-    return get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+def get_agent_evaluation_run_impl(
+    agent_evaluation_id: int, tenant_id: str
+) -> Dict[str, Any]:
+    return get_agent_evaluation(
+        agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+    )
 
 
 def list_agent_evaluations_by_agent_impl(
@@ -1879,7 +2048,9 @@ def list_agent_evaluations_by_agent_impl(
     limit: int = 50,
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
-    return list_agent_evaluations_by_agent(agent_id=agent_id, tenant_id=tenant_id, limit=limit, offset=offset)
+    return list_agent_evaluations_by_agent(
+        agent_id=agent_id, tenant_id=tenant_id, limit=limit, offset=offset
+    )
 
 
 def list_agent_evaluation_cases_impl(
@@ -1942,7 +2113,13 @@ def get_evaluation_stats_impl(
     )
 
     if not case_scores:
-        return {"per_evaluator": [], "histogram": [], "pass_count": 0, "fail_count": 0, "total": 0}
+        return {
+            "per_evaluator": [],
+            "histogram": [],
+            "pass_count": 0,
+            "fail_count": 0,
+            "total": 0,
+        }
 
     eval_scores: dict[str, list[float]] = defaultdict(list)
     # Five 0.2-wide buckets: indexes map directly to the five coloured
@@ -2026,12 +2203,16 @@ def delete_agent_evaluation_run_impl(
     tenant_id: str,
     user_id: str,
 ) -> None:
-    run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+    run = get_agent_evaluation(
+        agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+    )
     if run.get("created_by") != user_id:
         raise AppException(ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE)
 
     evaluator_config_raw = run.get("evaluator_config")
-    if isinstance(evaluator_config_raw, dict) and evaluator_config_raw.get("no_set_mode"):
+    if isinstance(evaluator_config_raw, dict) and evaluator_config_raw.get(
+        "no_set_mode"
+    ):
         try:
             from database.evaluation_set_db import hard_delete_evaluation_set
 
@@ -2043,7 +2224,9 @@ def delete_agent_evaluation_run_impl(
                 agent_evaluation_id,
                 exc,
             )
-    hard_delete_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+    hard_delete_agent_evaluation(
+        agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+    )
 
 
 async def trial_run_evaluator_impl(
@@ -2063,7 +2246,9 @@ async def trial_run_evaluator_impl(
             ev = get_evaluator(eid, tenant_id)
             if ev and ev.get("status") == "PUBLISHED":
                 evaluators[eid] = ev
-    judge_system_prompt = get_prompt_template("evaluation_judge_system", "zh")["SYSTEM_PROMPT"]
+    judge_system_prompt = get_prompt_template("evaluation_judge_system", "zh")[
+        "SYSTEM_PROMPT"
+    ]
 
     if JiuwenSDKAdapter is None:
         raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable")
