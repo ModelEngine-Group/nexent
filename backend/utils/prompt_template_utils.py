@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -9,6 +9,7 @@ from consts.prompt_template import (
     PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP,
     PROMPT_GENERATE_TEMPLATE_FIELDS,
 )
+
 
 logger = logging.getLogger("prompt_template_utils")
 
@@ -131,7 +132,35 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'nl2agent': {
             LANGUAGE["ZH"]: 'backend/prompts/nl2agent_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/nl2agent_en.yaml'
-        }
+        },
+        'evaluation_generate_queries': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/generate_cases_system_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/generate_cases_system_en.yaml'
+        },
+        'evaluation_generate_evaluator': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/generate_evaluator_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/generate_evaluator_en.yaml'
+        },
+        'evaluation_error_explain': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/error_explain_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/error_explain_en.yaml'
+        },
+        'evaluation_plan_kb_queries': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/plan_kb_queries_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/plan_kb_queries_en.yaml'
+        },
+        'evaluation_generate_cases_system': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/generate_cases_system_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/generate_cases_system_en.yaml'
+        },
+        'evaluation_judge_system': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/judge_system_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/judge_system_en.yaml'
+        },
+        'evaluation_analyze_report': {
+            LANGUAGE["ZH"]: 'backend/prompts/evaluation/analyze_report_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/evaluation/analyze_report_en.yaml'
+        },
     }
 
     if template_type not in template_paths:

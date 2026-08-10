@@ -143,7 +143,10 @@ export function MineAgentsView({
     });
   };
 
-  const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
+  const handleEdit = (
+    agentId: number,
+    permission?: MyEditableAgentItem["permission"]
+  ) => {
     if (permission === "READ_ONLY") {
       return;
     }
@@ -186,7 +189,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`);
+    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {
@@ -228,9 +231,7 @@ export function MineAgentsView({
         versionNo,
         payload,
       });
-      message.success(
-        t("repository.mine.applySuccess")
-      );
+      message.success(t("repository.mine.applySuccess"));
       closeApplyModal();
     } catch {
       message.error(t("repository.mine.applyError"));
@@ -558,7 +559,9 @@ export function MineAgentsView({
           setImportWizardData(null);
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
           ]);
         }}
       />

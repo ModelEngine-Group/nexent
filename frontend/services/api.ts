@@ -179,7 +179,19 @@ export const API_ENDPOINTS = {
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
+    export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
     delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+    generateCases: `${API_BASE_URL}/evaluation-sets/generate-cases`,
+  },
+  evaluators: {
+    list: `${API_BASE_URL}/evaluators`,
+    detail: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    create: `${API_BASE_URL}/evaluators`,
+    generate: `${API_BASE_URL}/evaluators/generate`,
+    export: `${API_BASE_URL}/evaluators/export`,
+    import: `${API_BASE_URL}/evaluators/import`,
+    publish: (id: number) => `${API_BASE_URL}/evaluators/${id}/publish`,
+    delete: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
@@ -638,11 +650,13 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
     // Platform-level quota (SU/ASSET_OWNER/SPEED only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
-    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -774,7 +788,10 @@ export const fetchWithErrorHandling = async (
         try {
           const errorData = JSON.parse(errorText);
           if (errorData?.error === "TenantStorageFull") {
-            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+            throw new ApiError(
+              413,
+              errorData.message || "Tenant storage limit reached"
+            );
           }
         } catch (error) {
           if (error instanceof ApiError) {

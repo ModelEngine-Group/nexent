@@ -113,6 +113,12 @@ class MemoryPreparationException(Exception):
     pass
 
 
+class ResourceInUseError(Exception):
+    """Raised when a resource cannot be deleted because it is still referenced."""
+
+    pass
+
+
 class MCPConnectionError(Exception):
     """Raised when MCP connection fails."""
 

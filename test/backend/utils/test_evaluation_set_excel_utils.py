@@ -1,8 +1,8 @@
 """Unit tests for ``backend.utils.evaluation_set_excel_utils``.
 
 Tests cover Excel template generation and case parsing for both .xlsx
-(Legacy ``xlrd`` path) formats, including alias resolution, required-column
-validation, row-level error reporting, and empty-file handling.
+and .xls (Legacy ``xlrd`` path) formats, including alias resolution,
+required-column validation, row-level error reporting, and empty-file handling.
 """
 
 import importlib
@@ -106,16 +106,6 @@ _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-# Reload the production module if it was already loaded by a sibling test
-# file so the new xlrd stub is used.  ``conftest.py`` installs a stub at
-# session collection time, but more importantly each fixture that touches
-# ``sys.modules["openpyxl"]`` (e.g. test_agent_evaluation_service) does not
-# touch ``sys.modules["xlrd"]`` itself.  So this reload is purely defensive.
-# Reload the production module if it was already loaded by a sibling test
-# file so the new xlrd stub is used.  ``conftest.py`` installs a stub at
-# session collection time, but more importantly each fixture that touches
-# ``sys.modules["openpyxl"]`` (e.g. test_agent_evaluation_service) does not
-# touch ``sys.modules["xlrd"]`` itself.  So this reload is purely defensive.
 import importlib as _importlib  # noqa: E402
 
 # Always force real ``openpyxl`` into sys.modules before reloading the
@@ -136,10 +126,10 @@ elif getattr(_existing_module, "xlrd", None) is not _xlrd_stub:
 else:
     _module = _existing_module
 REQUIRED_HEADERS = _module.REQUIRED_HEADERS
-OPTIONAL_HEADERS = _module.OPTIONAL_HEADERS
 ALL_HEADERS = _module.ALL_HEADERS
 _normalize_header = _module._normalize_header
 build_evaluation_set_excel_template_bytes = _module.build_evaluation_set_excel_template_bytes
+build_evaluation_set_export_bytes = _module.build_evaluation_set_export_bytes
 parse_evaluation_cases_from_excel = _module.parse_evaluation_cases_from_excel
 
 # Expose the module object so callers (tests) can reach other helpers.
@@ -159,9 +149,6 @@ def _make_xlsx_bytes(header_row, data_rows):
     Always uses the real ``openpyxl.Workbook`` even if a sibling test file has
     stubbed ``sys.modules["openpyxl"]`` for its own purposes.
     """
-    # Force a fresh import of openpyxl every call: a sibling test file may have
-    # left a MagicMock in sys.modules that breaks ``wb.save`` (which must write
-    # a real zip stream).
     sys.modules.pop("openpyxl", None)
     sys.modules.pop("openpyxl.styles", None)
     sys.modules.pop("openpyxl.workbook", None)
@@ -214,14 +201,129 @@ class TestBuildTemplateBytes:
         assert ws.title == "evaluation_cases"
 
     def test_header_row_present(self):
+        """Headers are on row 2; row 1 is the instruction row."""
         from openpyxl import load_workbook
 
         result = build_evaluation_set_excel_template_bytes()
         wb = load_workbook(io.BytesIO(result))
         ws = wb.active
-        headers = [cell.value for cell in ws[1]]
-        assert any("问题" in str(h) for h in headers)
-        assert any("答案" in str(h) for h in headers)
+        # Row 1 — instruction descriptions
+        row1 = [cell.value for cell in ws[1]]
+        assert any("对话" in str(v) for v in row1)
+        # Row 2 — actual column headers
+        row2 = [cell.value for cell in ws[2]]
+        assert "session_id" in row2
+        assert "request_id" in row2
+        assert "query" in row2
+        assert "custom_variables" in row2
+        assert "reference_output" in row2
+
+    def test_example_data_present(self):
+        """Row 3+ should contain example data."""
+        from openpyxl import load_workbook
+
+        result = build_evaluation_set_excel_template_bytes()
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        # Row 3 should be an example data row (not header, not empty)
+        row3 = [cell.value for cell in ws[3]]
+        assert row3[2] is not None  # query column should have data
+
+    def test_english_language_template(self):
+        from openpyxl import load_workbook
+
+        result = build_evaluation_set_excel_template_bytes(language="en")
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        row1 = [cell.value for cell in ws[1]]
+        assert any("Session ID" in str(v) for v in row1)
+        row2 = [cell.value for cell in ws[2]]
+        assert "session_id" in row2
+
+
+# ---------------------------------------------------------------------------
+# build_evaluation_set_export_bytes
+# ---------------------------------------------------------------------------
+
+class TestBuildExportBytes:
+    def test_returns_bytes(self):
+        result = build_evaluation_set_export_bytes("test_set", [])
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+    def test_includes_new_columns(self):
+        from openpyxl import load_workbook
+
+        cases = [
+            {
+                "case_id": "c1",
+                "inputs": {"query": "q1", "session_id": "s1", "request_id": "1"},
+                "label": {"answer": "a1"},
+            },
+        ]
+        result = build_evaluation_set_export_bytes("test_set", cases)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        # Row 2 (headers): session_id, request_id, query, custom_variables, reference_output
+        row2 = [cell.value for cell in ws[2]]
+        assert row2[0] == "session_id"
+        assert row2[1] == "request_id"
+        assert row2[2] == "query"
+        # Row 3 (data)
+        row3 = [cell.value for cell in ws[3]]
+        assert row3[0] == "s1"
+        assert row3[1] == "1"
+        assert row3[2] == "q1"
+        assert row3[4] == "a1"
+
+    def test_turn_order_fallback(self):
+        """When inputs use 'turn_order' instead of 'request_id'."""
+        from openpyxl import load_workbook
+
+        cases = [
+            {
+                "inputs": {"query": "q1", "turn_order": "3"},
+                "label": {"answer": "a1"},
+            },
+        ]
+        result = build_evaluation_set_export_bytes("test_set", cases)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        row3 = [cell.value for cell in ws[3]]
+        assert row3[1] == "3"
+
+    def test_session_id_from_top_level(self):
+        """When session_id is at case top-level, not in inputs."""
+        from openpyxl import load_workbook
+
+        cases = [
+            {
+                "inputs": {"query": "q1"},
+                "label": {"answer": "a1"},
+                "session_id": "top_level_s",
+            },
+        ]
+        result = build_evaluation_set_export_bytes("test_set", cases)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        row3 = [cell.value for cell in ws[3]]
+        assert row3[0] == "top_level_s"
+
+    def test_custom_variables_json_serialization(self):
+        from openpyxl import load_workbook
+
+        cases = [
+            {
+                "inputs": {"query": "q1", "custom_variables": {"lang": "zh", "topic": "math"}},
+                "label": {"answer": "a1"},
+            },
+        ]
+        result = build_evaluation_set_export_bytes("test_set", cases)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb.active
+        row3 = [cell.value for cell in ws[3]]
+        assert row3[3] is not None
+        assert "lang" in row3[3]
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +378,7 @@ class TestParseShared:
         assert cases[0]["case_id"] == "x1"
 
     def test_required_column_missing(self):
-        raw = _make_xlsx_bytes(["query"], [["only query"]])
+        raw = _make_xlsx_bytes(["session_id"], [["s1"]])
         with pytest.raises(ValueError, match="Missing required column"):
             parse_evaluation_cases_from_excel("test.xlsx", raw)
 
@@ -318,6 +420,109 @@ class TestParseShared:
         cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
         assert cases[0]["case_id"] is None
 
+    # ── New format tests ────────────────────────────────────────────
+
+    def test_new_format_columns(self):
+        """Parse Tencent Cloud format: session_id, request_id, query, custom_variables, reference_output."""
+        raw = _make_xlsx_bytes(
+            ["session_id", "request_id", "query", "custom_variables", "reference_output"],
+            [["s1", "1", "hello", '{"lang":"zh"}', "world"]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert len(cases) == 1
+        assert cases[0]["inputs"]["query"] == "hello"
+        assert cases[0]["inputs"]["session_id"] == "s1"
+        assert cases[0]["inputs"]["request_id"] == "1"
+        assert cases[0]["label"]["answer"] == "world"
+        assert cases[0]["session_id"] == "s1"
+        assert cases[0]["turn_order"] == "1"
+
+    def test_reference_output_maps_to_label_answer(self):
+        raw = _make_xlsx_bytes(
+            ["query", "reference_output"],
+            [["q1", "expected answer"]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert cases[0]["label"]["answer"] == "expected answer"
+
+    def test_answer_is_optional(self):
+        """reference_output / answer column is optional."""
+        raw = _make_xlsx_bytes(
+            ["query", "answer"],
+            [["q1", ""]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert len(cases) == 1
+        assert "answer" not in cases[0]["label"] or cases[0]["label"]["answer"] is None
+
+    def test_custom_variables_parsed_as_json(self):
+        raw = _make_xlsx_bytes(
+            ["query", "custom_variables"],
+            [["q1", '{"lang": "zh", "topic": "math"}']],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert cases[0]["inputs"]["lang"] == "zh"
+        assert cases[0]["inputs"]["topic"] == "math"
+        # query should still be present
+        assert cases[0]["inputs"]["query"] == "q1"
+
+    def test_custom_variables_invalid_json_stored_as_is(self):
+        raw = _make_xlsx_bytes(
+            ["query", "custom_variables"],
+            [["q1", "not-valid-json"]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert cases[0]["inputs"]["custom_variables"] == "not-valid-json"
+
+    def test_turn_order_alias(self):
+        raw = _make_xlsx_bytes(
+            ["query", "turn_order"],
+            [["q1", "5"]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert cases[0]["inputs"]["request_id"] == "5"
+
+    def test_multi_turn_sessions(self):
+        """Two cases in same session with different turn orders."""
+        raw = _make_xlsx_bytes(
+            ["session_id", "request_id", "query", "answer"],
+            [
+                ["s1", "1", "first question", "first answer"],
+                ["s1", "2", "follow-up question", "follow-up answer"],
+                ["s2", "1", "new session question", "new session answer"],
+            ],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert len(cases) == 3
+        assert cases[0]["inputs"]["session_id"] == "s1"
+        assert cases[0]["inputs"]["request_id"] == "1"
+        assert cases[1]["inputs"]["session_id"] == "s1"
+        assert cases[1]["inputs"]["request_id"] == "2"
+        assert cases[2]["inputs"]["session_id"] == "s2"
+
+    def test_template_round_trip(self):
+        """Generate a template, fill data, and parse it back."""
+        template_bytes = build_evaluation_set_excel_template_bytes(language="zh")
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(template_bytes))
+        ws = wb.active
+        # Data starts at row 3; clear rows 3+ and add our own
+        for row in ws.iter_rows(min_row=3):
+            for cell in row:
+                cell.value = None
+        ws.cell(row=3, column=3, value="test query")
+        ws.cell(row=3, column=5, value="test answer")
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        raw = buf.getvalue()
+
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert len(cases) >= 1
+        assert cases[0]["inputs"]["query"] == "test query"
+        assert cases[0]["label"]["answer"] == "test answer"
+
 
 # ---------------------------------------------------------------------------
 # parse_evaluation_cases_from_excel — .xlsx path
@@ -343,37 +548,34 @@ class TestParseXlsx:
             ["query", "answer"],
             [["has query", "has answer"], ["", "has answer"]],
         )
-        with pytest.raises(ValueError, match="问题 is required"):
+        with pytest.raises(ValueError, match="query is required"):
             parse_evaluation_cases_from_excel("test.xlsx", raw)
 
-    def test_row_missing_answer_raises(self):
+    def test_row_missing_answer_is_ok(self):
+        """answer is no longer required; row with only query should parse fine."""
         raw = _make_xlsx_bytes(
             ["query", "answer"],
-            [["has query", "has answer"], ["has query", ""]],
+            [["has query", ""]],
         )
-        with pytest.raises(ValueError, match="答案 is required"):
-            parse_evaluation_cases_from_excel("test.xlsx", raw)
+        cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
+        assert len(cases) == 1
+        assert cases[0]["inputs"]["query"] == "has query"
+        assert cases[0]["label"] == {}
 
     def test_empty_row_is_skipped(self):
-        # openpyxl iter_rows returns a tuple of Nones for empty rows (not None),
-        # so the skip depends on whether at least query+answer are present.
         raw = _make_xlsx_bytes(
             ["query", "answer"],
             [["q1", "a1"], [None, None], ["q2", "a2"]],
         )
         cases = parse_evaluation_cases_from_excel("test.xlsx", raw)
-        # Empty cells: get_col returns None, which is falsy → row skipped.
         assert len(cases) == 2
 
     def test_row_with_case_id_only_raises_missing_query(self):
-        # When only case_id is provided (query and answer are empty strings),
-        # the skip-check passes (any([case_id, "", ""]) is True because "c1" is
-        # truthy), then query validation fires: get_col("query") → "" → falsy.
         raw = _make_xlsx_bytes(
             ["case_id", "query", "answer"],
             [["c1", "", ""]],
         )
-        with pytest.raises(ValueError, match="问题 is required"):
+        with pytest.raises(ValueError, match="query is required"):
             parse_evaluation_cases_from_excel("test.xlsx", raw)
 
     def test_multiple_rows_parsed_correctly(self):
@@ -388,7 +590,6 @@ class TestParseXlsx:
         assert len(cases) == 2
         assert cases[0]["inputs"]["query"] == "first question"
         assert cases[1]["inputs"]["query"] == "second question"
-        # label structure
         assert cases[0]["label"]["answer"] == "first answer"
 
     def test_case_id_in_last_column(self):
@@ -401,7 +602,6 @@ class TestParseXlsx:
 
     def test_filename_case_insensitive(self):
         raw = _make_xlsx_bytes(["query", "answer"], [["q1", "a1"]])
-        # Should not raise "unsupported file type"
         cases = parse_evaluation_cases_from_excel("test.XLSX", raw)
         assert len(cases) == 1
 
@@ -412,8 +612,6 @@ class TestParseXlsx:
 
 class TestParseXls:
     def test_no_header_row_raises(self):
-        # xlrd stub wraps openpyxl; an empty bytes buffer raises BadZipFile.
-        # We verify the function handles this gracefully (doesn't crash, propagates).
         with pytest.raises(Exception, match=""):
             parse_evaluation_cases_from_excel("test.xls", b"")
 
@@ -422,25 +620,24 @@ class TestParseXls:
             ["query", "answer"],
             [
                 ["has query", "has answer"],
-                ["", "has answer"],  # missing query
+                ["", "has answer"],
             ],
         )
-        with pytest.raises(ValueError, match="问题 is required"):
+        with pytest.raises(ValueError, match="query is required"):
             parse_evaluation_cases_from_excel("test.xls", raw)
 
-    def test_row_missing_answer_raises(self):
+    def test_row_missing_answer_is_ok(self):
+        """answer is no longer required."""
         raw = _make_xlsx_bytes(
             ["query", "answer"],
-            [
-                ["has query", "has answer"],
-                ["has query", ""],  # missing answer
-            ],
+            [["has query", ""]],
         )
-        with pytest.raises(ValueError, match="答案 is required"):
-            parse_evaluation_cases_from_excel("test.xls", raw)
+        cases = parse_evaluation_cases_from_excel("test.xls", raw)
+        assert len(cases) == 1
+        assert cases[0]["inputs"]["query"] == "has query"
+        assert cases[0]["label"] == {}
 
     def test_no_cases_raises(self):
-        # Header only, no data rows → xlrd path raises "no cases".
         raw = _make_xlsx_bytes(["query", "answer"], [])
         with pytest.raises(ValueError, match="no cases"):
             parse_evaluation_cases_from_excel("test.xls", raw)
@@ -464,16 +661,26 @@ class TestParseXls:
         assert [c["inputs"]["query"] for c in cases] == ["q1", "q2"]
 
     def test_row_where_only_case_id_is_populated_is_skipped(self):
-        # xlrd: get_cell(None) → str(None) → "none" (truthy) → skip check passes,
-        # then query validation fires.
         raw = _make_xlsx_bytes(
             ["case_id", "query", "answer"],
             [["c1", None, None]],
         )
-        with pytest.raises(ValueError, match="问题 is required"):
+        with pytest.raises(ValueError, match="query is required"):
             parse_evaluation_cases_from_excel("test.xls", raw)
 
     def test_filename_case_insensitive(self):
         raw = _make_xlsx_bytes(["query", "answer"], [["q1", "a1"]])
         cases = parse_evaluation_cases_from_excel("test.XLS", raw)
         assert len(cases) == 1
+
+    def test_new_format_columns_xls(self):
+        """xls path should also handle new format columns."""
+        raw = _make_xlsx_bytes(
+            ["session_id", "request_id", "query", "custom_variables", "reference_output"],
+            [["s1", "1", "hello", '{"lang":"zh"}', "world"]],
+        )
+        cases = parse_evaluation_cases_from_excel("test.xls", raw)
+        assert len(cases) == 1
+        assert cases[0]["inputs"]["query"] == "hello"
+        assert cases[0]["inputs"]["session_id"] == "s1"
+        assert cases[0]["label"]["answer"] == "world"
