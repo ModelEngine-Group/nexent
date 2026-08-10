@@ -54,7 +54,7 @@ const SHARE_BASE_URL =
 
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
 const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
-const PORT = 30001;
+const PORT = 3000;
 
 function withoutBasePath(pathname) {
   if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {
@@ -232,7 +232,6 @@ async function isSuperAdminRequest(req) {
 
     const data = await response.json();
     const userRole = data?.data?.user?.user_role;
-    console.log("[isSuperAdminRequest] User role:", userRole);
     return SUPER_ADMIN_ROLES.has(userRole);
   } catch (error) {
     console.error("[isSuperAdminRequest] Error checking super admin:", error.message);
