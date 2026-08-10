@@ -1913,23 +1913,8 @@ def generate_analysis_report_impl(
         score_dict = _coerce_score_dict(c.get("score"))
         reason_dict = _coerce_reason(c.get("reason"))
 
-        # Low scores: evaluate against PER-EVALUATOR threshold; missing
-        # thresholds fall back to DEFAULT_PASS_THRESHOLD.  No per-row logs.
-        low_scores: Dict[str, float] = {}
-        borderline: Dict[str, float] = {}
-        for name, val in score_dict.items():
-            th = thresholds.get(str(name), DEFAULT_PASS_THRESHOLD)
-            if val < th:
-                low_scores[str(name)] = float(val)
-            elif val < th + 0.1:
-                borderline[str(name)] = float(val)
-
-        expected_answer = ""
         predict_answer = ""
-        label = c.get("label") or {}
         predict = c.get("predict") or {}
-        if isinstance(label, dict):
-            expected_answer = str(label.get("answer") or "")
         if isinstance(predict, dict):
             predict_answer = str(predict.get("answer") or "")
 
@@ -1938,17 +1923,25 @@ def generate_analysis_report_impl(
         if isinstance(inputs, dict):
             query_text = str(inputs.get("query") or "")
 
+        # Compact score: single-evaluator score → scalar, multi-evaluator → keep dict
+        if len(score_dict) == 1:
+            _score_val = next(iter(score_dict.values()))
+        else:
+            _score_val = score_dict
+
+        # Compact reason: multi-evaluator dict → joined string, scalar → keep string
+        if isinstance(reason_dict, dict) and reason_dict:
+            _reason_str = " | ".join(f"{k}: {v}" for k, v in reason_dict.items())
+        else:
+            _reason_str = str(reason_dict or "")
+
         failure_examples.append(
             {
                 "case_id": c.get("agent_evaluation_case_id"),
                 "query": query_text,
-                "expected": expected_answer[:4000],
-                "actual": predict_answer[:4000],
-                "scores": score_dict,
-                "thresholds": thresholds,
-                "low_scores": low_scores,
-                "borderline_scores": borderline,
-                "reasons": reason_dict,
+                "answer": predict_answer[:4000],
+                "score": _score_val,
+                "reason": _reason_str[:4000],
             }
         )
 
@@ -1965,21 +1958,13 @@ def generate_analysis_report_impl(
             # Compact newlines out of the user query so each case fits on one
             # readable line in the LLM prompt window (keeps token counts low
             # and improves model parseability).
-            q = (ex["query"] or "(empty)").replace("\n", " ")
+            q = (ex["query"] or "(empty)").replace("\n", " ")[:1000]
             failures_block += f"\nCase {i + 1}: Q={q}\n"
-            failures_block += (
-                f"Scores: {json.dumps(ex['scores'], ensure_ascii=False)}\n"
-            )
-            if ex["low_scores"]:
-                failures_block += f"Low scores (< threshold): {json.dumps(ex['low_scores'], ensure_ascii=False)}\n"
-            if ex["borderline_scores"]:
-                failures_block += f"Borderline (<=threshold+0.1): {json.dumps(ex['borderline_scores'], ensure_ascii=False)}\n"
-            if ex["reasons"]:
-                failures_block += (
-                    f"Reasons: {json.dumps(ex['reasons'], ensure_ascii=False)}\n"
-                )
-            if ex["expected"] or ex["actual"]:
-                failures_block += f"Expected: {ex['expected'] or '(missing)'}\nActual: {ex['actual'] or '(missing)'}\n"
+            failures_block += f"Score: {json.dumps(ex['score'], ensure_ascii=False)}\n"
+            if ex["reason"]:
+                failures_block += f"Reason: {ex['reason']}\n"
+            if ex["answer"]:
+                failures_block += f"Answer: {ex['answer']}\n"
     else:
         failures_block = "\nNo failed cases."
 

@@ -200,6 +200,7 @@ class TestUpdateAgentEvaluationStatus:
 class TestGetAgentEvaluation:
     def test_raises_value_error_when_not_found(self, session_factory, monkeypatch):
         from backend.database import agent_evaluation_db
+        from consts.exceptions import AppException
 
         session, _ = session_factory
         # Force ``.first()`` to return None for the primary lookup.
@@ -212,7 +213,7 @@ class TestGetAgentEvaluation:
 
         session.query.side_effect = _query
 
-        with pytest.raises(ValueError, match="agent evaluation not found"):
+        with pytest.raises(AppException, match="Agent evaluation not found"):
             agent_evaluation_db.get_agent_evaluation(
                 agent_evaluation_id=99, tenant_id="t1",
             )
@@ -375,9 +376,17 @@ class TestListAgentEvaluationsByAgent:
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
+        r1 = MagicMock(name="r1")
+        r1.progress_total = 10
+        r1.pass_count = 7
+        r1.fail_count = 3
+        r2 = MagicMock(name="r2")
+        r2.progress_total = 5
+        r2.pass_count = 0
+        r2.fail_count = 5
         rows = [
-            (MagicMock(name="r1"), "Set1", "GPT-4", 10, 7),
-            (MagicMock(name="r2"), "Set2", "Claude", 5, 0),
+            (r1, "Set1", "GPT-4"),
+            (r2, "Set2", "Claude"),
         ]
         _make_query_chain(session, rows)
 
@@ -398,7 +407,11 @@ class TestListAgentEvaluationsByAgent:
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
-        rows = [(MagicMock(name="r1"), "Set1", "GPT-4", None, None)]
+        r1 = MagicMock(name="r1")
+        r1.progress_total = None
+        r1.pass_count = None
+        r1.fail_count = None
+        rows = [(r1, "Set1", "GPT-4")]
         _make_query_chain(session, rows)
         monkeypatch.setattr(agent_evaluation_db, "as_dict",
                             lambda _r: {"agent_evaluation_id": 1})
@@ -468,12 +481,16 @@ class TestUpdateAgentEvaluationCaseResult:
         # on the filter-chain return.  ``rows`` is the count of updated rows.
         assert q.update.called
         updates = q.update.call_args[0][0]
-        # Pass case: heavy fields cleared
-        assert updates["predict"] is None
-        assert updates["reason"] is None
-        assert updates["label"] == {"answer": ""}
+        # Option B (no trim, keep all fields): pass case keeps predict/reason
+        # as-is — no trimming, UI retains the full Agent answer and reason
+        # tooltip for every case regardless of pass/fail.
+        assert updates["predict"] == {"answer": "x"}
+        assert updates["reason"] == "looks fine"
         assert updates["pass_status"] == "pass"
         assert updates["score"] == 1
+        # Label is managed independently (only overwritten on explicit
+        # relabel requests); update-result never touches ``label``.
+        assert "label" not in updates
 
     def test_score_one_with_no_pass_status_also_trims(self, session_factory):
         from backend.database import agent_evaluation_db
@@ -495,11 +512,13 @@ class TestUpdateAgentEvaluationCaseResult:
         )
         assert q.update.called
         updates = q.update.call_args[0][0]
-        # Even without explicit pass_status, score==1 triggers pass-trim.
-        assert updates["predict"] is None
-        assert updates["reason"] is None
-        assert updates["label"] == {"answer": ""}
+        # Option B (no trim): even without explicit pass_status, score==1
+        # keeps all provided fields intact.
+        assert updates["predict"] == {"answer": "x"}
+        assert updates["reason"] == "no reason needed"
+        assert updates["score"] == 1
         assert "pass_status" not in updates
+        assert "label" not in updates
 
     def test_failure_keeps_heavy_fields(self, session_factory):
         from backend.database import agent_evaluation_db
@@ -539,19 +558,36 @@ class TestListCases:
 
         session, _ = session_factory
         rows = [MagicMock(name="r1"), MagicMock(name="r2")]
-        _make_query_chain(session, rows)
+
+        def _query(*_args, **kwargs):
+            query = MagicMock(name="query")
+            query.filter.return_value = query
+            query.outerjoin.return_value = query
+            query.order_by.return_value = query
+            query.offset.return_value = query
+            query.limit.return_value = query
+            query.all.return_value = rows
+            query.count.return_value = len(rows)
+            return query
+
+        session.query.side_effect = _query
         monkeypatch.setattr(agent_evaluation_db, "as_dict",
                             lambda r: {"id": id(r)})
 
         cases = agent_evaluation_db.list_agent_evaluation_cases(
             agent_evaluation_id=1, tenant_id="t1",
         )
-        assert isinstance(cases, list)
+        # list_cases returns { "items": [...], "total": N } paginated dict
+        assert isinstance(cases, dict)
+        assert isinstance(cases["items"], list)
+        assert len(cases["items"]) == 2
+        assert cases["total"] == 2
 
 
 class TestGetAgentEvaluationCase:
     def test_raises_when_not_found(self, session_factory, monkeypatch):
         from backend.database import agent_evaluation_db
+        from consts.exceptions import AppException
 
         session, _ = session_factory
 
@@ -562,14 +598,15 @@ class TestGetAgentEvaluationCase:
             return q
 
         session.query.side_effect = _query
-        with pytest.raises(ValueError, match="agent evaluation case not found"):
+        with pytest.raises(AppException, match="Agent evaluation case not found"):
             agent_evaluation_db.get_agent_evaluation_case(
                 agent_evaluation_case_id=99, tenant_id="t1",
             )
 
 
 # ---------------------------------------------------------------------------
-# soft_delete_agent_evaluation
+# hard_delete_agent_evaluation (no soft_delete function exists; production
+# uses hard_delete which cascades case + annotation rows)
 # ---------------------------------------------------------------------------
 
 class TestSoftDeleteAgentEvaluation:
@@ -577,34 +614,41 @@ class TestSoftDeleteAgentEvaluation:
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
-        q = MagicMock(name="q")
-        q.filter.return_value = q
-        q.update.return_value = 1  # not zero → no exception
-        session.query.return_value = q
 
-        agent_evaluation_db.soft_delete_agent_evaluation(
+        # hard_delete first does a SELECT ... .first() to resolve the
+        # evaluation_set_id + evaluator_config before deleting, then does
+        # two DELETE statements + one UPDATE cascade.  We mock the SELECT
+        # to return a valid row and assert delete() is executed.
+        select_q = MagicMock(name="select_q")
+        select_q.filter.return_value = select_q
+        select_q.first.return_value = (None, {})
+        delete_q = MagicMock(name="delete_q")
+        delete_q.filter.return_value = delete_q
+        delete_q.delete.return_value = 1
+
+        def _query(*args, **kwargs):
+            return select_q if select_q.first.called is False else delete_q
+        session.query.side_effect = _query
+
+        agent_evaluation_db.hard_delete_agent_evaluation(
             agent_evaluation_id=1,
             tenant_id="t1",
-            deleted_by="u1",
         )
 
-        assert q.update.called
-        updates = q.update.call_args[0][0]
-        assert updates["delete_flag"] == "Y"
-        assert updates["updated_by"] == "u1"
+        assert delete_q.delete.called
 
     def test_raises_when_no_row_updated(self, session_factory):
         from backend.database import agent_evaluation_db
+        from consts.exceptions import AppException
 
         session, _ = session_factory
         q = MagicMock(name="q")
         q.filter.return_value = q
-        q.update.return_value = 0  # zero updated rows
+        q.first.return_value = None  # zero rows → AppException NOT_FOUND
         session.query.return_value = q
 
-        with pytest.raises(ValueError, match="not found or already deleted"):
-            agent_evaluation_db.soft_delete_agent_evaluation(
+        with pytest.raises(AppException, match="Agent evaluation not found"):
+            agent_evaluation_db.hard_delete_agent_evaluation(
                 agent_evaluation_id=999,
                 tenant_id="t1",
-                deleted_by="u1",
             )

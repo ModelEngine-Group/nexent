@@ -21,4 +21,4 @@ class EvalPassStatus:
 
 
 # Used in generate_analysis_report_impl
-MAX_FAILURE_EXAMPLES = 5
+MAX_FAILURE_EXAMPLES = 200
