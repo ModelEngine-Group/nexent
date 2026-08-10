@@ -196,8 +196,8 @@ sys.modules["database.client"] = _db_client_module
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()
-_db_models_module.AgentEvaluation = MagicMock
-_db_models_module.ModelRecord = MagicMock
+_db_models_module.AgentEvaluation = MagicMock()
+_db_models_module.ModelRecord = MagicMock()
 sys.modules["database.db_models"] = _db_models_module
 _db_pkg.db_models = _db_models_module
 
@@ -547,6 +547,7 @@ def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
     service_module.soft_delete_agent_evaluation.assert_not_called()
 
 
+@pytest.mark.skip(reason="generate_analysis_report_impl returns Dict (LLM analysis), not (bytes, fail_count) tuple; old Excel report test is obsolete")
 def test_generate_report_only_contains_failed_cases(service_module):
     cases = [
         _make_case(1, status="COMPLETED", score=1, pass_status="pass"),
@@ -589,6 +590,7 @@ def test_generate_report_only_contains_failed_cases(service_module):
     ]
 
 
+@pytest.mark.skip(reason="generate_analysis_report_impl returns Dict (LLM analysis), not (bytes, fail_count) tuple; old Excel report test is obsolete")
 def test_generate_report_all_pass_results_in_empty_failed_sheet(service_module):
     cases = [
         _make_case(10, status="COMPLETED", score=1, pass_status="pass"),
@@ -915,7 +917,7 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
         for chunk in final_answer_parts:
             yield chunk
 
-    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+    service_module.agent_run = _fake_agent_run
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -948,7 +950,7 @@ def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module)
         for chunk in chunks:
             yield chunk
 
-    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+    service_module.agent_run = _fake_agent_run
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -983,7 +985,7 @@ def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(
         for chunk in chunks:
             yield chunk
 
-    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+    service_module.agent_run = _fake_agent_run
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1009,7 +1011,7 @@ def test_run_agent_to_final_answer_handles_no_final_answer_chunks(service_module
     async def _fake_agent_run(_run_info):
         yield json.dumps({"type": "thought"})
 
-    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+    service_module.agent_run = _fake_agent_run
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1188,10 +1190,14 @@ def _wire_executor_dependencies(service_module, cases):
         "agent_version_no": 4,
         "judge_model_id": 99,
     }
-    service_module.list_agent_evaluation_cases.return_value = cases
+    # Use side_effect so the pagination loop gets cases on first call, then
+    # an empty list on the second call to break out of the while-True loop.
+    service_module.list_agent_evaluation_cases.side_effect = [cases, []]
 
     async def _fake_run_to_final_answer(**_):
-        return "agent-said-X"
+        # Must return a tuple (answer_text, runtime_events) to match the
+        # real signature -> Tuple[str, List[dict]].
+        return "agent-said-X", []
 
     service_module._run_agent_to_final_answer = _fake_run_to_final_answer
     return adapter
@@ -1529,45 +1535,22 @@ class TestGenerateFriendlyErrorMessage:
     def test_returns_llm_response_when_openai_succeeds(
         self, service_module, monkeypatch
     ):
-        """When the openai client + asyncio.run both work, return its content."""
+        """When call_llm_for_system_prompt returns content, return it."""
 
-        class _FakeMessage:
-            content = "Friendly error from LLM"
-
-        class _FakeChoice:
-            message = _FakeMessage()
-
-        class _FakeResponse:
-            choices = [_FakeChoice()]
-
-        class _FakeCompletions:
-            def create(self, *args, **kwargs):
-                return _FakeResponse()
-
-        class _FakeChat:
-            completions = _FakeCompletions()
-
-        class _FakeAsyncOpenAI:
-            def __init__(self, *args, **kwargs):
-                self.chat = _FakeChat()
-
-        import sys as _sys
-
-        fake_openai = types.ModuleType("openai")
-        fake_openai.AsyncOpenAI = _FakeAsyncOpenAI
-        monkeypatch.setitem(_sys.modules, "openai", fake_openai)
-
-        # ``asyncio.run`` expects a coroutine; bypass that for testing by
-        # having it just invoke and return our pre-built synchronous object.
-        monkeypatch.setattr(
-            service_module.asyncio,
-            "run",
-            lambda coro: _FakeResponse(),
+        # The service calls call_llm_for_system_prompt (not openai directly).
+        # Mock it to return a non-empty string so the helper returns it.
+        service_module.call_llm_for_system_prompt = MagicMock(
+            return_value="Friendly error from LLM"
+        )
+        service_module.get_prompt_template = MagicMock(
+            return_value={"USER_PROMPT": "test", "SYSTEM_PROMPT": "test"}
         )
 
         result = service_module._generate_friendly_error_message(
             RuntimeError("openai timeout"),
             "default",
+            model_id=99,
+            tenant_id="t1",
         )
         assert result == "Friendly error from LLM"
 
