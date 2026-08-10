@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_
 
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from database.client import as_dict, get_db_session
 from database.db_models import EvaluationSet, EvaluationSetCase
 
@@ -71,7 +73,9 @@ def get_evaluation_set(evaluation_set_id: int, tenant_id: str) -> Optional[Dict[
             EvaluationSet.evaluation_set_id == evaluation_set_id,
             EvaluationSet.tenant_id == tenant_id,
         ).first()
-        return as_dict(rec) if rec else None
+        if not rec:
+            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found")
+        return as_dict(rec)
 
 
 def count_evaluation_sets(tenant_id: str) -> int:
@@ -188,6 +192,26 @@ def batch_delete_evaluation_set_cases(
         ).delete(synchronize_session=False)
         session.commit()
     return rows
+
+
+def soft_delete_evaluation_set(
+    evaluation_set_id: int,
+    tenant_id: str,
+    deleted_by: Optional[str] = None,
+) -> None:
+    """Mark an evaluation set as deleted (soft delete via delete_flag='Y')."""
+    with get_db_session() as session:
+        rows = session.query(EvaluationSet).filter(
+            EvaluationSet.evaluation_set_id == evaluation_set_id,
+            EvaluationSet.tenant_id == tenant_id,
+            EvaluationSet.delete_flag == "N",
+        ).update(
+            {"delete_flag": "Y", "updated_by": deleted_by},
+            synchronize_session=False,
+        )
+        if not rows:
+            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found or already deleted")
+        session.commit()
 
 
 def hard_delete_evaluation_set(evaluation_set_id: int, tenant_id: str) -> int:

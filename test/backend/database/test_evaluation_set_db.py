@@ -121,12 +121,13 @@ class TestListEvaluationSets:
 
 class TestGetEvaluationSet:
     def test_raises_when_not_found(self, session_factory):
+        from consts.exceptions import AppException
         from backend.database import evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, first=None)
 
-        with pytest.raises(ValueError, match="evaluation set not found"):
+        with pytest.raises(AppException, match="Evaluation set not found"):
             evaluation_set_db.get_evaluation_set(
                 evaluation_set_id=99, tenant_id="t1",
             )
@@ -224,12 +225,13 @@ class TestSoftDelete:
         assert updates["updated_by"] == "u1"
 
     def test_raises_when_not_found(self, session_factory):
+        from consts.exceptions import AppException
         from backend.database import evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, update_rows=0)
 
-        with pytest.raises(ValueError, match="not found or already deleted"):
+        with pytest.raises(AppException, match="Evaluation set not found or already deleted"):
             evaluation_set_db.soft_delete_evaluation_set(
                 evaluation_set_id=999, tenant_id="t1", deleted_by="u1",
             )
