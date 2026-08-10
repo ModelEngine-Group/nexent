@@ -1,6 +1,6 @@
 """Build authorized, serializable context item inputs for an agent run."""
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.context_input import ContextInput
@@ -121,7 +121,7 @@ def _build_duty_text(
 
 
 def _build_execution_flow_text(
-    memory_list: list[Any] | None = None,
+    memory_list: Optional[List[Any]] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
@@ -338,7 +338,7 @@ def _build_code_norms_text(
 
 
 def _build_restricted_python_execution_policy_text(
-    authorized_imports: list[str],
+    authorized_imports: List[str],
     language: str = "zh",
 ) -> str:
     """Build pre-execution guidance for the restricted local interpreter."""
@@ -409,28 +409,28 @@ def _build_available_resources_header_text(
 
 
 def build_context_inputs(
-    duty: str | None = None,
-    constraint: str | None = None,
-    few_shots: str | None = None,
-    app_name: str | None = None,
-    app_description: str | None = None,
-    user_id: str | None = None,
+    duty: Optional[str] = None,
+    constraint: Optional[str] = None,
+    few_shots: Optional[str] = None,
+    app_name: Optional[str] = None,
+    app_description: Optional[str] = None,
+    user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
     # Piecewise data sources
-    tools: dict[str, Any] | None = None,
-    skills: list[dict[str, str]] | None = None,
-    managed_agents: dict[str, Any] | None = None,
-    external_a2a_agents: dict[str, Any] | None = None,
-    memory_list: list[Any] | None = None,
-    memory_search_query: str | None = None,
-    memory_tool_policy: str | None = None,
-    automation_tool_policy: str | None = None,
-    long_term_memory_prompt: str | None = None,
-    knowledge_base_summary: str | None = None,
-    kb_ids: list[str] | None = None,
-    restricted_python_authorized_imports: list[str] | None = None,
+    tools: Optional[Dict[str, Any]] = None,
+    skills: Optional[List[Dict[str, str]]] = None,
+    managed_agents: Optional[Dict[str, Any]] = None,
+    external_a2a_agents: Optional[Dict[str, Any]] = None,
+    memory_list: Optional[List[Any]] = None,
+    memory_search_query: Optional[str] = None,
+    memory_tool_policy: Optional[str] = None,
+    automation_tool_policy: Optional[str] = None,
+    long_term_memory_prompt: Optional[str] = None,
+    knowledge_base_summary: Optional[str] = None,
+    kb_ids: Optional[List[str]] = None,
+    restricted_python_authorized_imports: Optional[List[str]] = None,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
@@ -438,9 +438,9 @@ def build_context_inputs(
     include_managed_agents: bool = True,
     include_external_agents: bool = True,
     include_app_context: bool = True,
-) -> list[ContextItemInput]:
+) -> List[ContextItemInput]:
     """Build an authorized, naturally granular SDK context input snapshot."""
-    inputs: list[ContextItemInput] = []
+    inputs: List[ContextItemInput] = []
 
     def add_system(
         item_id: str,

@@ -45,10 +45,7 @@ export function KnowledgeBaseEditModal({
   // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
   const { data: groupData } = useGroupList(tenantId);
   const accessibleGroupIds = getAccessibleGroupIds();
-  const { groups } = useGroupDetails(
-    groupData?.groups ?? [],
-    accessibleGroupIds
-  );
+  const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
 
   const selectedGroupIds = Form.useWatch("group_ids", form);
 
@@ -120,7 +117,7 @@ export function KnowledgeBaseEditModal({
 
       // Ensure group_ids is empty when permission is PRIVATE
       const groupIds =
-        values.ingroup_permission === "PRIVATE" ? [] : (values.group_ids ?? []);
+        values.ingroup_permission === "PRIVATE" ? [] : values.group_ids ?? [];
 
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,

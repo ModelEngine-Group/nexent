@@ -4,41 +4,64 @@ import json
 import logging
 import os
 import threading
-from typing import Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    AgentVerificationConfig,
-    ExternalA2AAgentConfig,
-    ModelConfig,
-    ToolConfig,
-)
+from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
-from nexent.core.agents.sandbox import SandboxConfig
-from nexent.core.models.capacity_budget import (
-    RequestBudgetOverrides,
-    SafeInputBudgetCalculator,
-    UncertaintyReserveBasisUnknown,
-)
+from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
     ResolverError,
     resolve_capacity,
 )
-from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
+from nexent.core.models.capacity_budget import (
+    RequestBudgetOverrides,
+    SafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown,
+)
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+
+from services.file_management_service import get_llm_model, validate_urls_access
+from services.vectordatabase_service import (
+    ElasticSearchService,
+    get_vector_db_core,
+    get_embedding_model_by_index_name,
+    get_rerank_model,
+)
+from services.remote_mcp_service import get_remote_mcp_server_list
+
+from database.a2a_agent_db import PROTOCOL_JSONRPC
+from services.memory_config_service import build_memory_context
+from services.image_service import get_video_understanding_model, get_vlm_model
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
+from database.agent_version_db import query_current_version_no
+from database import skill_db
+from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
+from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.client import minio_client
+from utils.model_name_utils import add_repo_to_name
+from utils.prompt_template_utils import get_agent_prompt_template
+from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.memory_tool_prompt import build_memory_tool_policy
+from utils.automation_tool_prompt import build_automation_tool_policy
+from utils.context_utils import build_context_inputs
+from utils.redis_utils import get_redis_client
 from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
@@ -49,38 +72,8 @@ from consts.const import (
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
 )
-from consts.exceptions import ValidationError
 from consts.model import ToolParamsRequest
-from database import skill_db
-from database.a2a_agent_db import PROTOCOL_JSONRPC
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.model_management_db import get_model_by_model_id, get_model_records
-from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
-from services.file_management_service import get_llm_model, validate_urls_access
-from services.image_service import get_video_understanding_model, get_vlm_model
-from services.memory_config_service import build_memory_context
-from services.remote_mcp_service import get_remote_mcp_server_list
-from services.vectordatabase_service import (
-    ElasticSearchService,
-    get_embedding_model_by_index_name,
-    get_rerank_model,
-    get_vector_db_core,
-)
-from utils.automation_tool_prompt import build_automation_tool_policy
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
-from utils.context_utils import build_context_inputs
-from utils.memory_tool_prompt import build_memory_tool_policy
-from utils.model_name_utils import add_repo_to_name
-from utils.prompt_template_utils import get_agent_prompt_template
-from utils.redis_utils import get_redis_client
-
+from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -173,7 +166,7 @@ except Exception:  # pragma: no cover - OTel is optional at runtime
     _capacity_dispatch_profile_hit_total = None
 
 
-def _record_dispatch_profile_hit(provider: str | None) -> None:
+def _record_dispatch_profile_hit(provider: Optional[str]) -> None:
     """Emit dispatch_profile_hit_total for one successful runtime profile match."""
     if _capacity_dispatch_profile_hit_total is None:
         return
@@ -186,7 +179,7 @@ def _record_dispatch_profile_hit(provider: str | None) -> None:
         pass
 
 
-def _operator_overrides_from_model_info(model_info: dict | None) -> dict:
+def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     """Extract the W1 operator-override fields from a model_record_t row."""
     if not isinstance(model_info, dict):
         return {}
@@ -198,7 +191,7 @@ def _operator_overrides_from_model_info(model_info: dict | None) -> dict:
     return overrides
 
 
-def _dominant_capacity_source(field_sources: dict) -> str | None:
+def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
         return None
@@ -232,11 +225,11 @@ def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
 
 def _resolve_safe_input_budget(
     *,
-    capacity_snapshot: ModelCapacitySnapshot | None,
+    capacity_snapshot: Optional[ModelCapacitySnapshot],
     tenant_id: str,
-    agent_requested_output_tokens: int | None,
-    request_requested_output_tokens: int | None,
-) -> dict | None:
+    agent_requested_output_tokens: Optional[int],
+    request_requested_output_tokens: Optional[int],
+) -> Optional[dict]:
     """Resolve the W2 budget snapshot before context assembly begins."""
     if capacity_snapshot is None:
         return None
@@ -289,8 +282,8 @@ def _resolve_safe_input_budget(
 
 
 def _resolve_input_budget(
-    model_info: dict | None,
-) -> tuple[int, dict | None, ModelCapacitySnapshot | None]:
+    model_info: Optional[dict],
+) -> tuple[int, Optional[dict], Optional[ModelCapacitySnapshot]]:
     """Resolve the context-manager input budget for a model_record_t row.
 
     Calls ModelCapacityResolver with the catalog + operator overrides. Returns
@@ -344,10 +337,10 @@ def _resolve_input_budget(
 
 
 def _warn_missing_capacity_once(
-    model_info: dict | None,
+    model_info: Optional[dict],
     provider: str,
     model_id_str: str,
-    detail: str | None = None,
+    detail: Optional[str] = None,
 ) -> None:
     """Log one WARNING per process per model when capacity is not configured.
 
@@ -383,7 +376,7 @@ def _warn_missing_capacity_once(
     )
 
 
-def _normalize_tool_params_request(tool_params: ToolParamsRequest | dict[str, Any] | None) -> ToolParamsRequest:
+def _normalize_tool_params_request(tool_params: Optional[ToolParamsRequest | Dict[str, Any]]) -> ToolParamsRequest:
     """Normalize request-scoped tool parameter overrides into a ToolParamsRequest."""
     if tool_params is None:
         return ToolParamsRequest()
@@ -398,9 +391,9 @@ def _normalize_tool_params_request(tool_params: ToolParamsRequest | dict[str, An
 
 
 def _get_agent_tool_overrides(
-    tool_params: ToolParamsRequest | None,
-    agent_name: str | None,
-) -> dict[str, dict[str, Any]]:
+    tool_params: Optional[ToolParamsRequest],
+    agent_name: Optional[str],
+) -> Dict[str, Dict[str, Any]]:
     """Resolve tool overrides for a specific agent by its name."""
     if tool_params is None:
         return {}
@@ -413,10 +406,10 @@ def _get_agent_tool_overrides(
 
 
 def _merge_tool_params(
-    tool_record: dict[str, Any],
-    override_params: dict[str, Any] | None,
-    extra_params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    tool_record: Dict[str, Any],
+    override_params: Optional[Dict[str, Any]],
+    extra_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Merge request overrides on top of tool instance defaults from DB.
 
     Args:
@@ -427,7 +420,7 @@ def _merge_tool_params(
     Returns:
         Merged params dict with DB defaults, overrides, and extra params
     """
-    merged_params: dict[str, Any] = {}
+    merged_params: Dict[str, Any] = {}
     for param in tool_record.get("params", []):
         merged_params[param["name"]] = param.get("default")
 
@@ -468,7 +461,7 @@ def _get_skills_for_template(
     agent_id: int,
     tenant_id: str,
     version_no: int = 0
-) -> list[dict]:
+) -> List[dict]:
     """Get skills list for prompt template injection.
 
     Args:
@@ -496,7 +489,7 @@ def _get_skills_for_template(
         return []
 
 
-def _extract_url_from_card(raw_card: dict | None) -> str:
+def _extract_url_from_card(raw_card: Optional[dict]) -> str:
     """Extract http-json-rpc URL from Agent Card supportedInterfaces."""
     if not raw_card:
         return ""
@@ -542,7 +535,7 @@ def _get_external_a2a_agents(
     agent_id: int,
     tenant_id: str,
     version_no: int = 0
-) -> list[ExternalA2AAgentConfig]:
+) -> List[ExternalA2AAgentConfig]:
     """Get external A2A agent configurations for an agent.
 
     Args:
@@ -583,7 +576,7 @@ def _get_skill_script_tools(
     agent_id: int,
     tenant_id: str,
     version_no: int = 0
-) -> list[ToolConfig]:
+) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
     Args:
@@ -602,7 +595,7 @@ def _get_skill_script_tools(
         "version_no": version_no,
     }
 
-    skill_config_values: dict[str, dict[str, Any]] = {}
+    skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
         from services.skill_service import SkillService
 
@@ -619,7 +612,7 @@ def _get_skill_script_tools(
     except Exception as exc:
         logger.debug("Failed to resolve effective skill configuration: %s", exc)
 
-    skill_config_values: dict[str, dict[str, Any]] = {}
+    skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
         from services.skill_service import SkillService
 
@@ -750,7 +743,7 @@ async def create_model_config_list(tenant_id):
     return model_list
 
 
-def _inject_plan_tools(tools: list[ToolConfig], enable_planning: bool) -> None:
+def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
     """Inject plan tool configs into the given tools list if enable_planning is True."""
     if not enable_planning:
         return
@@ -796,13 +789,13 @@ async def create_agent_config(
     version_no: int = 0,
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
-    tool_params: ToolParamsRequest | dict[str, Any] | None = None,
-    conversation_id: int | None = None,
-    request_context_policy: dict[str, Any] | None = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
+    request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     include_automation_tool: bool = False,
-    automation_user_message: str | None = None,
-    automation_model_id: int | None = None,
+    automation_user_message: Optional[str] = None,
+    automation_model_id: Optional[int] = None,
     automation_has_attachments: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
@@ -942,9 +935,7 @@ async def create_agent_config(
             # ``services.memory_retrieval_service``.
             memory_service = None
             try:
-                from services.memory_backend_adapter import (
-                    build_memory_service_for_agent,
-                )
+                from services.memory_backend_adapter import build_memory_service_for_agent
 
                 memory_service = build_memory_service_for_agent(
                     tenant_id=memory_context.tenant_id,
@@ -1315,7 +1306,7 @@ def _resolve_runtime_tool_records(
     agent_id: int,
     tenant_id: str,
     version_no: int = 0,
-) -> list[dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     """Merge explicitly enabled tools with tools required by enabled skills."""
     explicit_tools = search_tools_for_sub_agent(
         agent_id,
@@ -1326,8 +1317,8 @@ def _resolve_runtime_tool_records(
         tool.get("tool_id") for tool in explicit_tools if tool.get("tool_id") is not None
     }
 
-    dependency_values: dict[int, dict[str, Any]] = {}
-    dependency_sources: dict[int, dict[str, str]] = {}
+    dependency_values: Dict[int, Dict[str, Any]] = {}
+    dependency_sources: Dict[int, Dict[str, str]] = {}
     enabled_skill_instances = skill_db.search_skills_for_agent(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -1388,7 +1379,7 @@ async def create_tool_config_list(
     tenant_id,
     user_id,
     version_no: int = 0,
-    tool_params: ToolParamsRequest | dict[str, Any] | None = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -1790,7 +1781,7 @@ async def join_minio_file_description_to_query(
     return final_query
 
 
-def _format_minio_files_for_content(minio_files: list[dict] | None, max_files: int = 20) -> str:
+def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20) -> str:
     """Format minio_files into a string for embedding in history content.
 
     Args:
@@ -1826,7 +1817,7 @@ def _format_minio_files_for_content(minio_files: list[dict] | None, max_files: i
     return "\n[Attached files]:\n" + "\n".join(file_lines)
 
 
-def _convert_history_with_minio_files(history: list) -> list[AgentHistory] | None:
+def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHistory]]:
     """Convert HistoryItem list to AgentHistory list, embedding minio_files into content.
 
     Args:
@@ -1887,9 +1878,9 @@ async def create_agent_run_info(
     override_version_no: int | None = None,
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
-    tool_params: ToolParamsRequest | dict[str, Any] | None = None,
-    conversation_id: int | None = None,
-    context_policy: dict[str, Any] | None = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
+    context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
 ):

@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any
+from typing import Dict, Any, Optional
 
 import yaml
 
@@ -9,7 +9,6 @@ from consts.prompt_template import (
     PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP,
     PROMPT_GENERATE_TEMPLATE_FIELDS,
 )
-
 
 logger = logging.getLogger("prompt_template_utils")
 
@@ -23,10 +22,10 @@ def get_prompt_generate_template_keys() -> list[str]:
 
 
 def normalize_prompt_generate_template_content(
-    template_content: dict[str, Any] | None
-) -> dict[str, str]:
+    template_content: Optional[Dict[str, Any]]
+) -> Dict[str, str]:
     """Normalize prompt generation template content and keep non-empty fields only."""
-    normalized: dict[str, str] = {}
+    normalized: Dict[str, str] = {}
     if not isinstance(template_content, dict):
         return normalized
 
@@ -42,10 +41,10 @@ def normalize_prompt_generate_template_content(
 
 
 def merge_prompt_generate_templates(
-    *template_contents: dict[str, Any] | None
-) -> dict[str, str]:
+    *template_contents: Optional[Dict[str, Any]]
+) -> Dict[str, str]:
     """Merge multiple prompt generation templates with first-non-empty priority."""
-    merged: dict[str, str] = {}
+    merged: Dict[str, str] = {}
 
     for template_content in template_contents:
         normalized = normalize_prompt_generate_template_content(template_content)
@@ -57,7 +56,7 @@ def merge_prompt_generate_templates(
     return merged
 
 
-def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> dict[str, Any]:
+def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kwargs) -> Dict[str, Any]:
     """
     Get prompt template
 
@@ -158,7 +157,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
 
 
 # For backward compatibility, keep original function names as wrapper functions
-def get_prompt_generate_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_prompt_generate_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get prompt generation prompt template
 
@@ -171,7 +170,7 @@ def get_prompt_generate_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[
     return get_prompt_template('prompt_generate', language)
 
 
-def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get prompt optimization template.
 
@@ -184,7 +183,7 @@ def get_prompt_optimize_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[
     return get_prompt_template('prompt_optimize', language)
 
 
-def get_guardrail_regex_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_guardrail_regex_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """Load the guardrail regex generation prompt template.
 
     Args:
@@ -197,7 +196,7 @@ def get_guardrail_regex_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[
     return get_prompt_template('guardrail_regex', language)
 
 
-def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get agent prompt template
 
@@ -211,7 +210,7 @@ def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) 
     return get_prompt_template('agent', language, is_manager=is_manager)
 
 
-def get_generate_title_prompt_template(language: str = 'zh') -> dict[str, Any]:
+def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:
     """
     Get title generation prompt template
 
@@ -224,7 +223,7 @@ def get_generate_title_prompt_template(language: str = 'zh') -> dict[str, Any]:
     return get_prompt_template('generate_title', language)
 
 
-def get_document_summary_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_document_summary_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get document summary prompt template (Map stage)
 
@@ -237,7 +236,7 @@ def get_document_summary_prompt_template(language: str = LANGUAGE["ZH"]) -> dict
     return get_prompt_template('document_summary', language)
 
 
-def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -> dict[str, Any]:
+def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
     """
     Get cluster summary reduce prompt template (Reduce stage)
 
@@ -252,9 +251,9 @@ def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -
 
 def get_skill_creation_simple_prompt_template(
     language: str = LANGUAGE["ZH"],
-    existing_skill: dict[str, Any] | None = None,
+    existing_skill: Optional[Dict[str, Any]] = None,
     complexity: str = "simple"
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """
     Get skill creation prompt template with Jinja2 rendering.
 

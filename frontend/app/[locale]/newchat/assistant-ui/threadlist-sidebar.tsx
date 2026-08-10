@@ -21,6 +21,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
+
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
@@ -46,7 +47,7 @@ export function ThreadListSidebar({
         <Sidebar
           collapsible="none"
           className={cn(props.className, "!h-full")}
-          style={{ backgroundColor: "#F2F8FF", ...props.style }}
+          style={{backgroundColor: "#F2F8FF", ...props.style}}
           {...props}
         >
           <SidebarHeader>
@@ -134,3 +135,5 @@ export function ThreadListSidebar({
     </ThreadListPrimitive.Root>
   );
 }
+
+

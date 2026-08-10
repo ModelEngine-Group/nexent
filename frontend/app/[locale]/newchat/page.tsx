@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FC,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   useAuiState,
@@ -30,7 +22,9 @@ import {
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import {
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
@@ -41,7 +35,7 @@ import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 
 function useLocalChatRuntime(
-  dictationAdapter: ServerDictationAdapter
+  dictationAdapter: ServerDictationAdapter,
 ): AssistantRuntime {
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
@@ -71,7 +65,7 @@ const PersistentChatHome: FC = () => {
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
-    [modelConfig?.stt]
+    [modelConfig?.stt],
   );
 
   useEffect(() => {
@@ -89,10 +83,13 @@ const PersistentChatHome: FC = () => {
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const handleAgentSelected = useCallback((agent: Agent) => {
-    setSelectedAgent(agent);
-    log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-  }, []);
+  const handleAgentSelected = useCallback(
+    (agent: Agent) => {
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+    },
+    [],
+  );
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -150,7 +147,7 @@ const HomeContent: FC<{
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    runtimeMainThreadId
+    runtimeMainThreadId,
   );
 
   // Update local state when the runtime's active thread changes
@@ -171,7 +168,7 @@ const HomeContent: FC<{
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
-    new Map()
+    new Map(),
   );
   const [, forceServerIdTick] = useState(0);
 
@@ -189,6 +186,7 @@ const HomeContent: FC<{
         forceServerIdTick((tick) => tick + 1);
       }
 
+
       if (initialQuestion && previous !== numericId) {
         void generateConversationTitle(numericId, initialQuestion)
           .then((title) => {
@@ -199,24 +197,19 @@ const HomeContent: FC<{
             });
           })
           .catch((error) => {
-            log.error(
-              `[HomeContent] Failed to generate title for ${numericId}:`,
-              error
-            );
+            log.error(`[HomeContent] Failed to generate title for ${numericId}:`, error);
           });
       }
     },
-    [chatMode]
+    [chatMode],
   );
 
-  const activeThread = (
-    threadItems as ReadonlyArray<{
-      id: string;
-      remoteId?: string;
-      custom?: { agentId?: number | string };
-    }>
-  ).find(
-    (item) => item.id === activeThreadId || item.remoteId === activeThreadId
+  const activeThread = (threadItems as ReadonlyArray<{
+    id: string;
+    remoteId?: string;
+    custom?: { agentId?: number | string };
+  }>).find(
+    (item) => item.id === activeThreadId || item.remoteId === activeThreadId,
   );
   const activeAgentId = activeThread?.custom?.agentId;
   const serverConversationIdForActiveThread = activeThreadId
@@ -239,10 +232,7 @@ const HomeContent: FC<{
   const previousActiveThreadIdRef = useRef(activeThreadId);
 
   useEffect(() => {
-    if (
-      previousActiveThreadIdRef.current !== activeThreadId &&
-      activeThreadId
-    ) {
+    if (previousActiveThreadIdRef.current !== activeThreadId && activeThreadId) {
       shouldRestoreAgentRef.current = true;
     }
     previousActiveThreadIdRef.current = activeThreadId;
@@ -250,12 +240,7 @@ const HomeContent: FC<{
 
   // Resolve the selected conversation's agent from thread metadata.
   useEffect(() => {
-    if (
-      !shouldRestoreAgentRef.current ||
-      !activeThreadId ||
-      agents.length === 0
-    )
-      return;
+    if (!shouldRestoreAgentRef.current || !activeThreadId || agents.length === 0) return;
 
     const agentId = activeAgentId;
     if (agentId === undefined || agentId === null) return;
@@ -263,17 +248,11 @@ const HomeContent: FC<{
     const matchedAgent = agents.find((agent) => agent.id === String(agentId));
     if (matchedAgent && matchedAgent.id !== selectedAgent?.id) {
       log.log(
-        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`
+        `[HomeContent] Thread changed to ${activeThreadId}, updating selectedAgent to: ${matchedAgent.display_name || matchedAgent.name}`,
       );
       setSelectedAgent(matchedAgent);
     }
-  }, [
-    activeThreadId,
-    activeAgentId,
-    agents,
-    selectedAgent?.id,
-    setSelectedAgent,
-  ]);
+  }, [activeThreadId, activeAgentId, agents, selectedAgent?.id, setSelectedAgent]);
 
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
@@ -290,12 +269,12 @@ const HomeContent: FC<{
           ? {
               onServerConversationId: (
                 serverId: string,
-                initialQuestion?: string
+                initialQuestion?: string,
               ) =>
                 handleServerConversationId(
                   activeThreadId,
                   serverId,
-                  initialQuestion
+                  initialQuestion,
                 ),
             }
           : {}),
@@ -364,7 +343,7 @@ const HomeContent: FC<{
       await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
-    [runtime, onAgentSelected]
+    [runtime, onAgentSelected],
   );
 
   // Conditional rendering must happen after all hooks
@@ -390,9 +369,7 @@ const HomeContent: FC<{
 
       <div className="flex-1 min-w-0">
         <Chat
-          generatedTitle={
-            activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-          }
+          generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
           conversationId={
             activeConversationId && Number(activeConversationId) > 0
               ? Number(activeConversationId)

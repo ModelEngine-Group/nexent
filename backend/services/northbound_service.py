@@ -5,11 +5,11 @@ import logging
 import time
 from dataclasses import dataclass
 from os.path import basename
-from typing import Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from nexent.multi_modal.utils import parse_s3_url
+
 
 from consts.const import (
     ASSET_OWNER_TENANT_ID,
@@ -18,35 +18,29 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from consts.exceptions import (
-    ConversationNotFoundError,
     LimitExceededError,
     UnauthorizedError,
+    ConversationNotFoundError,
 )
 from consts.model import AgentRequest, ToolParamsRequest
-from database.attachment_db import get_file_size_from_minio, get_file_url
 from database.conversation_db import get_conversation_messages
-from database.token_db import log_token_usage
+from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
-    get_agent_by_name_impl,
     run_agent_stream,
     stop_agent_tasks,
-)
-from services.agent_version_service import list_published_agents_impl
-from services.conversation_management_service import (
-    create_new_conversation,
-    get_conversation_list_service,
-    save_conversation_user,
-)
-from services.conversation_management_service import (
-    update_conversation_title as update_conversation_title_service,
-)
-from services.file_management_service import (
-    resolve_minio_upload_folder,
-    upload_to_minio,
-    validate_urls_access,
+    get_agent_by_name_impl,
 )
 from services.runtime_state_service import runtime_state_service
-
+from services.agent_version_service import list_published_agents_impl
+from services.conversation_management_service import (
+    save_conversation_user,
+    get_conversation_list_service,
+    create_new_conversation,
+    update_conversation_title as update_conversation_title_service,
+)
+from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from database.attachment_db import get_file_url, get_file_size_from_minio
+from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
 
@@ -61,11 +55,11 @@ class NorthboundContext:
 
 
 def _build_northbound_file_descriptor(
-    upload_result: dict[str, Any],
+    upload_result: Dict[str, Any],
     original_file_name: str = "",
-    file_type: str | None = None,
-    file_size: int | None = None,
-) -> dict[str, Any]:
+    file_type: Optional[str] = None,
+    file_size: Optional[int] = None,
+) -> Dict[str, Any]:
     """Normalize upload metadata for northbound API consumers."""
     object_name = str(upload_result.get("object_name") or "").strip()
     # Use original filename if provided, otherwise fall back to upload result or object name
@@ -92,9 +86,9 @@ def _build_northbound_file_descriptor(
 
 async def upload_files_for_northbound(
     ctx: NorthboundContext,
-    files: list[UploadFile],
+    files: List[UploadFile],
     folder: str = "attachments",
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Upload files for northbound callers and return reusable storage references."""
     if not files:
         raise ValueError("No files in the request")
@@ -140,10 +134,10 @@ async def upload_files_for_northbound(
 
 
 def _normalize_northbound_attachments(
-    attachments: list[Any] | None,
+    attachments: Optional[List[Any]],
     user_id: str,
     tenant_id: str,
-) -> list[dict[str, Any]] | None:
+) -> Optional[List[Dict[str, Any]]]:
     """Convert northbound attachment references into internal minio_files objects.
 
     Supports two formats:
@@ -157,7 +151,7 @@ def _normalize_northbound_attachments(
     if not isinstance(attachments, list):
         raise ValueError("attachments must be an array")
 
-    normalized_files: list[dict[str, Any]] = []
+    normalized_files: List[Dict[str, Any]] = []
     for attachment in attachments:
         # Handle dict format (full attachment object)
         if isinstance(attachment, dict):
@@ -245,10 +239,10 @@ def _normalize_northbound_attachments(
 # -----------------------------
 # In-memory idempotency and rate limit placeholders
 # -----------------------------
-_IDEMPOTENCY_RUNNING: dict[str, float] = {}
+_IDEMPOTENCY_RUNNING: Dict[str, float] = {}
 _IDEMPOTENCY_LOCK = asyncio.Lock()
 
-_RATE_STATE: dict[str, dict[str, int]] = {}
+_RATE_STATE: Dict[str, Dict[str, int]] = {}
 _RATE_LOCK = asyncio.Lock()
 
 
@@ -256,12 +250,12 @@ def _now_seconds() -> float:
     return time.time()
 
 
-def _minute_bucket(ts: float | None = None) -> str:
+def _minute_bucket(ts: Optional[float] = None) -> str:
     t = int((ts or _now_seconds()) // 60)
     return str(t)
 
 
-async def idempotency_start(key: str, ttl_seconds: int | None = None) -> None:
+async def idempotency_start(key: str, ttl_seconds: Optional[int] = None) -> None:
     ttl = ttl_seconds or NORTHBOUND_IDEMPOTENCY_TTL_SECONDS
     if runtime_state_service.enabled:
         try:
@@ -359,14 +353,14 @@ def _build_title_update_idempotency_key(tenant_id: str, conversation_id: int, ti
 
 async def start_streaming_chat(
     ctx: NorthboundContext,
-    conversation_id: int | None,
+    conversation_id: Optional[int],
     agent_name: str,
     query: str,
-    attachments: list[Any] | None = None,
-    meta_data: dict[str, Any] | None = None,
-    tool_params: ToolParamsRequest | None = None,
-    model_id: int | None = None,
-    idempotency_key: str | None = None
+    attachments: Optional[List[Any]] = None,
+    meta_data: Optional[Dict[str, Any]] = None,
+    tool_params: Optional[ToolParamsRequest] = None,
+    model_id: Optional[int] = None,
+    idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
         # Simple rate limit
@@ -421,14 +415,14 @@ async def start_streaming_chat(
                 ctx.tenant_id,
             )
         except Exception as e:
-            raise Exception(f"Failed to persist user message: {e!s}")
+            raise Exception(f"Failed to persist user message: {str(e)}")
 
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except Exception as e:
-        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {e!s}")
+        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
     try:
         response = await run_agent_stream(
@@ -454,7 +448,7 @@ async def start_streaming_chat(
                 metadata=meta_data
             )
         except Exception as e:
-            logger.warning(f"Failed to log token usage: {e!s}")
+            logger.warning(f"Failed to log token usage: {str(e)}")
 
     # Attach northbound response headers used by streaming clients and proxies.
     response.headers["X-Request-Id"] = ctx.request_id
@@ -463,7 +457,7 @@ async def start_streaming_chat(
     return response
 
 
-async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: dict[str, Any] | None = None) -> dict[str, Any]:
+async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
         stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
 
@@ -478,14 +472,14 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: dic
                     metadata=meta_data
                 )
             except Exception as e:
-                logger.warning(f"Failed to log token usage: {e!s}")
+                logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": stop_result.get("message", "success"), "data": conversation_id, "requestId": ctx.request_id}
     except Exception as e:
-        raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {e!s}")
+        raise Exception(f"Failed to stop chat for conversation_id {conversation_id}: {str(e)}")
 
 
-async def list_conversations(ctx: NorthboundContext) -> dict[str, Any]:
+async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     conversations = get_conversation_list_service(ctx.user_id)
     # get_conversation_list_service is sync
 
@@ -493,7 +487,7 @@ async def list_conversations(ctx: NorthboundContext) -> dict[str, Any]:
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
-async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> dict[str, Any]:
+async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
     history = get_conversation_messages(conversation_id)
     result = []
@@ -522,11 +516,11 @@ async def get_conversation_history_internal(ctx: NorthboundContext, conversation
     return {"message": "success", "data": response, "requestId": ctx.request_id}
 
 
-async def get_conversation_history(ctx: NorthboundContext, conversation_id: int) -> dict[str, Any]:
+async def get_conversation_history(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     try:
         return await get_conversation_history_internal(ctx, conversation_id)
     except Exception as e:
-        raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {e!s}")
+        raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
 
 
 async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
@@ -543,7 +537,7 @@ async def _get_visible_published_agents(ctx: NorthboundContext) -> list[dict]:
     return agent_info_list
 
 
-async def get_agent_info_list(ctx: NorthboundContext) -> dict[str, Any]:
+async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
         agent_info_list = await _get_visible_published_agents(ctx)
         for agent_info in agent_info_list:
@@ -551,13 +545,13 @@ async def get_agent_info_list(ctx: NorthboundContext) -> dict[str, Any]:
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:
-        raise RuntimeError(f"Failed to get agent info list for tenant {ctx.tenant_id}: {e!s}") from e
+        raise Exception(f"Failed to get agent info list for tenant {ctx.tenant_id}: {str(e)}")
 
 
 async def get_agent_info_by_name_for_northbound(
     ctx: NorthboundContext,
     agent_name: str,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Return one visible published agent selected by its exact agent name."""
     if not agent_name.strip():
         raise ValueError("agent_name is required")
@@ -581,12 +575,12 @@ async def get_agent_info_by_name_for_northbound(
         raise
     except Exception as e:
         raise Exception(
-            f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {e!s}"
+            f"Failed to get agent info for agent_name {agent_name} in tenant {ctx.tenant_id}: {str(e)}"
         )
 
 
-async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: dict[str, Any] | None = None, idempotency_key: str | None = None) -> dict[str, Any]:
-    composed_key: str | None = None
+async def update_conversation_title(ctx: NorthboundContext, conversation_id: int, title: str, meta_data: Optional[Dict[str, Any]] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+    composed_key: Optional[str] = None
     try:
         # Idempotency: avoid concurrent duplicate title update for same conversation
         composed_key = idempotency_key or _build_title_update_idempotency_key(
@@ -609,7 +603,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
                     metadata=meta_data
                 )
             except Exception as e:
-                logger.warning(f"Failed to log token usage: {e!s}")
+                logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {
             "message": "success",
@@ -622,7 +616,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     except ConversationNotFoundError:
         raise
     except Exception as e:
-        raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {e!s}")
+        raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {str(e)}")
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))

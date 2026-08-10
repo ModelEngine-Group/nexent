@@ -83,8 +83,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [addingServer, setAddingServer] = useState(false);
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
-  const [newServerAuthorizationToken, setNewServerAuthorizationToken] =
-    useState("");
+  const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
   const [newServerCustomHeaders, setNewServerCustomHeaders] = useState("");
 
   // Tools Modal State
@@ -102,9 +101,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   // Container Add/Logs State
   const [addingContainer, setAddingContainer] = useState(false);
   const [containerConfigJson, setContainerConfigJson] = useState("");
-  const [containerPort, setContainerPort] = useState<number | undefined>(
-    undefined
-  );
+  const [containerPort, setContainerPort] = useState<number | undefined>(undefined);
   const [containerServiceName, setContainerServiceName] = useState("");
   const [logsModalVisible, setLogsModalVisible] = useState(false);
   const [currentContainerId, setCurrentContainerId] = useState("");
@@ -149,12 +146,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       message.error(t("mcpConfig.message.serverNameTooLong"));
       return;
     }
-    if (
-      serverList.some(
-        (s) =>
-          s.service_name === serverName || s.mcp_url === newServerUrl.trim()
-      )
-    ) {
+    if (serverList.some(s => s.service_name === serverName || s.mcp_url === newServerUrl.trim())) {
       message.error(t("mcpConfig.message.serverExists"));
       return;
     }
@@ -183,17 +175,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       setNewServerAuthorizationToken("");
       setNewServerCustomHeaders("");
       setAddModalVisible(false);
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.addServerSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
     } else {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.addServerFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
     }
     setAddingServer(false);
   };
@@ -202,17 +186,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const onDeleteServer = async (server: McpServer) => {
     const result = await handleDeleteServer(server);
     if (!result.success) {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.deleteServerFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.deleteServerFailed")));
     } else {
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.deleteServerSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.deleteServerSuccess"));
     }
   };
 
@@ -226,11 +202,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     if (result.success) {
       setCurrentServerTools(result.data);
     } else {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.getToolsFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getToolsFailed")));
       setCurrentServerTools([]);
     }
     setLoadingTools(false);
@@ -289,11 +261,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           custom_headers: result.data.custom_headers,
         });
       } else {
-        message.error(
-          result.messageKey
-            ? t(result.messageKey)
-            : result.message || t("mcpConfig.message.getMcpRecordFailed")
-        );
+        message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
       }
     }
     setLoadingMcpRecord(false);
@@ -331,17 +299,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     if (result.success) {
       setEditServerModalVisible(false);
       setEditingServer(null);
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.updateServerSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.updateServerSuccess"));
     } else {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpService.message.updateServerFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpService.message.updateServerFailed")));
     }
     setUpdatingServer(false);
   };
@@ -369,27 +329,15 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     }
 
     setAddingContainer(true);
-    const result = await handleAddContainer(
-      config,
-      containerPort,
-      containerServiceName.trim() || undefined
-    );
+    const result = await handleAddContainer(config, containerPort, containerServiceName.trim() || undefined);
     if (result.success) {
       setContainerConfigJson("");
       setContainerPort(undefined);
       setContainerServiceName("");
       setAddModalVisible(false);
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.addContainerSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addContainerSuccess"));
     } else {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.addContainerFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addContainerFailed")));
     }
     setAddingContainer(false);
   };
@@ -426,17 +374,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       setUploadServiceName("");
       setUploadAuthorizationToken("");
       setAddModalVisible(false);
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.uploadImageSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.uploadImageSuccess"));
     } else {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.uploadImageFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.uploadImageFailed")));
     }
     setUploadingImage(false);
   };
@@ -444,17 +384,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const onDeleteContainer = async (container: McpContainer) => {
     const result = await handleDeleteContainer(container);
     if (!result.success) {
-      message.error(
-        result.messageKey
-          ? t(result.messageKey)
-          : result.message || t("mcpConfig.message.deleteContainerFailed")
-      );
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.deleteContainerFailed")));
     } else {
-      message.success(
-        result.messageKey
-          ? t(result.messageKey)
-          : t("mcpService.message.deleteContainerSuccess")
-      );
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.deleteContainerSuccess"));
     }
   };
 
@@ -508,9 +440,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         service_name: openApiServiceName.trim(),
         server_url: openApiServerUrl.trim(),
         openapi_json: parsedJson,
-        headers_template: openApiHeadersTemplate.trim()
-          ? JSON.parse(openApiHeadersTemplate.trim())
-          : null,
+        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
       });
 
       message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
@@ -556,9 +486,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "25%",
       ellipsis: true,
       render: (text: string) => (
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {text}
-        </span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{text}</span>
       ),
     },
     {
@@ -619,13 +547,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         const key = `${record.service_name}__${record.mcp_url}`;
         return (
           <Tag
-            color={
-              healthCheckLoading[key]
-                ? "#2E4053"
-                : isAvailable
-                  ? "#229954"
-                  : "#E74C3C"
-            }
+            color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -643,13 +565,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             ) : (
               <CircleX className="w-3 h-3 mr-1" />
             )}
-            <span>
-              {t(
-                isAvailable
-                  ? "mcpConfig.status.available"
-                  : "mcpConfig.status.unavailable"
-              )}
-            </span>
+            <span>{t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}</span>
           </Tag>
         );
       },
@@ -665,24 +581,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             <Tooltip title={t("mcpConfig.serverList.button.healthCheck")}>
               <Button
                 type="text"
-                icon={
-                  <RefreshCw
-                    className={`h-4 w-4 ${healthCheckLoading[key] ? "animate-spin" : ""}`}
-                  />
-                }
+                icon={<RefreshCw className={`h-4 w-4 ${healthCheckLoading[key] ? "animate-spin" : ""}`} />}
                 onClick={() => onCheckHealth(record)}
                 size="small"
                 loading={healthCheckLoading[key]}
                 disabled={actionsLocked}
               />
             </Tooltip>
-            <Tooltip
-              title={
-                !record.status
-                  ? t("mcpConfig.serverList.button.viewToolsDisabledHint")
-                  : t("mcpConfig.serverList.button.viewTools")
-              }
-            >
+            <Tooltip title={!record.status ? t("mcpConfig.serverList.button.viewToolsDisabledHint") : t("mcpConfig.serverList.button.viewTools")}>
               <span>
                 <Button
                   type="text"
@@ -704,9 +610,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             </Tooltip>
             <Popconfirm
               title={t("mcpConfig.delete.confirmTitle")}
-              description={t("mcpConfig.delete.confirmContent", {
-                name: record.service_name,
-              })}
+              description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
               onConfirm={() => onDeleteServer(record)}
               okText={t("common.confirm")}
               cancelText={t("common.cancel")}
@@ -735,8 +639,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       key: "name",
       width: "25%",
       ellipsis: true,
-      render: (text: string, record: any) =>
-        text || record.container_id?.substring(0, 12),
+      render: (text: string, record: any) => text || record.container_id?.substring(0, 12),
     },
     {
       title: t("mcpConfig.containerList.column.containerId"),
@@ -759,32 +662,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       key: "status",
       width: "15%",
       render: (status: string) => {
-        const statusConfig: Record<
-          string,
-          { color: string; icon: React.ReactNode }
-        > = {
-          running: {
-            color: "#229954",
-            icon: <CheckCircle className="w-3 h-3" />,
-          },
+        const statusConfig: Record<string, { color: string; icon: React.ReactNode }> = {
+          running: { color: "#229954", icon: <CheckCircle className="w-3 h-3" /> },
           exited: { color: "#E74C3C", icon: <CircleX className="w-3 h-3" /> },
-          created: {
-            color: "#2E4053",
-            icon: <LoaderCircle className="w-3 h-3 animate-spin" />,
-          },
-          paused: {
-            color: "#AEB6BF",
-            icon: <AlertCircle className="w-3 h-3" />,
-          },
-          restarting: {
-            color: "#2E4053",
-            icon: <LoaderCircle className="w-3 h-3 animate-spin" />,
-          },
+          created: { color: "#2E4053", icon: <LoaderCircle className="w-3 h-3 animate-spin" /> },
+          paused: { color: "#AEB6BF", icon: <AlertCircle className="w-3 h-3" /> },
+          restarting: { color: "#2E4053", icon: <LoaderCircle className="w-3 h-3 animate-spin" /> },
         };
-        const config = statusConfig[status || ""] || {
-          color: "#2E4053",
-          icon: <AlertCircle className="w-3 h-3" />,
-        };
+        const config = statusConfig[status || ""] || { color: "#2E4053", icon: <AlertCircle className="w-3 h-3" /> };
         return (
           <Tag
             color={config.color}
@@ -821,9 +706,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           </Tooltip>
           <Popconfirm
             title={t("mcpConfig.deleteContainer.confirmTitle")}
-            description={t("mcpConfig.deleteContainer.confirmContent", {
-              name: record.name || record.container_id,
-            })}
+            description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
             onConfirm={() => onDeleteContainer(record)}
             okText={t("common.confirm")}
             cancelText={t("common.cancel")}
@@ -868,9 +751,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         <div className="flex items-center space-x-2">
           <Popconfirm
             title={t("mcpConfig.delete.confirmTitle")}
-            description={t("mcpConfig.delete.confirmContent", {
-              name: record.mcp_service_name,
-            })}
+            description={t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name })}
             onConfirm={() => onDeleteOpenapiService(record)}
             okText={t("common.confirm")}
             cancelText={t("common.cancel")}
@@ -894,19 +775,13 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <div />
-        <Button
-          type="primary"
-          icon={<Plus size={16} />}
-          onClick={() => setAddModalVisible(true)}
-        >
+        <Button type="primary" icon={<Plus size={16} />} onClick={() => setAddModalVisible(true)}>
           {t("tenantResources.mcp.addService")}
         </Button>
       </div>
 
       <div className="flex-1 overflow-hidden">
-        <Title level={5} style={{ marginBottom: 12 }}>
-          {t("mcpConfig.serverList.title")}
-        </Title>
+        <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.serverList.title")}</Title>
         <Table
           columns={serverColumns}
           dataSource={serverList}
@@ -919,9 +794,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           className="flex-1 [&_.ant-table]:h-full"
         />
 
-        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>
-          {t("mcpConfig.containerList.title")}
-        </Title>
+        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>{t("mcpConfig.containerList.title")}</Title>
         <Table
           columns={containerColumns}
           dataSource={containerList}
@@ -934,9 +807,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           className="[&_.ant-table]:h-full"
         />
 
-        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>
-          {t("mcpConfig.openapiService.list.title")}
-        </Title>
+        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>{t("mcpConfig.openapiService.list.title")}</Title>
         <Table
           columns={openapiServicesColumns}
           dataSource={openapiServices}
@@ -993,26 +864,18 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       />
                     </div>
                     <Input.TextArea
-                      placeholder={t(
-                        "mcpConfig.addServer.customHeadersPlaceholder"
-                      )}
+                      placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
                       value={newServerCustomHeaders}
-                      onChange={(e) =>
-                        setNewServerCustomHeaders(e.target.value)
-                      }
+                      onChange={(e) => setNewServerCustomHeaders(e.target.value)}
                       rows={2}
                       disabled={actionsLocked || addingServer}
                       style={{ fontSize: 14 }}
                     />
                     <div className="flex items-center gap-2 w-full">
                       <Input.Password
-                        placeholder={t(
-                          "mcpConfig.editServer.authorizationTokenPlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
                         value={newServerAuthorizationToken}
-                        onChange={(e) =>
-                          setNewServerAuthorizationToken(e.target.value)
-                        }
+                        onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
                         disabled={actionsLocked || addingServer}
                         className="flex-1"
                         autoComplete="new-password"
@@ -1022,13 +885,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onClick={onAddServer}
                         loading={addingServer || updatingTools}
                         disabled={actionsLocked}
-                        icon={
-                          addingServer || updatingTools ? (
-                            <LoaderCircle className="animate-spin size-4" />
-                          ) : (
-                            <Plus className="size-4" />
-                          )
-                        }
+                        icon={addingServer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
                       >
                         {updatingTools
                           ? t("mcpConfig.addServer.button.updating")
@@ -1050,13 +907,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               children: (
                 <Card size="small" className="mt-2">
                   <Space direction="vertical" className="w-full">
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {t("mcpConfig.addContainer.configHint")}
-                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{t("mcpConfig.addContainer.configHint")}</Text>
                     <Input.TextArea
-                      placeholder={t(
-                        "mcpConfig.addContainer.configPlaceholder"
-                      )}
+                      placeholder={t("mcpConfig.addContainer.configPlaceholder")}
                       value={containerConfigJson}
                       onChange={(e) => setContainerConfigJson(e.target.value)}
                       rows={6}
@@ -1064,28 +917,18 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       style={{ fontFamily: "monospace", fontSize: 12 }}
                     />
                     <div className="flex items-center gap-2">
-                      <Text style={{ minWidth: 80 }}>
-                        {t("mcpConfig.addContainer.serviceName")}:
-                      </Text>
+                      <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.serviceName")}:</Text>
                       <Input
-                        placeholder={t(
-                          "mcpConfig.addContainer.serviceNamePlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.addContainer.serviceNamePlaceholder")}
                         value={containerServiceName}
-                        onChange={(e) =>
-                          setContainerServiceName(e.target.value)
-                        }
+                        onChange={(e) => setContainerServiceName(e.target.value)}
                         style={{ width: 150 }}
                         maxLength={20}
                         disabled={actionsLocked}
                       />
-                      <Text style={{ minWidth: 60 }}>
-                        {t("mcpConfig.addContainer.port")}:
-                      </Text>
+                      <Text style={{ minWidth: 60 }}>{t("mcpConfig.addContainer.port")}:</Text>
                       <InputNumber
-                        placeholder={t(
-                          "mcpConfig.addContainer.portPlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.addContainer.portPlaceholder")}
                         value={containerPort}
                         onChange={(value) => {
                           setContainerPort(value === null ? undefined : value);
@@ -1102,13 +945,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onClick={onAddContainer}
                         loading={addingContainer || updatingTools}
                         disabled={actionsLocked}
-                        icon={
-                          addingContainer || updatingTools ? (
-                            <LoaderCircle className="animate-spin size-4" />
-                          ) : (
-                            <Plus className="size-4" />
-                          )
-                        }
+                        icon={addingContainer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
                       >
                         {t("mcpConfig.addContainer.button.add")}
                       </Button>
@@ -1117,105 +954,76 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 </Card>
               ),
             },
-            ...(enableUploadImage
-              ? [
-                  {
-                    key: "upload",
-                    label: (
-                      <span className="flex items-center gap-2">
-                        <UploadIcon size={16} />
-                        {t("mcpConfig.uploadImage.title")}
-                      </span>
-                    ),
-                    children: (
-                      <Card size="small" className="mt-2">
-                        <Space direction="vertical" className="w-full">
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {t("mcpConfig.uploadImage.fileHint")}
-                          </Text>
-                          <Upload
-                            fileList={uploadFileList}
-                            onChange={({ fileList }) =>
-                              setUploadFileList(fileList)
-                            }
-                            beforeUpload={() => false}
-                            accept=".tar"
-                            maxCount={1}
-                            disabled={actionsLocked}
-                          >
-                            <Button
-                              icon={<UploadIcon size={16} />}
-                              disabled={actionsLocked}
-                            >
-                              {t("mcpConfig.uploadImage.button.selectFile")}
-                            </Button>
-                          </Upload>
-                          <div className="flex items-center gap-2">
-                            <InputNumber
-                              placeholder={t(
-                                "mcpConfig.uploadImage.portPlaceholder"
-                              )}
-                              value={uploadPort}
-                              onChange={(value) => {
-                                setUploadPort(
-                                  value === null ? undefined : value
-                                );
-                              }}
-                              style={{ width: 150 }}
-                              disabled={actionsLocked}
-                              min={1}
-                              max={65535}
-                              controls={false}
-                            />
-                            <Input
-                              placeholder={t(
-                                "mcpConfig.uploadImage.serviceNamePlaceholder"
-                              )}
-                              value={uploadServiceName}
-                              onChange={(e) =>
-                                setUploadServiceName(e.target.value)
-                              }
-                              className="flex-1"
-                              disabled={actionsLocked}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Input.Password
-                              placeholder={t(
-                                "mcpConfig.editServer.authorizationTokenPlaceholder"
-                              )}
-                              value={uploadAuthorizationToken}
-                              onChange={(e) =>
-                                setUploadAuthorizationToken(e.target.value)
-                              }
-                              className="flex-1"
-                              disabled={actionsLocked}
-                              autoComplete="new-password"
-                            />
-                            <Button
-                              type="primary"
-                              onClick={onUploadImage}
-                              loading={uploadingImage || updatingTools}
-                              disabled={actionsLocked}
-                              icon={
-                                uploadingImage || updatingTools ? (
-                                  <LoaderCircle className="animate-spin size-4" />
-                                ) : (
-                                  <Plus className="size-4" />
-                                )
-                              }
-                            >
-                              {updatingTools
-                                ? t("mcpConfig.addContainer.button.updating")
-                                : t("mcpConfig.addContainer.button.add")}
-                            </Button>
-                          </div>
-                        </Space>
-                      </Card>
-                    ),
-                  },
-                ]
-              : []),
+            ...(enableUploadImage ? [{
+              key: "upload",
+              label: (
+                <span className="flex items-center gap-2">
+                  <UploadIcon size={16} />
+                  {t("mcpConfig.uploadImage.title")}
+                </span>
+              ),
+              children: (
+                <Card size="small" className="mt-2">
+                  <Space direction="vertical" className="w-full">
+                    <Text type="secondary" style={{ fontSize: 12 }}>{t("mcpConfig.uploadImage.fileHint")}</Text>
+                    <Upload
+                      fileList={uploadFileList}
+                      onChange={({ fileList }) => setUploadFileList(fileList)}
+                      beforeUpload={() => false}
+                      accept=".tar"
+                      maxCount={1}
+                      disabled={actionsLocked}
+                    >
+                      <Button icon={<UploadIcon size={16} />} disabled={actionsLocked}>
+                        {t("mcpConfig.uploadImage.button.selectFile")}
+                      </Button>
+                    </Upload>
+                    <div className="flex items-center gap-2">
+                      <InputNumber
+                        placeholder={t("mcpConfig.uploadImage.portPlaceholder")}
+                        value={uploadPort}
+                        onChange={(value) => {
+                            setUploadPort(value === null ? undefined : value);
+                        }}
+                        style={{ width: 150 }}
+                        disabled={actionsLocked}
+                        min={1}
+                        max={65535}
+                        controls={false}
+                      />
+                      <Input
+                        placeholder={t("mcpConfig.uploadImage.serviceNamePlaceholder")}
+                        value={uploadServiceName}
+                        onChange={(e) => setUploadServiceName(e.target.value)}
+                        className="flex-1"
+                        disabled={actionsLocked}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input.Password
+                        placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+                        value={uploadAuthorizationToken}
+                        onChange={(e) => setUploadAuthorizationToken(e.target.value)}
+                        className="flex-1"
+                        disabled={actionsLocked}
+                        autoComplete="new-password"
+                      />
+                      <Button
+                        type="primary"
+                        onClick={onUploadImage}
+                        loading={uploadingImage || updatingTools}
+                        disabled={actionsLocked}
+                        icon={uploadingImage || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
+                      >
+                        {updatingTools
+                          ? t("mcpConfig.addContainer.button.updating")
+                          : t("mcpConfig.addContainer.button.add")}
+                      </Button>
+                    </div>
+                  </Space>
+                </Card>
+              ),
+            }] : []),
             {
               key: "openapi",
               label: (
@@ -1229,9 +1037,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                   <Space direction="vertical" className="w-full" size="small">
                     <div className="flex items-center gap-2">
                       <Input
-                        placeholder={t(
-                          "mcpConfig.openapiService.form.serviceNamePlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.openapiService.form.serviceNamePlaceholder")}
                         value={openApiServiceName}
                         onChange={(e) => setOpenApiServiceName(e.target.value)}
                         disabled={actionsLocked || importingOpenApi}
@@ -1239,9 +1045,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         maxLength={20}
                       />
                       <Input
-                        placeholder={t(
-                          "mcpConfig.openapiService.form.serverUrlPlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.openapiService.form.serverUrlPlaceholder")}
                         value={openApiServerUrl}
                         onChange={(e) => setOpenApiServerUrl(e.target.value)}
                         disabled={actionsLocked || importingOpenApi}
@@ -1250,20 +1054,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                     </div>
                     <div className="space-y-2">
                       <Input.TextArea
-                        placeholder={t(
-                          "mcpConfig.addServer.customHeadersPlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
                         value={openApiHeadersTemplate}
-                        onChange={(e) =>
-                          setOpenApiHeadersTemplate(e.target.value)
-                        }
+                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
                         rows={2}
                         disabled={actionsLocked || importingOpenApi}
                       />
                       <Input.TextArea
-                        placeholder={t(
-                          "mcpConfig.openApiToMcp.jsonPlaceholder"
-                        )}
+                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                         value={openApiJson}
                         onChange={(e) => setOpenApiJson(e.target.value)}
                         rows={6}
@@ -1276,13 +1074,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         onClick={onImportOpenApiService}
                         loading={importingOpenApi || updatingTools}
                         disabled={actionsLocked}
-                        icon={
-                          importingOpenApi || updatingTools ? (
-                            <LoaderCircle className="animate-spin size-4" />
-                          ) : (
-                            <Plus className="size-4" />
-                          )
-                        }
+                        icon={importingOpenApi || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
                       >
                         {updatingTools
                           ? t("mcpConfig.openApiToMcp.button.adding")
