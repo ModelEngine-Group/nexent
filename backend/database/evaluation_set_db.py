@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import or_
 
@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 def create_evaluation_set(
     tenant_id: str,
     name: str,
-    description: Optional[str],
-    source_filename: Optional[str],
-    created_by: Optional[str],
-) -> Dict[str, Any]:
+    description: str | None,
+    source_filename: str | None,
+    created_by: str | None,
+) -> dict[str, Any]:
     with get_db_session() as session:
         rec = EvaluationSet(
             tenant_id=tenant_id,
@@ -34,7 +34,7 @@ def create_evaluation_set(
         return as_dict(rec)
 
 
-def update_evaluation_set_case_count(evaluation_set_id: int, case_count: int, updated_by: Optional[str] = None) -> None:
+def update_evaluation_set_case_count(evaluation_set_id: int, case_count: int, updated_by: str | None = None) -> None:
     with get_db_session() as session:
         session.query(EvaluationSet).filter(
             EvaluationSet.evaluation_set_id == evaluation_set_id,
@@ -42,7 +42,7 @@ def update_evaluation_set_case_count(evaluation_set_id: int, case_count: int, up
         ).update({"case_count": case_count, "updated_by": updated_by}, synchronize_session=False)
 
 
-def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = (
             session.query(EvaluationSet)
@@ -67,7 +67,7 @@ def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> Li
         return [as_dict(x) for x in q.all()]
 
 
-def get_evaluation_set(evaluation_set_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+def get_evaluation_set(evaluation_set_id: int, tenant_id: str) -> dict[str, Any] | None:
     with get_db_session() as session:
         rec = session.query(EvaluationSet).filter(
             EvaluationSet.evaluation_set_id == evaluation_set_id,
@@ -88,8 +88,8 @@ def count_evaluation_sets(tenant_id: str) -> int:
 def insert_evaluation_set_cases(
     tenant_id: str,
     evaluation_set_id: int,
-    cases: List[Dict[str, Any]],
-    created_by: Optional[str],
+    cases: list[dict[str, Any]],
+    created_by: str | None,
 ) -> int:
     """Insert cases. Each case must have: inputs(dict), label(dict), optional case_id(str).
 
@@ -122,8 +122,8 @@ def list_evaluation_set_cases(
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
-    query: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    query: str | None = None,
+) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = session.query(EvaluationSetCase).filter(
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
@@ -145,7 +145,7 @@ def list_evaluation_set_cases(
 def count_evaluation_set_cases(
     evaluation_set_id: int,
     tenant_id: str,
-    query: Optional[str] = None,
+    query: str | None = None,
 ) -> int:
     with get_db_session() as session:
         q = session.query(EvaluationSetCase).filter(
@@ -158,7 +158,7 @@ def count_evaluation_set_cases(
         return q.count()
 
 
-def get_evaluation_set_cases_all(evaluation_set_id: int, tenant_id: str) -> List[Dict[str, Any]]:
+def get_evaluation_set_cases_all(evaluation_set_id: int, tenant_id: str) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = (
             session.query(EvaluationSetCase)
@@ -197,7 +197,7 @@ def batch_delete_evaluation_set_cases(
 def soft_delete_evaluation_set(
     evaluation_set_id: int,
     tenant_id: str,
-    deleted_by: Optional[str] = None,
+    deleted_by: str | None = None,
 ) -> None:
     """Mark an evaluation set as deleted (soft delete via delete_flag='Y')."""
     with get_db_session() as session:
@@ -233,8 +233,8 @@ def hard_delete_evaluation_set(evaluation_set_id: int, tenant_id: str) -> int:
 def list_case_turn_orders_by_session(
     evaluation_set_id: int,
     session_id: str,
-    exclude_case_ids: Optional[List[int]] = None,
-) -> List[int]:
+    exclude_case_ids: list[int] | None = None,
+) -> list[int]:
     """Return all turn_orders for a session, optionally excluding some case_ids."""
     with get_db_session() as session:
         q = session.query(EvaluationSetCase.turn_order).filter(
@@ -251,7 +251,7 @@ def list_case_turn_orders_by_session(
 def get_case_ids_by_session(
     evaluation_set_id: int,
     session_id: str,
-) -> List[int]:
+) -> list[int]:
     """Return all case_ids belonging to a session."""
     with get_db_session() as session:
         rows = session.query(EvaluationSetCase.evaluation_set_case_id).filter(
@@ -263,10 +263,10 @@ def get_case_ids_by_session(
 
 
 def get_cases_by_ids(
-    case_ids: List[int],
+    case_ids: list[int],
     tenant_id: str,
-    evaluation_set_id: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    evaluation_set_id: int | None = None,
+) -> list[dict[str, Any]]:
     """Fetch case records by their IDs."""
     if not case_ids:
         return []

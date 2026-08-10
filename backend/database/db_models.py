@@ -1,7 +1,23 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    Boolean,
+    Column,
+    Float,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
+
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"

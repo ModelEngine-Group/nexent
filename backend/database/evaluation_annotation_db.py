@@ -6,7 +6,11 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import tuple_
 
 from database.client import get_db_session
-from database.db_models import AgentEvaluationCase, EvaluationAnnotation, EvaluationAnnotationSchema
+from database.db_models import (
+    AgentEvaluationCase,
+    EvaluationAnnotation,
+    EvaluationAnnotationSchema,
+)
 
 
 logger = logging.getLogger(__name__)

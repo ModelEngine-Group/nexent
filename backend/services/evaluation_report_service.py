@@ -11,10 +11,22 @@ from reportlab.lib.colors import HexColor, white
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import HRFlowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    HRFlowable,
+    Image,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from consts.evaluation_report_labels import get_report_labels
-from database.agent_evaluation_db import get_agent_evaluation, list_agent_evaluation_cases
+from database.agent_evaluation_db import (
+    get_agent_evaluation,
+    list_agent_evaluation_cases,
+)
 from services.agent_evaluation_service import get_evaluation_stats_impl
 from utils.font_utils import setup_matplotlib_cjk, setup_reportlab_cjk
 
@@ -479,7 +491,10 @@ def _build_report_annotations(story, L, styles, cn_font, tenant_id, agent_evalua
       preceding ``PageBreak`` keeps pagination predictable.
     """
     try:
-        from database.evaluation_annotation_db import list_annotation_schemas, list_annotations_by_evaluation_id
+        from database.evaluation_annotation_db import (
+            list_annotation_schemas,
+            list_annotations_by_evaluation_id,
+        )
     except Exception as exc:
         logger.exception("Failed to import annotation DB: %s", exc)
         return

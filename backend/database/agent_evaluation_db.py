@@ -8,7 +8,13 @@ from consts.error_code import ErrorCode
 from consts.evaluation_status import EvalRunStatus
 from consts.exceptions import AppException
 from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
+from database.db_models import (
+    AgentEvaluation,
+    AgentEvaluationCase,
+    AgentInfo,
+    EvaluationSet,
+    ModelRecord,
+)
 
 
 logger = logging.getLogger("agent_evaluation_db")
