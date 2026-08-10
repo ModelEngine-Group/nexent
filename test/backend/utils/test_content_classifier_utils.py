@@ -409,6 +409,49 @@ class TestContentClassifier:
             }
         ]
 
+    def test_flush_accepts_a_new_origin_type(self):
+        classifier = ContentClassifier()
+        classifier.classify("partial <")
+
+        results = classifier.flush(origin_type="model_output_code")
+
+        assert results == [
+            {
+                "type": "model_output_code",
+                "content": "<",
+                "origin_type": "model_output_code",
+            }
+        ]
+
+    def test_flush_parses_a_complete_tag_at_the_end(self):
+        classifier = ContentClassifier()
+        classifier.buffer = "<SKILL>"
+
+        assert classifier.flush() == []
+        assert classifier.state == "skill_body"
+
+    def test_file_tag_accepts_crlf_after_tag(self):
+        classifier = ContentClassifier()
+
+        results = classifier.classify('<FILE path="notes.txt">\r\nnote')
+
+        assert results[0]["is_new_file"] is True
+        assert results[-1]["content"] == "note"
+
+    def test_tag_count_limit_discards_remaining_content_after_limit(self):
+        classifier = ContentClassifier()
+        classifier.MAX_TAG_COUNT = 1
+        classifier.classify("<SKILL>\n")
+
+        assert classifier.classify("</SKILL>\n") == []
+        assert classifier.state == "skill_body"
+        assert classifier.buffer == ""
+
+    def test_unknown_tag_handler_returns_no_event(self):
+        classifier = ContentClassifier()
+
+        assert classifier._handle_tag("<UNKNOWN>") is None
+
     def test_unknown_tag_is_emitted_as_raw_content(self):
         classifier = ContentClassifier()
         results = classifier.classify("before <UNKNOWN> after")
