@@ -860,6 +860,7 @@
   "knowledgeBase.name.new": "新知识库",
   "knowledgeBase.message.getDocumentsFailed": "获取文档列表失败",
   "knowledgeBase.create.permission.groupPlaceholder": "无所属用户组",
+  "group.deleted": "已删除的用户组",
   "knowledgeBase.create.preserveSourceFile": "保留文档副本",
   "knowledgeBase.ingroup.permission.EDIT": "同组可编辑",
   "knowledgeBase.ingroup.permission.READ_ONLY": "同组只读",

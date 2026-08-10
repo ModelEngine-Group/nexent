@@ -892,6 +892,7 @@
   "knowledgeBase.name.new": "new_base",
   "knowledgeBase.message.getDocumentsFailed": "Failed to get documents",
   "knowledgeBase.create.permission.groupPlaceholder": "No user group",
+  "group.deleted": "Deleted user group",
   "knowledgeBase.create.preserveSourceFile": "Preserve document copy",
   "knowledgeBase.ingroup.permission.EDIT": "In Group Read/Write",
   "knowledgeBase.ingroup.permission.READ_ONLY": "In Group Read Only",
