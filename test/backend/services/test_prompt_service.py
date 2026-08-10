@@ -174,6 +174,8 @@ from backend.services.prompt_service import (
     PromptOptimizationService,
     OptimizeRequest,
     OptimizeResult,
+    _copy_bad_cases_with_scope_instruction,
+    _resolve_knowledge_tool_capabilities,
 )
 
 
@@ -4051,3 +4053,47 @@ class TestOptimizeBadcaseWithJiuwenDirect(unittest.TestCase):
                 section_type="duty",
                 section_title="Role",
             )
+
+
+class TestKnowledgeAgnosticPromptRules(unittest.TestCase):
+    def test_tool_capabilities_do_not_depend_on_resource_names(self):
+        local, aidp = _resolve_knowledge_tool_capabilities([
+            {"class_name": "KnowledgeBaseSearchTool", "name": "custom-local"},
+            {"name": "aidp_search"},
+        ])
+
+        self.assertTrue(local)
+        self.assertTrue(aidp)
+
+    def test_bad_cases_are_copied_and_hardened(self):
+        original = {"question": "Q", "answer": "A", "reason": "Improve it"}
+
+        copied = _copy_bad_cases_with_scope_instruction([original], "en")
+
+        self.assertEqual(original["reason"], "Improve it")
+        self.assertIsNot(copied[0], original)
+        self.assertIn("current conversation", copied[0]["reason"])
+        self.assertIn("fixed index_names", copied[0]["reason"])
+
+    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    def test_jiuwen_general_optimization_receives_scope_rule(self, mock_get_adapter):
+        adapter = MagicMock()
+        adapter.optimize.return_value = "optimized"
+        adapter_class = MagicMock(return_value=adapter)
+        mock_get_adapter.return_value = adapter_class
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="en")
+        request = OptimizeRequest(
+            agent_id=1,
+            model_id=1,
+            task_description="task",
+            section_type="duty",
+            section_title="Role",
+            current_content="prompt",
+            feedback="Improve it",
+        )
+
+        service._optimize_with_jiuwen(request)
+
+        feedback = adapter.optimize.call_args.kwargs["feedback"]
+        self.assertIn("Improve it", feedback)
+        self.assertIn("fixed kds_list", feedback)

@@ -12,6 +12,7 @@ import log from "@/lib/logger";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
+  KnowledgeScopeUpdateResult,
 } from "@/types/knowledgeScope";
 
 // @ts-ignore
@@ -102,7 +103,7 @@ export const conversationService = {
   async updateKnowledgeScope(
     conversationId: number,
     scope: ConversationKnowledgeScope | null
-  ): Promise<{ desired_scope: ConversationKnowledgeScope | null }> {
+  ): Promise<KnowledgeScopeUpdateResult> {
     const response = await fetch(
       API_ENDPOINTS.conversation.knowledgeScope(conversationId),
       {

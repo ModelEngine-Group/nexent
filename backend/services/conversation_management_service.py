@@ -8,7 +8,7 @@ from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import ConversationNotFoundError
+from consts.exceptions import ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
     create_conversation,
@@ -450,13 +450,27 @@ def update_conversation_chat_mode_service(
         raise Exception(str(e))
 
 
+def _resolve_knowledge_scope_for_update(
+    knowledge_scope: Dict[str, Any],
+    **kwargs,
+):
+    """Load the scope resolver lazily to avoid service import cycles."""
+    from consts.model import ConversationKnowledgeScopeRequest
+    from services.knowledge_scope_service import resolve_knowledge_scope
+
+    return resolve_knowledge_scope(
+        scope=ConversationKnowledgeScopeRequest.model_validate(knowledge_scope),
+        **kwargs,
+    )
+
+
 def update_conversation_knowledge_scope_service(
     conversation_id: int,
     knowledge_scope: Optional[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
-) -> bool:
-    """Replace scope only when the conversation belongs to the current identity."""
+) -> Dict[str, Any]:
+    """Validate, preview, and replace a user-owned conversation knowledge scope."""
     conversation = get_conversation(
         conversation_id=conversation_id,
         user_id=user_id,
@@ -466,6 +480,48 @@ def update_conversation_knowledge_scope_service(
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or is not accessible"
         )
+    effective_preview = None
+    warnings: List[Dict[str, Any]] = []
+    if knowledge_scope is not None and conversation.get("agent_id") is not None:
+        resolved = _resolve_knowledge_scope_for_update(
+            knowledge_scope=knowledge_scope,
+            agent_id=int(conversation["agent_id"]),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=None,
+            is_debug=False,
+        )
+        unavailable = [
+            warning
+            for warning in resolved.warnings
+            if warning.get("code") == "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE"
+        ]
+        if unavailable:
+            sources = ", ".join(
+                sorted({str(warning.get("source")) for warning in unavailable})
+            )
+            raise ValidationError(
+                f"Some selected knowledge bases are unavailable or inaccessible: {sources}."
+            )
+        warnings = resolved.warnings
+        effective_preview = {
+            "local": {
+                "disabled": resolved.local_disabled,
+                "knowledge_ids": resolved.local_knowledge_ids,
+                "display_names": resolved.local_display_names,
+            },
+            "aidp": {
+                "disabled": resolved.aidp_disabled,
+                "kds_ids": resolved.aidp_kds_ids,
+                "display_names": resolved.aidp_display_names,
+            },
+        }
+    elif knowledge_scope is not None:
+        warnings.append({
+            "code": "KNOWLEDGE_SCOPE_AGENT_UNASSIGNED",
+            "count": 1,
+        })
+
     success = update_conversation_knowledge_scope(
         conversation_id=conversation_id,
         knowledge_scope=knowledge_scope,
@@ -475,7 +531,11 @@ def update_conversation_knowledge_scope_service(
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or is not accessible"
         )
-    return True
+    return {
+        "desired_scope": knowledge_scope,
+        "effective_preview": effective_preview,
+        "warnings": warnings,
+    }
 
 
 def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:

@@ -313,7 +313,17 @@ class KnowledgeBaseSearchTool(Tool):
         kb_search_results = self._filter_by_document_paths(kb_search_results)
 
         if not kb_search_results:
-            raise Exception("No results found! Try a less restrictive/shorter query.")
+            logger.info(
+                "Knowledge base search returned no results for query '%s' in indexes %s",
+                query,
+                search_index_names,
+            )
+            return json.dumps(
+                "No relevant information was found in the selected knowledge bases. "
+                "Try a broader or shorter query, or explain that the selected scope "
+                "does not contain enough evidence.",
+                ensure_ascii=False,
+            )
 
         if self.rerank and self.rerank_model and kb_search_results:
             kb_search_results = self._apply_rerank(

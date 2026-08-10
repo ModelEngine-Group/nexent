@@ -354,10 +354,10 @@ class TestAidpSearchToolForward:
         mock_response.json.return_value = {"result": []}
         aidp_tool._mock_http_client.post.return_value = mock_response
 
-        with pytest.raises(Exception) as exc_info:
-            aidp_tool.forward("nothing")
+        result = json.loads(aidp_tool.forward("nothing"))
 
-        assert "AIDP search error: No results found!" in str(exc_info.value)
+        assert "No relevant information" in result
+        assert "selected AIDP knowledge bases" in result
 
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
         aidp_tool._mock_http_client.post.side_effect = httpx.HTTPError("boom")
@@ -606,15 +606,13 @@ class TestAidpSearchToolWhitelist:
     # C. forward() with empty whitelist — block before HTTP call
     # ------------------------------------------------------------------
 
-    def test_forward_empty_whitelist_raises_without_http_call(self, aidp_tool):
-        """When the whitelist is installed but empty, forward raises
-        AidpSearchError and never touches the AIDP API."""
+    def test_forward_empty_whitelist_returns_observation_without_http_call(self, aidp_tool):
+        """An empty whitelist returns a denial observation without calling AIDP."""
         aidp_tool.set_allowed_kds([])
 
-        with pytest.raises(Exception) as exc_info:
-            aidp_tool.forward("some query")
+        result = json.loads(aidp_tool.forward("some query"))
 
-        assert "No accessible knowledge base" in str(exc_info.value)
+        assert "No AIDP knowledge base is accessible" in result
         aidp_tool._mock_http_client.post.assert_not_called()
 
     def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
@@ -623,10 +621,9 @@ class TestAidpSearchToolWhitelist:
         # aidp_tool was created with kds_list=["kb1", "kb2"]
         aidp_tool.set_allowed_kds([])
 
-        with pytest.raises(Exception) as exc_info:
-            aidp_tool.forward("query")
+        result = json.loads(aidp_tool.forward("query"))
 
-        assert "No accessible knowledge base" in str(exc_info.value)
+        assert "No AIDP knowledge base is accessible" in result
         aidp_tool._mock_http_client.post.assert_not_called()
 
     # ------------------------------------------------------------------
@@ -666,15 +663,15 @@ class TestAidpSearchToolWhitelist:
         assert "kb-1" in sent_payload["kds_list"]
         assert "kb2" in sent_payload["kds_list"]
 
-    def test_forward_all_kds_filtered_raises_error(self, aidp_tool):
-        """When every user-supplied KB is stripped by the whitelist,
-        forward raises AidpSearchError instead of calling AIDP."""
+    def test_forward_all_kds_filtered_returns_observation(self, aidp_tool):
+        """Fully filtered user input returns a denial without calling AIDP."""
         aidp_tool.set_allowed_kds(["kb-allowed"])
 
-        with pytest.raises(Exception) as exc_info:
+        result = json.loads(
             aidp_tool.forward("query", kds_list=["kb-bad1", "kb-bad2"])
+        )
 
-        assert "No accessible knowledge base" in str(exc_info.value)
+        assert "No AIDP knowledge base is accessible" in result
         aidp_tool._mock_http_client.post.assert_not_called()
 
     def test_forward_no_whitelist_passes_all_kds(self, aidp_tool):

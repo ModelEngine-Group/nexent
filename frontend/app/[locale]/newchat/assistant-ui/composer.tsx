@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
+import { AuiIf, ComposerPrimitive, useAuiState } from "@assistant-ui/react";
 import {
   Tooltip,
   TooltipContent,
@@ -170,30 +170,48 @@ export const Composer: FC<ComposerProps> = ({
 }) => {
   const { t } = useTranslation();
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+
+  const hasIncompatibleScope = Boolean(
+    knowledgeScope &&
+    ((knowledgeScope.local.mode === "override" &&
+      !knowledgeCapabilities?.sources.local.enabled) ||
+      (knowledgeScope.aidp.mode === "override" &&
+        !knowledgeCapabilities?.sources.aidp.enabled))
+  );
 
   const knowledgeSummary = useMemo(() => {
-    if (!knowledgeScope) return "知识库：跟随智能体默认";
+    if (!knowledgeScope) return t("chat.knowledgeScope.summaryDefault");
     const parts: string[] = [];
     if (knowledgeCapabilities?.sources.local.enabled) {
       parts.push(
         knowledgeScope.local.mode === "disabled"
-          ? "本地已关闭"
+          ? t("chat.knowledgeScope.summaryLocalDisabled")
           : knowledgeScope.local.mode === "override"
-            ? `本地 ${knowledgeScope.local.knowledge_ids.length}`
-            : "本地默认"
+            ? t("chat.knowledgeScope.summaryLocalOverride", {
+                count: knowledgeScope.local.knowledge_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryLocalDefault")
       );
     }
     if (knowledgeCapabilities?.sources.aidp.enabled) {
       parts.push(
         knowledgeScope.aidp.mode === "disabled"
-          ? "AIDP 已关闭"
+          ? t("chat.knowledgeScope.summaryAidpDisabled")
           : knowledgeScope.aidp.mode === "override"
-            ? `AIDP ${knowledgeScope.aidp.kds_ids.length}`
-            : "AIDP 默认"
+            ? t("chat.knowledgeScope.summaryAidpOverride", {
+                count: knowledgeScope.aidp.kds_ids.length,
+              })
+            : t("chat.knowledgeScope.summaryAidpDefault")
       );
     }
-    return `知识库：${parts.join(" · ") || "不可用"}`;
-  }, [knowledgeScope, knowledgeCapabilities]);
+    const summary = t("chat.knowledgeScope.summary", {
+      value: parts.join(" · ") || t("chat.knowledgeScope.unavailable"),
+    });
+    return hasIncompatibleScope
+      ? `${summary} · ${t("chat.knowledgeScope.incompatibleShort")}`
+      : summary;
+  }, [knowledgeScope, knowledgeCapabilities, hasIncompatibleScope, t]);
 
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
@@ -237,13 +255,20 @@ export const Composer: FC<ComposerProps> = ({
         </div>
 
         {(knowledgeCapabilities?.sources.local.enabled ||
-          knowledgeCapabilities?.sources.aidp.enabled) && (
+          knowledgeCapabilities?.sources.aidp.enabled ||
+          knowledgeScope) && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             className="h-7 max-w-64 gap-1.5 truncate text-xs text-muted-foreground"
             onClick={() => setKnowledgeModalOpen(true)}
+            disabled={isRunning}
+            title={
+              isRunning
+                ? t("chat.knowledgeScope.runningDisabled")
+                : knowledgeSummary
+            }
           >
             <Database className="size-3.5" />
             <span className="truncate">{knowledgeSummary}</span>

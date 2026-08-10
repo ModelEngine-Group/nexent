@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import queue
@@ -68,6 +69,69 @@ PROMPT_SECTION_TYPE_TITLES = {
         "few_shots": "Few Shots",
     },
 }
+
+
+def _resolve_knowledge_tool_capabilities(
+    tool_info_list: List[dict],
+) -> tuple[bool, bool]:
+    """Return knowledge capabilities without exposing configured resource names."""
+    identifiers = {
+        str(tool.get(key) or "").strip().lower()
+        for tool in tool_info_list
+        for key in ("name", "class_name")
+    }
+    has_local = bool(
+        identifiers
+        & {
+            "knowledgebasesearchtool",
+            "knowledge_base_search",
+        }
+    )
+    has_aidp = bool(
+        identifiers
+        & {
+            "aidpsearchtool",
+            "aidp_search",
+        }
+    )
+    return has_local, has_aidp
+
+
+def _knowledge_agnostic_optimization_instruction(language: str) -> str:
+    """Build the invariant appended to every prompt optimization entry point."""
+    if language == LANGUAGE["ZH"]:
+        return (
+            "优化后的提示词不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、"
+            "固定 index_names 或固定 kds_list；统一改写为使用当前会话允许的知识库范围。"
+        )
+    return (
+        "The optimized prompt must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
+        "fixed index_names, or fixed kds_list values. Rewrite them to use the knowledge scope allowed for the "
+        "current conversation."
+    )
+
+
+def _append_knowledge_agnostic_instruction(feedback: str, language: str) -> str:
+    instruction = _knowledge_agnostic_optimization_instruction(language)
+    return f"{(feedback or '').strip()}\n\n{instruction}".strip()
+
+
+def _copy_bad_cases_with_scope_instruction(bad_cases: list, language: str) -> list:
+    """Copy Jiuwen bad cases and harden their feedback without mutating callers."""
+    copied_cases = []
+    for bad_case in bad_cases:
+        if isinstance(bad_case, dict):
+            copied_case = dict(bad_case)
+            copied_case["reason"] = _append_knowledge_agnostic_instruction(
+                str(copied_case.get("reason") or ""), language
+            )
+        else:
+            copied_case = copy.copy(bad_case)
+            copied_case.reason = _append_knowledge_agnostic_instruction(
+                str(getattr(copied_case, "reason", "") or ""), language
+            )
+        copied_cases.append(copied_case)
+    return copied_cases
 
 
 def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
@@ -844,6 +908,9 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         "the current conversation."
     )
     tool_description = f"{tool_description}\n\n{scope_instruction}"
+    has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
+        tool_info_list
+    )
 
     # Build template context
     template_context = {
@@ -856,6 +923,8 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         # Always include aidp_kb_names to avoid StrictUndefined errors in template.
         # An empty string is falsy, so the {% if aidp_kb_names %} block will be skipped.
         "aidp_kb_names": "",
+        "has_local_knowledge_tool": has_local_knowledge_tool,
+        "has_aidp_knowledge_tool": has_aidp_knowledge_tool,
         # Flag indicating whether tools or sub-agents are selected;
         # templates use this to suppress boilerplate in constraint/few_shots sections
         "has_selected_resources": has_selected_resources,
@@ -903,6 +972,9 @@ def join_info_for_optimize_prompt_section(
 
     kb_names_str = ""
     aidp_names_str = ""
+    has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
+        tool_info_list
+    )
     scope_instruction = (
         "优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names "
         "或固定 kds_list；应改写为当前会话允许的知识库范围。"
@@ -922,6 +994,8 @@ def join_info_for_optimize_prompt_section(
         "assistant_description": assistant_description,
         "knowledge_base_names": kb_names_str,
         "aidp_kb_names": aidp_names_str,
+        "has_local_knowledge_tool": has_local_knowledge_tool,
+        "has_aidp_knowledge_tool": has_aidp_knowledge_tool,
     }
 
     return Template(
@@ -1168,7 +1242,7 @@ class PromptOptimizationService:
         bc.question = user_question or ""
         bc.answer = assistant_answer or ""
         bc.label = ""
-        bc.reason = feedback
+        bc.reason = _append_knowledge_agnostic_instruction(feedback, self.language)
 
         adapter_cls = _get_jiuwen_adapter_class()
         if adapter_cls is None:
@@ -1233,7 +1307,9 @@ class PromptOptimizationService:
         )
         result = adapter.optimize(
             prompt=request.current_content,
-            feedback=request.feedback,
+            feedback=_append_knowledge_agnostic_instruction(
+                request.feedback, self.language
+            ),
             mode=request.mode,
             start_pos=request.start_pos,
             end_pos=request.end_pos,
@@ -1353,7 +1429,9 @@ class PromptOptimizationService:
         )
         result = adapter.optimize_badcase(
             prompt=current_content,
-            bad_cases=bad_cases,
+            bad_cases=_copy_bad_cases_with_scope_instruction(
+                bad_cases, self.language
+            ),
             language=self.language,
         )
         return OptimizeResult(

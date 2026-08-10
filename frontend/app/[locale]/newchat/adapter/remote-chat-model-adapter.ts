@@ -124,6 +124,34 @@ interface NexentRunConfig {
   enablePlan?: boolean;
   runtimeMode?: "nl2agent";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
+  onKnowledgeScopeResolved?: (
+    resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
+  ) => void;
+}
+
+function notifyKnowledgeScopeResolved(
+  content: unknown,
+  callback: NexentRunConfig["onKnowledgeScopeResolved"]
+): void {
+  if (!callback) return;
+  try {
+    const resolution =
+      typeof content === "string" ? JSON.parse(content) : content;
+    if (
+      resolution &&
+      typeof resolution === "object" &&
+      Array.isArray((resolution as { warnings?: unknown }).warnings)
+    ) {
+      callback(
+        resolution as import("@/types/knowledgeScope").KnowledgeScopeResolution
+      );
+    }
+  } catch (error) {
+    log.warn(
+      "[ChatModelAdapter] Failed to parse knowledge_scope_resolved:",
+      error
+    );
+  }
 }
 
 // assistant-ui valid part types referenced by this adapter
@@ -1465,6 +1493,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
 
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+            continue;
+          }
+
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
             storedTiming = buildTimingFromTokenCount(chunk.content);
@@ -1876,7 +1912,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
-          if (chunk.type === "plan") {
+          if (chunk.type === "knowledge_scope_resolved") {
+            notifyKnowledgeScopeResolved(
+              chunk.content as unknown,
+              custom?.onKnowledgeScopeResolved
+            );
+          } else if (chunk.type === "plan") {
             const plan = parsePlan(chunk.content);
             if (plan) planRegistry.set(plan);
           } else if (chunk.type === "plan_step_update") {

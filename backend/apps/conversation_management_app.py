@@ -13,7 +13,7 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError
+from consts.exceptions import ConversationNotFoundError, ValidationError
 from services.conversation_management_service import (
     create_new_conversation,
     delete_conversation_service,
@@ -155,7 +155,7 @@ async def update_conversation_knowledge_scope_endpoint(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         scope = request.scope.model_dump(mode="json") if request.scope is not None else None
-        update_conversation_knowledge_scope_service(
+        result = update_conversation_knowledge_scope_service(
             conversation_id=conversation_id,
             knowledge_scope=scope,
             user_id=user_id,
@@ -164,10 +164,15 @@ async def update_conversation_knowledge_scope_endpoint(
         return ConversationResponse(
             code=0,
             message="success",
-            data={"desired_scope": scope},
+            data=result,
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

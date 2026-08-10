@@ -40,9 +40,11 @@ import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
+import { useTranslation } from "react-i18next";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
+  KnowledgeScopeResolution,
 } from "@/types/knowledgeScope";
 
 function useLocalChatRuntime(
@@ -145,6 +147,7 @@ const HomeContent: FC<{
   onBack,
   isDictationConfigured,
 }) => {
+  const { t } = useTranslation();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [knowledgeScope, setKnowledgeScope] =
     useState<ConversationKnowledgeScope | null>(null);
@@ -320,10 +323,13 @@ const HomeContent: FC<{
           Number.isInteger(numericConversationId) &&
           numericConversationId > 0
         ) {
-          await conversationService.updateKnowledgeScope(
+          const result = await conversationService.updateKnowledgeScope(
             numericConversationId,
             scope
           );
+          if (result.warnings.length > 0) {
+            message.warning(t("chat.knowledgeScope.partialWarning"));
+          }
         }
         if (activeThreadId) {
           knowledgeScopesRef.current.set(activeThreadId, scope);
@@ -331,11 +337,20 @@ const HomeContent: FC<{
         setKnowledgeScope(scope);
       } catch (error) {
         log.error("[HomeContent] Failed to update knowledge scope:", error);
-        message.error("知识库配置保存失败");
+        message.error(t("chat.knowledgeScope.saveFailed"));
         throw error;
       }
     },
-    [activeConversationId, activeThreadId]
+    [activeConversationId, activeThreadId, t]
+  );
+
+  const handleKnowledgeScopeResolved = useCallback(
+    (resolution: KnowledgeScopeResolution) => {
+      if (resolution.warnings.length > 0) {
+        message.warning(t("chat.knowledgeScope.runtimeWarning"));
+      }
+    },
+    [t]
   );
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
@@ -393,6 +408,7 @@ const HomeContent: FC<{
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
         ...(knowledgeScope ? { knowledgeScope } : {}),
+        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
@@ -416,6 +432,7 @@ const HomeContent: FC<{
     activeThreadId,
     chatMode,
     knowledgeScope,
+    handleKnowledgeScopeResolved,
     handleServerConversationId,
   ]);
 

@@ -401,6 +401,40 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
     assert exc_info.value.detail == "Conversation is not accessible"
 
 
+@pytest.mark.asyncio
+async def test_agent_run_api_maps_scope_validation_to_422(mocker):
+    from consts.exceptions import ValidationError
+    from consts.model import AgentRequest
+    from starlette.requests import Request
+
+    from apps.agent_app import agent_run_api
+
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        side_effect=ValidationError("Selected knowledge bases are incompatible"),
+    )
+    request = AgentRequest(
+        agent_id=1,
+        query="test query",
+        knowledge_scope={
+            "local": {"mode": "disabled", "knowledge_ids": []},
+            "aidp": {"mode": "disabled", "kds_ids": []},
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await agent_run_api(
+            agent_request=request,
+            http_request=Request({"type": "http", "headers": []}),
+            authorization="Bearer token",
+            resume=False,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Selected knowledge bases are incompatible"
+
+
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

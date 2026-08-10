@@ -31,6 +31,7 @@ from consts.exceptions import (
     SkillDuplicateError,
     AppException,
     UnauthorizedError,
+    ValidationError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
@@ -125,6 +126,11 @@ async def agent_run_api(
         )
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis

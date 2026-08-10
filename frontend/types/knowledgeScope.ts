@@ -15,6 +15,12 @@ export interface ConversationKnowledgeScope {
 export interface KnowledgeCapabilities {
   agent_id: number;
   version_no: number;
+  capability_revision?: string;
+  legacy_prompt_warning?: {
+    detected: boolean;
+    affected_agent_ids: number[];
+    reason_code: "STATIC_KNOWLEDGE_SCOPE_REFERENCE";
+  };
   sources: {
     local: {
       enabled: boolean;
@@ -28,6 +34,36 @@ export interface KnowledgeCapabilities {
       default_summary: string;
     };
   };
+}
+
+export interface KnowledgeScopeWarning {
+  code: string;
+  source?: "local" | "aidp";
+  count: number;
+}
+
+export interface KnowledgeScopeEffectivePreview {
+  local: {
+    disabled: boolean;
+    knowledge_ids: string[];
+    display_names: string[];
+  };
+  aidp: {
+    disabled: boolean;
+    kds_ids: string[];
+    display_names: string[];
+  };
+}
+
+export interface KnowledgeScopeUpdateResult {
+  desired_scope: ConversationKnowledgeScope | null;
+  effective_preview: KnowledgeScopeEffectivePreview | null;
+  warnings: KnowledgeScopeWarning[];
+}
+
+export interface KnowledgeScopeResolution {
+  effective: KnowledgeScopeEffectivePreview;
+  warnings: KnowledgeScopeWarning[];
 }
 
 export const DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE: ConversationKnowledgeScope =

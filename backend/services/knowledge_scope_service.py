@@ -1,4 +1,7 @@
+import hashlib
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -25,6 +28,14 @@ LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
 AIDP_TOOL_CLASS = "AidpSearchTool"
 LOCAL_RANGE_PARAM = "index_names"
 AIDP_RANGE_PARAM = "kds_list"
+LOCAL_MAX_SELECT = 50
+AIDP_MAX_SELECT = 10
+RESOURCE_NAME_MAX_LENGTH = 100
+RESOURCE_CONTEXT_MAX_LENGTH = 4000
+STATIC_SCOPE_PATTERN = re.compile(
+    r"\b(?:index_names|kds_list)\s*(?:=|:)\s*\[",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -100,6 +111,18 @@ def _walk_agent_tree(
         "version_no": int(version_no),
         "agent_name": agent_info.get("name"),
         "tools": _resolve_runtime_tool_records(agent_id, tenant_id, version_no),
+        "has_static_scope_reference": bool(
+            STATIC_SCOPE_PATTERN.search(
+                "\n".join(
+                    str(agent_info.get(field_name) or "")
+                    for field_name in (
+                        "duty_prompt",
+                        "constraint_prompt",
+                        "few_shots_prompt",
+                    )
+                )
+            )
+        ),
     }
     nodes = [node]
     for relation in query_sub_agent_relations(agent_id, tenant_id, version_no):
@@ -131,22 +154,45 @@ def get_agent_knowledge_capabilities(
         for node in agent_tree
         for tool in node["tools"]
     )
+    affected_agent_ids = [
+        node["agent_id"]
+        for node in agent_tree
+        if node.get("has_static_scope_reference")
+    ]
+    sources = {
+        "local": {
+            "enabled": local_enabled,
+            "max_select": LOCAL_MAX_SELECT,
+            "requires_same_embedding_model": True,
+            "default_summary": "Follow each agent's default configuration",
+        },
+        "aidp": {
+            "enabled": aidp_enabled,
+            "max_select": AIDP_MAX_SELECT,
+            "default_summary": "Follow each agent's default configuration",
+        },
+    }
+    revision_payload = json.dumps(
+        {
+            "agent_id": int(agent_id),
+            "version_no": resolved_version,
+            "sources": sources,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return {
         "agent_id": int(agent_id),
         "version_no": resolved_version,
-        "sources": {
-            "local": {
-                "enabled": local_enabled,
-                "max_select": 50,
-                "requires_same_embedding_model": True,
-                "default_summary": "Follow each agent's default configuration",
-            },
-            "aidp": {
-                "enabled": aidp_enabled,
-                "max_select": 10,
-                "default_summary": "Follow each agent's default configuration",
-            },
+        "capability_revision": hashlib.sha256(
+            revision_payload.encode("utf-8")
+        ).hexdigest()[:16],
+        "legacy_prompt_warning": {
+            "detected": bool(affected_agent_ids),
+            "affected_agent_ids": affected_agent_ids,
+            "reason_code": "STATIC_KNOWLEDGE_SCOPE_REFERENCE",
         },
+        "sources": sources,
     }
 
 
@@ -400,6 +446,33 @@ def build_runtime_knowledge_policy(language: str) -> str:
     )
 
 
+def _sanitize_resource_name(value: Any) -> str:
+    """Keep resource data inert and bounded before adding it to model context."""
+    characters = []
+    for character in str(value):
+        if character.isspace():
+            characters.append(" ")
+        elif not unicodedata.category(character).startswith("C"):
+            characters.append(character)
+    text = "".join(characters)
+    return " ".join(text.split())[:RESOURCE_NAME_MAX_LENGTH]
+
+
+def _bounded_resource_lines(names: Iterable[Any], max_items: int) -> List[str]:
+    lines = []
+    current_length = 0
+    for name in list(names)[:max_items]:
+        sanitized = _sanitize_resource_name(name)
+        if not sanitized:
+            continue
+        candidate = f"{len(lines) + 1}. {sanitized}"
+        if current_length + len(candidate) > RESOURCE_CONTEXT_MAX_LENGTH:
+            break
+        lines.append(candidate)
+        current_length += len(candidate)
+    return lines
+
+
 def build_runtime_knowledge_resources(
     resolved: ResolvedKnowledgeScope,
     language: str,
@@ -411,7 +484,12 @@ def build_runtime_knowledge_resources(
             lines.append("本地知识库：当前会话已禁用")
         elif resolved.local_display_names:
             lines.append("本地知识库：")
-            lines.extend(f"{index}. {name[:100]}" for index, name in enumerate(resolved.local_display_names, 1))
+            lines.extend(
+                _bounded_resource_lines(
+                    resolved.local_display_names,
+                    LOCAL_MAX_SELECT,
+                )
+            )
         else:
             lines.append("本地知识库：当前没有可用资源")
         lines.append("")
@@ -419,7 +497,12 @@ def build_runtime_knowledge_resources(
             lines.append("AIDP 知识库：当前会话已禁用")
         elif resolved.aidp_display_names:
             lines.append("AIDP 知识库：")
-            lines.extend(f"{index}. {name[:100]}" for index, name in enumerate(resolved.aidp_display_names, 1))
+            lines.extend(
+                _bounded_resource_lines(
+                    resolved.aidp_display_names,
+                    AIDP_MAX_SELECT,
+                )
+            )
         else:
             lines.append("AIDP 知识库：当前没有可用资源")
         return "\n".join(lines)
@@ -429,7 +512,12 @@ def build_runtime_knowledge_resources(
         lines.append("Local knowledge bases: disabled for this conversation")
     elif resolved.local_display_names:
         lines.append("Local knowledge bases:")
-        lines.extend(f"{index}. {name[:100]}" for index, name in enumerate(resolved.local_display_names, 1))
+        lines.extend(
+            _bounded_resource_lines(
+                resolved.local_display_names,
+                LOCAL_MAX_SELECT,
+            )
+        )
     else:
         lines.append("Local knowledge bases: no resources are currently available")
     lines.append("")
@@ -437,7 +525,12 @@ def build_runtime_knowledge_resources(
         lines.append("AIDP knowledge bases: disabled for this conversation")
     elif resolved.aidp_display_names:
         lines.append("AIDP knowledge bases:")
-        lines.extend(f"{index}. {name[:100]}" for index, name in enumerate(resolved.aidp_display_names, 1))
+        lines.extend(
+            _bounded_resource_lines(
+                resolved.aidp_display_names,
+                AIDP_MAX_SELECT,
+            )
+        )
     else:
         lines.append("AIDP knowledge bases: no resources are currently available")
     return "\n".join(lines)

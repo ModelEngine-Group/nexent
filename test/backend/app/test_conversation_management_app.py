@@ -47,7 +47,9 @@ from backend.apps.conversation_management_app import (
     generate_conversation_title_endpoint,
     update_opinion_endpoint,
     get_message_id_endpoint,
+    update_conversation_knowledge_scope_endpoint,
 )
+from consts.exceptions import ValidationError
 
 
 # -----------------------------
@@ -68,6 +70,7 @@ def conversation_mocks():
             patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
             patch('backend.apps.conversation_management_app.update_message_opinion_service') as mock_update_opinion_service, \
             patch('backend.apps.conversation_management_app.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
+            patch('backend.apps.conversation_management_app.update_conversation_knowledge_scope_service') as mock_update_scope_service, \
             patch('backend.apps.conversation_management_app.get_current_user_info') as mock_get_user_info:
 
         yield {
@@ -82,6 +85,7 @@ def conversation_mocks():
             'generate_title_service': mock_generate_title_service,
             'update_opinion_service': mock_update_opinion_service,
             'get_message_id_impl': mock_get_msg_id_impl,
+            'update_scope_service': mock_update_scope_service,
             'get_user_info': mock_get_user_info,
         }
 
@@ -327,6 +331,53 @@ async def test_get_history_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+# get_sources_endpoint
+
+
+@pytest.mark.asyncio
+async def test_update_knowledge_scope_returns_preview(conversation_mocks):
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id"
+    )
+    payload = {
+        "desired_scope": {"schema_version": 1},
+        "effective_preview": {"local": {}, "aidp": {}},
+        "warnings": [],
+    }
+    conversation_mocks['update_scope_service'].return_value = payload
+    request_obj = MagicMock()
+    request_obj.scope.model_dump.return_value = {"schema_version": 1}
+
+    result = await update_conversation_knowledge_scope_endpoint(
+        1, request_obj, authorization="Bearer test-token"
+    )
+
+    assert result.code == 0
+    assert result.data == payload
+
+
+@pytest.mark.asyncio
+async def test_update_knowledge_scope_maps_validation_error_to_422(
+    conversation_mocks,
+):
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id"
+    )
+    conversation_mocks['update_scope_service'].side_effect = ValidationError(
+        "scope invalid"
+    )
+    request_obj = MagicMock()
+    request_obj.scope.model_dump.return_value = {"schema_version": 1}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_conversation_knowledge_scope_endpoint(
+            1, request_obj, authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "scope invalid"
 
 
 # get_sources_endpoint

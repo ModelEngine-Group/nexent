@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FC } from "react";
+import { useTranslation } from "react-i18next";
+import { useRouter } from "next/navigation";
 import {
   Alert,
+  Button,
   Checkbox,
   Empty,
   Modal,
@@ -40,6 +43,8 @@ const copyScope = (
 export const ConversationKnowledgeScopeModal: FC<
   ConversationKnowledgeScopeModalProps
 > = ({ open, value, capabilities, onCancel, onConfirm, onRestoreDefault }) => {
+  const { t } = useTranslation();
+  const router = useRouter();
   const [draft, setDraft] = useState<ConversationKnowledgeScope>(() =>
     copyScope(value)
   );
@@ -80,7 +85,7 @@ export const ConversationKnowledgeScopeModal: FC<
         );
       })
       .catch(() => {
-        if (!cancelled) message.error("知识库列表加载失败");
+        if (!cancelled) message.error(t("chat.knowledgeScope.listLoadFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -88,7 +93,7 @@ export const ConversationKnowledgeScopeModal: FC<
     return () => {
       cancelled = true;
     };
-  }, [open, value, capabilities]);
+  }, [open, value, capabilities, t]);
 
   const localOptions = useMemo(
     () =>
@@ -139,7 +144,7 @@ export const ConversationKnowledgeScopeModal: FC<
         .filter(Boolean)
     );
     if (models.size > 1) {
-      message.error("本地知识库必须使用相同的向量化模型");
+      message.error(t("chat.knowledgeScope.embeddingMismatch"));
       return false;
     }
     return true;
@@ -150,11 +155,11 @@ export const ConversationKnowledgeScopeModal: FC<
       draft.local.mode === "override" &&
       draft.local.knowledge_ids.length === 0
     ) {
-      message.warning("请选择至少一个本地知识库");
+      message.warning(t("chat.knowledgeScope.selectLocal"));
       return;
     }
     if (draft.aidp.mode === "override" && draft.aidp.kds_ids.length === 0) {
-      message.warning("请选择至少一个 AIDP 知识库");
+      message.warning(t("chat.knowledgeScope.selectAidp"));
       return;
     }
     if (!validateLocalEmbeddingModels()) return;
@@ -180,9 +185,13 @@ export const ConversationKnowledgeScopeModal: FC<
           }
           className="flex flex-col gap-2"
         >
-          <Radio value="inherit">跟随智能体默认</Radio>
-          <Radio value="override">指定知识库</Radio>
-          <Radio value="disabled">当前对话禁用</Radio>
+          <Radio value="inherit">{t("chat.knowledgeScope.modeInherit")}</Radio>
+          <Radio value="override">
+            {t("chat.knowledgeScope.modeOverride")}
+          </Radio>
+          <Radio value="disabled">
+            {t("chat.knowledgeScope.modeDisabled")}
+          </Radio>
         </Radio.Group>
 
         {mode === "override" && (
@@ -190,7 +199,7 @@ export const ConversationKnowledgeScopeModal: FC<
             {options.length === 0 ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="暂无可用知识库"
+                description={t("chat.knowledgeScope.empty")}
               />
             ) : (
               <Checkbox.Group
@@ -202,7 +211,9 @@ export const ConversationKnowledgeScopeModal: FC<
                   const maxSelect =
                     capabilities?.sources[source].max_select ?? 0;
                   if (maxSelect > 0 && normalized.length > maxSelect) {
-                    message.warning(`最多选择 ${maxSelect} 个知识库`);
+                    message.warning(
+                      t("chat.knowledgeScope.maxSelect", { count: maxSelect })
+                    );
                     return;
                   }
                   setDraft((current) =>
@@ -229,7 +240,10 @@ export const ConversationKnowledgeScopeModal: FC<
           <Alert
             type="warning"
             showIcon
-            message={`当前对话不会使用${source === "local" ? "本地" : " AIDP"}知识库`}
+            message={t("chat.knowledgeScope.disabledMessage", {
+              source:
+                source === "local" ? t("chat.knowledgeScope.local") : "AIDP",
+            })}
           />
         )}
       </div>
@@ -240,26 +254,26 @@ export const ConversationKnowledgeScopeModal: FC<
   if (capabilities?.sources.local.enabled) {
     items.push({
       key: "local",
-      label: "本地知识库",
+      label: t("chat.knowledgeScope.localTab"),
       children: renderSource("local"),
     });
   }
   if (capabilities?.sources.aidp.enabled) {
     items.push({
       key: "aidp",
-      label: "AIDP 知识库",
+      label: t("chat.knowledgeScope.aidpTab"),
       children: renderSource("aidp"),
     });
   }
 
   return (
     <Modal
-      title="当前对话知识库"
+      title={t("chat.knowledgeScope.title")}
       open={open}
       onCancel={onCancel}
       onOk={handleConfirm}
-      okText="确定"
-      cancelText="取消"
+      okText={t("chat.knowledgeScope.confirm")}
+      cancelText={t("chat.knowledgeScope.cancel")}
       confirmLoading={saving}
       footer={(_, { OkBtn, CancelBtn }) => (
         <div className="flex items-center justify-between">
@@ -268,7 +282,7 @@ export const ConversationKnowledgeScopeModal: FC<
             className="text-sm text-muted-foreground hover:text-foreground"
             onClick={() => void onRestoreDefault()}
           >
-            恢复默认
+            {t("chat.knowledgeScope.restoreDefault")}
           </button>
           <div className="flex gap-2">
             <CancelBtn />
@@ -277,11 +291,47 @@ export const ConversationKnowledgeScopeModal: FC<
         </div>
       )}
     >
+      {value &&
+        ((value.local.mode === "override" &&
+          !capabilities?.sources.local.enabled) ||
+          (value.aidp.mode === "override" &&
+            !capabilities?.sources.aidp.enabled)) && (
+          <Alert
+            className="mb-3"
+            type="warning"
+            showIcon
+            message={t("chat.knowledgeScope.incompatible")}
+          />
+        )}
+      {capabilities?.legacy_prompt_warning?.detected && (
+        <Alert
+          className="mb-3"
+          type="warning"
+          showIcon
+          message={t("chat.knowledgeScope.legacyPromptWarning")}
+          description={t("chat.knowledgeScope.affectedAgents", {
+            ids: capabilities.legacy_prompt_warning.affected_agent_ids.join(
+              ", "
+            ),
+          })}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                onCancel();
+                router.push("/agents");
+              }}
+            >
+              {t("chat.knowledgeScope.goToAgentConfig")}
+            </Button>
+          }
+        />
+      )}
       <Spin spinning={loading}>
         {items.length > 0 ? (
           <Tabs items={items} />
         ) : (
-          <Empty description="当前智能体未启用知识库工具" />
+          <Empty description={t("chat.knowledgeScope.noTool")} />
         )}
       </Spin>
     </Modal>
