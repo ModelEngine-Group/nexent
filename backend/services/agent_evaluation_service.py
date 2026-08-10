@@ -282,7 +282,8 @@ def validate_code_evaluator(code: str) -> None:
         # Four defences are applied BEFORE the evaluator reaches this call
         # (compile syntax check, AST shell-call scan, ALLOWED_BUILTINS
         # whitelist, evaluate() signature check) — see docstring.
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  # lgtm[py/code-injection] lgtm[py/unsafe-exec] NOSONAR
+        # codeql[py/code-injection]
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -1002,7 +1003,8 @@ def _score_with_evaluators(
             # Same ALLOWED_BUILTINS whitelist re-applied here for runtime
             # parity with validate_code_evaluator(), which rejected any
             # unsafe evaluator at authoring time.
-            exec(  # nosec B102  # lgtm[py/code-injection] lgtm[py/unsafe-exec] NOSONAR
+            # codeql[py/code-injection]
+            exec(  # nosec B102  NOSONAR
                 ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
             )
             fn = local_vars.get("evaluate")
