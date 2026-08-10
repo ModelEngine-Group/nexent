@@ -30,7 +30,9 @@ logger = logging.getLogger("agent_evaluation_app")
 
 def _ok(data=None):
     """Standard success response."""
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success", "data": data})
+    return JSONResponse(
+        status_code=HTTPStatus.OK, content={"message": "Success", "data": data}
+    )
 
 
 router = APIRouter(prefix="/agent-evaluations")
@@ -59,6 +61,13 @@ class TrialRunRequest(BaseModel):
     judge_model_id: int
     evaluator_ids: Optional[List[int]] = None
     field_mappings: Optional[Dict[str, Any]] = None
+
+
+# Module-level constants for Sonar python:S1192 — duplicated string
+# literals (10x _AUTH_REQUIRED_MSG, 4x _UNKNOWN_ID) drag the
+# New Code Reliability Rating from A to C when flagged as Critical.
+_AUTH_REQUIRED_MSG = "Authentication required"
+_UNKNOWN_ID = "<unknown>"
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -135,7 +144,7 @@ async def create_agent_evaluation_api(
     except AppException:
         raise
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "create_agent_evaluation_api ERROR: tenant=%s user=%s agent_id=%s "
@@ -148,7 +157,9 @@ async def create_agent_evaluation_api(
             getattr(payload, "query_count", None),
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create agent evaluation")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create agent evaluation"
+        )
 
 
 @router.get("")
@@ -180,7 +191,7 @@ async def list_agent_evaluations_by_agent_api(
     except AppException:
         raise
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "list_agent_evaluations_by_agent_api ERROR: tenant=%s agent_id=%s window=%s..%s err=%r",
@@ -190,7 +201,9 @@ async def list_agent_evaluations_by_agent_api(
             offset + limit,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list agent evaluations")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list agent evaluations"
+        )
 
 
 @router.get("/{agent_evaluation_id}")
@@ -208,13 +221,15 @@ async def get_agent_evaluation_api(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = get_agent_evaluation_run_impl(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+        data = get_agent_evaluation_run_impl(
+            agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
+        )
         return _ok(data)
     except AppException:
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "get_agent_evaluation_api ERROR: tenant=%s run_id=%s err=%r",
@@ -222,7 +237,9 @@ async def get_agent_evaluation_api(
             agent_evaluation_id,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get agent evaluation")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get agent evaluation"
+        )
 
 
 @router.get("/{agent_evaluation_id}/cases")
@@ -267,7 +284,7 @@ async def list_agent_evaluation_cases_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "list_agent_evaluation_cases_api ERROR: tenant=%s run_id=%s "
@@ -281,7 +298,9 @@ async def list_agent_evaluation_cases_api(
             offset + limit,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list agent evaluation cases")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list agent evaluation cases"
+        )
 
 
 @router.get("/{agent_evaluation_id}/stats")
@@ -309,7 +328,7 @@ async def get_evaluation_stats_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "get_evaluation_stats_api ERROR: tenant=%s run_id=%s err=%r",
@@ -317,7 +336,9 @@ async def get_evaluation_stats_api(
             agent_evaluation_id,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get evaluation stats")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get evaluation stats"
+        )
 
 
 @router.get("/{agent_evaluation_id}/report")
@@ -343,13 +364,15 @@ async def download_agent_evaluation_report_api(
         return StreamingResponse(
             iter([data]),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}.pdf"},
+            headers={
+                "Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}.pdf"
+            },
         )
     except AppException:
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "download_agent_evaluation_report_api ERROR: tenant=%s run_id=%s language=%s err=%r",
@@ -358,7 +381,10 @@ async def download_agent_evaluation_report_api(
             _safe_extract_language(request),
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to download agent evaluation report")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR,
+            "Failed to download agent evaluation report",
+        )
 
 
 @router.post("/{agent_evaluation_id}/analyze")
@@ -397,7 +423,7 @@ async def analyze_agent_evaluation_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "analyze_agent_evaluation_api ERROR: tenant=%s run_id=%s force=%s err=%r",
@@ -406,7 +432,9 @@ async def analyze_agent_evaluation_api(
             force,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to generate analysis report")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to generate analysis report"
+        )
 
 
 @router.put("/{agent_evaluation_id}/annotation-schemas")
@@ -438,7 +466,7 @@ async def update_annotation_schemas_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "update_annotation_schemas_api ERROR: tenant=%s run_id=%s schema_count=%s err=%r",
@@ -447,7 +475,9 @@ async def update_annotation_schemas_api(
             len(schema_ids) if schema_ids else 0,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to update annotation schemas")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to update annotation schemas"
+        )
 
 
 @router.delete("/{agent_evaluation_id}")
@@ -481,7 +511,7 @@ async def delete_agent_evaluation_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "delete_agent_evaluation_api ERROR: tenant=%s user=%s run_id=%s err=%r",
@@ -490,7 +520,9 @@ async def delete_agent_evaluation_api(
             agent_evaluation_id,
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete agent evaluation")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete agent evaluation"
+        )
 
 
 @router.post("/trial-run")
@@ -538,7 +570,7 @@ async def trial_run_api(
         raise
 
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
             "trial_run_api ERROR: tenant=%s user=%s agent_id=%s version=%s "
@@ -552,7 +584,9 @@ async def trial_run_api(
             len(getattr(payload, "query", "") or ""),
             exc,
         )
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to run trial evaluation")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to run trial evaluation"
+        )
 
 
 # ── tiny helpers to extract a best-effort tenant_id / user_id when
@@ -563,17 +597,17 @@ async def trial_run_api(
 def _safe_extract_tenant(authorization: Optional[str]) -> str:
     try:
         _, tenant_id = get_current_user_id(authorization)
-        return str(tenant_id) if tenant_id else "<unknown>"
+        return str(tenant_id) if tenant_id else _UNKNOWN_ID
     except Exception:
-        return "<unknown>"
+        return _UNKNOWN_ID
 
 
 def _safe_extract_user(authorization: Optional[str]) -> str:
     try:
         user_id, _ = get_current_user_id(authorization)
-        return str(user_id) if user_id else "<unknown>"
+        return str(user_id) if user_id else _UNKNOWN_ID
     except Exception:
-        return "<unknown>"
+        return _UNKNOWN_ID
 
 
 def _safe_extract_language(request: Optional[Request]) -> str:
