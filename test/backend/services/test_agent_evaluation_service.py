@@ -14,6 +14,7 @@ def re_compile_json_object():
     """Return a regex that finds a single JSON object in a string."""
     return re.compile(r"\{[^{}]*\"reason\"[^{}]*\}")
 
+
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -35,6 +36,7 @@ sys.modules["openjiuwen"] = MagicMock()
 # (sqlalchemy.orm, sqlalchemy.sql, etc.) succeeds without error.
 _sqlalchemy_root = MagicMock()
 sys.modules["sqlalchemy"] = _sqlalchemy_root
+
 
 # Stub out the ``services`` and ``nexent`` packages so importing
 # ``services.agent_evaluation_service`` does not pull in the full dependency
@@ -107,6 +109,12 @@ _agent_model_mock.ToolConfig = _MockToolConfig
 sys.modules["nexent.core.agents.agent_model"] = _agent_model_mock
 sys.modules["nexent.core.agents.agent_context"] = MagicMock()
 sys.modules["nexent.core.agents.run_agent"] = MagicMock()
+
+_nexent_core_agents_sandbox_module = types.ModuleType("nexent.core.agents.sandbox")
+_nexent_core_agents_sandbox_module._scan_shell_calls = MagicMock(return_value=[])
+sys.modules["nexent.core.agents.sandbox"] = _nexent_core_agents_sandbox_module
+_nexent_core_agents.sandbox = _nexent_core_agents_sandbox_module
+
 sys.modules["nexent.core.utils.observer"] = MagicMock()
 sys.modules["nexent.core.utils.common"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()
@@ -151,6 +159,13 @@ _agent_evaluation_db_mock.soft_delete_agent_evaluation = MagicMock()
 sys.modules["database.agent_evaluation_db"] = _agent_evaluation_db_mock
 _db_pkg.agent_evaluation_db = _agent_evaluation_db_mock
 
+_knowledge_db_mock = MagicMock()
+_knowledge_db_mock.search_knowledge_records = MagicMock(return_value=[])
+_knowledge_db_mock.get_knowledge_name_by_id = MagicMock()
+_knowledge_db_mock.get_index_name_by_knowledge_name = MagicMock()
+sys.modules["database.knowledge_db"] = _knowledge_db_mock
+_db_pkg.knowledge_db = _knowledge_db_mock
+
 # database.client / database.db_models are imported by both service modules.
 _db_client_module = MagicMock()
 _db_client_module.get_db_session = MagicMock()
@@ -168,6 +183,87 @@ _consts_model_module = types.ModuleType("consts.model")
 _consts_model_module.AgentRequest = MagicMock()
 sys.modules["consts.model"] = _consts_model_module
 _consts_pkg.model = _consts_model_module
+
+_consts_error_code_module = types.ModuleType("consts.error_code")
+
+
+class _ErrorCode:
+    COMMON_VALIDATION_ERROR = "COMMON_VALIDATION_ERROR"
+    AGENT_EVALUATION_SET_IN_USE = "AGENT_EVALUATION_SET_IN_USE"
+    AGENT_EVALUATION_NOT_FOUND = "AGENT_EVALUATION_NOT_FOUND"
+    AGENT_EVALUATION_DELETE_NOT_ALLOWED = "AGENT_EVALUATION_DELETE_NOT_ALLOWED"
+    AGENT_EVALUATION_NOT_COMPLETED = "AGENT_EVALUATION_NOT_COMPLETED"
+    AGENT_EVALUATION_CASE_NOT_FOUND = "AGENT_EVALUATION_CASE_NOT_FOUND"
+    EVALUATION_NOT_FOUND = "EVALUATION_NOT_FOUND"
+    AGENT_NOT_FOUND = "AGENT_NOT_FOUND"
+    MODEL_NOT_FOUND = "MODEL_NOT_FOUND"
+    KNOWLEDGE_NOT_FOUND = "KNOWLEDGE_NOT_FOUND"
+
+
+_consts_error_code_module.ErrorCode = _ErrorCode
+sys.modules["consts.error_code"] = _consts_error_code_module
+_consts_pkg.error_code = _consts_error_code_module
+
+_consts_limits_module = types.ModuleType("consts.evaluation_limits")
+_consts_limits_module.DEFAULT_PASS_THRESHOLD = 0.8
+_consts_limits_module.MAX_CONCURRENT_RUNS = 10
+_consts_limits_module.MAX_EVALUATORS_PER_RUN = 3
+_consts_limits_module.MAX_TOTAL_RUNS = 100
+_consts_limits_module.MAX_TURNS_PER_SESSION = 20
+_consts_limits_module.MAX_CASES_PER_SET = 10000
+sys.modules["consts.evaluation_limits"] = _consts_limits_module
+_consts_pkg.evaluation_limits = _consts_limits_module
+
+_consts_status_module = types.ModuleType("consts.evaluation_status")
+_consts_status_module.MAX_FAILURE_EXAMPLES = 5
+_consts_status_module.EvalCaseStatus = type(
+    "EvalCaseStatus",
+    (),
+    {
+        "PENDING": "PENDING",
+        "RUNNING": "RUNNING",
+        "COMPLETED": "COMPLETED",
+        "FAILED": "FAILED",
+        "CANCELLED": "CANCELLED",
+    },
+)
+_consts_status_module.EvalPassStatus = type(
+    "EvalPassStatus", (), {"PASS": "pass", "FAIL": "fail", "PARTIAL": "partial"}
+)
+_consts_status_module.EvalRunStatus = type(
+    "EvalRunStatus",
+    (),
+    {
+        "PENDING": "PENDING",
+        "RUNNING": "RUNNING",
+        "COMPLETED": "COMPLETED",
+        "FAILED": "FAILED",
+        "CANCELLED": "CANCELLED",
+    },
+)
+sys.modules["consts.evaluation_status"] = _consts_status_module
+_consts_pkg.evaluation_status = _consts_status_module
+
+_consts_exceptions_module = types.ModuleType("consts.exceptions")
+
+
+class _AppException(Exception):
+    def __init__(self, error_code=None, message=None, *args, **kwargs):
+        self.error_code = error_code
+        self.message = message or ""
+        super().__init__(self.message)
+
+
+_consts_exceptions_module.AppException = _AppException
+_consts_exceptions_module.NotFoundException = Exception
+_consts_exceptions_module.ValidationError = Exception
+_consts_exceptions_module.ForbiddenError = Exception
+_consts_exceptions_module.NoInviteCodeException = Exception
+_consts_exceptions_module.MCPConnectionError = Exception
+_consts_exceptions_module.ToolExecutionException = Exception
+_consts_exceptions_module.VoiceServiceException = Exception
+sys.modules["consts.exceptions"] = _consts_exceptions_module
+_consts_pkg.exceptions = _consts_exceptions_module
 
 # adapters (Jiuwen SDK) stubs
 _adapters_pkg = _register_package("adapters")
@@ -195,6 +291,54 @@ _utils_thread_module = MagicMock()
 _utils_thread_module.submit = MagicMock()
 sys.modules["utils.thread_utils"] = _utils_thread_module
 _utils_pkg.thread_utils = _utils_thread_module
+
+_utils_agent_module = MagicMock()
+_utils_agent_module.prepare_request_args = MagicMock()
+_utils_agent_module.build_agent_request = MagicMock()
+_utils_agent_module.build_output_schema = MagicMock()
+_utils_agent_module.verify_agent_runnable = MagicMock()
+_utils_agent_module.run_model_provider_health_check = MagicMock()
+sys.modules["utils.agent_utils"] = _utils_agent_module
+_utils_pkg.agent_utils = _utils_agent_module
+
+_utils_eval_module = MagicMock()
+_utils_eval_module.calculate_pass_status = MagicMock(return_value="pass")
+_utils_eval_module.format_case_output = MagicMock()
+_utils_eval_module.build_score_summary = MagicMock()
+_utils_eval_module.build_analysis_report_sections = MagicMock()
+sys.modules["utils.evaluation_utils"] = _utils_eval_module
+_utils_pkg.evaluation_utils = _utils_eval_module
+
+_utils_eval_run_module = MagicMock()
+_utils_eval_run_module.dispatch_background_run = MagicMock()
+_utils_eval_run_module.refresh_evaluation_case_predict = MagicMock()
+_utils_eval_run_module.refresh_evaluation_case_reason = MagicMock()
+sys.modules["utils.evaluation_run"] = _utils_eval_run_module
+_utils_pkg.evaluation_run = _utils_eval_run_module
+
+_utils_llm_module = MagicMock()
+_utils_llm_module.call_llm_for_system_prompt = MagicMock()
+sys.modules["utils.llm_utils"] = _utils_llm_module
+_utils_pkg.llm_utils = _utils_llm_module
+
+_utils_prompt_template_module = MagicMock()
+_utils_prompt_template_module.get_prompt_template = MagicMock()
+sys.modules["utils.prompt_template_utils"] = _utils_prompt_template_module
+_utils_pkg.prompt_template_utils = _utils_prompt_template_module
+
+_nexent_core_models_module = types.ModuleType("nexent.core.models")
+_nexent_core_models_module.OpenAIModel = MagicMock()
+sys.modules["nexent.core.models"] = _nexent_core_models_module
+_nexent_core.models = _nexent_core_models_module
+
+_eval_prompt_service_module = types.ModuleType("services.evaluation_prompt_service")
+_eval_prompt_service_module.build_prompts_for_evaluation_cases = MagicMock(
+    return_value=[]
+)
+sys.modules["services.evaluation_prompt_service"] = _eval_prompt_service_module
+_services_pkg.evaluation_prompt_service = _eval_prompt_service_module
+
+_agent_service_module.list_model_providers_impl = MagicMock(return_value=[])
 # Pre-load the real auth_utils module so it is in sys.modules and set as
 # an attribute on the ``utils`` package, so doted ``patch`` resolution in
 # sibling tests can find it.
@@ -237,14 +381,16 @@ class _WorksheetRecorder:
             return [MagicMock(value=v) for v in row]
         return self
 
-    def iter_rows(self, min_row=None, max_row=None, min_col=None, max_col=None, values_only=False):
+    def iter_rows(
+        self, min_row=None, max_row=None, min_col=None, max_col=None, values_only=False
+    ):
         start = (min_row or 1) - 1
         end = max_row if max_row is not None else len(self._rows)
         for row in self._rows[start:end]:
             if values_only:
                 yield row
             else:
-                yield [MagicMock(value=v) for v in row] 
+                yield [MagicMock(value=v) for v in row]
 
 
 class _WorkbookRecorder:
@@ -279,6 +425,7 @@ def _workbook_factory():
 
 openpyxl_mock.Workbook = _workbook_factory
 
+
 @pytest.fixture
 def service_module(monkeypatch):
     """Import agent_evaluation_service fresh for each test with stubs in place.
@@ -300,24 +447,32 @@ def service_module(monkeypatch):
             pass
 
     from services import agent_evaluation_service  # noqa: E402
+
     # Make sure the freshly imported submodule is also visible as an attribute
     # of the ``services`` package, so subsequent ``from services.X import Y``
     # access (and ``getattr(services_pkg, 'X')`` in mocks) does not fall
     # through to a ModuleNotFoundError on the parent package.
     _services_pkg.agent_evaluation_service = agent_evaluation_service
     agent_evaluation_service.openpyxl = openpyxl_mock
-    # ``services.agent_evaluation_service`` does ``from openpyxl import Workbook``
-    # at module load, so the bound name must be patched here too — otherwise
-    # a sibling fixture that swaps ``sys.modules["openpyxl"]`` for a real
-    # module will leave the production code calling ``openpyxl.Workbook()``
-    # directly and our recorder never sees the workbook.
-    _saved_workbook = agent_evaluation_service.Workbook
+    # ``services.agent_evaluation_service`` may or may not do
+    # ``from openpyxl import Workbook`` at module load depending on the
+    # current code shape; either way we install a patch under the module
+    # attribute so the workbook recorder picks it up when used.
+    _saved_workbook = getattr(agent_evaluation_service, "Workbook", None)
     agent_evaluation_service.Workbook = _workbook_factory
-    monkeypatch.setattr(agent_evaluation_service, "Workbook", _workbook_factory)
+    monkeypatch.setattr(
+        agent_evaluation_service, "Workbook", _workbook_factory, raising=False
+    )
 
-    agent_evaluation_service.get_agent_evaluation = _agent_evaluation_db_mock.get_agent_evaluation
-    agent_evaluation_service.list_agent_evaluation_cases = _agent_evaluation_db_mock.list_agent_evaluation_cases
-    agent_evaluation_service.soft_delete_agent_evaluation = _agent_evaluation_db_mock.soft_delete_agent_evaluation
+    agent_evaluation_service.get_agent_evaluation = (
+        _agent_evaluation_db_mock.get_agent_evaluation
+    )
+    agent_evaluation_service.list_agent_evaluation_cases = (
+        _agent_evaluation_db_mock.list_agent_evaluation_cases
+    )
+    agent_evaluation_service.soft_delete_agent_evaluation = (
+        _agent_evaluation_db_mock.soft_delete_agent_evaluation
+    )
 
     _agent_evaluation_db_mock.get_agent_evaluation.reset_mock(side_effect=True)
     _agent_evaluation_db_mock.list_agent_evaluation_cases.reset_mock(side_effect=True)
@@ -454,11 +609,25 @@ def _wire_full_db_module(service_module):
     service_module.list_agent_evaluations_by_agent = MagicMock(return_value=[{"id": 1}])
     service_module.update_agent_evaluation_case_result = MagicMock()
     service_module.update_agent_evaluation_status = MagicMock()
-    service_module.get_evaluation_set_cases_all = MagicMock(return_value=[
-        {"evaluation_set_case_id": 1, "inputs": {"query": "q1"}, "label": {"answer": "a1"}},
-        {"evaluation_set_case_id": 2, "inputs": {"query": "q2"}, "label": {"answer": "a2"}},
-        {"evaluation_set_case_id": 3, "inputs": {"query": "q3"}, "label": {"answer": "a3"}},
-    ])
+    service_module.get_evaluation_set_cases_all = MagicMock(
+        return_value=[
+            {
+                "evaluation_set_case_id": 1,
+                "inputs": {"query": "q1"},
+                "label": {"answer": "a1"},
+            },
+            {
+                "evaluation_set_case_id": 2,
+                "inputs": {"query": "q2"},
+                "label": {"answer": "a2"},
+            },
+            {
+                "evaluation_set_case_id": 3,
+                "inputs": {"query": "q3"},
+                "label": {"answer": "a3"},
+            },
+        ]
+    )
     service_module.resolve_latest_published_version_no = MagicMock(return_value=7)
     service_module.prepare_agent_run = MagicMock()
     return create_mock
@@ -467,14 +636,16 @@ def _wire_full_db_module(service_module):
 def test_get_agent_evaluation_run_impl_returns_db_payload(service_module):
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.return_value = {
-        "agent_evaluation_id": 7, "status": "RUNNING",
+        "agent_evaluation_id": 7,
+        "status": "RUNNING",
     }
 
     result = service_module.get_agent_evaluation_run_impl(7, "t1")
 
     assert result == {"agent_evaluation_id": 7, "status": "RUNNING"}
     service_module.get_agent_evaluation.assert_called_once_with(
-        agent_evaluation_id=7, tenant_id="t1",
+        agent_evaluation_id=7,
+        tenant_id="t1",
     )
 
 
@@ -483,12 +654,18 @@ def test_list_agent_evaluations_by_agent_impl_forwards_pagination(service_module
     service_module.list_agent_evaluations_by_agent.return_value = [{"id": 1}, {"id": 2}]
 
     result = service_module.list_agent_evaluations_by_agent_impl(
-        agent_id=11, tenant_id="t1", limit=10, offset=20,
+        agent_id=11,
+        tenant_id="t1",
+        limit=10,
+        offset=20,
     )
 
     assert result == [{"id": 1}, {"id": 2}]
     service_module.list_agent_evaluations_by_agent.assert_called_once_with(
-        agent_id=11, tenant_id="t1", limit=10, offset=20,
+        agent_id=11,
+        tenant_id="t1",
+        limit=10,
+        offset=20,
     )
 
 
@@ -497,19 +674,27 @@ def test_list_agent_evaluation_cases_impl_forwards_pagination(service_module):
     service_module.list_agent_evaluation_cases.return_value = [{"case_id": 1}]
 
     result = service_module.list_agent_evaluation_cases_impl(
-        agent_evaluation_id=5, tenant_id="t1", limit=25, offset=5,
+        agent_evaluation_id=5,
+        tenant_id="t1",
+        limit=25,
+        offset=5,
     )
 
     assert result == [{"case_id": 1}]
     service_module.list_agent_evaluation_cases.assert_called_once_with(
-        agent_evaluation_id=5, tenant_id="t1", limit=25, offset=5,
+        agent_evaluation_id=5,
+        tenant_id="t1",
+        limit=25,
+        offset=5,
     )
 
 
 def test_delete_agent_evaluation_run_not_found_raises(service_module):
     """A missing run bubbles up the ``ValueError`` from the DB layer."""
     _wire_full_db_module(service_module)
-    service_module.get_agent_evaluation.side_effect = ValueError("agent evaluation not found")
+    service_module.get_agent_evaluation.side_effect = ValueError(
+        "agent evaluation not found"
+    )
 
     with pytest.raises(ValueError, match="agent evaluation not found"):
         service_module.delete_agent_evaluation_run_impl(404, "t1", "u1")
@@ -520,7 +705,9 @@ def test_delete_agent_evaluation_run_creator_missing_raises(service_module):
     """``created_by`` is None on the run record — never matches any user."""
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.return_value = {
-        "agent_evaluation_id": 1, "tenant_id": "t1", "created_by": None,
+        "agent_evaluation_id": 1,
+        "tenant_id": "t1",
+        "created_by": None,
     }
 
     with pytest.raises(ValueError, match="Only the creator"):
@@ -541,7 +728,10 @@ def test_extract_clean_reason_returns_plain_verdict(service_module):
 
 
 def test_extract_clean_reason_returns_free_form_text(service_module):
-    assert service_module._extract_clean_reason_v2("looks correct to me") == "looks correct to me"
+    assert (
+        service_module._extract_clean_reason_v2("looks correct to me")
+        == "looks correct to me"
+    )
 
 
 def test_extract_clean_reason_returns_empty_for_none(service_module):
@@ -607,7 +797,7 @@ def test_extract_clean_reason_v1_unwraps_top_level_reason(service_module):
 def test_extract_clean_reason_v1_handles_invalid_json_in_envelope(service_module):
     """An envelope with invalid JSON inside falls back to regex extraction."""
     service_module._JSON_OBJECT_RE = re_compile_json_object()
-    raw = "[12:00:00 INFO llm] {\"reason\": \"from regex\"}"
+    raw = '[12:00:00 INFO llm] {"reason": "from regex"}'
     assert service_module._extract_clean_reason(raw) == "from regex"
 
 
@@ -629,7 +819,7 @@ def test_extract_clean_reason_handles_openai_chatcompletion_repr(service_module)
     """The SDK captures ``repr(ChatCompletion)`` for the request-side log."""
     repr_payload = (
         "ChatCompletion(id='x', choices=[Choice(finish_reason='stop', "
-        "message=ChatCompletionMessage(content='```json\\n{\\\"reason\\\": \\\"from repr\\\"}\\n```', "
+        'message=ChatCompletionMessage(content=\'```json\\n{\\"reason\\": \\"from repr\\"}\\n```\', '
         "refusal=None))])"
     )
     raw = f'[12:00:00 INFO llm] {{"response": "{repr_payload}"}}'
@@ -671,8 +861,10 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
         return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
     )
 
-    final_answer_parts = [json.dumps({"type": "final_answer", "content": "hello "}),
-                          json.dumps({"type": "final_answer", "content": "world"})]
+    final_answer_parts = [
+        json.dumps({"type": "final_answer", "content": "hello "}),
+        json.dumps({"type": "final_answer", "content": "world"}),
+    ]
 
     async def _fake_agent_run(_run_info):
         for chunk in final_answer_parts:
@@ -680,9 +872,15 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
 
     sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
 
-    result = asyncio.run(service_module._run_agent_to_final_answer(
-        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
-    ))
+    result = asyncio.run(
+        service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+        )
+    )
     assert result == "hello world"
 
 
@@ -707,13 +905,21 @@ def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module)
 
     sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
 
-    result = asyncio.run(service_module._run_agent_to_final_answer(
-        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
-    ))
+    result = asyncio.run(
+        service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+        )
+    )
     assert result == "only this"
 
 
-def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(service_module):
+def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(
+    service_module,
+):
     """Non-string chunks and unparseable JSON are silently dropped."""
     import asyncio
 
@@ -734,9 +940,15 @@ def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(serv
 
     sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
 
-    result = asyncio.run(service_module._run_agent_to_final_answer(
-        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
-    ))
+    result = asyncio.run(
+        service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+        )
+    )
     assert result == "kept"
 
 
@@ -754,9 +966,15 @@ def test_run_agent_to_final_answer_handles_no_final_answer_chunks(service_module
 
     sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
 
-    result = asyncio.run(service_module._run_agent_to_final_answer(
-        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
-    ))
+    result = asyncio.run(
+        service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+        )
+    )
     assert result == ""
 
 
@@ -770,7 +988,9 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
     service_module.update_agent_evaluation_status = _fake_update
 
     callback = service_module._make_background_done_callback(
-        tenant_id="t1", user_id="u1", agent_evaluation_id=99,
+        tenant_id="t1",
+        user_id="u1",
+        agent_evaluation_id=99,
     )
     future = MagicMock()
     future.exception.return_value = RuntimeError("worker crashed")
@@ -794,7 +1014,9 @@ def test_make_background_done_callback_no_exception_is_noop(service_module):
     service_module.update_agent_evaluation_status = _fake_update
 
     callback = service_module._make_background_done_callback(
-        tenant_id="t1", user_id="u1", agent_evaluation_id=100,
+        tenant_id="t1",
+        user_id="u1",
+        agent_evaluation_id=100,
     )
     future = MagicMock()
     future.exception.return_value = None
@@ -807,13 +1029,16 @@ def test_make_background_done_callback_no_exception_is_noop(service_module):
 
 def test_make_background_done_callback_update_failure_is_logged(service_module):
     """If the DB update itself fails, the exception must be swallowed and logged."""
+
     def _failing_update(**_kwargs):
         raise RuntimeError("db unavailable")
 
     service_module.update_agent_evaluation_status = _failing_update
 
     callback = service_module._make_background_done_callback(
-        tenant_id="t1", user_id="u1", agent_evaluation_id=101,
+        tenant_id="t1",
+        user_id="u1",
+        agent_evaluation_id=101,
     )
     future = MagicMock()
     future.exception.return_value = RuntimeError("worker crashed")
@@ -869,8 +1094,11 @@ def test_create_agent_evaluation_run_empty_set_raises(service_module):
 
     with pytest.raises(ValueError, match="evaluation set has no cases"):
         service_module.create_agent_evaluation_run_impl(
-            tenant_id="t1", user_id="u1",
-            agent_id=1, evaluation_set_id=2, judge_model_id=3,
+            tenant_id="t1",
+            user_id="u1",
+            agent_id=1,
+            evaluation_set_id=2,
+            judge_model_id=3,
         )
     service_module.create_agent_evaluation.assert_not_called()
     service_module.create_agent_evaluation_cases.assert_not_called()
@@ -883,8 +1111,11 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     service_module.pool = MagicMock()
 
     service_module.create_agent_evaluation_run_impl(
-        tenant_id="t1", user_id="u1",
-        agent_id=1, evaluation_set_id=2, judge_model_id=3,
+        tenant_id="t1",
+        user_id="u1",
+        agent_id=1,
+        evaluation_set_id=2,
+        judge_model_id=3,
     )
 
     assert create_mock.call_args.kwargs["agent_version_no"] == 13
@@ -939,7 +1170,8 @@ def test_execute_agent_evaluation_run_completes_with_overall_score(service_modul
 
     # Final transition should mark the run COMPLETED with the mean score.
     completed_calls = [
-        c for c in service_module.update_agent_evaluation_status.call_args_list
+        c
+        for c in service_module.update_agent_evaluation_status.call_args_list
         if c.kwargs.get("status") == "COMPLETED"
     ]
     assert len(completed_calls) == 1
@@ -964,7 +1196,8 @@ def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module
 
     # Both cases should have a FAILED update written.
     failed_updates = [
-        c for c in service_module.update_agent_evaluation_case_result.call_args_list
+        c
+        for c in service_module.update_agent_evaluation_case_result.call_args_list
         if c.kwargs.get("status") == "FAILED"
     ]
     assert len(failed_updates) == 2
@@ -973,22 +1206,30 @@ def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module
 def test_execute_agent_evaluation_run_top_level_error_marks_run_failed(service_module):
     """An exception raised before the loop starts must transition the run FAILED."""
     _wire_full_db_module(service_module)
-    service_module.JiuwenSDKAdapter = MagicMock(side_effect=RuntimeError("adapter init boom"))
+    service_module.JiuwenSDKAdapter = MagicMock(
+        side_effect=RuntimeError("adapter init boom")
+    )
     service_module.get_agent_evaluation.return_value = {
-        "agent_evaluation_id": 50, "agent_id": 11, "agent_version_no": 4, "judge_model_id": 99,
+        "agent_evaluation_id": 50,
+        "agent_id": 11,
+        "agent_version_no": 4,
+        "judge_model_id": 99,
     }
 
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
 
     failed = [
-        c for c in service_module.update_agent_evaluation_status.call_args_list
+        c
+        for c in service_module.update_agent_evaluation_status.call_args_list
         if c.kwargs.get("status") == "FAILED"
     ]
     assert failed, "expected the outer except branch to mark the run FAILED"
     assert "adapter init boom" in (failed[0].kwargs.get("error_message") or "")
 
 
-def test_execute_agent_evaluation_run_falls_back_to_persisted_judge_model(service_module):
+def test_execute_agent_evaluation_run_falls_back_to_persisted_judge_model(
+    service_module,
+):
     """When the queued judge_model_id is lost the persisted one is reused."""
     cases = [_make_exec_case(1)]
     _wire_executor_dependencies(service_module, cases)
@@ -1004,13 +1245,17 @@ def test_execute_agent_evaluation_run_missing_judge_model_raises(service_module)
     _wire_full_db_module(service_module)
     service_module.JiuwenSDKAdapter = MagicMock()
     service_module.get_agent_evaluation.return_value = {
-        "agent_evaluation_id": 50, "agent_id": 11, "agent_version_no": 4, "judge_model_id": None,
+        "agent_evaluation_id": 50,
+        "agent_id": 11,
+        "agent_version_no": 4,
+        "judge_model_id": None,
     }
 
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=None)
 
     failed = [
-        c for c in service_module.update_agent_evaluation_status.call_args_list
+        c
+        for c in service_module.update_agent_evaluation_status.call_args_list
         if c.kwargs.get("status") == "FAILED"
     ]
     assert failed, "outer except branch should mark run FAILED"
@@ -1031,11 +1276,7 @@ class TestIterLogEnvelopes:
         assert json.loads(payload) == {"reason": "ok"}
 
     def test_multiple_envelopes_with_whitespace(self, service_module):
-        text = (
-            '\n[12:00:00 INFO llm] {"a": 1}\n'
-            '  \n'
-            '[12:00:01 INFO llm] {"b": 2}\n'
-        )
+        text = '\n[12:00:00 INFO llm] {"a": 1}\n  \n[12:00:01 INFO llm] {"b": 2}\n'
         envelopes = list(service_module._iter_log_envelopes(text))
         assert len(envelopes) == 2
         assert json.loads(envelopes[0][1]) == {"a": 1}
@@ -1091,11 +1332,15 @@ class TestReasonFromJsonEnvelope:
         assert service_module._reason_from_json_envelope("[1, 2]") is None
 
     def test_response_content_with_markdown_fence(self, service_module):
-        payload = '{"response_content": "```json\\n{\\"reason\\": \\"judged ok\\"}\\n```"}'
+        payload = (
+            '{"response_content": "```json\\n{\\"reason\\": \\"judged ok\\"}\\n```"}'
+        )
         assert service_module._reason_from_json_envelope(payload) == "judged ok"
 
     def test_response_content_with_plain_fence(self, service_module):
-        payload = '{"response_content": "```\\n{\\"reason\\": \\"plain fence\\"}\\n```"}'
+        payload = (
+            '{"response_content": "```\\n{\\"reason\\": \\"plain fence\\"}\\n```"}'
+        )
         assert service_module._reason_from_json_envelope(payload) == "plain fence"
 
     def test_response_content_as_plain_json_string(self, service_module):
@@ -1118,14 +1363,16 @@ class TestReasonFromJsonEnvelope:
     def test_response_chatcompletion_repr_with_metadata_wrapping(self, service_module):
         repr_text = (
             "ChatCompletion(id='x', choices=[Choice(finish_reason='stop', "
-            "message=ChatCompletionMessage(content='```json\\n{\\\"reason\\\": \\\"via repr\\\"}\\n```', "
+            'message=ChatCompletionMessage(content=\'```json\\n{\\"reason\\": \\"via repr\\"}\\n```\', '
             "refusal=None))])"
         )
         payload = json.dumps({"metadata": {"response": repr_text}})
         assert service_module._reason_from_json_envelope(payload) == "via repr"
 
     def test_response_chatcompletion_repr_at_top_level(self, service_module):
-        repr_text = r"""ChatCompletionMessage(content='{"reason": "top repr"}', refusal=None)"""
+        repr_text = (
+            r"""ChatCompletionMessage(content='{"reason": "top repr"}', refusal=None)"""
+        )
         payload = json.dumps({"response": repr_text})
         assert service_module._reason_from_json_envelope(payload) == "top repr"
 
@@ -1136,22 +1383,28 @@ class TestReasonFromJsonEnvelope:
         assert service_module._reason_from_json_envelope(payload) == "plain via repr"
 
     def test_response_as_plain_json_choices(self, service_module):
-        response = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": '```json\n{"reason": "via choices"}\n```',
-                },
-            }],
-        })
+        response = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"reason": "via choices"}\n```',
+                        },
+                    }
+                ],
+            }
+        )
         payload = json.dumps({"response": response})
         assert service_module._reason_from_json_envelope(payload) == "via choices"
 
     def test_response_as_plain_json_choices_invalid_json(self, service_module):
         """Invalid choices JSON falls through to top-level reason."""
-        payload = json.dumps({
-            "response": "not valid json",
-            "reason": "top level wins",
-        })
+        payload = json.dumps(
+            {
+                "response": "not valid json",
+                "reason": "top level wins",
+            }
+        )
         assert service_module._reason_from_json_envelope(payload) == "top level wins"
 
     def test_response_missing_when_no_chatcompletion(self, service_module):
@@ -1201,13 +1454,15 @@ class TestIsLlmRelatedError:
 class TestGenerateFriendlyErrorMessage:
     def test_returns_default_for_unrelated_error(self, service_module):
         result = service_module._generate_friendly_error_message(
-            ValueError("not an LLM error"), "fallback message",
+            ValueError("not an LLM error"),
+            "fallback message",
         )
         assert result == "fallback message"
 
     def test_returns_default_when_openai_call_fails(self, service_module, monkeypatch):
         """LLM call failure inside the helper must not bubble — we return default."""
         import builtins as _bi
+
         real_import = _bi.__import__
 
         def _failing_import(name, *args, **kwargs):
@@ -1219,11 +1474,14 @@ class TestGenerateFriendlyErrorMessage:
         # Even with an LLM-related error, the openai import failure is caught
         # inside the helper and we get the default message back.
         result = service_module._generate_friendly_error_message(
-            RuntimeError("openai API timed out"), "default",
+            RuntimeError("openai API timed out"),
+            "default",
         )
         assert result == "default"
 
-    def test_returns_llm_response_when_openai_succeeds(self, service_module, monkeypatch):
+    def test_returns_llm_response_when_openai_succeeds(
+        self, service_module, monkeypatch
+    ):
         """When the openai client + asyncio.run both work, return its content."""
 
         class _FakeMessage:
@@ -1247,6 +1505,7 @@ class TestGenerateFriendlyErrorMessage:
                 self.chat = _FakeChat()
 
         import sys as _sys
+
         fake_openai = types.ModuleType("openai")
         fake_openai.AsyncOpenAI = _FakeAsyncOpenAI
         monkeypatch.setitem(_sys.modules, "openai", fake_openai)
@@ -1254,12 +1513,14 @@ class TestGenerateFriendlyErrorMessage:
         # ``asyncio.run`` expects a coroutine; bypass that for testing by
         # having it just invoke and return our pre-built synchronous object.
         monkeypatch.setattr(
-            service_module.asyncio, "run",
+            service_module.asyncio,
+            "run",
             lambda coro: _FakeResponse(),
         )
 
         result = service_module._generate_friendly_error_message(
-            RuntimeError("openai timeout"), "default",
+            RuntimeError("openai timeout"),
+            "default",
         )
         assert result == "Friendly error from LLM"
 
@@ -1274,7 +1535,7 @@ class TestExtractCleanReasonV2Additional:
     def test_handles_payload_with_unicode_escape_in_content(self, service_module):
         """Content with a ``\\n`` literal in a markdown fence round-trips."""
         raw = (
-            '[12:00:00 INFO llm] '
+            "[12:00:00 INFO llm] "
             '{"response_content": "```json\\n{\\"reason\\": \\"with\\\\nnewline\\"}\\n```"}'
         )
         # The exact ``\n`` form depends on how the regex captures it; the
@@ -1289,8 +1550,6 @@ class TestExtractCleanReasonV2Additional:
         assert service_module._extract_clean_reason_v2(raw) == "judge says: looks fine"
 
     def test_strips_multiple_log_prefixes(self, service_module):
-        raw = (
-            '[12:00:00 INFO llm] [12:00:01 INFO llm] free form text'
-        )
+        raw = "[12:00:00 INFO llm] [12:00:01 INFO llm] free form text"
         result = service_module._extract_clean_reason_v2(raw)
         assert result == "free form text"

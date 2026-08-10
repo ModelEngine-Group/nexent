@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import logging
@@ -45,9 +46,25 @@ from utils.thread_utils import pool
 
 logger = logging.getLogger(__name__)
 
+
 def _ok(data=None):
     """Standard success response."""
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success", "data": data})
+    return JSONResponse(
+        status_code=HTTPStatus.OK, content={"message": "Success", "data": data}
+    )
+
+
+def _safe_line_preview(line: str) -> str:
+    """Return a non-reconstructible preview of user-provided JSONL lines.
+
+    Sonar flags direct logging of user-controlled payloads because raw
+    queries / answers may contain PII.  We emit the byte length plus a
+    short SHA-256 prefix so production logs remain searchable by line
+    identity without exposing any verbatim content.
+    """
+    digest = hashlib.sha256(line.encode("utf-8")).hexdigest()
+    return f"len={len(line)} sha256_prefix={digest[:16]}"
+
 
 router = APIRouter(prefix="/evaluation-sets")
 
@@ -85,6 +102,7 @@ def _parse_docx_to_text(raw: bytes) -> str:
     from io import BytesIO
 
     from docx import Document
+
     doc = Document(BytesIO(raw))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
     return "\n\n".join(paragraphs)
@@ -101,13 +119,17 @@ async def list_evaluation_sets_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = list_evaluation_sets_impl(tenant_id=tenant_id, limit=limit, offset=offset)
+        data = list_evaluation_sets_impl(
+            tenant_id=tenant_id, limit=limit, offset=offset
+        )
         return _ok(data)
     except AppException:
         raise
     except Exception as exc:
         logger.exception("List evaluation sets error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluation sets")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluation sets"
+        )
 
 
 @router.post("")
@@ -115,21 +137,35 @@ async def create_evaluation_set_api(
     name: str = Body(...),
     description: Optional[str] = Body(None),
     source_filename: Optional[str] = Body(None),
-    jsonl_text: str = Body("", description="Raw JSONL content, empty to create empty set"),
+    jsonl_text: str = Body(
+        "", description="Raw JSONL content, empty to create empty set"
+    ),
     authorization: Optional[str] = Header(None),
 ):
     try:
-        if not name or len(name.strip()) < SET_NAME_MIN_LEN or len(name.strip()) > SET_NAME_MAX_LEN:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
-                f"Evaluation set name must be {SET_NAME_MIN_LEN}-{SET_NAME_MAX_LEN} characters"
+        if (
+            not name
+            or len(name.strip()) < SET_NAME_MIN_LEN
+            or len(name.strip()) > SET_NAME_MAX_LEN
+        ):
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                f"Evaluation set name must be {SET_NAME_MIN_LEN}-{SET_NAME_MAX_LEN} characters",
             )
         user_id, tenant_id = get_current_user_id(authorization)
         existing = count_evaluation_sets_impl(tenant_id=tenant_id)
         if existing >= MAX_EVALUATION_SETS:
-            raise AppException(ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,f"Evaluation set limit reached: {MAX_EVALUATION_SETS}")
+            raise AppException(
+                ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,
+                f"Evaluation set limit reached: {MAX_EVALUATION_SETS}",
+            )
         meta = create_evaluation_set_from_jsonl(
-            tenant_id=tenant_id, name=name.strip(), description=description,
-            source_filename=source_filename, jsonl_text=jsonl_text, created_by=user_id,
+            tenant_id=tenant_id,
+            name=name.strip(),
+            description=description,
+            source_filename=source_filename,
+            jsonl_text=jsonl_text,
+            created_by=user_id,
         )
         return _ok(meta)
     except AppException:
@@ -138,7 +174,9 @@ async def create_evaluation_set_api(
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
     except Exception as exc:
         logger.exception("Create evaluation set error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create evaluation set")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create evaluation set"
+        )
 
 
 @router.post("/upload")
@@ -151,7 +189,9 @@ async def upload_evaluation_set_api(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         if not files:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"At least one file is required")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR, "At least one file is required"
+            )
 
         all_cases: List[Dict[str, Any]] = []
         source_filenames: List[str] = []
@@ -170,7 +210,10 @@ async def upload_evaluation_set_api(
                     jsonl_text = raw.decode("utf-8")
                 except UnicodeDecodeError:
                     jsonl_text = raw.decode("utf-8", errors="replace")
-                    logger.warning("Non-UTF-8 content in uploaded file %s, replaced invalid bytes", filename)
+                    logger.warning(
+                        "Non-UTF-8 content in uploaded file %s, replaced invalid bytes",
+                        filename,
+                    )
                 for line in jsonl_text.strip().splitlines():
                     line = line.strip()
                     if not line:
@@ -178,22 +221,37 @@ async def upload_evaluation_set_api(
                     try:
                         obj = json.loads(line)
                     except json.JSONDecodeError:
-                        logger.warning("Skipping invalid JSONL line in upload: %.80s", line)
+                        logger.warning(
+                            "Skipping invalid JSONL line in upload: %s",
+                            _safe_line_preview(line),
+                        )
                         continue
-                    all_cases.append({
-                        "inputs": {"query": obj.get("query", ""), "context": obj.get("context")}
-                        if obj.get("context")
-                        else {"query": obj.get("query", "")},
-                        "label": {"answer": obj.get("answer", "")},
-                        "case_id": obj.get("case_id"),
-                    })
+                    all_cases.append(
+                        {
+                            "inputs": {
+                                "query": obj.get("query", ""),
+                                "context": obj.get("context"),
+                            }
+                            if obj.get("context")
+                            else {"query": obj.get("query", "")},
+                            "label": {"answer": obj.get("answer", "")},
+                            "case_id": obj.get("case_id"),
+                        }
+                    )
 
         if not all_cases:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"No valid cases found in uploaded files")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                "No valid cases found in uploaded files",
+            )
 
         meta = create_evaluation_set_from_cases(
-            tenant_id=tenant_id, name=name, description=description,
-            source_filename=", ".join(source_filenames), cases=all_cases, created_by=user_id,
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            source_filename=", ".join(source_filenames),
+            cases=all_cases,
+            created_by=user_id,
         )
         return _ok(meta)
     except AppException:
@@ -201,7 +259,9 @@ async def upload_evaluation_set_api(
 
     except Exception as exc:
         logger.exception("Upload evaluation set error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to upload evaluation set")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to upload evaluation set"
+        )
 
 
 @router.get("/template")
@@ -210,7 +270,9 @@ async def download_evaluation_set_template_api():
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="evaluation_set_template.xlsx"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="evaluation_set_template.xlsx"'
+        },
     )
 
 
@@ -221,14 +283,18 @@ async def get_evaluation_set_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = get_evaluation_set_impl(evaluation_set_id=evaluation_set_id, tenant_id=tenant_id)
+        data = get_evaluation_set_impl(
+            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
+        )
         return _ok(data)
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Get evaluation set error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get evaluation set")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to get evaluation set"
+        )
 
 
 @router.get("/{evaluation_set_id}/export")
@@ -240,7 +306,8 @@ async def export_evaluation_set_api(
     try:
         _, tenant_id = get_current_user_id(authorization)
         filename, excel_bytes = export_evaluation_set_impl(
-            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id,
+            evaluation_set_id=evaluation_set_id,
+            tenant_id=tenant_id,
         )
         encoded_filename = quote(filename)
         return StreamingResponse(
@@ -255,7 +322,9 @@ async def export_evaluation_set_api(
 
     except Exception as exc:
         logger.exception("Export evaluation set error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to export evaluation set")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to export evaluation set"
+        )
 
 
 @router.get("/{evaluation_set_id}/cases")
@@ -269,18 +338,28 @@ async def list_evaluation_set_cases_api(
     try:
         _, tenant_id = get_current_user_id(authorization)
         result = list_evaluation_set_cases_impl(
-            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id,
-            limit=limit, offset=offset, query=query,
+            evaluation_set_id=evaluation_set_id,
+            tenant_id=tenant_id,
+            limit=limit,
+            offset=offset,
+            query=query,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": "Success", "data": result["data"], "total": result["total"],
-        })
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "Success",
+                "data": result["data"],
+                "total": result["total"],
+            },
+        )
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("List evaluation set cases error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluation set cases")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluation set cases"
+        )
 
 
 @router.post("/{evaluation_set_id}/cases")
@@ -294,11 +373,24 @@ async def add_evaluation_set_case_api(
         query_text = str((payload.inputs or {}).get("query", ""))
         answer_text = str((payload.label or {}).get("answer", ""))
         if len(query_text) > CASE_QUERY_MAX_LEN:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,f"Query exceeds max length: {CASE_QUERY_MAX_LEN}")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                f"Query exceeds max length: {CASE_QUERY_MAX_LEN}",
+            )
         if len(answer_text) > CASE_ANSWER_MAX_LEN:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,f"Answer exceeds max length: {CASE_ANSWER_MAX_LEN}")
-        data = add_evaluation_set_case_impl(evaluation_set_id, tenant_id, payload.inputs, payload.label, user_id,
-                                             session_id=payload.session_id, turn_order=payload.turn_order)
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                f"Answer exceeds max length: {CASE_ANSWER_MAX_LEN}",
+            )
+        data = add_evaluation_set_case_impl(
+            evaluation_set_id,
+            tenant_id,
+            payload.inputs,
+            payload.label,
+            user_id,
+            session_id=payload.session_id,
+            turn_order=payload.turn_order,
+        )
         return _ok(data)
     except AppException:
         raise
@@ -317,8 +409,15 @@ async def update_evaluation_set_case_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        updated = update_evaluation_set_case_impl(evaluation_set_id, case_id, tenant_id, payload.inputs, payload.label,
-                                                     session_id=payload.session_id, turn_order=payload.turn_order)
+        updated = update_evaluation_set_case_impl(
+            evaluation_set_id,
+            case_id,
+            tenant_id,
+            payload.inputs,
+            payload.label,
+            session_id=payload.session_id,
+            turn_order=payload.turn_order,
+        )
         if not updated:
             raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Case not found")
         return _ok()
@@ -358,13 +457,17 @@ async def batch_delete_cases_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        deleted = batch_delete_evaluation_set_cases_impl(evaluation_set_id, payload.case_ids, tenant_id)
+        deleted = batch_delete_evaluation_set_cases_impl(
+            evaluation_set_id, payload.case_ids, tenant_id
+        )
         return _ok({"deleted": deleted})
     except AppException:
         raise
     except Exception as exc:
         logger.exception("Batch delete cases error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to batch delete cases")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to batch delete cases"
+        )
 
 
 @router.delete("/{evaluation_set_id}")
@@ -379,11 +482,11 @@ async def delete_evaluation_set_api(
     except AppException:
         raise
 
-
-
     except Exception as exc:
         logger.exception("Delete evaluation set error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluation set")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluation set"
+        )
 
 
 @router.post("/generate-cases-async")
@@ -409,29 +512,45 @@ async def generate_cases_async_api(
         file_name = None
         if file and isinstance(file, UploadFile):
             if not file.filename or not file.filename.lower().endswith(".docx"):
-                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Only .docx files are supported")
+                raise AppException(
+                    ErrorCode.COMMON_VALIDATION_ERROR, "Only .docx files are supported"
+                )
             raw = await file.read()
             if len(raw) > MAX_DOCX_FILE_SIZE:
-                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, f"File size exceeds {MAX_DOCX_FILE_SIZE // (1024*1024)}MB limit")
+                raise AppException(
+                    ErrorCode.COMMON_VALIDATION_ERROR,
+                    f"File size exceeds {MAX_DOCX_FILE_SIZE // (1024 * 1024)}MB limit",
+                )
             try:
                 file_content = _parse_docx_to_text(raw)
             except Exception as e:
-                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, f"Failed to parse DOCX file: {e}") from e
+                raise AppException(
+                    ErrorCode.COMMON_VALIDATION_ERROR, f"Failed to parse DOCX file: {e}"
+                ) from e
             file_name = file.filename
 
         if payload.target_set_id:
             set_id = payload.target_set_id
             n = count_active_runs_using_set(set_id, tenant_id)
             if n > 0:
-                raise AppException(ErrorCode.AGENT_EVALUATION_SET_IN_USE,
-                    f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified")
+                raise AppException(
+                    ErrorCode.AGENT_EVALUATION_SET_IN_USE,
+                    f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified",
+                )
             _update_generation_status(set_id, tenant_id, "GENERATING", 0)
         else:
             if not payload.set_name:
-                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"set_name is required when target_set_id is not provided")
+                raise AppException(
+                    ErrorCode.COMMON_VALIDATION_ERROR,
+                    "set_name is required when target_set_id is not provided",
+                )
             meta = create_evaluation_set_from_jsonl(
-                tenant_id=tenant_id, name=payload.set_name, description=payload.set_description,
-                source_filename=None, jsonl_text="", created_by=user_id,
+                tenant_id=tenant_id,
+                name=payload.set_name,
+                description=payload.set_description,
+                source_filename=None,
+                jsonl_text="",
+                created_by=user_id,
             )
             set_id = meta["evaluation_set_id"]
             _update_generation_status(set_id, tenant_id, "GENERATING", 0)
@@ -439,10 +558,17 @@ async def generate_cases_async_api(
         is_new = not bool(payload.target_set_id)
         pool.submit(
             _generate_cases_async,
-            set_id, tenant_id, user_id,
-            payload.description, payload.count, payload.model_id,
-            file_content, file_name, payload.agent_id,
-            is_new, payload.knowledge_base_names,
+            set_id,
+            tenant_id,
+            user_id,
+            payload.description,
+            payload.count,
+            payload.model_id,
+            file_content,
+            file_name,
+            payload.agent_id,
+            is_new,
+            payload.knowledge_base_names,
         )
         return _ok({"evaluation_set_id": set_id})
     except AppException:
@@ -450,6 +576,6 @@ async def generate_cases_async_api(
 
     except Exception as exc:
         logger.exception("Generate cases async error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to start generation")
-
-
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to start generation"
+        )
