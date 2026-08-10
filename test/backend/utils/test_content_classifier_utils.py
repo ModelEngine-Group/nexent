@@ -408,3 +408,43 @@ class TestContentClassifier:
                 "origin_type": "model_output_thinking",
             }
         ]
+
+    def test_unknown_tag_is_emitted_as_raw_content(self):
+        classifier = ContentClassifier()
+        results = classifier.classify("before <UNKNOWN> after")
+        assert "<UNKNOWN>" in "".join(event["content"] for event in results)
+        assert all(event["type"] == "others" for event in results)
+
+    def test_overlong_tag_uses_dos_protection(self):
+        classifier = ContentClassifier()
+        classifier.MAX_TAG_LENGTH = 5
+        results = classifier.classify("<123456789>content")
+        assert results[0]["content"] == "<"
+        assert classifier.buffer != "<123456789>content"
+
+    def test_buffer_overflow_emits_oldest_content(self):
+        classifier = ContentClassifier()
+        classifier.MAX_BUFFER_SIZE = 5
+        results = classifier.classify("abcdefgh", origin_type="model_output")
+        assert results == [
+            {
+                "type": "model_output",
+                "content": "abc",
+                "origin_type": "model_output",
+            },
+            {
+                "type": "model_output",
+                "content": "defgh",
+                "origin_type": "model_output",
+            },
+        ]
+        assert classifier.buffer == ""
+
+    def test_file_close_restores_previous_summary_state(self):
+        classifier = ContentClassifier()
+        classifier.classify("<SUMMARY>\n")
+        classifier.classify('<FILE path="notes.txt">\n')
+        classifier.classify("note\n")
+        classifier.classify("</FILE>\n")
+        assert classifier.state == "summary"
+        assert classifier.classify("done")[-1]["type"] == "summary"

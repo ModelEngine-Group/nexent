@@ -2529,6 +2529,46 @@ class TestCreateSkillInteractiveEndpoint:
                 assert '"type":"done"' in response.text
                 mock_stream.assert_awaited_once()
 
+    def test_create_skill_interactive_uses_user_language_when_request_omits_it(self):
+        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "en")):
+            async def stream():
+                yield 'data: {"type":"done","content":""}\n\n'
+
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                return_value=stream(),
+            ) as mock_stream:
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                response = TestClient(app).post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill"},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+        assert response.status_code == 200
+        assert mock_stream.await_args.kwargs["tenant_id"] == "tenant123"
+        assert mock_stream.await_args.kwargs["language"] == "en"
+
+    def test_create_skill_interactive_maps_runtime_error_to_server_error(self):
+        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "zh")):
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("failed"),
+            ):
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                response = TestClient(app).post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill"},
+                    headers={"Authorization": "Bearer token123"},
+                )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "NL2Skill run error."
+
     def test_create_skill_interactive_unauthorized(self, mocker):
         """Test interactive skill creation without auth."""
         with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
