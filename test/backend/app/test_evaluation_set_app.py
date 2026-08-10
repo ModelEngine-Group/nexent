@@ -4,7 +4,7 @@ import io
 import sys
 import types
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -43,9 +43,16 @@ def _register_package(name: str) -> types.ModuleType:
 
 
 for _name in (
-    "nexent", "nexent.core", "nexent.core.agents", "nexent.core.utils",
-    "nexent.memory", "nexent.monitor", "nexent.storage",
-    "database", "services", "utils",
+    "nexent",
+    "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.utils",
+    "nexent.memory",
+    "nexent.monitor",
+    "nexent.storage",
+    "database",
+    "services",
+    "utils",
 ):
     _register_package(_name)
 
@@ -69,8 +76,14 @@ if _db_pkg is None or not getattr(_db_pkg, "__path__", None):
 # already adds the sdk/ directory).  If a stale stub exists, remove it so the
 # real package can be imported.
 for _name in (
-    "nexent", "nexent.core", "nexent.core.agents", "nexent.core.agents.agent_model",
-    "nexent.core.utils", "nexent.memory", "nexent.monitor", "nexent.storage",
+    "nexent",
+    "nexent.core",
+    "nexent.core.agents",
+    "nexent.core.agents.agent_model",
+    "nexent.core.utils",
+    "nexent.memory",
+    "nexent.monitor",
+    "nexent.storage",
 ):
     existing = sys.modules.get(_name)
     if existing is not None and not getattr(existing, "__path__", None):
@@ -98,15 +111,43 @@ if _adapters_pkg is None or not getattr(_adapters_pkg, "__path__", None):
     sys.modules["adapters"] = _adapters_pkg
 
 
+# ---------------------------------------------------------------------------
+# Helpers — build the same ``AppException`` the service layer raises.
+# Service code never raises bare ``ValueError``; it always raises
+# ``AppException`` with a specific ``ErrorCode``.  Using the real exception
+# class keeps these tests faithful to production behaviour.
+# ---------------------------------------------------------------------------
+def _exc(error_code, message):
+    from consts.exceptions import AppException
+
+    return AppException(error_code, message)
+
+
+def _code(name):
+    from consts.error_code import ErrorCode
+
+    return getattr(ErrorCode, name)
+
+
 @pytest.fixture
 def client():
-    """Build a FastAPI TestClient with the evaluation_set router mounted."""
+    """Build a FastAPI TestClient with the evaluation_set router mounted.
+
+    The global ``ExceptionHandlerMiddleware`` is registered so that
+    ``AppException`` raised by endpoints is translated to a JSON HTTP
+    response (matching production behaviour) instead of propagating out
+    of ``TestClient`` as a raw exception.
+    """
     from fastapi import FastAPI
+    from middleware.exception_handler import ExceptionHandlerMiddleware
+
     from backend.apps.evaluation_set_app import router
 
     app = FastAPI()
+    app.add_middleware(ExceptionHandlerMiddleware)
     app.include_router(router)
     from fastapi.testclient import TestClient
+
     return TestClient(app)
 
 
@@ -126,7 +167,10 @@ def _mock_service_impl(service_module, **impl_overrides):
         "create_evaluation_set_from_cases": MagicMock(return_value={"id": 2}),
         "delete_evaluation_set_impl": MagicMock(),
         "get_evaluation_set_impl": MagicMock(return_value={"id": 1, "name": "set"}),
-        "list_evaluation_set_cases_impl": MagicMock(return_value={"cases": []}),
+        # The list-cases endpoint reads result["data"] and result["total"].
+        "list_evaluation_set_cases_impl": MagicMock(
+            return_value={"data": [], "total": 0}
+        ),
     }
     defaults.update(impl_overrides)
     for name, mock in defaults.items():
@@ -135,12 +179,15 @@ def _mock_service_impl(service_module, **impl_overrides):
 
 
 def _mock_auth(evaluation_set_app, user_id="u1", tenant_id="t1"):
-    evaluation_set_app.get_current_user_id = MagicMock(return_value=(user_id, tenant_id))
+    evaluation_set_app.get_current_user_id = MagicMock(
+        return_value=(user_id, tenant_id)
+    )
 
 
 # ---------------------------------------------------------------------------
 # GET /evaluation-sets
 # ---------------------------------------------------------------------------
+
 
 class TestListEvaluationSets:
     def test_returns_paginated_list(self, client):
@@ -166,6 +213,7 @@ class TestListEvaluationSets:
 # POST /evaluation-sets
 # ---------------------------------------------------------------------------
 
+
 class TestCreateEvaluationSet:
     def test_creates_from_jsonl(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -179,8 +227,12 @@ class TestCreateEvaluationSet:
         assert response.json()["data"] == {"id": 1}
 
     def test_400_on_value_error(self, client):
+        # Service raises COMMON_VALIDATION_ERROR (→400) for bad input.
         evaluation_set_app = _mock_service_impl(
-            None, create_evaluation_set_from_jsonl=MagicMock(side_effect=ValueError("bad input")),
+            None,
+            create_evaluation_set_from_jsonl=MagicMock(
+                side_effect=_exc(_code("COMMON_VALIDATION_ERROR"), "bad input")
+            ),
         )
         _mock_auth(evaluation_set_app)
 
@@ -189,11 +241,14 @@ class TestCreateEvaluationSet:
             json={"name": "set", "jsonl_text": "{}"},
         )
         assert response.status_code == 400
-        assert "bad input" in response.json()["detail"]
+        assert "bad input" in response.json()["message"]
 
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(
-            None, create_evaluation_set_from_jsonl=MagicMock(side_effect=RuntimeError("db down")),
+            None,
+            create_evaluation_set_from_jsonl=MagicMock(
+                side_effect=RuntimeError("db down")
+            ),
         )
         _mock_auth(evaluation_set_app)
 
@@ -207,6 +262,7 @@ class TestCreateEvaluationSet:
 # ---------------------------------------------------------------------------
 # POST /evaluation-sets/upload
 # ---------------------------------------------------------------------------
+
 
 class TestUploadEvaluationSet:
     @staticmethod
@@ -227,7 +283,16 @@ class TestUploadEvaluationSet:
         _mock_auth(evaluation_set_app)
 
         xlsx = self._make_xlsx_bytes(["query", "answer"], [["q1", "a1"]])
-        files = [("files", ("set.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))]
+        files = [
+            (
+                "files",
+                (
+                    "set.xlsx",
+                    xlsx,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            )
+        ]
 
         response = client.post(
             "/evaluation-sets/upload",
@@ -263,7 +328,16 @@ class TestUploadEvaluationSet:
         _mock_auth(evaluation_set_app)
 
         jsonl_content = '{"query":"q1","answer":"a1"}\n{"query":"q2","answer":"a2"}\n'
-        files = [("files", ("cases.jsonl", jsonl_content.encode("utf-8"), "application/x-jsonlines"))]
+        files = [
+            (
+                "files",
+                (
+                    "cases.jsonl",
+                    jsonl_content.encode("utf-8"),
+                    "application/x-jsonlines",
+                ),
+            )
+        ]
 
         response = client.post(
             "/evaluation-sets/upload",
@@ -293,9 +367,11 @@ class TestUploadEvaluationSet:
             files=files,
         )
         assert response.status_code == 200, response.text
-        assert captured["cases"][0]["query"] == "q"
-        assert captured["cases"][0]["answer"] == "a"
-        assert captured["cases"][0]["context"] == "ctx"
+        # Upload endpoint wraps each JSONL object into the nested
+        # {"inputs": {...}, "label": {...}, "case_id": ...} structure.
+        assert captured["cases"][0]["inputs"]["query"] == "q"
+        assert captured["cases"][0]["inputs"]["context"] == "ctx"
+        assert captured["cases"][0]["label"]["answer"] == "a"
         assert captured["cases"][0]["case_id"] == "c1"
 
     def test_upload_jsonl_with_invalid_utf8(self, client):
@@ -310,7 +386,9 @@ class TestUploadEvaluationSet:
 
         evaluation_set_app.create_evaluation_set_from_cases.side_effect = _capture
 
-        # Invalid UTF-8 bytes — should be decoded with errors='ignore'.
+        # Invalid UTF-8 bytes — after ``errors="replace"`` decoding the
+        # single line is not valid JSON, so no cases are produced and the
+        # endpoint raises COMMON_VALIDATION_ERROR (→400).
         bad = b'\xff\xfe{"query":"q","answer":"a"}'
         files = [("files", ("cases.jsonl", bad, "application/x-jsonlines"))]
 
@@ -319,7 +397,8 @@ class TestUploadEvaluationSet:
             data={"name": "test"},
             files=files,
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 400, response.text
+        assert "No valid cases" in response.json()["message"]
 
     def test_upload_with_empty_cases_returns_400(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -334,7 +413,7 @@ class TestUploadEvaluationSet:
             files=files,
         )
         assert response.status_code == 400
-        assert "No valid cases" in response.json()["detail"]
+        assert "No valid cases" in response.json()["message"]
 
     def test_upload_with_invalid_jsonl_returns_500(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -347,15 +426,15 @@ class TestUploadEvaluationSet:
             data={"name": "test"},
             files=files,
         )
-        # Bad JSON in JSONL raises JSONDecodeError which is not a ValueError
-        # but a subclass; the app either surfaces it as 400 (via ValueError
-        # branch) or 500 (via the bare except).  Both are valid error paths.
+        # Bad JSON lines are skipped; with no valid cases the endpoint
+        # raises COMMON_VALIDATION_ERROR (→400).
         assert response.status_code in (400, 422, 500)
 
 
 # ---------------------------------------------------------------------------
 # GET /evaluation-sets/template
 # ---------------------------------------------------------------------------
+
 
 class TestTemplateEndpoint:
     def test_returns_xlsx_streaming_response(self, client):
@@ -371,6 +450,7 @@ class TestTemplateEndpoint:
 # GET /evaluation-sets/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetEvaluationSet:
     def test_returns_evaluation_set(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -384,7 +464,8 @@ class TestGetEvaluationSet:
 
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(
-            None, get_evaluation_set_impl=MagicMock(side_effect=RuntimeError("not found")),
+            None,
+            get_evaluation_set_impl=MagicMock(side_effect=RuntimeError("not found")),
         )
         _mock_auth(evaluation_set_app)
 
@@ -396,6 +477,7 @@ class TestGetEvaluationSet:
 # GET /evaluation-sets/{id}/cases
 # ---------------------------------------------------------------------------
 
+
 class TestListCasesEndpoint:
     def test_returns_cases(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -404,11 +486,16 @@ class TestListCasesEndpoint:
         response = client.get("/evaluation-sets/1/cases?limit=10&offset=0")
         assert response.status_code == 200
         body = response.json()
-        assert body["data"] == {"cases": []}
+        # The endpoint returns {"message": "Success", "data": [...], "total": N}
+        assert body["data"] == []
+        assert body["total"] == 0
 
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(
-            None, list_evaluation_set_cases_impl=MagicMock(side_effect=RuntimeError("db down")),
+            None,
+            list_evaluation_set_cases_impl=MagicMock(
+                side_effect=RuntimeError("db down")
+            ),
         )
         _mock_auth(evaluation_set_app)
 
@@ -420,6 +507,7 @@ class TestListCasesEndpoint:
 # DELETE /evaluation-sets/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteEvaluationSet:
     def test_successful_delete(self, client):
         evaluation_set_app = _mock_service_impl(None)
@@ -429,16 +517,20 @@ class TestDeleteEvaluationSet:
         assert response.status_code == 200
         assert response.json()["message"] == "Success"
 
-    def test_400_on_value_error(self, client):
+    def test_409_on_set_in_use(self, client):
+        # Service raises AGENT_EVALUATION_SET_IN_USE (→409) when the set
+        # is still referenced by evaluation runs.
         evaluation_set_app = _mock_service_impl(
             None,
-            delete_evaluation_set_impl=MagicMock(side_effect=ValueError("set in use")),
+            delete_evaluation_set_impl=MagicMock(
+                side_effect=_exc(_code("AGENT_EVALUATION_SET_IN_USE"), "set in use")
+            ),
         )
         _mock_auth(evaluation_set_app)
 
         response = client.delete("/evaluation-sets/1")
-        assert response.status_code == 400
-        assert "set in use" in response.json()["detail"]
+        assert response.status_code == 409
+        assert "set in use" in response.json()["message"]
 
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(
