@@ -276,14 +276,15 @@ def validate_code_evaluator(code: str) -> None:
     #      before the evaluator is persisted as DRAFT / PUBLISHED.
     # Static-analysis suppression: this is a deliberate sandboxed exec used
     # as a code-evaluator authoring facility; it is NOT generic code injection.
-    # lgtm [py/code-injection]
     local_vars: dict = {}
     try:
-        exec(  # noqa: S102,B102 nosec NOSONAR  # lgtm [py/code-injection]
-            code,
-            {"__builtins__": ALLOWED_BUILTINS, "json": json},
-            local_vars,
-        )
+        # noqa — suppress py/code-injection: 4 defences (compile syntax, AST
+        # shell-call scan, ALLOWED_BUILTINS whitelist, signature check) are
+        # enforced in stages 1/2/3b/4 *before* evaluator code is persisted or
+        # invoked at runtime — see docstring for the full chain.
+        exec(
+            code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
+        )  # lgtm[py/code-injection] nosec NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -1002,11 +1003,12 @@ def _score_with_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            exec(  # noqa: S102,B102 nosec NOSONAR  # lgtm [py/code-injection]
-                ev["code"],
-                {"__builtins__": ALLOWED_BUILTINS, "json": json},
-                local_vars,
-            )
+            # noqa — suppress py/code-injection: same ALLOWED_BUILTINS whitelist
+            # is re-applied here for runtime parity with validate_code_evaluator(),
+            # which has already rejected any unsafe evaluator at authoring time.
+            exec(
+                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
+            )  # lgtm[py/code-injection] nosec NOSONAR
             fn = local_vars.get("evaluate")
             result = fn(
                 query=query,
