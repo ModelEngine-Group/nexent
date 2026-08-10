@@ -96,6 +96,66 @@ _consts_model_module.AgentRequest = MagicMock()
 sys.modules["consts.model"] = _consts_model_module
 _consts_pkg.model = _consts_model_module
 
+# ── consts.error_code stub with all enumerators referenced by service ──
+_consts_error_code_module = types.ModuleType("consts.error_code")
+
+
+class _ErrorCode:
+    COMMON_VALIDATION_ERROR = "COMMON_VALIDATION_ERROR"
+    COMMON_RESOURCE_NOT_FOUND = "COMMON_RESOURCE_NOT_FOUND"
+    AGENT_EVALUATION_GENERATION_BAD_FORMAT = "AGENT_EVALUATION_GENERATION_BAD_FORMAT"
+    AGENT_EVALUATION_AGENT_NOT_FOUND = "AGENT_EVALUATION_AGENT_NOT_FOUND"
+    AGENT_EVALUATION_SET_IN_USE = "AGENT_EVALUATION_SET_IN_USE"
+    AGENT_EVALUATION_TURN_ORDER_MISMATCH = "AGENT_EVALUATION_TURN_ORDER_MISMATCH"
+    AGENT_EVALUATION_TURN_DELETE_NOT_LAST = "AGENT_EVALUATION_TURN_DELETE_NOT_LAST"
+    AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS = (
+        "AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS"
+    )
+    AGENT_EVALUATION_CASE_GENERATION_FORMAT = "AGENT_EVALUATION_CASE_GENERATION_FORMAT"
+    AGENT_EVALUATION_CASE_GENERATION_EMPTY = "AGENT_EVALUATION_CASE_GENERATION_EMPTY"
+
+
+_consts_error_code_module.ErrorCode = _ErrorCode
+sys.modules["consts.error_code"] = _consts_error_code_module
+_consts_pkg.error_code = _consts_error_code_module
+
+# ── consts.evaluation_limits stub ──
+_consts_limits_module = types.ModuleType("consts.evaluation_limits")
+_consts_limits_module.MAX_CASES_PER_SET = 10000
+sys.modules["consts.evaluation_limits"] = _consts_limits_module
+_consts_pkg.evaluation_limits = _consts_limits_module
+
+# ── consts.evaluation_status stub ──
+_consts_status_module = types.ModuleType("consts.evaluation_status")
+
+
+class _EvalRunStatus:
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+_consts_status_module.EvalRunStatus = _EvalRunStatus
+sys.modules["consts.evaluation_status"] = _consts_status_module
+_consts_pkg.evaluation_status = _consts_status_module
+
+# ── consts.exceptions stub (real Exception subclass so try/except works) ──
+_consts_exceptions_module = types.ModuleType("consts.exceptions")
+
+
+class _AppException(Exception):
+    def __init__(self, error_code=None, message=None):
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message)
+
+
+_consts_exceptions_module.AppException = _AppException
+sys.modules["consts.exceptions"] = _consts_exceptions_module
+_consts_pkg.exceptions = _consts_exceptions_module
+
 _db_pkg = _register_package("database")
 _db_client_module = MagicMock()
 sys.modules["database.client"] = _db_client_module
@@ -112,8 +172,26 @@ _db_pkg.agent_version_db = _agent_version_db_mock
 
 _evaluation_set_db_mock = MagicMock()
 _evaluation_set_db_mock.soft_delete_evaluation_set = MagicMock()
+_evaluation_set_db_mock.hard_delete_evaluation_set = MagicMock()
 sys.modules["database.evaluation_set_db"] = _evaluation_set_db_mock
 _db_pkg.evaluation_set_db = _evaluation_set_db_mock
+
+# ── database.knowledge_db stub ──
+_knowledge_db_mock = MagicMock()
+_knowledge_db_mock.get_index_name_by_knowledge_name = MagicMock()
+sys.modules["database.knowledge_db"] = _knowledge_db_mock
+_db_pkg.knowledge_db = _knowledge_db_mock
+
+# ── utils package + sub-module stubs referenced by evaluation_set_service ──
+_utils_pkg = _register_package("utils")
+
+_utils_llm_mock = MagicMock()
+sys.modules["utils.llm_utils"] = _utils_llm_mock
+_utils_pkg.llm_utils = _utils_llm_mock
+
+_utils_prompt_mock = MagicMock()
+sys.modules["utils.prompt_template_utils"] = _utils_prompt_mock
+_utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 
 @pytest.fixture
@@ -135,7 +213,9 @@ def service_module(monkeypatch):
     class _SessionCtx:
         def __enter__(self_inner):
             session = MagicMock()
-            session.query.return_value.filter.return_value.count.return_value = session_holder["count"]
+            session.query.return_value.filter.return_value.count.return_value = (
+                session_holder["count"]
+            )
             return session
 
         def __exit__(self_inner, exc_type, exc, tb):
@@ -153,9 +233,9 @@ def service_module(monkeypatch):
     # Patch the names bound at module load time so the test exercises the
     # mocked implementations.
     evaluation_set_service.get_db_session = MagicMock(return_value=_SessionCtx())
-    evaluation_set_service.soft_delete_evaluation_set = _evaluation_set_db_mock.soft_delete_evaluation_set
-
+    evaluation_set_service.hard_delete_evaluation_set = MagicMock()
     _evaluation_set_db_mock.soft_delete_evaluation_set.reset_mock()
+    _evaluation_set_db_mock.hard_delete_evaluation_set.reset_mock()
     return evaluation_set_service, session_holder
 
 
@@ -163,9 +243,9 @@ def test_delete_blocked_when_referenced(service_module):
     service, holder = service_module
     holder["count"] = 3
 
-    with pytest.raises(ValueError, match="referenced by 3"):
+    with pytest.raises(_AppException, match="referenced by 3"):
         service.delete_evaluation_set_impl(1, "t1", "u1")
-    service.soft_delete_evaluation_set.assert_not_called()
+    service.hard_delete_evaluation_set.assert_not_called()
 
 
 def test_delete_allowed_when_no_references(service_module):
@@ -173,7 +253,7 @@ def test_delete_allowed_when_no_references(service_module):
     holder["count"] = 0
 
     service.delete_evaluation_set_impl(1, "t1", "u1")
-    service.soft_delete_evaluation_set.assert_called_once_with(1, "t1", "u1")
+    service.hard_delete_evaluation_set.assert_called_once_with(1, "t1")
 
 
 def test_count_active_runs_using_set(service_module):
@@ -186,6 +266,7 @@ def test_count_active_runs_using_set(service_module):
 # ---------------------------------------------------------------------------
 # _validate_single_turn_case — drives the parser's per-case validation.
 # ---------------------------------------------------------------------------
+
 
 class TestValidateSingleTurnCase:
     def test_accepts_minimal_case(self, service_module):
@@ -201,85 +282,102 @@ class TestValidateSingleTurnCase:
 
     def test_includes_context_when_provided(self, service_module):
         service, _ = service_module
-        result = service._validate_single_turn_case({
-            "inputs": {"query": "q", "context": "ctx"},
-            "label": {"answer": "a"},
-        })
+        result = service._validate_single_turn_case(
+            {
+                "inputs": {"query": "q", "context": "ctx"},
+                "label": {"answer": "a"},
+            }
+        )
         assert result["inputs"]["context"] == "ctx"
 
     def test_includes_case_id_when_provided(self, service_module):
         service, _ = service_module
-        result = service._validate_single_turn_case({
-            "case_id": "c1",
-            "inputs": {"query": "q"},
-            "label": {"answer": "a"},
-        })
+        result = service._validate_single_turn_case(
+            {
+                "case_id": "c1",
+                "inputs": {"query": "q"},
+                "label": {"answer": "a"},
+            }
+        )
         assert result["case_id"] == "c1"
 
     def test_rejects_non_dict(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="case must be an object"):
+        with pytest.raises(_AppException, match="case must be an object"):
             service._validate_single_turn_case(["not a dict"])
 
     def test_rejects_missing_inputs(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="inputs must be an object"):
+        with pytest.raises(_AppException, match="inputs must be an object"):
             service._validate_single_turn_case({"label": {"answer": "a"}})
 
     def test_rejects_missing_label(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="label must be an object"):
+        with pytest.raises(_AppException, match="label must be an object"):
             service._validate_single_turn_case({"inputs": {"query": "q"}})
 
     def test_rejects_empty_query(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="inputs.query must be a non-empty string"):
+        with pytest.raises(
+            _AppException, match="inputs.query must be a non-empty string"
+        ):
             service._validate_single_turn_case(
                 {"inputs": {"query": "   "}, "label": {"answer": "a"}},
             )
 
     def test_rejects_non_string_query(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="inputs.query must be a non-empty string"):
+        with pytest.raises(
+            _AppException, match="inputs.query must be a non-empty string"
+        ):
             service._validate_single_turn_case(
                 {"inputs": {"query": 123}, "label": {"answer": "a"}},
             )
 
     def test_rejects_non_string_context(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="inputs.context must be a string"):
-            service._validate_single_turn_case({
-                "inputs": {"query": "q", "context": 123},
-                "label": {"answer": "a"},
-            })
+        with pytest.raises(_AppException, match="inputs.context must be a string"):
+            service._validate_single_turn_case(
+                {
+                    "inputs": {"query": "q", "context": 123},
+                    "label": {"answer": "a"},
+                }
+            )
 
     def test_rejects_empty_answer(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="label.answer must be a non-empty string"):
+        with pytest.raises(
+            _AppException, match="label.answer must be a non-empty string"
+        ):
             service._validate_single_turn_case(
                 {"inputs": {"query": "q"}, "label": {"answer": ""}},
             )
 
     def test_rejects_non_string_answer(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="label.answer must be a non-empty string"):
+        with pytest.raises(
+            _AppException, match="label.answer must be a non-empty string"
+        ):
             service._validate_single_turn_case(
                 {"inputs": {"query": "q"}, "label": {"answer": None}},
             )
 
     def test_rejects_non_string_case_id(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="case_id must be a string"):
-            service._validate_single_turn_case({
-                "case_id": 123,
-                "inputs": {"query": "q"},
-                "label": {"answer": "a"},
-            })
+        with pytest.raises(_AppException, match="case_id must be a string"):
+            service._validate_single_turn_case(
+                {
+                    "case_id": 123,
+                    "inputs": {"query": "q"},
+                    "label": {"answer": "a"},
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
 # parse_jsonl_cases — exercises the JSONL parser and its error branches.
 # ---------------------------------------------------------------------------
+
 
 class TestParseJsonlCases:
     def test_parses_single_case(self, service_module):
@@ -304,36 +402,29 @@ class TestParseJsonlCases:
 
     def test_skips_blank_lines(self, service_module):
         service, _ = service_module
-        jsonl = (
-            '\n'
-            '{"inputs": {"query": "q"}, "label": {"answer": "a"}}\n'
-            '\n\n'
-        )
+        jsonl = '\n{"inputs": {"query": "q"}, "label": {"answer": "a"}}\n\n\n'
         cases = service.parse_jsonl_cases(jsonl)
         assert len(cases) == 1
 
     def test_rejects_invalid_json(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="Invalid JSON at line 1"):
-            service.parse_jsonl_cases('{not valid json')
+        with pytest.raises(_AppException, match="Invalid JSON at line 1"):
+            service.parse_jsonl_cases("{not valid json")
 
     def test_rejects_invalid_json_on_second_line(self, service_module):
         service, _ = service_module
-        jsonl = (
-            '{"inputs": {"query": "q"}, "label": {"answer": "a"}}\n'
-            '{garbage\n'
-        )
-        with pytest.raises(ValueError, match="Invalid JSON at line 2"):
+        jsonl = '{"inputs": {"query": "q"}, "label": {"answer": "a"}}\n{garbage\n'
+        with pytest.raises(_AppException, match="Invalid JSON at line 2"):
             service.parse_jsonl_cases(jsonl)
 
     def test_rejects_empty_jsonl(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="JSONL contains no cases"):
+        with pytest.raises(_AppException, match="JSONL contains no cases"):
             service.parse_jsonl_cases("")
 
     def test_rejects_only_blank_lines(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="JSONL contains no cases"):
+        with pytest.raises(_AppException, match="JSONL contains no cases"):
             service.parse_jsonl_cases("\n\n   \n")
 
     def test_propagates_validation_errors_with_line_numbers(self, service_module):
@@ -342,7 +433,9 @@ class TestParseJsonlCases:
             '{"inputs": {"query": "q"}, "label": {"answer": "a"}}\n'
             '{"inputs": {"query": ""}, "label": {"answer": "a"}}\n'
         )
-        with pytest.raises(ValueError, match="inputs.query must be a non-empty string"):
+        with pytest.raises(
+            _AppException, match="inputs.query must be a non-empty string"
+        ):
             service.parse_jsonl_cases(jsonl)
 
 
@@ -350,17 +443,20 @@ class TestParseJsonlCases:
 # create_evaluation_set_from_cases
 # ---------------------------------------------------------------------------
 
+
 class TestCreateEvaluationSetFromCases:
     def test_creates_and_inserts_with_case_count(self, service_module, monkeypatch):
         service, _ = service_module
 
         # Wire mocks on the freshly imported module reference.
         monkeypatch.setattr(
-            service, "create_evaluation_set",
+            service,
+            "create_evaluation_set",
             MagicMock(return_value={"evaluation_set_id": 42}),
         )
         monkeypatch.setattr(
-            service, "insert_evaluation_set_cases",
+            service,
+            "insert_evaluation_set_cases",
             MagicMock(return_value=3),
         )
         update_mock = MagicMock()
@@ -372,8 +468,12 @@ class TestCreateEvaluationSetFromCases:
             {"inputs": {"query": "q3"}, "label": {"answer": "a3"}},
         ]
         meta = service.create_evaluation_set_from_cases(
-            tenant_id="t1", name="n", description="d",
-            source_filename="src", cases=cases, created_by="u1",
+            tenant_id="t1",
+            name="n",
+            description="d",
+            source_filename="src",
+            cases=cases,
+            created_by="u1",
         )
 
         assert meta == {"evaluation_set_id": 42, "case_count": 3}
@@ -381,10 +481,14 @@ class TestCreateEvaluationSetFromCases:
 
     def test_rejects_empty_cases(self, service_module):
         service, _ = service_module
-        with pytest.raises(ValueError, match="cases is empty"):
+        with pytest.raises(_AppException, match="cases is empty"):
             service.create_evaluation_set_from_cases(
-                tenant_id="t1", name="n", description=None,
-                source_filename=None, cases=[], created_by="u1",
+                tenant_id="t1",
+                name="n",
+                description=None,
+                source_filename=None,
+                cases=[],
+                created_by="u1",
             )
 
 
@@ -392,19 +496,27 @@ class TestCreateEvaluationSetFromCases:
 # create_evaluation_set_from_jsonl
 # ---------------------------------------------------------------------------
 
+
 class TestCreateEvaluationSetFromJsonl:
     def test_parses_and_delegates(self, service_module, monkeypatch):
         service, _ = service_module
         delegator = MagicMock(return_value={"evaluation_set_id": 1})
         monkeypatch.setattr(service, "create_evaluation_set_from_cases", delegator)
         monkeypatch.setattr(
-            service, "parse_jsonl_cases",
-            MagicMock(return_value=[{"inputs": {"query": "q"}, "label": {"answer": "a"}}]),
+            service,
+            "parse_jsonl_cases",
+            MagicMock(
+                return_value=[{"inputs": {"query": "q"}, "label": {"answer": "a"}}]
+            ),
         )
 
         result = service.create_evaluation_set_from_jsonl(
-            tenant_id="t1", name="n", description="d",
-            source_filename="src", jsonl_text="ignored", created_by="u1",
+            tenant_id="t1",
+            name="n",
+            description="d",
+            source_filename="src",
+            jsonl_text="ignored",
+            created_by="u1",
         )
         assert result == {"evaluation_set_id": 1}
         delegator.assert_called_once()
@@ -414,6 +526,7 @@ class TestCreateEvaluationSetFromJsonl:
 # list / get / list_cases impls — thin pass-through wrappers.
 # ---------------------------------------------------------------------------
 
+
 class TestListImpls:
     def test_list_evaluation_sets_impl(self, service_module, monkeypatch):
         service, _ = service_module
@@ -421,7 +534,9 @@ class TestListImpls:
         monkeypatch.setattr(service, "list_evaluation_sets", underlying)
 
         result = service.list_evaluation_sets_impl(
-            tenant_id="t1", limit=10, offset=20,
+            tenant_id="t1",
+            limit=10,
+            offset=20,
         )
         underlying.assert_called_once_with(tenant_id="t1", limit=10, offset=20)
         assert result == [{"id": 1}]
@@ -439,26 +554,38 @@ class TestListImpls:
         service, _ = service_module
         underlying = MagicMock(return_value=[{"case_id": 1}])
         monkeypatch.setattr(service, "list_evaluation_set_cases", underlying)
+        count_mock = MagicMock(return_value=1)
+        monkeypatch.setattr(service, "count_evaluation_set_cases", count_mock)
 
         result = service.list_evaluation_set_cases_impl(
-            evaluation_set_id=1, tenant_id="t1", limit=5, offset=10,
+            evaluation_set_id=1,
+            tenant_id="t1",
+            limit=5,
+            offset=10,
         )
         underlying.assert_called_once_with(
-            evaluation_set_id=1, tenant_id="t1", limit=5, offset=10,
+            evaluation_set_id=1,
+            tenant_id="t1",
+            limit=5,
+            offset=10,
+            query=None,
         )
-        assert result == [{"case_id": 1}]
+        count_mock.assert_called_once_with(1, "t1", query=None)
+        assert result == {"data": [{"case_id": 1}], "total": 1}
 
 
 # ---------------------------------------------------------------------------
 # resolve_latest_published_version_no
 # ---------------------------------------------------------------------------
 
+
 class TestResolveLatestVersion:
     def test_returns_latest_version(self, service_module, monkeypatch):
         service, _ = service_module
         # query_version_list returns latest-first by existing convention.
         monkeypatch.setattr(
-            service, "query_version_list",
+            service,
+            "query_version_list",
             MagicMock(return_value=[{"version_no": 7}, {"version_no": 3}]),
         )
         assert service.resolve_latest_published_version_no(1, "t1") == 7
@@ -466,7 +593,8 @@ class TestResolveLatestVersion:
     def test_returns_coerced_int(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "query_version_list",
+            service,
+            "query_version_list",
             MagicMock(return_value=[{"version_no": "9"}]),
         )
         assert service.resolve_latest_published_version_no(1, "t1") == 9
@@ -474,16 +602,21 @@ class TestResolveLatestVersion:
     def test_raises_when_no_versions(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "query_version_list", MagicMock(return_value=[]),
+            service,
+            "query_version_list",
+            MagicMock(return_value=[]),
         )
-        with pytest.raises(ValueError, match="no published versions"):
+        with pytest.raises(_AppException, match="no published versions"):
             service.resolve_latest_published_version_no(1, "t1")
 
     def test_raises_when_version_no_missing(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "query_version_list",
+            service,
+            "query_version_list",
             MagicMock(return_value=[{"name": "no_version_field"}]),
         )
-        with pytest.raises(ValueError, match="failed to resolve"):
+        with pytest.raises(
+            _AppException, match="Failed to resolve latest published version"
+        ):
             service.resolve_latest_published_version_no(1, "t1")

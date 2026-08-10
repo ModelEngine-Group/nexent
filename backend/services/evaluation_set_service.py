@@ -31,6 +31,7 @@ from database.evaluation_set_db import (
     list_case_turn_orders_by_session,
     list_evaluation_set_cases,
     list_evaluation_sets,
+    update_evaluation_set_case_count,
 )
 from database.knowledge_db import get_index_name_by_knowledge_name
 from utils.llm_utils import call_llm_for_system_prompt
@@ -44,35 +45,49 @@ MAX_TURNS_PER_SESSION = 100
 
 def _validate_single_turn_case(obj: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(obj, dict):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"case must be an object")
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "case must be an object")
 
     inputs = obj.get("inputs")
     label = obj.get("label")
 
     if not isinstance(inputs, dict):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"inputs must be an object")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "inputs must be an object"
+        )
     if not isinstance(label, dict):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"label must be an object")
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "label must be an object")
 
     query = inputs.get("query")
     if not isinstance(query, str) or not query.strip():
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"inputs.query must be a non-empty string")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "inputs.query must be a non-empty string"
+        )
 
     context = inputs.get("context")
     if context is not None and not isinstance(context, str):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"inputs.context must be a string when provided")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            "inputs.context must be a string when provided",
+        )
 
     answer = label.get("answer")
     if not isinstance(answer, str) or not answer.strip():
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"label.answer must be a non-empty string")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "label.answer must be a non-empty string"
+        )
 
     case_id = obj.get("case_id")
     if case_id is not None and not isinstance(case_id, str):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,"case_id must be a string when provided")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "case_id must be a string when provided"
+        )
 
     result: Dict[str, Any] = {
         "case_id": case_id,
-        "inputs": {"query": query, **({"context": context} if context is not None else {})},
+        "inputs": {
+            "query": query,
+            **({"context": context} if context is not None else {}),
+        },
         "label": {"answer": answer},
     }
     sid = obj.get("session_id")
@@ -91,12 +106,17 @@ def parse_jsonl_cases(jsonl_text: str) -> List[Dict[str, Any]]:
         try:
             obj = json.loads(line)
         except Exception as exc:
-            raise AppException(ErrorCode.AGENT_EVALUATION_GENERATION_BAD_FORMAT, f"Invalid JSON at line {idx}") from exc
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_GENERATION_BAD_FORMAT,
+                f"Invalid JSON at line {idx}",
+            ) from exc
 
         normalized = _validate_single_turn_case(obj)
         normalized["order_no"] = len(cases)
         cases.append(normalized)
 
+    if not cases:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "JSONL contains no cases")
     return cases
 
 
@@ -109,9 +129,13 @@ def create_evaluation_set_from_cases(
     created_by: Optional[str],
 ) -> Dict[str, Any]:
     # ── Multi-turn / count validations ────────────────────────────
+    if not cases:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "cases is empty")
     if len(cases) > MAX_CASES_PER_SET:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
-            f"Case count {len(cases)} exceeds limit {MAX_CASES_PER_SET}")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            f"Case count {len(cases)} exceeds limit {MAX_CASES_PER_SET}",
+        )
 
     sessions: Dict[str, List[int]] = defaultdict(list)
     for case in cases:
@@ -125,12 +149,16 @@ def create_evaluation_set_from_cases(
 
     for sid, turns in sessions.items():
         if len(turns) > MAX_TURNS_PER_SESSION:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
-                f"Session {sid} has {len(turns)} turns, max {MAX_TURNS_PER_SESSION}")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                f"Session {sid} has {len(turns)} turns, max {MAX_TURNS_PER_SESSION}",
+            )
         sorted_turns = sorted(turns)
         if sorted_turns != list(range(min(sorted_turns), max(sorted_turns) + 1)):
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,
-                f"Session {sid}: turn orders are not consecutive")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                f"Session {sid}: turn orders are not consecutive",
+            )
 
     meta = create_evaluation_set(
         tenant_id=tenant_id,
@@ -147,8 +175,9 @@ def create_evaluation_set_from_cases(
         created_by=created_by,
     )
 
-    if inserted > 0:
-        _recount_set_cases(meta["evaluation_set_id"])
+    update_evaluation_set_case_count(
+        meta["evaluation_set_id"], inserted, updated_by=created_by
+    )
     meta["case_count"] = inserted
     return meta
 
@@ -172,14 +201,18 @@ def create_evaluation_set_from_jsonl(
     )
 
 
-def list_evaluation_sets_impl(tenant_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+def list_evaluation_sets_impl(
+    tenant_id: str, limit: int = 50, offset: int = 0
+) -> List[Dict[str, Any]]:
     return list_evaluation_sets(tenant_id=tenant_id, limit=limit, offset=offset)
 
 
 def get_evaluation_set_impl(evaluation_set_id: int, tenant_id: str) -> Dict[str, Any]:
     data = get_evaluation_set(evaluation_set_id=evaluation_set_id, tenant_id=tenant_id)
     if not data:
-        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found")
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found"
+        )
     return data
 
 
@@ -212,11 +245,17 @@ def resolve_latest_published_version_no(agent_id: int, tenant_id: str) -> int:
     """
     versions = query_version_list(agent_id, tenant_id)
     if not versions:
-        raise AppException(ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND, "Agent has no published versions")
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND,
+            "Agent has no published versions",
+        )
     # query_version_list returns latest first in existing code usage
     latest = versions[0].get("version_no")
     if latest is None:
-        raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Failed to resolve latest published version")
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+            "Failed to resolve latest published version",
+        )
     return int(latest)
 
 
@@ -241,20 +280,28 @@ def count_active_runs_using_set(evaluation_set_id: int, tenant_id: str) -> int:
     COMPLETED and FAILED runs are excluded — they don't prevent deletion.
     """
     with get_db_session() as session:
-        return session.query(AgentEvaluation).filter(
-            AgentEvaluation.evaluation_set_id == evaluation_set_id,
-            AgentEvaluation.tenant_id == tenant_id,
-            AgentEvaluation.delete_flag == "N",
-            AgentEvaluation.status.in_([EvalRunStatus.PENDING, EvalRunStatus.RUNNING]),
-        ).count()
+        return (
+            session.query(AgentEvaluation)
+            .filter(
+                AgentEvaluation.evaluation_set_id == evaluation_set_id,
+                AgentEvaluation.tenant_id == tenant_id,
+                AgentEvaluation.delete_flag == "N",
+                AgentEvaluation.status.in_(
+                    [EvalRunStatus.PENDING, EvalRunStatus.RUNNING]
+                ),
+            )
+            .count()
+        )
 
 
 def _check_set_not_in_use(evaluation_set_id: int, tenant_id: str) -> None:
     """Raise AppException if any active evaluation run references this set."""
     n = count_active_runs_using_set(evaluation_set_id, tenant_id)
     if n > 0:
-        raise AppException(ErrorCode.AGENT_EVALUATION_SET_IN_USE,
-            f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified")
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_SET_IN_USE,
+            f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified",
+        )
 
 
 def delete_evaluation_set_impl(
@@ -270,13 +317,25 @@ def delete_evaluation_set_impl(
     """
     referenced = count_active_runs_using_set(evaluation_set_id, tenant_id)
     if referenced > 0:
-        raise AppException(ErrorCode.AGENT_EVALUATION_SET_IN_USE, f"Evaluation set is referenced by {referenced} active evaluation run(s) and cannot be deleted")
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_SET_IN_USE,
+            f"Evaluation set is referenced by {referenced} active evaluation run(s) and cannot be deleted",
+        )
     hard_delete_evaluation_set(evaluation_set_id, tenant_id)
+
 
 # ── Case CRUD ──────────────────────────────────────────────────────
 
-def add_evaluation_set_case_impl(evaluation_set_id, tenant_id, inputs, label, created_by,
-                                  session_id=None, turn_order=None):
+
+def add_evaluation_set_case_impl(
+    evaluation_set_id,
+    tenant_id,
+    inputs,
+    label,
+    created_by,
+    session_id=None,
+    turn_order=None,
+):
     _check_set_not_in_use(evaluation_set_id, tenant_id)
 
     # Validate multi-turn session continuity (turn_order starts from 1)
@@ -287,20 +346,43 @@ def add_evaluation_set_case_impl(evaluation_set_id, tenant_id, inputs, label, cr
         if turn_order is None:
             turn_order = expected_turn
         elif turn_order != expected_turn:
-            raise AppException(ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
                 f"Session {session_id}: expected turn_order {expected_turn}, got {turn_order}",
-                details={"session_id": session_id, "expected": expected_turn, "actual": turn_order})
+                details={
+                    "session_id": session_id,
+                    "expected": expected_turn,
+                    "actual": turn_order,
+                },
+            )
 
-    case = {"inputs": inputs, "label": label, "order_no": 0,
-            "session_id": session_id, "turn_order": turn_order or 0}
-    n = insert_evaluation_set_cases(tenant_id=tenant_id, evaluation_set_id=evaluation_set_id, cases=[case], created_by=created_by)
+    case = {
+        "inputs": inputs,
+        "label": label,
+        "order_no": 0,
+        "session_id": session_id,
+        "turn_order": turn_order or 0,
+    }
+    n = insert_evaluation_set_cases(
+        tenant_id=tenant_id,
+        evaluation_set_id=evaluation_set_id,
+        cases=[case],
+        created_by=created_by,
+    )
     if n > 0:
         _recount_set_cases(evaluation_set_id)
     return n
 
 
-def update_evaluation_set_case_impl(evaluation_set_id, case_id, tenant_id, inputs, label,
-                                     session_id=None, turn_order=None):
+def update_evaluation_set_case_impl(
+    evaluation_set_id,
+    case_id,
+    tenant_id,
+    inputs,
+    label,
+    session_id=None,
+    turn_order=None,
+):
     _check_set_not_in_use(evaluation_set_id, tenant_id)
 
     cases = get_cases_by_ids([case_id], tenant_id, evaluation_set_id)
@@ -325,16 +407,26 @@ def update_evaluation_set_case_impl(evaluation_set_id, case_id, tenant_id, input
         other_max = max(other_turns) if other_turns else 0
         expected = other_max + 1
         if new_turn_order != expected:
-            raise AppException(ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
                 f"Session {new_session_id}: expected turn_order {expected}, got {new_turn_order}",
-                details={"session_id": new_session_id, "expected": expected, "actual": new_turn_order})
+                details={
+                    "session_id": new_session_id,
+                    "expected": expected,
+                    "actual": new_turn_order,
+                },
+            )
 
     with get_db_session() as s:
-        r = s.query(EvaluationSetCase).filter(
-            EvaluationSetCase.evaluation_set_case_id == case_id,
-            EvaluationSetCase.tenant_id == tenant_id,
-            EvaluationSetCase.delete_flag == "N",
-        ).first()
+        r = (
+            s.query(EvaluationSetCase)
+            .filter(
+                EvaluationSetCase.evaluation_set_case_id == case_id,
+                EvaluationSetCase.tenant_id == tenant_id,
+                EvaluationSetCase.delete_flag == "N",
+            )
+            .first()
+        )
         r.inputs = inputs
         r.label = label
         if session_id is not None:
@@ -358,16 +450,25 @@ def delete_evaluation_set_case_impl(case_id, tenant_id):
         all_turns = list_case_turn_orders_by_session(set_id, row["session_id"])
         max_turn = max(all_turns) if all_turns else -1
         if max_turn > (row.get("turn_order") or 0):
-            raise AppException(ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_LAST,
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_LAST,
                 f"Cannot delete turn {row['turn_order']} of session {row['session_id']}: must delete from the last turn first",
-                details={"session_id": row['session_id'], "turn_order": row['turn_order']})
+                details={
+                    "session_id": row["session_id"],
+                    "turn_order": row["turn_order"],
+                },
+            )
 
     with get_db_session() as s:
-        r = s.query(EvaluationSetCase).filter(
-            EvaluationSetCase.evaluation_set_case_id == case_id,
-            EvaluationSetCase.tenant_id == tenant_id,
-            EvaluationSetCase.delete_flag == "N",
-        ).first()
+        r = (
+            s.query(EvaluationSetCase)
+            .filter(
+                EvaluationSetCase.evaluation_set_case_id == case_id,
+                EvaluationSetCase.tenant_id == tenant_id,
+                EvaluationSetCase.delete_flag == "N",
+            )
+            .first()
+        )
         r.delete_flag = "Y"
         s.commit()
     _recount_set_cases(set_id)
@@ -376,10 +477,14 @@ def delete_evaluation_set_case_impl(case_id, tenant_id):
 
 def _recount_set_cases(evaluation_set_id):
     with get_db_session() as s:
-        n = s.query(EvaluationSetCase).filter(
-            EvaluationSetCase.evaluation_set_id == evaluation_set_id,
-            EvaluationSetCase.delete_flag == "N",
-        ).count()
+        n = (
+            s.query(EvaluationSetCase)
+            .filter(
+                EvaluationSetCase.evaluation_set_id == evaluation_set_id,
+                EvaluationSetCase.delete_flag == "N",
+            )
+            .count()
+        )
         s.query(EvaluationSet).filter(
             EvaluationSet.evaluation_set_id == evaluation_set_id,
         ).update({"case_count": n}, synchronize_session=False)
@@ -395,7 +500,9 @@ def batch_delete_evaluation_set_cases_impl(evaluation_set_id, case_ids, tenant_i
     for case in cases_to_delete:
         sid = case.get("session_id")
         if sid:
-            to_delete_by_session.setdefault(sid, []).append(case["evaluation_set_case_id"])
+            to_delete_by_session.setdefault(sid, []).append(
+                case["evaluation_set_case_id"]
+            )
 
     # Validate: after deletion, remaining turns in each session must stay contiguous from 1
     for sid, delete_ids in to_delete_by_session.items():
@@ -405,9 +512,15 @@ def batch_delete_evaluation_set_cases_impl(evaluation_set_id, case_ids, tenant_i
         if remaining:
             expected = list(range(1, len(remaining) + 1))
             if remaining != expected:
-                raise AppException(ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS,
+                raise AppException(
+                    ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS,
                     f"Cannot delete turns from session {sid}: remaining turns {remaining} would not be contiguous (expected {expected})",
-                    details={"session_id": sid, "remaining": remaining, "expected": expected})
+                    details={
+                        "session_id": sid,
+                        "remaining": remaining,
+                        "expected": expected,
+                    },
+                )
 
     n = batch_delete_evaluation_set_cases(case_ids, tenant_id, evaluation_set_id)
     if n > 0:
@@ -416,6 +529,7 @@ def batch_delete_evaluation_set_cases_impl(evaluation_set_id, case_ids, tenant_i
 
 
 # ── KB-aware helpers ─────────────────────────────────────────────────
+
 
 def _resolve_kb_info(kb_names, tenant_id):
     resolved = []
@@ -432,10 +546,14 @@ def _build_kb_descriptions(kb_info, tenant_id):
     lines = []
     with get_db_session() as session:
         for kb in kb_info:
-            rec = session.query(KnowledgeRecord.knowledge_describe).filter(
-                KnowledgeRecord.index_name == kb["index_name"],
-                KnowledgeRecord.tenant_id == tenant_id,
-            ).first()
+            rec = (
+                session.query(KnowledgeRecord.knowledge_describe)
+                .filter(
+                    KnowledgeRecord.index_name == kb["index_name"],
+                    KnowledgeRecord.tenant_id == tenant_id,
+                )
+                .first()
+            )
             desc = (rec[0] or "").strip() if rec else ""
             desc_text = f" - {desc}" if desc else " (no description)"
             lines.append(f"- {kb['display_name']}{desc_text}")
@@ -454,8 +572,10 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id):
     try:
         template = get_prompt_template("evaluation_plan_kb_queries", "zh")
         response = call_llm_for_system_prompt(
-            model_id=model_id, user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"], tenant_id=tenant_id,
+            model_id=model_id,
+            user_prompt=user_prompt,
+            system_prompt=template["SYSTEM_PROMPT"],
+            tenant_id=tenant_id,
         )
         data = json.loads(response) if isinstance(response, str) else response
         queries = data.get("queries", []) if isinstance(data, dict) else []
@@ -475,6 +595,7 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
         get_embedding_model_by_index_name,
         get_vector_db_core,
     )
+
     if not kb_info or not queries:
         return ""
 
@@ -484,7 +605,9 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
     for kb in kb_info:
         parts.append(f"\n### {kb['display_name']}")
         try:
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, kb["index_name"])
+            embedding_model, _, _ = get_embedding_model_by_index_name(
+                tenant_id, kb["index_name"]
+            )
             if embedding_model is None:
                 logger.warning("No embedding model for KB %s", kb["index_name"])
                 continue
@@ -493,9 +616,16 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
             continue
         for q in queries:
             try:
-                logger.debug("[KB-ES] Searching KB=%s query=%s model=%s", kb["display_name"], q, type(embedding_model).__name__)
+                logger.debug(
+                    "[KB-ES] Searching KB=%s query=%s model=%s",
+                    kb["display_name"],
+                    q,
+                    type(embedding_model).__name__,
+                )
                 query_vector = embedding_model.get_embeddings([q])[0]
-                logger.debug("[KB-ES] encode returned type=%s", type(query_vector).__name__)
+                logger.debug(
+                    "[KB-ES] encode returned type=%s", type(query_vector).__name__
+                )
                 search_body = {
                     "size": top_k,
                     "query": {
@@ -510,7 +640,10 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
                     "_source": ["content", "metadata"],
                 }
                 resp = es_core.search(index_name=kb["index_name"], query=search_body)
-                logger.debug("[KB-ES] ES search returned %d hits", len(resp.get("hits", {}).get("hits", [])))
+                logger.debug(
+                    "[KB-ES] ES search returned %d hits",
+                    len(resp.get("hits", {}).get("hits", [])),
+                )
                 for hit in resp["hits"]["hits"]:
                     src = hit.get("_source", {})
                     if isinstance(src, str):
@@ -523,9 +656,17 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
                     score = hit.get("_score", 0)
                     normalized = max(0.0, min(1.0, (score + 1.0) / 2.0))
                     if content.strip():
-                        parts.append(f"- [{q}] (score={normalized:.2f}) {content.strip()[:400]}")
+                        parts.append(
+                            f"- [{q}] (score={normalized:.2f}) {content.strip()[:400]}"
+                        )
             except Exception as exc:
-                logger.warning("Search failed for KB %s query '%s': %s\n%s", kb["display_name"], q, exc, traceback.format_exc())
+                logger.warning(
+                    "Search failed for KB %s query '%s': %s\n%s",
+                    kb["display_name"],
+                    q,
+                    exc,
+                    traceback.format_exc(),
+                )
     return "\n".join(parts) if len(parts) > 1 else ""
 
 
@@ -535,7 +676,10 @@ def _update_generation_status(set_id, tenant_id, status, progress=0):
             s.query(EvaluationSet).filter(
                 EvaluationSet.evaluation_set_id == set_id,
                 EvaluationSet.tenant_id == tenant_id,
-            ).update({"generation_status": status, "generation_progress": progress}, synchronize_session=False)
+            ).update(
+                {"generation_status": status, "generation_progress": progress},
+                synchronize_session=False,
+            )
             s.commit()
     except Exception as e:
         logger.warning("Failed to update generation status: %s", e)
@@ -562,8 +706,15 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id) -> str
     return kb_context
 
 
-def _build_case_gen_context_blocks(agent_id, tenant_id, description, kb_context,
-                                   knowledge_base_names, file_content, file_name):
+def _build_case_gen_context_blocks(
+    agent_id,
+    tenant_id,
+    description,
+    kb_context,
+    knowledge_base_names,
+    file_content,
+    file_name,
+):
     """Build prompt context blocks for case generation.  Order: Agent → Scene → KB → File."""
     context_blocks = []
     if agent_id:
@@ -572,6 +723,7 @@ def _build_case_gen_context_blocks(agent_id, tenant_id, description, kb_context,
                 fetch_agent_profile,
                 format_agent_profile_context,
             )
+
             profile = fetch_agent_profile(agent_id, tenant_id)
             ctx = format_agent_profile_context(profile)
             if ctx:
@@ -589,13 +741,17 @@ def _build_case_gen_context_blocks(agent_id, tenant_id, description, kb_context,
                 kb_desc_parts.append(f"{name}（{info[0]['description'][:150]}）")
             else:
                 kb_desc_parts.append(name)
-        context_blocks.append(f"## 关联知识库: {'; '.join(kb_desc_parts)}\n(未检索到内容)")
+        context_blocks.append(
+            f"## 关联知识库: {'; '.join(kb_desc_parts)}\n(未检索到内容)"
+        )
     if file_content and file_name:
         context_blocks.append(f"## 上传文档: {file_name}\n{file_content[:3000]}")
     return context_blocks
 
 
-def _build_case_gen_user_prompt(context_blocks, count, kb_context, agent_id, file_content):
+def _build_case_gen_user_prompt(
+    context_blocks, count, kb_context, agent_id, file_content
+):
     """Append generation instructions from YAML template to assembled context."""
     user_prompt = "\n\n".join(context_blocks)
     sources = ["场景描述"]
@@ -608,17 +764,23 @@ def _build_case_gen_user_prompt(context_blocks, count, kb_context, agent_id, fil
     source_list = "、".join(sources)
 
     template = get_prompt_template("evaluation_generate_cases_system", "zh")
-    instruction = (template.get("USER_PROMPT_INSTRUCTION") or "").replace(
-        "{{sources}}", source_list
-    ).replace("{{count}}", str(count)).replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION))
+    instruction = (
+        (template.get("USER_PROMPT_INSTRUCTION") or "")
+        .replace("{{sources}}", source_list)
+        .replace("{{count}}", str(count))
+        .replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION))
+    )
     return user_prompt + "\n\n" + instruction if instruction else user_prompt
 
 
 def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
     """Call LLM for case generation, parse JSON response, return normalized case list."""
     resp = call_llm_for_system_prompt(
-        model_id=model_id, user_prompt=user_prompt,
-        system_prompt=get_prompt_template("evaluation_generate_cases_system", "zh")["SYSTEM_PROMPT"].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
+        model_id=model_id,
+        user_prompt=user_prompt,
+        system_prompt=get_prompt_template("evaluation_generate_cases_system", "zh")[
+            "SYSTEM_PROMPT"
+        ].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
         tenant_id=tenant_id,
     )
     data = None
@@ -635,8 +797,13 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
 
     cases = []
     for d in data:
-        if not (isinstance(d, dict) and "inputs" in d and "label" in d
-                and d["inputs"].get("query") and d["label"].get("answer")):
+        if not (
+            isinstance(d, dict)
+            and "inputs" in d
+            and "label" in d
+            and d["inputs"].get("query")
+            and d["label"].get("answer")
+        ):
             continue
         case = {
             "inputs": {"query": str(d["inputs"]["query"]).strip()},
@@ -647,10 +814,14 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
         if isinstance(sid, str) and sid.strip():
             case["session_id"] = sid.strip()
         to = d.get("turn_order")
-        if isinstance(to, int) or (isinstance(to, str) and to.strip().lstrip("-").isdigit()):
+        if isinstance(to, int) or (
+            isinstance(to, str) and to.strip().lstrip("-").isdigit()
+        ):
             case["turn_order"] = int(to)
         cases.append(case)
-    logger.info("Extracted %d valid cases from LLM response (raw=%d)", len(cases), len(data))
+    logger.info(
+        "Extracted %d valid cases from LLM response (raw=%d)", len(cases), len(data)
+    )
     if not cases:
         raise AppException(ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY)
     return cases
@@ -659,25 +830,44 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def generate_cases_by_llm_impl(description, count, tenant_id, model_id,
-                                knowledge_base_names=None, agent_id=None,
-                                agent_version_no=None, file_content=None, file_name=None):
+def generate_cases_by_llm_impl(
+    description,
+    count,
+    tenant_id,
+    model_id,
+    knowledge_base_names=None,
+    agent_id=None,
+    agent_version_no=None,
+    file_content=None,
+    file_name=None,
+):
     logger.info("Generating %d cases, KBs=%s", count, knowledge_base_names)
 
     kb_context = _do_kb_search(knowledge_base_names, description, model_id, tenant_id)
     context_blocks = _build_case_gen_context_blocks(
-        agent_id, tenant_id, description, kb_context,
-        knowledge_base_names, file_content, file_name,
+        agent_id,
+        tenant_id,
+        description,
+        kb_context,
+        knowledge_base_names,
+        file_content,
+        file_name,
     )
     user_prompt = _build_case_gen_user_prompt(
-        context_blocks, count, kb_context, agent_id, file_content,
+        context_blocks,
+        count,
+        kb_context,
+        agent_id,
+        file_content,
     )
     try:
         cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id)
     except AppException:
         raise
     except Exception as exc:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR,f"Case generation failed: {exc}") from exc
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, f"Case generation failed: {exc}"
+        ) from exc
     return cases[:count]
 
 
@@ -691,8 +881,13 @@ def _insert_generated_cases(cases, set_id, tenant_id, user_id):
     total = len(cases)
     written = 0
     for i, item in enumerate(cases):
-        if (isinstance(item, dict) and "inputs" in item and "label" in item
-                and item["inputs"].get("query") and item["label"].get("answer")):
+        if (
+            isinstance(item, dict)
+            and "inputs" in item
+            and "label" in item
+            and item["inputs"].get("query")
+            and item["label"].get("answer")
+        ):
             case = {
                 "inputs": {"query": str(item["inputs"]["query"]).strip()},
                 "label": {"answer": str(item["label"]["answer"]).strip()},
@@ -704,8 +899,10 @@ def _insert_generated_cases(cases, set_id, tenant_id, user_id):
             if isinstance(item.get("turn_order"), int):
                 case["turn_order"] = item["turn_order"]
             insert_evaluation_set_cases(
-                tenant_id=tenant_id, evaluation_set_id=set_id,
-                cases=[case], created_by=user_id,
+                tenant_id=tenant_id,
+                evaluation_set_id=set_id,
+                cases=[case],
+                created_by=user_id,
             )
             written += 1
         p = min(70 + int((i + 1) / max(total, 1) * 30), 99)
@@ -724,12 +921,18 @@ def _handle_generation_failure(set_id, tenant_id, user_id, is_new_set, start):
     try:
         _update_generation_status(set_id, tenant_id, "FAILED", 0)
     except Exception:
-        logger.warning("Failed to update generation status to FAILED for set %d", set_id, exc_info=True)
+        logger.warning(
+            "Failed to update generation status to FAILED for set %d",
+            set_id,
+            exc_info=True,
+        )
     if is_new_set:
         try:
             hard_delete_evaluation_set(set_id, tenant_id)
         except Exception:
-            logger.warning("Cleanup soft-delete failed for set %d", set_id, exc_info=True)
+            logger.warning(
+                "Cleanup soft-delete failed for set %d", set_id, exc_info=True
+            )
     else:
         try:
             with get_db_session() as s:
@@ -744,26 +947,53 @@ def _handle_generation_failure(set_id, tenant_id, user_id, is_new_set, start):
             logger.warning("Cleanup rollback failed for set %d: %s", set_id, ce)
 
 
-def _generate_cases_async(set_id, tenant_id, user_id, description, count, model_id,
-                          file_content, file_name, agent_id, is_new_set=False,
-                          knowledge_base_names=None):
+def _generate_cases_async(
+    set_id,
+    tenant_id,
+    user_id,
+    description,
+    count,
+    model_id,
+    file_content,
+    file_name,
+    agent_id,
+    is_new_set=False,
+    knowledge_base_names=None,
+):
     """Orchestrate async case generation: KB search → prompt → LLM → insert → finalize."""
     start = datetime.now(timezone.utc)
     try:
         _report_progress(set_id, tenant_id, 0)
 
-        kb_context = _do_kb_search(knowledge_base_names, description, model_id, tenant_id)
+        kb_context = _do_kb_search(
+            knowledge_base_names, description, model_id, tenant_id
+        )
         _report_progress(set_id, tenant_id, 8)
 
         context_blocks = _build_case_gen_context_blocks(
-            agent_id, tenant_id, description, kb_context,
-            knowledge_base_names, file_content, file_name,
+            agent_id,
+            tenant_id,
+            description,
+            kb_context,
+            knowledge_base_names,
+            file_content,
+            file_name,
         )
         user_prompt = _build_case_gen_user_prompt(
-            context_blocks, count, kb_context, agent_id, file_content,
+            context_blocks,
+            count,
+            kb_context,
+            agent_id,
+            file_content,
         )
-        logger.info("Case gen prompt length=%d, has_agent=%s, has_kb=%s, has_file=%s, preview=%s",
-            len(user_prompt), bool(agent_id), bool(kb_context), bool(file_content), user_prompt[-500:])
+        logger.info(
+            "Case gen prompt length=%d, has_agent=%s, has_kb=%s, has_file=%s, preview=%s",
+            len(user_prompt),
+            bool(agent_id),
+            bool(kb_context),
+            bool(file_content),
+            user_prompt[-500:],
+        )
         _report_progress(set_id, tenant_id, 10)
 
         cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id)
