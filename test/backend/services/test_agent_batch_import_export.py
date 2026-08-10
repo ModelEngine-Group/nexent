@@ -633,6 +633,20 @@ class TestDiscoverAgentFolders:
             folders = _discover_agent_folders(zf, names)
             assert folders == ["agents/shared"]
 
+    def test_discover_scanning_skips_duplicate_folder_entries(self):
+        """When the same folder appears twice in names, it should be deduplicated."""
+        from backend.services.agent_service import _discover_agent_folders
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("agents/test_agent/agent.json", "{}")
+
+        buffer.seek(0)
+        with zipfile.ZipFile(buffer, "r") as zf:
+            names = ["agents/test_agent/agent.json", "agents/test_agent/agent.json"]
+            folders = _discover_agent_folders(zf, names)
+            assert folders == ["agents/test_agent"]
+
 
 # =============================================================================
 # Tests for _collect_skill_entries
