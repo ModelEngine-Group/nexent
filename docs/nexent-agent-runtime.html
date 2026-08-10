@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexent Agent Runtime 流程分析</title>
+<style>
+:root{
+  --bg:#0d1117; --card:#161b22; --border:#30363d;
+  --text:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --green:#3fb950; --orange:#d29922; --red:#f85149; --purple:#bc8cff; --cyan:#39d2c0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.75;padding:0}
+.wrap{max-width:900px;margin:0 auto;padding:2.5rem 2rem}
+header.title{border-bottom:1px solid var(--border);padding-bottom:1.2rem;margin-bottom:2rem}
+header.title h1{font-size:1.7rem;margin:0 0 .3rem}
+header.title .sub{color:var(--dim);font-size:.9rem}
+.src{font-family:'SF Mono',Menlo,monospace;font-size:.78rem;color:var(--cyan);margin:.2rem 0}
+section{margin-bottom:2.5rem;scroll-margin-top:1rem}
+h2{font-size:1.3rem;border-left:4px solid var(--accent);padding-left:.7rem;margin-top:2rem}
+h3{font-size:1.05rem;color:var(--purple);margin-top:1.4rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.1rem 1.3rem;margin:1rem 0}
+.note{background:#1a1f2b;border-left:3px solid var(--orange);padding:.8rem 1rem;border-radius:0 6px 6px 0;font-size:.9rem;margin:1rem 0}
+.note::before{content:"💡 关键点";display:block;color:var(--orange);font-size:.72rem;font-family:'SF Mono',Menlo,monospace;margin-bottom:.4rem;letter-spacing:.05em}
+.code-block{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:.8rem;white-space:pre-wrap;word-break:break-word;color:#c9d1d9;margin:1rem 0;line-height:1.6}
+.code-block .c{color:var(--dim);font-style:italic}
+.code-block .k{color:var(--purple)}
+.code-block .s{color:var(--orange)}
+.code-block .f{color:var(--green)}
+table{border-collapse:separate;border-spacing:0;width:100%;margin:1rem 0;font-size:.84rem;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+th,td{padding:.5rem .8rem;text-align:left;border-bottom:1px solid var(--border)}
+th{background:#1c2128;color:var(--accent);font-weight:600}
+tr:last-child td{border-bottom:none}
+.hl{color:var(--green);font-weight:600}
+.badge{display:inline-block;font-size:.7rem;padding:.12rem .5rem;border-radius:99px;border:1px solid;margin-right:.3rem;vertical-align:middle}
+.b-blue{color:var(--accent);border-color:rgba(88,166,255,.4);background:rgba(88,166,255,.08)}
+.b-green{color:var(--green);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.08)}
+.b-orange{color:var(--orange);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.08)}
+.b-purple{color:var(--purple);border-color:rgba(188,140,255,.4);background:rgba(188,140,255,.08)}
+.flow{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:1.2rem;font-family:'SF Mono',Menlo,monospace;font-size:.78rem;line-height:1.9;color:#c9d1d9;white-space:pre;overflow-x:auto}
+.flow .l{color:var(--accent)}
+.flow .t{color:var(--green)}
+.flow .m{color:var(--purple)}
+.flow .x{color:var(--orange)}
+footer{border-top:1px solid var(--border);margin-top:2.5rem;padding-top:1rem;color:var(--dim);font-size:.8rem}
+.puml{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:16px;margin:14px 0;text-align:center;overflow-x:auto}
+.puml img{max-width:100%;height:auto}
+.puml .cap{font-size:.78rem;color:var(--dim);margin-top:6px;text-align:left}
+pre.plantuml{display:none}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/plantuml-encoder@1.4.0/dist/plantuml-encoder.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <h1>Nexent Agent Runtime 流程分析</h1>
+  <div class="sub">从 HTTP 请求到 SSE 流式输出的完整调用链 · 基于 Nexent 源码</div>
+  <div class="src">核心文件:backend/services/agent_service.py · backend/agents/create_agent_info.py · sdk/nexent/core/agents/run_agent.py · sdk/nexent/core/agents/nexent_agent.py · sdk/nexent/core/utils/observer.py</div>
+</header>
+
+<section>
+<h2><span class="badge b-blue">总览</span>一句话流程</h2>
+<div class="card">
+<p>Nexent 的 agent runtime 是一个 <b>"子线程跑 smolagents 循环 + 主协程轮询 observer 缓存"</b> 的流式架构。HTTP 请求进来后,构建一个 <code>AgentRunInfo</code>,起一个独立线程跑 smolagents 的 <code>agent.run(stream=True)</code>;agent 每产生一个 step,就把消息塞进 <code>MessageObserver</code> 的队列;主 async 协程循环轮询这个队列,把消息作为 SSE chunk yield 给前端。</p>
+</div>
+<div class="flow"><span class="l">HTTP POST /agent/run</span>
+  │
+  ▼
+<span class="f">run_agent_stream()</span>  ── 保存用户消息 + 绑定监控 + 选 memory 分支
+  │
+  ▼
+<span class="f">create_agent_run_info()</span> ── 构建 AgentConfig / ModelConfigList / Observer / AgentRunInfo
+  │
+  ▼
+<span class="f">agent_run()</span> (async generator) ── 起子线程 agent_run_thread + 主协程轮询 observer
+  │        ┌─────────────────────────────────┐
+  │        │  <span class="m">子线程</span> agent_run_thread:           │
+  │        │    create_single_agent(agent_config) │
+  │        │    add_history_to_agent(history)     │
+  │        │    <span class="t">agent_run_with_observer(query)</span>    │
+  │        │       └─ smolagents agent.run(stream)│
+  │        │           每个 ActionStep → observer.add_message()
+  │        └──────────────┬──────────────────────┘
+  │                       │ (队列: message_query)
+  │        ┌──────────────▼──────────────────────┐
+  │        │  <span class="x">主协程</span> while thread.is_alive():      │
+  │        │    cached = observer.get_cached_message() │
+  │        │    for msg in cached: yield msg (SSE)     │
+  │        └────────────────────────────────────┘
+  ▼
+<span class="l">StreamingResponse (text/event-stream)</span> → 前端
+</div>
+
+<div class="puml">
+<pre class="plantuml">
+@startuml
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam roundCorner 6
+actor "前端" as FE
+participant "run_agent_stream\n(HTTP/编排)" as HTTP
+participant "create_agent_run_info\n(构建)" as BUILD
+participant "agent_run\n(async 协程)" as CO
+participant "agent_run_thread\n(子线程)" as TH
+participant "MessageObserver\n(队列)" as Q
+participant "smolagents\nagent.run()" as AGENT
+
+FE -> HTTP: POST /agent/run
+HTTP -> HTTP: save_messages(USER)\n+ bind 监控
+HTTP -> BUILD: create_agent_run_info(...)
+BUILD --> HTTP: AgentRunInfo
+HTTP -> CO: generate_stream_with_memory/_no_memory
+CO -> TH: Thread(agent_run_thread).start()
+activate TH
+CO -> Q: while thread.is_alive():
+activate CO
+
+TH -> AGENT: create_single_agent + add_history
+TH -> AGENT: agent_run_with_observer(query)
+activate AGENT
+loop ReAct 循环 (ActionStep)
+  AGENT -> Q: add_message(thought/tool/answer)
+  CO -> Q: get_cached_message()
+  Q --> CO: [messages]
+  CO -> FE: yield SSE chunk
+end
+AGENT --> TH: 完成
+deactivate AGENT
+TH --> CO: thread 结束
+deactivate TH
+CO -> Q: get_cached_message() (剩余)
+CO -> FE: yield 最后的 chunks
+CO -> HTTP: save_messages(ASSISTANT)
+HTTP --> FE: StreamingResponse 结束
+deactivate CO
+@enduml
+</pre>
+<div class="cap">图 1:Agent Runtime 时序图 —— HTTP→构建→子线程(smolagents ReAct)→队列→主协程 SSE。注意子线程与主协程通过 MessageObserver 队列解耦。</div>
+</div>
+</section>
+
+<section>
+<h2><span class="badge b-blue">阶段 1</span>HTTP 入口 + 编排</h2>
+<div class="src">backend/services/agent_service.py:2365 — run_agent_stream</div>
+<div class="card">
+<p><code>run_agent_stream(agent_request, http_request, authorization, ...)</code> 是整个 runtime 的编排入口,做四件事:</p>
+<ol style="margin:.4rem 0 0 1.2rem;line-height:2">
+<li><b>解析身份</b>:<code>_resolve_user_tenant_language()</code> 从 authorization/请求解析 user_id / tenant_id / 语言。</li>
+<li><b>持久化用户消息</b>:非 debug 模式下 <code>save_messages()</code> 把用户 query 存进会话历史。</li>
+<li><b>构建监控上下文</b>:<code>monitoring_manager.bind_agent_context(AgentRunMetadata(...))</code> 绑定 agent_id/conversation_id/query 等,供 OpenTelemetry 追踪。</li>
+<li><b>选 memory 分支</b>:若 <code>memory_enabled and not is_debug</code> → <code>generate_stream_with_memory()</code>,否则 <code>generate_stream_no_memory()</code>。两者最终都调 <code>_stream_agent_chunks()</code>。</li>
+</ol>
+</div>
+<div class="note">这里有个 <b>stream_with_agent_context()</b> 闭包:把流包进 <code>agent_monitoring_context</code>,且 <b>catch 异常后 yield 一个 error chunk</b>(<code>_safe_agent_stream_error_chunk()</code>)——保证流不因中途报错而静默断掉,前端总能收到一个错误 SSE。</div>
+<div class="card">
+最终返回:<code>StreamingResponse(stream_with_agent_context(), media_type="text/event-stream")</code> —— 标准 SSE。
+</div>
+</section>
+
+<section>
+<h2><span class="badge b-purple">阶段 2</span>构建 AgentRunInfo</h2>
+<div class="src">backend/agents/create_agent_info.py — create_agent_run_info</div>
+<div class="card">
+<p>这一步把"一次 agent 运行"需要的所有上下文打包成 <code>AgentRunInfo</code>:</p>
+<table>
+<tr><th>字段</th><th>来源 / 作用</th></tr>
+<tr><td><code>query</code></td><td>用户 query + minio 文件描述拼接(<code>join_minio_file_description_to_query</code>)</td></tr>
+<tr><td><code>model_config_list</code></td><td><code>create_model_config_list(tenant_id)</code> —— 该租户所有 LLM 模型配置(含 main/sub)</td></tr>
+<tr><td><code>observer</code></td><td><code>MessageObserver(lang=language)</code> —— <b>线程间通信的队列</b>,新创建</td></tr>
+<tr><td><code>agent_config</code></td><td><code>create_agent_config(...)</code> —— 含 prompt/duty/tools/model_name</td></tr>
+<tr><td><code>mcp_host</code></td><td>从 <code>remote_mcp_list</code> 过滤出 agent 实际用到的 MCP server(url + transport + auth headers)</td></tr>
+<tr><td><code>history</code></td><td>API 历史转 <code>AgentHistory</code>(含 minio 文件)</td></tr>
+<tr><td><code>stop_event</code></td><td><code>threading.Event()</code> —— 停止信号</td></tr>
+</table>
+</div>
+<div class="note"><b>工具注入发生在 create_agent_config → create_tool_config_list</b>:遍历 agent 配置的 tools,对 <code>ScheduledTaskTool</code> 注入 db 回调 + agent/tenant/user/conversation id;对 MCP 工具按 <code>usage</code> 匹配 server。这一步是"工具拿到运行时上下文"的关键。</div>
+</section>
+
+<section>
+<h2><span class="badge b-green">阶段 3</span>agent_run —— 线程 + 协程的桥</h2>
+<div class="src">sdk/nexent/core/agents/run_agent.py:128 — agent_run (async generator)</div>
+<div class="code-block"><span class="k">async def</span> <span class="f">agent_run</span>(agent_run_info):
+    observer = agent_run_info.observer
+    ctx = copy_context()
+    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
+    thread_agent.start()                          <span class="c"># 子线程跑 smolagents</span>
+
+    <span class="k">while</span> thread_agent.is_alive():                <span class="c"># 主协程轮询</span>
+        cached_message = observer.get_cached_message()
+        <span class="k">for</span> message <span class="k">in</span> cached_message:
+            <span class="k">yield</span> message                          <span class="c"># SSE chunk</span>
+            <span class="k">if</span> len(cached_message) < 8:
+                <span class="k">await</span> asyncio.sleep(0.05)
+        <span class="k">await</span> asyncio.sleep(0.1)
+
+    <span class="c"># 线程结束后,把队列里剩余的消息全部 yield</span>
+    cached_message = observer.get_cached_message()
+    <span class="k">for</span> message <span class="k">in</span> cached_message:
+        <span class="k">yield</span> message</div>
+<div class="note">这是整个 runtime 最精妙的设计:<b>smolagents 是同步阻塞的(smolagents 的 agent.run 是同步循环),但 HTTP 层是 async + SSE 流式</b>。Nexent 用一个 <b>独立线程跑同步的 smolagents</b>,用 <code>MessageObserver</code> 的队列做线程→协程的缓冲,主协程 <code>while is_alive()</code> 轮询队列把消息流式吐出。<b>队列是唯一的跨线程通道</b>。</div>
+<div class="note"><b>背压控制</b>:如果一次取的消息 < 8 条(说明产出慢),多 sleep 50ms;否则 sleep 100ms。这是一种简单的速率协调——避免协程空转,也避免消息积压。</div>
+
+<div class="puml">
+<pre class="plantuml">
+@startuml
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam roundCorner 6
+
+package "子线程 (同步, 阻塞)" {
+  [smolagents\nagent.run(stream=True)] as AGENT
+  note right of AGENT: ReAct 循环\n每轮 = ActionStep\n(thought→tool→obs)
+  [agent_run_with_observer] as LOOP
+  LOOP --> AGENT : 调用
+}
+
+package "MessageObserver (跨线程桥)" {
+  database "message_queue\n(list)" as Q
+  note bottom of Q: add_message() 追加\nget_cached_message() 取走整批+清空\n唯一跨线程通道
+}
+
+package "主协程 (async, SSE)" {
+  [agent_run\nasync generator] as CO
+  [StreamingResponse\ntext/event-stream] as SSE
+  CO --> SSE : yield message
+}
+
+AGENT --> Q : add_message(step)
+CO --> Q : get_cached_message()
+Q --> CO : [messages]
+
+actor "前端" as FE
+SSE --> FE : SSE chunks
+
+note as N1
+  <b>解耦点</b>:子线程只 append,主协程只取。
+  agent 速度与 SSE 速度互不阻塞。
+  背压:消息 < 8 时 sleep 50ms,否则 100ms。
+end note
+
+LOOP .. N1
+CO .. N1
+@enduml
+</pre>
+<div class="cap">图 2:线程/协程/队列组件图 —— 同步 smolagents(子线程)与 async SSE(主协程)通过 MessageObserver 队列解耦。</div>
+</div>
+</section>
+
+<section>
+<h2><span class="badge b-orange">阶段 4</span>子线程:smolagents 循环</h2>
+<div class="src">run_agent.py:77 — agent_run_thread · nexent_agent.py:489 — agent_run_with_observer</div>
+<div class="card">
+<p>子线程里依次:</p>
+<ol style="margin:.4rem 0 0 1.2rem;line-height:2">
+<li><code>create_single_agent(agent_config)</code> —— 用 agent_config 建真实的 smolagents <code>CoreAgent</code>(挂 tools + model + observer)。</li>
+<li><code>add_history_to_agent(history)</code> —— 注入对话历史。</li>
+<li><code>agent_run_with_observer(query, reset=False)</code> —— 跑 smolagents 循环。</li>
+</ol>
+</div>
+<div class="code-block"><span class="c"># nexent_agent.py:489</span>
+<span class="k">def</span> <span class="f">agent_run_with_observer</span>(self, query, reset=True):
+    <span class="k">with</span> monitoring_manager.start_agent_run(metadata):
+        <span class="k">with</span> monitoring_manager.trace_agent_step(<span class="s">"agent.run.loop"</span>, ...):
+            <span class="k">for</span> step_log <span class="k">in</span> self.agent.run(query, stream=True, reset=reset):  <span class="c"># smolagents</span>
+                <span class="k">if not</span> isinstance(step_log, ActionStep):
+                    <span class="k">continue</span>
+                <span class="c"># 提取 token 用量、context 估算 → observer.add_message()</span>
+                ...</div>
+<div class="note"><b>smolagents 的 agent.run(stream=True)</b> 是一个 ReAct 循环:每轮模型生成 thought + tool call → 执行工具 → 观察 → 下一轮。每个 <code>ActionStep</code> 就是一轮的产物。Nexent 在这里 <b>拦截每个 ActionStep</b>,把 token 用量、思考、工具调用、最终答案都转成消息塞进 observer。<b>这就是 ReAct 范式在 Nexent 里的落地点</b>——跟我们之前分析的 ReAct 论文完全对应:thought-action-observation 交替,每步外化成消息。</div>
+</section>
+
+<section>
+<h2><span class="badge b-purple">阶段 5</span>MessageObserver —— 线程间队列</h2>
+<div class="src">sdk/nexent/core/utils/observer.py</div>
+<div class="card">
+<p><code>MessageObserver</code> 是子线程(生产者)和主协程(消费者)之间的桥梁。核心是 <code>message_queue</code>(list 当队列用):</p>
+<div class="code-block"><span class="k">def</span> <span class="f">add_message</span>(self, agent_name, process_type, content, **kwargs):
+    transformer = self.transformers.get(process_type, ...)   <span class="c"># 按 type 选格式化器</span>
+    formatted_content = transformer.transform(content, ...)
+    self.message_queue.append(Message(process_type, formatted_content).to_json())
+
+<span class="k">def</span> <span class="f">get_cached_message</span>(self):
+    cached_message = self.message_queue          <span class="c"># 取走整个队列</span>
+    self.message_queue = []                       <span class="c"># 清空(原子交换)</span>
+    <span class="k">return</span> cached_message</div>
+<p><code>get_cached_message</code> 用 <b>"取引用 + 新建空列表"</b> 的方式做交换——取走整个队列一次性返回,清空后续。这是一种简单的批量消费模式。</p>
+</div>
+<div class="note"><b>消息类型(ProcessType)</b> 决定前端怎么渲染:MODEL_OUTPUT_CODE(代码块)、MODEL_OUTPUT_THINKING(思考)、MODEL_FINAL_ANSWER(最终答案)、TOOL_CALL 等。每类有专属 transformer 把内容格式化成前端可显示的 JSON。这就是为什么前端能分"思考/工具调用/最终答案"分区显示。</div>
+</section>
+
+<section>
+<h2><span class="badge b-blue">阶段 6</span>_stream_agent_chunks —— 边流式边落库</h2>
+<div class="src">backend/services/agent_service.py:778</div>
+<div class="card">
+<p><code>_stream_agent_chunks()</code> 包在 <code>agent_run()</code> 外层,边 yield SSE chunk 边做两件副作用:</p>
+<ol style="margin:.4rem 0 0 1.2rem;line-height:2">
+<li><b>收集消息</b>:每个 chunk 存进 <code>local_messages</code>(用于后续落库)。</li>
+<li><b>捕获最终答案</b>:遇到 <code>type == "final_answer"</code> 的 chunk,记下 <code>captured_final_answer</code>。</li>
+<li><b>解析 skill 文件上传</b>:从 <code>execution_logs</code>/<code>parse</code>/tool-response 里抽 absolute_path,触发文件上传处理。</li>
+</ol>
+<p>流结束后(或上层 <code>generate_stream_with_memory</code>),这些收集的消息会被 <code>save_messages</code> 持久化成 assistant 消息。</p>
+</div>
+<div class="note">这就是为什么 Nexent 能 <b>既流式输出又持久化</b>:流式 chunk 实时给前端,同时攒一份在 <code>local_messages</code>,流结束统一存库。前端看到的"实时打字"和数据库里的"完整 assistant 消息"是同一份数据的两个视图。</div>
+</section>
+
+<section>
+<h2><span class="badge b-orange">关键设计洞察</span></h2>
+<div class="card">
+<h3>1. 为什么用线程而不是纯 async?</h3>
+<p>smolagents 的 <code>agent.run()</code> 是 <b>同步阻塞</b> 的(内部是 ReAct 循环 + 同步工具调用)。FastAPI 的 async SSE 不能直接跑长同步任务(会阻塞事件循环)。Nexent 的解法:<b>把同步 agent 跑在独立线程</b>,用 observer 队列把产出桥到 async 协程。这是"同步核心 + async 外壳"的经典适配。</p>
+
+<h3>2. 队列是唯一的解耦点</h3>
+<p>子线程不直接 yield(它不是 async),只往 observer 队列 append;主协程不直接调 agent,只从队列取。两边只通过 <code>message_queue</code> 通信 → <b>生产消费解耦</b>,agent 的速度和 SSE 的速度互不阻塞。</p>
+
+<h3>3. 与 ReAct 的对应</h3>
+<p>smolagents 的 <code>agent.run(stream=True)</code> 每个 ActionStep 就是一个"thought-action-observation"三元组。Nexent 拦截它 → observer → SSE。<b>论文里的 ReAct 范式,Nexent 用线程+队列把它流式化了</b>。</p>
+
+<h3>4. 监控可观测性贯穿全程</h3>
+<p>从 <code>AgentRunMetadata</code> 绑定 → <code>start_agent_run</code> → <code>trace_agent_step("agent.run.loop")</code> → 每步 token 用量上报。整条链路都有 OpenTelemetry span,这是生产级 agent 的标配。</p>
+</div>
+</section>
+
+<section>
+<h2><span class="badge b-green">完整调用链速查</span></h2>
+<div class="code-block"><span class="c"># HTTP 层</span>
+POST /agent/run (Authorization)
+  └─ <span class="f">run_agent_stream</span>(agent_request, http_request, authorization)   <span class="c"># agent_service.py:2365</span>
+       ├─ _resolve_user_tenant_language()
+       ├─ save_messages(USER)                       <span class="c"># 存用户消息</span>
+       ├─ monitoring_manager.bind_agent_context(AgentRunMetadata)
+       ├─ generate_stream_with_memory / _no_memory
+       │    └─ <span class="f">_stream_agent_chunks</span>(agent_request, ..., agent_run_info, memory_ctx)  <span class="c"># :778</span>
+       │         ├─ <span class="k">async for</span> chunk <span class="k">in</span> <span class="f">agent_run</span>(agent_run_info):   <span class="c"># run_agent.py:128</span>
+       │         │    ├─ Thread(agent_run_thread)              <span class="c"># 子线程</span>
+       │         │    │    ├─ <span class="f">create_single_agent</span>(agent_config)   <span class="c"># nexent_agent.py:384</span>
+       │         │    │    ├─ add_history_to_agent(history)
+       │         │    │    └─ <span class="f">agent_run_with_observer</span>(query)      <span class="c"># :489</span>
+       │         │    │         └─ <span class="k">for</span> step_log <span class="k">in</span> agent.run(query, stream=True):  <span class="c"># smolagents ReAct</span>
+       │         │    │              └─ observer.add_message(...)            <span class="c"># 入队</span>
+       │         │    └─ <span class="k">while</span> thread.is_alive():                   <span class="c"># 主协程</span>
+       │         │         cached = observer.get_cached_message()             <span class="c"># 出队</span>
+       │         │         <span class="k">yield</span> message (→ SSE chunk)
+       │         ├─ local_messages.append(chunk)              <span class="c"># 攒消息</span>
+       │         ├─ 捕获 final_answer / skill 文件
+       │         └─ (流结束) save_messages(ASSISTANT)          <span class="c"># 存助手消息</span>
+       └─ <span class="k">return</span> StreamingResponse(..., text/event-stream)</div>
+</section>
+
+<footer>
+分析基于 Nexent 源码(agent_service.py / create_agent_info.py / run_agent.py / nexent_agent.py / observer.py)。生成日期:2026-07-14。核心架构:同步 smolagents ReAct 循环(子线程) + MessageObserver 队列(桥) + async SSE 流式(主协程)。
+</footer>
+
+</div>
+<script>
+document.querySelectorAll('pre.plantuml').forEach(function(pre){
+  var src = pre.textContent.trim();
+  var encoded = plantumlEncoder.encode(src);
+  var img = document.createElement('img');
+  img.src = 'https://www.plantuml.com/plantuml/svg/' + encoded;
+  img.alt = 'PlantUML diagram';
+  pre.parentNode.insertBefore(img, pre);
+});
+</script>
+</body>
+</html>

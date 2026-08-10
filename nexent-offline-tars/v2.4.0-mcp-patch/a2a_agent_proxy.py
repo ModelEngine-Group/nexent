@@ -21,6 +21,9 @@ PROTOCOL_GRPC = "GRPC"
 
 logger = logging.getLogger("a2a_agent_proxy")
 
+import os
+_A2A_SEND_MODEL = os.getenv("NEXENT_A2A_SEND_MODEL", "")
+
 
 @dataclass
 class A2AAgentInfo:
@@ -156,6 +159,11 @@ class ExternalA2AAgentProxy:
 
         if history:
             payload["history"] = history
+
+        if _A2A_SEND_MODEL:
+            if "metadata" not in payload:
+                payload["metadata"] = {}
+            payload["metadata"]["model"] = _A2A_SEND_MODEL
 
         return payload
 
@@ -431,6 +439,20 @@ class ExternalA2AAgentProxy:
                     return part["text"]
         return None
 
+    def _find_text_in_artifacts(self, result: Dict[str, Any]) -> Optional[str]:
+        """Extract text from result.artifacts[].parts[].text (or result.task.artifacts)."""
+        artifacts = result.get("artifacts", [])
+        if not artifacts:
+            task = result.get("task")
+            if isinstance(task, dict):
+                artifacts = task.get("artifacts", [])
+        for artifact in artifacts:
+            if isinstance(artifact, dict):
+                for part in artifact.get("parts", []):
+                    if isinstance(part, dict) and part.get("text"):
+                        return part["text"]
+        return None
+
     def extract_text_from_response(self, response: Dict[str, Any]) -> str:
         """Extract text content from A2A response.
 
@@ -460,6 +482,11 @@ class ExternalA2AAgentProxy:
             return text
 
         text = self._find_text_in_status_message(result)
+        if text is not None:
+            return text
+
+        # A2A Task artifacts: result.artifacts[].parts[].text
+        text = self._find_text_in_artifacts(result)
         if text is not None:
             return text
 

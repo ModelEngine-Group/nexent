@@ -1,0 +1,867 @@
+"""
+A2A Client Service.
+
+This service provides functionality for discovering and calling external A2A agents.
+Used internally by Nexent to call external A2A agents as sub-agents (similar to MCP pattern).
+"""
+import asyncio
+import logging
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+
+import aiohttp
+
+from database import a2a_agent_db
+from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+
+import os
+_A2A_SEND_MODEL = os.getenv("NEXENT_A2A_SEND_MODEL", "")
+
+logger = logging.getLogger(__name__)
+
+
+class A2AClientServiceError(Exception):
+    """Base exception for A2A Client Service errors."""
+    pass
+
+
+class AgentDiscoveryError(A2AClientServiceError):
+    """Raised when agent discovery fails."""
+    pass
+
+
+class AgentCallError(A2AClientServiceError):
+    """Raised when calling an external agent fails."""
+    pass
+
+
+class A2AClientService:
+    """Service for discovering and calling external A2A agents."""
+
+    def __init__(self):
+        pass
+
+    # =============================================================================
+    # Agent Discovery
+    # =============================================================================
+
+    async def discover_from_url(
+        self,
+        url: str,
+        tenant_id: str,
+        user_id: str,
+        custom_headers: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """Discover an external A2A agent from a URL.
+
+        Fetches the Agent Card from the URL, caches it, and stores the agent info.
+
+        Args:
+            url: Direct URL to the Agent Card (e.g., https://example.com/.well-known/agent-xxx.json).
+            tenant_id: Tenant ID for isolation.
+            user_id: User who initiated the discovery.
+            custom_headers: Headers saved only for Agent Card discovery and refresh.
+
+        Returns:
+            Discovered agent information dict.
+
+        Raises:
+            AgentDiscoveryError: If discovery fails.
+        """
+        try:
+            # custom_headers=None means preserve existing stored headers (don't pass anything to DB).
+            # custom_headers={} means explicitly clear stored headers.
+            async with A2AHttpClient() as client:
+                headers = build_a2a_headers()
+                if custom_headers:
+                    headers.update(custom_headers)
+                card = await client.get_json(url, headers=headers)
+
+            # Extract agent info from Card
+            # Support multiple field names for agent ID
+            agent_id = (
+                card.get("agent_id") 
+                or card.get("id") 
+                or card.get("endpoint_id")
+                or card.get("name")  # Fallback to name if no ID
+            )
+            if not agent_id:
+                # Generate a hash-based ID from name and URL as last resort
+                import hashlib
+                name = card.get("name", "unknown")
+                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                agent_id = f"{name.lower().replace(' ', '-')}-{url_hash}"
+
+            name = card.get("name", agent_id)
+            description = card.get("description", "")
+
+            # Extract endpoint URL - prioritize supportedInterfaces (A2A v1.0 standard)
+            agent_url = self._extract_agent_url(card)
+
+            # Extract supported interfaces (A2A v1.0 standard format)
+            supported_interfaces = card.get("supportedInterfaces", [])
+
+            # Extract protocol info from supported_interfaces (A2A 1.0 spec)
+            # protocol_version and streaming are properties of each interface, not top-level
+            first_interface = supported_interfaces[0] if supported_interfaces else {}
+            interface_capabilities = first_interface.get("capabilities", {})
+            protocol_version = first_interface.get("protocolVersion", "1.0")
+            streaming = interface_capabilities.get("streaming", False)
+
+            # Fallback to top-level capabilities if no supported_interfaces
+            if not supported_interfaces:
+                card_capabilities = card.get("capabilities", {})
+                if protocol_version == "1.0" and card_capabilities.get("protocolVersion"):
+                    protocol_version = card_capabilities.get("protocolVersion")
+                if not streaming and card_capabilities.get("streaming"):
+                    streaming = card_capabilities.get("streaming")
+
+            # Store in database
+            result = a2a_agent_db.create_external_agent_from_url(
+                source_url=url,
+                name=name,
+                description=description,
+                agent_url=agent_url,
+                version=protocol_version,
+                streaming=streaming,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                raw_card=card,
+                supported_interfaces=supported_interfaces,
+                agent_card_headers=custom_headers,
+                security_schemes=card.get("securitySchemes"),
+                security_requirements=card.get("securityRequirements"),
+            )
+
+            logger.info(f"Discovered A2A agent {agent_id} from URL: {url}")
+            return result
+
+        except Exception as e:
+            import traceback
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(
+                f"Agent discovery failed for {url}: [{error_type}] {error_msg}\n"
+                f"Traceback: {traceback.format_exc()}"
+            )
+            raise AgentDiscoveryError(f"Discovery failed: [{error_type}] {error_msg}") from e
+
+    async def discover_from_nacos(
+        self,
+        nacos_config_id: str,
+        agent_names: List[str],
+        tenant_id: str,
+        user_id: str,
+        namespace: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Discover external A2A agents from Nacos service registry.
+
+        Args:
+            nacos_config_id: Nacos config ID for connection settings.
+            agent_names: List of agent names to discover.
+            tenant_id: Tenant ID for isolation.
+            user_id: User who initiated the discovery.
+            namespace: Optional Nacos namespace override.
+
+        Returns:
+            List of discovered agent information dicts.
+
+        Raises:
+            AgentDiscoveryError: If discovery fails.
+        """
+        # Get Nacos config
+        nacos_config = a2a_agent_db.get_nacos_config_by_id(nacos_config_id, tenant_id)
+        if not nacos_config:
+            raise AgentDiscoveryError(f"Nacos config {nacos_config_id} not found")
+
+        if not nacos_config.get("is_active"):
+            raise AgentDiscoveryError(f"Nacos config {nacos_config_id} is not active")
+
+        # Use namespace from config or parameter
+        target_namespace = namespace or nacos_config.get("namespace_id", "public")
+
+        discovered_agents = []
+        errors = []
+
+        # For each agent name, query Nacos and fetch Agent Card
+        for agent_name in agent_names:
+            try:
+                agent_info = await self._discover_single_from_nacos(
+                    nacos_config=nacos_config,
+                    agent_name=agent_name,
+                    namespace=target_namespace,
+                    tenant_id=tenant_id,
+                    user_id=user_id
+                )
+                if agent_info:
+                    discovered_agents.append(agent_info)
+            except Exception as e:
+                logger.warning(f"Failed to discover agent '{agent_name}' from Nacos: {e}")
+                errors.append({"name": agent_name, "error": str(e)})
+
+        # Update last scan timestamp
+        a2a_agent_db.update_nacos_config_last_scan(nacos_config_id, tenant_id)
+
+        if not discovered_agents and errors:
+            error_msg = "; ".join([f"{e['name']}: {e['error']}" for e in errors])
+            raise AgentDiscoveryError(f"All agent discoveries failed: {error_msg}")
+
+        logger.info(f"Discovered {len(discovered_agents)} agents from Nacos config {nacos_config_id}")
+        return discovered_agents
+
+    async def _discover_single_from_nacos(
+        self,
+        nacos_config: Dict[str, Any],
+        agent_name: str,
+        namespace: str,
+        tenant_id: str,
+        user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Discover a single agent from Nacos.
+
+        Args:
+            nacos_config: Nacos configuration dict.
+            agent_name: Agent name to discover.
+            namespace: Nacos namespace.
+            tenant_id: Tenant ID.
+            user_id: User ID.
+
+        Returns:
+            Discovered agent info or None.
+        """
+        # Import Nacos client (lazy import to avoid hard dependency)
+        try:
+            from utils.nacos_client import NacosClient
+        except ImportError:
+            logger.warning("Nacos client not available, using mock discovery")
+            return None
+
+        nacos_addr = nacos_config["nacos_addr"]
+        username = nacos_config.get("nacos_username")
+        password = nacos_config.get("nacos_password")
+
+        # Initialize Nacos client
+        client = NacosClient(nacos_addr, username, password)
+
+        try:
+            # Query A2A agent from Nacos using dedicated A2A endpoint
+            agent_info = await client.query_a2a_agent(agent_name, namespace)
+            if not agent_info:
+                logger.warning(f"No A2A agent found for '{agent_name}' in Nacos")
+                return None
+
+            # Extract agent URL from A2A response
+            agent_url = agent_info.get("agent_url") or agent_info.get("url")
+            if not agent_url:
+                logger.warning(f"No agent URL found for A2A agent '{agent_name}'")
+                return None
+
+            # Get metadata and extract description from Nacos response
+            metadata = agent_info.get("metadata") or {}
+            description = agent_info.get("description") or metadata.get("description", "")
+            nacos_interfaces = metadata.get("supported_interfaces", [])
+            supported_interfaces = nacos_interfaces.copy() if nacos_interfaces else []
+            protocol_version = "1.0"
+            streaming = False
+            agent_card_fetched = False
+
+            # Fetch Agent Card from agent_url to get supported_interfaces (A2A v1.0 spec)
+            # Try common Agent Card endpoints (order matters - try more specific paths first)
+            card_urls = [
+                f"{agent_url.rstrip('/')}/.well-known/agent-card.json",
+                f"{agent_url.rstrip('/')}/.well-known/agent.json",
+                f"{agent_url.rstrip('/')}/.well-known/agent-1.0.json",
+                f"{agent_url.rstrip('/')}/agent-card.json",
+                f"{agent_url.rstrip('/')}/agent.json",
+            ]
+
+            for card_url in card_urls:
+                try:
+                    async with A2AHttpClient() as http_client:
+                        card = await http_client.get_json(card_url, headers=build_a2a_headers())
+
+                    if card and (card.get("name") or card.get("agent_id")):
+                        logger.info(f"Fetched Agent Card from {card_url}")
+
+                        # Extract supported_interfaces from Agent Card
+                        card_interfaces = card.get("supportedInterfaces", [])
+
+                        # Always update from Agent Card if present
+                        if card_interfaces:
+                            supported_interfaces = card_interfaces
+                            agent_card_fetched = True
+
+                        # Extract description from Agent Card if not found in Nacos
+                        if not description:
+                            description = card.get("description", "")
+
+                        # Extract protocol info from supported_interfaces
+                        first_interface = supported_interfaces[0] if supported_interfaces else {}
+                        capabilities = first_interface.get("capabilities", {})
+                        protocol_version = first_interface.get("protocolVersion", "1.0")
+                        streaming = capabilities.get("streaming", False)
+
+                        # Merge raw_card: Agent Card takes precedence over Nacos info
+                        agent_info = card
+                        break
+
+                except Exception as e:
+                    logger.warning(f"Failed to fetch Agent Card from {card_url}: {e}")
+                    continue
+
+            if not agent_card_fetched:
+                logger.warning(
+                    f"[Nacos Discovery] Failed to fetch Agent Card for '{agent_name}', "
+                    f"using Nacos interfaces: {supported_interfaces}"
+                )
+
+            logger.info(
+                f"[Nacos Discovery] Storing agent: name={agent_name}, "
+                f"agent_url={agent_url}, supported_interfaces_count={len(supported_interfaces) if supported_interfaces else 0}, "
+                f"protocol_version={protocol_version}, streaming={streaming}"
+            )
+
+            # Store in database
+            result = a2a_agent_db.create_external_agent_from_nacos(
+                name=agent_name,
+                description=description,
+                agent_url=agent_url,
+                version=protocol_version,
+                streaming=streaming,
+                nacos_config_id=nacos_config["config_id"],
+                nacos_agent_name=agent_name,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                raw_card=agent_info,
+                supported_interfaces=supported_interfaces,
+                security_schemes=agent_info.get("securitySchemes"),
+                security_requirements=agent_info.get("securityRequirements"),
+            )
+
+            return result
+
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                # Ignore errors during close
+                pass
+
+    def _extract_agent_url(self, card: Dict[str, Any]) -> str:
+        """Extract the A2A endpoint URL from an Agent Card.
+
+        According to A2A v1.0 specification, the agent URL should be extracted
+        from supportedInterfaces array, prioritizing http-json-rpc protocol.
+
+        Args:
+            card: Agent Card dict.
+
+        Returns:
+            A2A endpoint URL string.
+        """
+        url = self._find_url_in_interfaces(card.get("supportedInterfaces", []))
+        if url:
+            return url
+
+        url = self._find_url_in_endpoints(card.get("endpoints", {}))
+        if url:
+            return url
+
+        provider = card.get("provider", {})
+        if isinstance(provider, dict):
+            url = provider.get("url", "")
+            if url:
+                return url
+
+        url = card.get("url", "")
+        if url:
+            return url
+
+        logger.warning("_extract_agent_url: No URL found in Agent Card")
+        return ""
+
+    def _find_url_in_interfaces(self, interfaces: List[Any]) -> str:
+        """Find URL from supportedInterfaces array - return the first interface's URL.
+
+        This ensures protocol and URL are always from the same interface.
+        """
+        for iface in interfaces:
+            url = iface.get("url", "")
+            if url:
+                return url
+        return ""
+
+    def _find_url_in_endpoints(self, endpoints: Dict[str, Any]) -> str:
+        """Find URL from endpoints dict, preferring streaming then polling."""
+        transport_preference = ("http-streaming", "http-polling")
+        for transport in transport_preference:
+            url = endpoints.get(transport, "")
+            if url:
+                return url
+        first_key = next(iter(endpoints.keys()), None)
+        if first_key:
+            return endpoints[first_key]
+        return ""
+
+    # =============================================================================
+    # Agent Management
+    # =============================================================================
+
+    def get_external_agent(self, external_agent_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """Get an external agent by ID.
+
+        Args:
+            external_agent_id: External agent database ID.
+            tenant_id: Tenant ID for isolation.
+
+        Returns:
+            Agent information dict or None.
+        """
+        return a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id)
+
+    def list_external_agents(
+        self,
+        tenant_id: str,
+        source_type: Optional[str] = None,
+        is_available: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """List all discovered external agents for a tenant.
+
+        Args:
+            tenant_id: Tenant ID.
+            source_type: Filter by source type (url or nacos).
+            is_available: Filter by availability.
+
+        Returns:
+            List of agent information dicts.
+        """
+        return a2a_agent_db.list_external_agents(
+            tenant_id=tenant_id,
+            source_type=source_type,
+            is_available=is_available
+        )
+
+    def update_agent_protocol(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        protocol_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """Update the protocol type for an external agent.
+
+        Args:
+            external_agent_id: External agent database ID.
+            tenant_id: Tenant ID for isolation.
+            protocol_type: New protocol type (JSONRPC, HTTP+JSON, or GRPC).
+
+        Returns:
+            Updated agent information dict or None if not found.
+        """
+        result = a2a_agent_db.update_external_agent_protocol(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            protocol_type=protocol_type
+        )
+
+        if result:
+            logger.info(f"Updated agent {external_agent_id} protocol to {protocol_type}")
+
+        return result
+
+    async def refresh_agent_card(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """Refresh the cached Agent Card for an external agent.
+
+        Args:
+            external_agent_id: External agent database ID.
+            tenant_id: Tenant ID.
+            user_id: User who requested the refresh.
+
+        Returns:
+            Updated agent information.
+
+        Raises:
+            AgentDiscoveryError: If refresh fails.
+        """
+        # Get current agent info
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_agent_card_headers=True,
+        )
+        if not agent:
+            raise AgentDiscoveryError(f"Agent {external_agent_id} not found")
+
+        source_type = agent.get("source_type")
+        source_url = agent.get("source_url")
+        agent_url = agent.get("agent_url")
+        base_url = agent.get("base_url")
+
+        try:
+            if source_type == "nacos":
+                # Nacos discovered agents: use /health endpoint to check availability
+                if not base_url:
+                    raise AgentDiscoveryError("No base_url available for health check")
+
+                health_url = f"{base_url.rstrip('/')}/health"
+                logger.info(f"Checking health for Nacos agent: {health_url}")
+
+                async with A2AHttpClient() as client:
+                    health_response = await client.get_json(health_url)
+
+                # Update availability based on health check
+                a2a_agent_db.update_agent_availability(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    is_available=True,
+                    check_result="OK"
+                )
+
+                # Update cache timestamp
+                a2a_agent_db.refresh_external_agent_cache(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id
+                )
+
+                logger.info(f"Health check passed for agent {external_agent_id}")
+                return {
+                    "agent_id": external_agent_id,
+                    "source_type": source_type,
+                    "health_url": health_url,
+                    "health_response": health_response,
+                    "status": "available"
+                }
+
+            else:
+                # URL discovered agents: fetch fresh Agent Card from source_url
+                if not source_url:
+                    raise AgentDiscoveryError("No source URL available for refresh")
+
+                async with A2AHttpClient() as client:
+                    card_headers = agent.get("agent_card_headers")
+                    headers = build_a2a_headers()
+                    if isinstance(card_headers, dict):
+                        headers.update(card_headers)
+                    card = await client.get_json(source_url, headers=headers)
+
+                new_supported_interfaces = card.get("supportedInterfaces")
+                new_url = self._extract_agent_url(card) if new_supported_interfaces is None else None
+                new_name = card.get("name")
+                new_description = card.get("description")
+
+                # The selected protocol and its endpoint must survive incomplete Card refreshes.
+                result = a2a_agent_db.refresh_external_agent_cache(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    new_raw_card=card,
+                    new_agent_url=new_url,
+                    new_name=new_name,
+                    new_description=new_description,
+                    new_supported_interfaces=new_supported_interfaces,
+                    new_security_schemes=card.get("securitySchemes", {}),
+                    new_security_requirements=card.get("securityRequirements", []),
+                )
+
+                # Update availability
+                a2a_agent_db.update_agent_availability(
+                    external_agent_id=external_agent_id,
+                    tenant_id=tenant_id,
+                    is_available=True,
+                    check_result="OK"
+                )
+
+                logger.info(f"Refreshed agent {external_agent_id}")
+                return result
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to refresh agent {external_agent_id}: {e}")
+            a2a_agent_db.update_agent_availability(
+                external_agent_id=external_agent_id,
+                tenant_id=tenant_id,
+                is_available=False,
+                check_result="ERROR"
+            )
+            raise AgentDiscoveryError(f"Failed to refresh: {str(e)}") from e
+
+    def delete_external_agent(self, external_agent_id: int, tenant_id: str) -> bool:
+        """Delete a discovered external agent.
+
+        Args:
+            external_agent_id: External agent database ID.
+            tenant_id: Tenant ID.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        return a2a_agent_db.delete_external_agent(external_agent_id, tenant_id)
+
+    # =============================================================================
+    # Agent Calling
+    # =============================================================================
+
+    def _build_endpoint_url(self, agent_url: str, protocol_type: str, streaming: bool = False) -> str:
+        """Build the request URL from the Agent Card protocol binding.
+
+        The Agent Card URL is a complete endpoint for JSON-RPC. HTTP+JSON URLs
+        identify the service base and require the A2A message operation suffix.
+        """
+        base_url = agent_url.rstrip("/")
+        path_suffix = self._get_protocol_path(protocol_type, streaming)
+        if path_suffix and path_suffix not in base_url:
+            return f"{base_url}{path_suffix}"
+        return base_url
+
+    def _get_protocol_path(self, protocol_type: str, streaming: bool) -> str:
+        """Get the required HTTP+JSON operation suffix for an A2A request."""
+        if protocol_type == PROTOCOL_HTTP_JSON:
+            return "/message:stream" if streaming else "/message:send"
+        return ""
+
+    def _build_security_request_parts(
+        self,
+        agent: Dict[str, Any],
+    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+        """Build request authentication parts from the configured Card security scheme."""
+        schemes = agent.get("security_schemes") or {}
+        requirements = agent.get("security_requirements") or []
+        credentials = agent.get("security_credentials") or {}
+        if not requirements:
+            return {}, {}, {}
+
+        selected_index = agent.get("selected_security_requirement_index")
+        if selected_index is not None:
+            if not isinstance(selected_index, int) or not 0 <= selected_index < len(requirements):
+                raise AgentCallError("Selected Agent Card security requirement is invalid")
+            requirements = [requirements[selected_index]]
+
+        for requirement in requirements:
+            required_schemes = requirement.get("schemes", {}) if isinstance(requirement, dict) else {}
+            if not required_schemes:
+                return {}, {}, {}
+
+            headers: Dict[str, str] = {}
+            params: Dict[str, str] = {}
+            cookies: Dict[str, str] = {}
+            valid = True
+            for scheme_id in required_schemes:
+                credential = credentials.get(scheme_id)
+                scheme = schemes.get(scheme_id, {})
+                if not isinstance(scheme, dict) or not credential:
+                    valid = False
+                    break
+
+                http_auth_scheme = scheme.get("httpAuthSecurityScheme", {})
+                if http_auth_scheme:
+                    auth_scheme = http_auth_scheme.get("scheme") if isinstance(http_auth_scheme, dict) else None
+                    if not isinstance(auth_scheme, str) or not auth_scheme.strip():
+                        valid = False
+                        break
+                    bearer_format = http_auth_scheme.get("bearerFormat")
+                    if isinstance(bearer_format, str) and bearer_format.lower() == "jwt":
+                        auth_scheme = "Bearer"
+                    headers["Authorization"] = f"{auth_scheme} {credential}"
+                    continue
+
+                api_key_scheme = scheme.get("apiKeySecurityScheme", {})
+                location = api_key_scheme.get("location")
+                parameter_name = api_key_scheme.get("name")
+                if not parameter_name or location not in {"header", "query", "cookie"}:
+                    valid = False
+                    break
+                if location == "header":
+                    headers[parameter_name] = credential
+                elif location == "query":
+                    params[parameter_name] = credential
+                else:
+                    cookies[parameter_name] = credential
+            if valid:
+                return headers, params, cookies
+
+        raise AgentCallError("Configured credentials do not satisfy the Agent Card security requirements")
+
+    async def call_agent(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        message: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call an external A2A agent (non-streaming).
+
+        Args:
+            external_agent_id: External agent database ID to call.
+            tenant_id: Tenant ID for isolation.
+            message: A2A message payload.
+            api_key: Optional API key for authentication.
+
+        Returns:
+            A2A Task result dict.
+
+        Raises:
+            AgentCallError: If the call fails.
+        """
+        # Get agent info
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
+        if not agent:
+            raise AgentCallError(f"Agent {external_agent_id} not found")
+
+        if not agent.get("is_available"):
+            raise AgentCallError(f"Agent {external_agent_id} is not available")
+
+        agent_url = agent["agent_url"]
+        protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
+
+        # Build complete endpoint URL with protocol path
+        endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=False)
+
+        logger.info(
+            f"[A2A-CLIENT] Calling external agent id={external_agent_id}, "
+            f"url={endpoint_url}, protocol={protocol_type}"
+        )
+
+        try:
+            # Build request based on protocol type
+            if protocol_type == PROTOCOL_JSONRPC:
+                # JSON-RPC 2.0 format
+                _params = {"message": message}
+                if _A2A_SEND_MODEL:
+                    _params["metadata"] = {"model": _A2A_SEND_MODEL}
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "SendMessage",
+                    "params": _params
+                }
+            else:
+                # HTTP+JSON (REST) format - direct message payload
+                payload = {"message": message}
+                if _A2A_SEND_MODEL:
+                    payload["metadata"] = {"model": _A2A_SEND_MODEL}
+
+            logger.info(
+                f"Calling external A2A agent {external_agent_id}: "
+                f"url={endpoint_url}, protocol={protocol_type}"
+            )
+
+            headers = build_a2a_headers()
+            auth_headers, auth_params, auth_cookies = self._build_security_request_parts(agent)
+            headers.update(auth_headers)
+            async with A2AHttpClient() as client:
+                response = await client.post_json(
+                    endpoint_url,
+                    payload,
+                    headers,
+                    params=auth_params,
+                    cookies=auth_cookies,
+                )
+
+            # Parse response
+            if "error" in response:
+                error = response["error"]
+                raise AgentCallError(f"Agent error: {error.get('message', 'Unknown error')}")
+
+            return response.get("result", response)
+
+        except A2AHttpStatusError as e:
+            logger.error(f"External agent {external_agent_id} returned HTTP {e.status}")
+            if e.status == 401:
+                raise AgentCallError(
+                    "External agent authentication failed (HTTP 401). "
+                    "Check the configured security credentials."
+                ) from e
+            raise AgentCallError(f"External agent request failed (HTTP {e.status})") from e
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to call agent {external_agent_id}: {e}")
+            raise AgentCallError(f"Call failed: {str(e)}") from e
+
+    async def call_agent_streaming(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        message: Dict[str, Any],
+        api_key: Optional[str] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Call an external A2A agent with streaming response.
+
+        Args:
+            external_agent_id: External agent database ID to call.
+            tenant_id: Tenant ID for isolation.
+            message: A2A message payload.
+            api_key: Optional API key for authentication.
+
+        Yields:
+            A2A task events (taskProgress, taskArtifact, etc.).
+
+        Raises:
+            AgentCallError: If the call setup fails.
+        """
+        # Get agent info
+        agent = a2a_agent_db.get_external_agent_by_id(
+            external_agent_id,
+            tenant_id,
+            include_security_credentials=True,
+        )
+        if not agent:
+            raise AgentCallError(f"Agent {external_agent_id} not found")
+
+        if not agent.get("is_available"):
+            raise AgentCallError(f"Agent {external_agent_id} is not available")
+
+        agent_url = agent["agent_url"]
+        protocol_type = agent.get("protocol_type", PROTOCOL_JSONRPC)
+
+        # Build complete endpoint URL with protocol path
+        endpoint_url = self._build_endpoint_url(agent_url, protocol_type, streaming=True)
+
+        # Build request based on protocol type
+        if protocol_type == PROTOCOL_JSONRPC:
+            # JSON-RPC 2.0 format
+            _params = {"message": message}
+            if _A2A_SEND_MODEL:
+                _params["metadata"] = {"model": _A2A_SEND_MODEL}
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "SendMessage",
+                "params": _params
+            }
+        else:
+            # HTTP+JSON (REST) format - direct message payload
+            payload = {"message": message}
+            if _A2A_SEND_MODEL:
+                payload["metadata"] = {"model": _A2A_SEND_MODEL}
+
+        logger.info(
+            f"Calling external A2A agent {external_agent_id} (streaming): "
+            f"url={endpoint_url}, protocol={protocol_type}"
+        )
+
+        headers = build_a2a_headers(api_key)
+        auth_headers, auth_params, auth_cookies = self._build_security_request_parts(agent)
+        headers.update(auth_headers)
+
+        try:
+            async with A2AHttpClient() as client:
+                async for event in client.post_stream(
+                    endpoint_url,
+                    payload,
+                    headers,
+                    params=auth_params,
+                    cookies=auth_cookies,
+                ):
+                    yield event
+        except aiohttp.ClientError as e:
+            logger.error(f"Streaming call failed for agent {external_agent_id}: {e}")
+            raise AgentCallError(f"Streaming call failed: {str(e)}") from e
+
+# Singleton instance
+a2a_client_service = A2AClientService()

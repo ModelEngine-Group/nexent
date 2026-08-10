@@ -1,0 +1,1 @@
+[{"op": "add", "path": "/spec/template/spec/volumes/-", "value": {"name": "runagent-ssl", "configMap": {"name": "nexent-runagent-ssl"}}}, {"op": "add", "path": "/spec/template/spec/containers/0/volumeMounts/-", "value": {"name": "runagent-ssl", "mountPath": "/opt/backend/.venv/lib/python3.11/site-packages/nexent/core/agents/run_agent.py", "subPath": "run_agent.py"}}]

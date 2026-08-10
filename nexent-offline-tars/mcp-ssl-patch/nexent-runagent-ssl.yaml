@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-runagent-ssl
+  namespace: nexent
+  labels:
+    app.kubernetes.io/name: nexent
+data:
+  run_agent.py: |
+    import asyncio
+    import logging
+    from contextvars import copy_context
+    from threading import Thread
+    from typing import Any, Dict, Union
+
+    from smolagents import ToolCollection
+
+    from .agent_model import AgentRunInfo
+    from .nexent_agent import NexentAgent, ProcessType
+
+    logger = logging.getLogger("run_agent")
+    logger.setLevel(logging.DEBUG)
+
+    # === nexent patch: skip TLS verification for MCP HTTP transports ===
+    # smolagents ToolCollection.from_mcp -> mcpadapt builds its own httpx client
+    # without exposing httpx_client_factory, so it would reject self-signed/internal
+    # MCP servers. The config/scan path already disables verify (create_httpx_client);
+    # mirror that here. verify=False only relaxes checks, never breaks a connection.
+    import httpx as _httpx
+    _orig_ac_init = _httpx.AsyncClient.__init__
+    def _ac_init_skip_verify(self, *args, **kwargs):
+        kwargs.setdefault("verify", False)
+        return _orig_ac_init(self, *args, **kwargs)
+    _httpx.AsyncClient.__init__ = _ac_init_skip_verify
+    # === end patch ===
+
+
+    def _detect_transport(url: str) -> str:
+        """
+        Auto-detect MCP transport type based on URL format.
+
+        Args:
+            url: MCP server URL
+
+        Returns:
+            Transport type: 'sse' or 'streamable-http'
+        """
+        url_stripped = url.strip()
+
+        if url_stripped.endswith("/sse"):
+            return "sse"
+        elif url_stripped.endswith("/mcp"):
+            return "streamable-http"
+
+        return "streamable-http"
+
+
+    def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Normalize MCP host configuration to a dictionary format.
+
+        Args:
+            mcp_host_item: Either a string URL or a dict with 'url', optional 'transport',
+                           and optional 'headers' or 'authorization'
+
+        Returns:
+            Dictionary with 'url', 'transport', and optionally 'headers' keys
+        """
+        if isinstance(mcp_host_item, str):
+            url = mcp_host_item
+            transport = _detect_transport(url)
+            return {"url": url, "transport": transport}
+        elif isinstance(mcp_host_item, dict):
+            url = mcp_host_item.get("url")
+            if not url:
+                raise ValueError("MCP host dict must contain 'url' key")
+            transport = mcp_host_item.get("transport")
+            if not transport:
+                transport = _detect_transport(url)
+            if transport not in ("sse", "streamable-http"):
+                raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
+
+            result = {"url": url, "transport": transport}
+
+            if "authorization" in mcp_host_item and "headers" in mcp_host_item:
+                headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
+                headers["Authorization"] = mcp_host_item["authorization"]
+                result["headers"] = headers
+            elif "authorization" in mcp_host_item:
+                result["headers"] = {"Authorization": mcp_host_item["authorization"]}
+            elif "headers" in mcp_host_item:
+                result["headers"] = mcp_host_item["headers"]
+
+            return result
+        else:
+            raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
+
+
+    def agent_run_thread(agent_run_info: AgentRunInfo):
+        try:
+            mcp_host = agent_run_info.mcp_host
+            if mcp_host is None or len(mcp_host) == 0:
+                nexent = NexentAgent(
+                    observer=agent_run_info.observer,
+                    model_config_list=agent_run_info.model_config_list,
+                    stop_event=agent_run_info.stop_event
+                )
+                agent = nexent.create_single_agent(agent_run_info.agent_config)
+                nexent.set_agent(agent)
+
+                if getattr(agent_run_info, 'context_manager', None) is not None:
+                    agent.context_manager = agent_run_info.context_manager
+
+                nexent.add_history_to_agent(agent_run_info.history)
+                nexent.agent_run_with_observer(
+                    query=agent_run_info.query, reset=False)
+            else:
+                agent_run_info.observer.add_message(
+                    "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+                mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+
+                with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
+                    nexent = NexentAgent(
+                        observer=agent_run_info.observer,
+                        model_config_list=agent_run_info.model_config_list,
+                        stop_event=agent_run_info.stop_event,
+                        mcp_tool_collection=tool_collection
+                    )
+                    agent = nexent.create_single_agent(agent_run_info.agent_config)
+                    nexent.set_agent(agent)
+
+                    if getattr(agent_run_info, 'context_manager', None) is not None:
+                        agent.context_manager = agent_run_info.context_manager
+
+                    nexent.add_history_to_agent(agent_run_info.history)
+                    nexent.agent_run_with_observer(
+                        query=agent_run_info.query, reset=False)
+
+        except Exception as e:
+            if "Couldn't connect to the MCP server" in str(e):
+                mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
+                agent_run_info.observer.add_message(
+                    "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
+            else:
+                agent_run_info.observer.add_message(
+                    "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+            raise ValueError(f"Error in agent_run_thread: {e}")
+
+
+    async def agent_run(agent_run_info: AgentRunInfo):
+        observer = agent_run_info.observer
+
+        ctx = copy_context()
+        thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
+        thread_agent.start()
+
+        while thread_agent.is_alive():
+            cached_message = observer.get_cached_message()
+            for message in cached_message:
+                yield message
+                if len(cached_message) < 8:
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
+
+        cached_message = observer.get_cached_message()
+        for message in cached_message:
+            yield message
+
