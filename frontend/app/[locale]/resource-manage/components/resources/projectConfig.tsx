@@ -29,7 +29,7 @@ export default function ProjectConfigTab({
     {
       key: 'productName',
       label: t('project.config.title'),
-      max: 10,
+      max: 20,
       maxEn: 50,
     },
     {
