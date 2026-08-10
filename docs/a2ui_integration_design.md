@@ -460,21 +460,31 @@ async def request_user_feedback(agent_run_info, conversation_id, user_id,
 
 **文件**: `backend/apps/a2ui_app.py`
 
-```python
-a2ui_router = APIRouter(prefix="/api/a2ui", tags=["A2UI"])
+a2ui\_router = APIRouter(prefix="/api/a2ui", tags=\["A2UI"])
 
-@a2ui_router.post("/action")
-async def submit_action(request: ActionSubmitRequest):
-    """提交用户操作响应。"""
+<br />
 
-@a2ui_router.get("/interactions/{conversation_id}")
-async def get_pending_interactions(conversation_id: str, user_id: str | None = None):
-    """查询会话的待处理交互（用于断线恢复）。"""
+@a2ui\_router.post("/action")
 
-@a2ui_router.delete("/interactions/{interaction_id}")
-async def cancel_interaction(interaction_id: str):
-    """取消待处理交互。"""
-```
+async def submit\_action(request: ActionSubmitRequest):
+
+&#x20;   """提交用户操作响应。"""
+
+<br />
+
+@a2ui\_router.get("/interactions/{conversation\_id}")
+
+async def get\_pending\_interactions(conversation\_id: str, user\_id: str | None = None):
+
+&#x20;   """查询会话的待处理交互（用于断线恢复）。"""
+
+<br />
+
+@a2ui\_router.delete("/interactions/{interaction\_id}")
+
+async def cancel\_interaction(interaction\_id: str):
+
+&#x20;   """取消待处理交互。"""
 
 注册到 `runtime_service.py`：
 
