@@ -4041,7 +4041,7 @@
   "project.config.about.us.close": "Hide",
   "project.config.logo.change": "Change Icon",
   "project.config.logo.upload.new": "Upload New Icon",
-  "project.config.logo.format": "Incorrect image format, only PNG images are supported",
+  "project.config.logo.format": "Incorrect image format, only PNG and JPG images are supported",
   "project.config.logo.size": "Image size must not exceed 200KB",
   "project.config.update.success": "Configuration updated successfully, effective after page refresh",
   "project.config.page.subtitle": "Subtitle",
