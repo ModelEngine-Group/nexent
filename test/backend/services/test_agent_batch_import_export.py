@@ -1469,3 +1469,32 @@ class TestImportAgentsBatchImpl:
 
             assert result["total"] == 1
             assert result["success_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_import_agent_with_missing_agent_json(self, mock_authorization):
+        buffer = io.BytesIO()
+        manifest = {
+            "version": "1.0",
+            "exported_at": "",
+            "agents": [
+                {
+                    "folder": "agents/test_agent",
+                    "agent_id": 1,
+                    "name": "test_agent",
+                    "display_name": "Test Agent",
+                }
+            ],
+        }
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(manifest))
+            zf.writestr("agents/test_agent/some_other_file.txt", "content")
+
+        zip_bytes = buffer.getvalue()
+
+        result = await import_agents_batch_impl(zip_bytes, mock_authorization)
+
+        assert result["total"] == 1
+        assert result["success_count"] == 0
+        assert result["failed_count"] == 1
+        assert len(result["items"]) == 1
+        assert result["items"][0]["success"] is False
