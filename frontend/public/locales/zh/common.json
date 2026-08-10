@@ -736,7 +736,6 @@
   "toolPool.selectedToolsLabel": "已选择工具",
   "toolPool.noSearchResults": "没有搜索到匹配的工具",
   "toolPool.mcpModelUnavailableTooltip": "工具所选模型不可用",
-
   "nl2agent.toolRecommendations.title": "推荐工具",
   "nl2agent.toolRecommendations.count": "匹配到 {{count}} 个已安装的 MCP 工具",
   "nl2agent.toolRecommendations.match": "匹配度 {{score}}",
@@ -755,7 +754,6 @@
   "nl2agent.agentDraft.apply": "应用到草稿",
   "nl2agent.agentDraft.applied": "已应用",
   "nl2agent.assistant.description": "请描述你想创建的智能体，我会搜索已安装的工具并协助生成智能体配置。",
-
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",
@@ -3577,7 +3575,6 @@
   "systemPrompt.finetune.modeInsertDesc": "在指定位置插入新的内容",
   "systemPrompt.finetune.modeSelect": "替换选中",
   "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围",
-
   "aidpKnowledge.pageTitle": "AIDP 知识库",
   "aidpKnowledge.serverUrl": "AIDP 服务器地址",
   "aidpKnowledge.serverUrlPlaceholder": "https://aidp.example.com",
@@ -3598,7 +3595,6 @@
   "aidpKnowledge.kbUnavailable": "不可用",
   "aidpKnowledge.createKb": "创建知识库",
   "aidpKnowledge.refresh": "刷新",
-
   "aidpKnowledge.listEmpty": "暂无知识库",
   "aidpKnowledge.tagDocs": "文档: {{count}}",
   "aidpKnowledge.tagChunks": "分块: {{count}}",
@@ -3963,7 +3959,6 @@
   "systemPrompt.finetune.selectTip": "在下方编辑器中选择文本以获取位置",
   "toolConfig.validation.array.invalid": "请输入有效的数组 JSON",
   "toolConfig.validation.object.invalid": "请输入有效的对象 JSON",
-
   "project.config": "系统配置",
   "project.config.title": "系统名",
   "project.config.language.en": "请输入英文配置",
@@ -3981,7 +3976,6 @@
   "project.config.page.complete.logo": "完整logo",
   "project.config.page.simple.log": "系统logo",
   "project.config.description": "{productName} 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。",
-  "project.config.page.simple.log": "系统logo",
   "sidebar.agentEvaluation": "智能体评估",
   "sidebar.annotationLabels": "标注标签",
   "agentEvaluation.agentLabel": "智能体",
@@ -4334,5 +4328,6 @@
   "agentEvaluation.genTargetSetTitle": "目标评测集",
   "agentEvaluation.genSceneDescTitle": "场景描述",
   "agentEvaluation.genOptionalContextTitle": "可选上下文（让生成更精准）",
-  "agentEvaluation.genRefDocLabel": "上传参考文档"
+  "agentEvaluation.genRefDocLabel": "上传参考文档",
+  "group.deleted": "已删除的用户组"
 }

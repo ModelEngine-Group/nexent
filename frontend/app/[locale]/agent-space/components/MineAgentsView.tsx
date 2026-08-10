@@ -189,7 +189,9 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
+    router.push(
+      `/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`
+    );
   };
 
   const closeReviewModal = () => {

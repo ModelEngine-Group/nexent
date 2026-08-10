@@ -732,6 +732,7 @@ class TestStartStreamingChat:
         assert chunks == [b"data: hello\n\n"]
         assert response.headers["conversation_id"] == "123"
         assert response.headers["X-Request-Id"] == ctx.request_id
+        assert response.headers["X-Accel-Buffering"] == "no"
         assert response.headers["x-existing"] == "1"
 
 

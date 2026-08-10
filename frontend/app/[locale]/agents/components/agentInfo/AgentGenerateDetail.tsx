@@ -18,7 +18,13 @@ import {
   Tooltip,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Zap, Maximize2, Settings2, Sparkles, TriangleAlert } from "lucide-react";
+import {
+  Zap,
+  Maximize2,
+  Settings2,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
@@ -26,9 +32,7 @@ import {
   DEFAULT_AGENT_VERIFICATION_CONFIG,
   PromptTemplate,
 } from "@/types/agentConfig";
-import {
-  clearExpiredGenerationCaches
-} from "@/lib/agentGenerationCache";
+import { clearExpiredGenerationCaches } from "@/lib/agentGenerationCache";
 import { GENERATE_PROMPT_STREAM_TYPES } from "@/const/agentConfig";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentGeneration } from "@/hooks/agent/useAgentGeneration";
@@ -40,6 +44,7 @@ import { canManageModels } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
+import { buildGroupSelectOptions } from "@/hooks/group/buildGroupSelectOptions";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
@@ -72,15 +77,22 @@ export default function AgentGenerateDetail({}) {
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
   const allGroups = groupData?.groups ?? [];
   const accessibleGroupIds = getAccessibleGroupIds();
-  const { groups: filteredGroups } = useGroupDetails(allGroups, accessibleGroupIds);
+  const { groups: filteredGroups } = useGroupDetails(
+    allGroups,
+    accessibleGroupIds
+  );
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const forceRefreshKey = useAgentConfigStore((state) => state.forceRefreshKey);
   const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const updateAgentConfig = useAgentConfigStore((state) => state.updateAgentConfig);
-  const setSaveValidation = useAgentConfigStore((state) => state.setSaveValidation);
+  const updateAgentConfig = useAgentConfigStore(
+    (state) => state.updateAgentConfig
+  );
+  const setSaveValidation = useAgentConfigStore(
+    (state) => state.setSaveValidation
+  );
   const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   // Determine if form should be editable (based on isReadOnly only, isGenerating handled separately)
@@ -96,7 +108,11 @@ export default function AgentGenerateDetail({}) {
   const canEditGroupSettings = isAdmin || isCreator;
 
   const { defaultLlmModelConfig } = useConfig();
-  const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
+  const {
+    availableLlmModels,
+    models,
+    isLoading: loadingModels,
+  } = useModelList();
   const { bareModelIds: bareCapacityModelIds } = useCapacityCoverage();
   const userCanManageModels = canManageModels(user?.role, isSpeedMode);
   const {
@@ -107,7 +123,10 @@ export default function AgentGenerateDetail({}) {
 
   const defaultLlmModel = useMemo(() => {
     if (!defaultLlmModelConfig) return undefined;
-    const configName = defaultLlmModelConfig.modelName || defaultLlmModelConfig.displayName || "";
+    const configName =
+      defaultLlmModelConfig.modelName ||
+      defaultLlmModelConfig.displayName ||
+      "";
     if (!configName) return undefined;
     const found = availableLlmModels.find(
       (m) => m.name === configName || m.displayName === configName
@@ -129,21 +148,34 @@ export default function AgentGenerateDetail({}) {
   // Streaming field values (accumulated from SSE, bypasses Form disabled state)
 
   // Track form values for modal props (synced after Form mounts / setFieldsValue)
-  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<number | undefined>();
-  const [watchedBusinessDescription, setWatchedBusinessDescription] = useState<string>("");
-  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] = useState<number | undefined>();
+  const [watchedPromptTemplateId, setWatchedPromptTemplateId] = useState<
+    number | undefined
+  >();
+  const [watchedBusinessDescription, setWatchedBusinessDescription] =
+    useState<string>("");
+  const [watchedBusinessLogicModelId, setWatchedBusinessLogicModelId] =
+    useState<number | undefined>();
   const [watchedDutyPrompt, setWatchedDutyPrompt] = useState<string>("");
-  const [watchedConstraintPrompt, setWatchedConstraintPrompt] = useState<string>("");
-  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] = useState<string>("");
+  const [watchedConstraintPrompt, setWatchedConstraintPrompt] =
+    useState<string>("");
+  const [watchedFewShotsPrompt, setWatchedFewShotsPrompt] =
+    useState<string>("");
 
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
-  const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
-  const [promptTemplateManagerOpen, setPromptTemplateManagerOpen] = useState(false);
+  const [expandModalType, setExpandModalType] = useState<
+    "duty" | "constraint" | "few-shots" | null
+  >(null);
+  const [promptTemplateManagerOpen, setPromptTemplateManagerOpen] =
+    useState(false);
   const [optimizeModalOpen, setOptimizeModalOpen] = useState(false);
-  const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [optimizeModalType, setOptimizeModalType] = useState<
+    "duty" | "constraint" | "few-shots" | null
+  >(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
-  const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  const [advancedSettingsTab, setAdvancedSettingsTab] = useState<
+    "basic" | "guardrail"
+  >("basic");
   const [guardrailContentKey, setGuardrailContentKey] = useState(0);
   const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
@@ -171,12 +203,12 @@ export default function AgentGenerateDetail({}) {
   const { handleGenerateAgent } = useAgentGeneration({
     onStreamUpdate: ({ type, content }) => {
       const fieldMap: Record<string, string> = {
-        [GENERATE_PROMPT_STREAM_TYPES.DUTY]: 'dutyPrompt',
-        [GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT]: 'constraintPrompt',
-        [GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS]: 'fewShotsPrompt',
-        [GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME]: 'agentName',
-        [GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION]: 'agentDescription',
-        [GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME]: 'agentDisplayName',
+        [GENERATE_PROMPT_STREAM_TYPES.DUTY]: "dutyPrompt",
+        [GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT]: "constraintPrompt",
+        [GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS]: "fewShotsPrompt",
+        [GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME]: "agentName",
+        [GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION]: "agentDescription",
+        [GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME]: "agentDisplayName",
       };
 
       const fieldName = fieldMap[type];
@@ -193,12 +225,29 @@ export default function AgentGenerateDetail({}) {
     ).sort((a, b) => a - b);
   };
 
-  const groupSelectOptions = useMemo(() => {
-    return filteredGroups.map((g) => ({
-      label: g.group_name,
-      value: g.group_id,
-    }));
-  }, [filteredGroups]);
+  const selectedAdvancedGroupIds = Form.useWatch(
+    "group_ids",
+    advancedSettingsForm
+  );
+
+  const groupSelectOptions = useMemo(
+    () =>
+      buildGroupSelectOptions({
+        groups: filteredGroups,
+        allGroups,
+        selectedGroupIds:
+          selectedAdvancedGroupIds ??
+          normalizeNumberArray(editedAgent.group_ids || []),
+        deletedGroupLabel: t("group.deleted"),
+      }),
+    [
+      filteredGroups,
+      allGroups,
+      selectedAdvancedGroupIds,
+      editedAgent.group_ids,
+      t,
+    ]
+  );
 
   const selectedMainAgentModel = useMemo(() => {
     const primaryModelId = editedAgent.model_ids?.[0];
@@ -228,17 +277,24 @@ export default function AgentGenerateDetail({}) {
     // Build mainAgentModels array from model_ids (preferred) and resolve display names
     // against the available LLM list. When model_ids is empty, fall back to deriving
     // a single model entry from the legacy `model` name (kept for backward compatibility).
-    const modelIds = (editedAgent.model_ids || []).filter((id: unknown) => Number.isFinite(Number(id)));
-    const mainAgentModelIds: number[] = modelIds.map((id: unknown) => Number(id));
+    const modelIds = (editedAgent.model_ids || []).filter((id: unknown) =>
+      Number.isFinite(Number(id))
+    );
+    const mainAgentModelIds: number[] = modelIds.map((id: unknown) =>
+      Number(id)
+    );
     let mainAgentModels: string[] = mainAgentModelIds
-      .map((id: number) => availableLlmModels.find((m) => m.id === id)?.displayName)
+      .map(
+        (id: number) => availableLlmModels.find((m) => m.id === id)?.displayName
+      )
       .filter(Boolean) as string[];
 
     // Backward compatibility: if model_ids is empty but a legacy `model` name is present,
     // try to resolve a matching model to keep the UI populated.
     if (mainAgentModels.length === 0 && editedAgent.model) {
       const matched = availableLlmModels.find(
-        (m) => m.name === editedAgent.model || m.displayName === editedAgent.model
+        (m) =>
+          m.name === editedAgent.model || m.displayName === editedAgent.model
       );
       if (matched) {
         mainAgentModels = [matched.displayName];
@@ -276,7 +332,7 @@ export default function AgentGenerateDetail({}) {
       provideRunSummary: editedAgent.provide_run_summary || false,
       verificationEnabled: editedAgent.verification_config?.enabled ?? false,
       businessDescription: editedAgent.business_description || "",
-      businessLogicModelName:editedAgent.business_logic_model_name,
+      businessLogicModelName: editedAgent.business_logic_model_name,
       businessLogicModelId: editedAgent.business_logic_model_id,
       promptTemplateId: editedAgent.prompt_template_id,
       promptTemplateName: editedAgent.prompt_template_name || "system_default",
@@ -290,8 +346,19 @@ export default function AgentGenerateDetail({}) {
       setWatchedConstraintPrompt(initialAgentInfo.constraintPrompt || "");
       setWatchedFewShotsPrompt(initialAgentInfo.fewShotsPrompt || "");
     });
-
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels, user?.email, isSpeedMode, updateAgentConfig]);
+  }, [
+    form,
+    currentAgentId,
+    editedAgent,
+    isCreatingMode,
+    defaultLlmModel,
+    accessibleGroupIds,
+    forceRefreshKey,
+    availableLlmModels,
+    user?.email,
+    isSpeedMode,
+    updateAgentConfig,
+  ]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
@@ -306,7 +373,6 @@ export default function AgentGenerateDetail({}) {
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
-
     updateAgentConfig({
       business_description: value,
     });
@@ -320,7 +386,7 @@ export default function AgentGenerateDetail({}) {
 
     updateAgentConfig({
       business_logic_model_id: selectedModel?.id,
-      business_logic_model_name: modelName
+      business_logic_model_name: modelName,
     });
   };
 
@@ -335,7 +401,6 @@ export default function AgentGenerateDetail({}) {
   };
 
   const handleSelectPromptTemplate = (template: PromptTemplate) => {
-
     updateAgentConfig({
       prompt_template_id: template.template_id,
       prompt_template_name: template.template_name,
@@ -343,14 +408,19 @@ export default function AgentGenerateDetail({}) {
   };
 
   // Handle expand modal functions
-  const handleOpenExpandModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+  const handleOpenExpandModal = (type: "duty" | "constraint" | "few-shots") => {
     if (!editable) return;
     setExpandModalType(type);
     setExpandModalOpen(true);
   };
 
-  const handleOpenOptimizeModal = (type: 'duty' | 'constraint' | 'few-shots') => {
-    const modelId = form.getFieldValue("businessLogicModelId") || editedAgent.business_logic_model_id || 0;
+  const handleOpenOptimizeModal = (
+    type: "duty" | "constraint" | "few-shots"
+  ) => {
+    const modelId =
+      form.getFieldValue("businessLogicModelId") ||
+      editedAgent.business_logic_model_id ||
+      0;
     if (!editable || isGenerating || !modelId) {
       return;
     }
@@ -361,7 +431,6 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };
-
 
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return (
@@ -385,7 +454,10 @@ export default function AgentGenerateDetail({}) {
   };
 
   const renderOptimizeButton = (type: "duty" | "constraint" | "few-shots") => {
-    const modelId = form.getFieldValue("businessLogicModelId") || editedAgent.business_logic_model_id || 0;
+    const modelId =
+      form.getFieldValue("businessLogicModelId") ||
+      editedAgent.business_logic_model_id ||
+      0;
     return (
       <Button
         onClick={() => handleOpenOptimizeModal(type)}
@@ -478,7 +550,10 @@ export default function AgentGenerateDetail({}) {
             type="warning"
             showIcon
             className="mb-3 shrink-0"
-            message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+            message={t(
+              "agent.prompts.noPermission",
+              "You do not have permission to view prompts."
+            )}
           />
         )}
         {renderPromptToolbar(type, title)}
@@ -500,7 +575,10 @@ export default function AgentGenerateDetail({}) {
     onBlurUpdate: (value: string) => void
   ) => {
     return (
-      <Form.Item name={fieldName} className="mb-0 h-full [&_.ant-row]:!h-full [&_.ant-col]:!h-full [&_.ant-form-item-control-input]:!h-full [&_.ant-form-item-control-input-content]:!h-full">
+      <Form.Item
+        name={fieldName}
+        className="mb-0 h-full [&_.ant-row]:!h-full [&_.ant-col]:!h-full [&_.ant-form-item-control-input]:!h-full [&_.ant-form-item-control-input-content]:!h-full"
+      >
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
@@ -548,7 +626,9 @@ export default function AgentGenerateDetail({}) {
       values.group_ids ?? editedAgent.group_ids ?? []
     );
     const ingroupPermission =
-      values.ingroup_permission ?? editedAgent.ingroup_permission ?? "READ_ONLY";
+      values.ingroup_permission ??
+      editedAgent.ingroup_permission ??
+      "READ_ONLY";
     // Commit guardrail draft from the ref
     const guardrailDraft = guardrailContentRef.current?.getDraft();
     const verificationConfig = {
@@ -582,15 +662,15 @@ export default function AgentGenerateDetail({}) {
 
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
-      case 'duty':
+      case "duty":
         form.setFieldsValue({ dutyPrompt: content });
         updateAgentConfig({ duty_prompt: content });
         break;
-      case 'constraint':
+      case "constraint":
         form.setFieldsValue({ constraintPrompt: content });
         updateAgentConfig({ constraint_prompt: content });
         break;
-      case 'few-shots':
+      case "few-shots":
         form.setFieldsValue({ fewShotsPrompt: content });
         updateAgentConfig({ few_shots_prompt: content });
         break;
@@ -600,11 +680,11 @@ export default function AgentGenerateDetail({}) {
 
   const getExpandModalTitle = () => {
     switch (expandModalType) {
-      case 'duty':
+      case "duty":
         return t("systemPrompt.card.duty.title");
-      case 'constraint':
+      case "constraint":
         return t("systemPrompt.card.constraint.title");
-      case 'few-shots':
+      case "few-shots":
         return t("systemPrompt.card.fewShots.title");
       default:
         return "";
@@ -613,18 +693,18 @@ export default function AgentGenerateDetail({}) {
 
   const getExpandModalContent = () => {
     switch (expandModalType) {
-      case 'duty':
+      case "duty":
         return form.getFieldValue("dutyPrompt") || "";
-      case 'constraint':
+      case "constraint":
         return form.getFieldValue("constraintPrompt") || "";
-      case 'few-shots':
+      case "few-shots":
         return form.getFieldValue("fewShotsPrompt") || "";
       default:
         return "";
     }
   };
 
-  const getPromptFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
+  const getPromptFieldKey = (type: "duty" | "constraint" | "few-shots") => {
     switch (type) {
       case "duty":
         return "dutyPrompt";
@@ -636,14 +716,17 @@ export default function AgentGenerateDetail({}) {
   };
 
   const handlePromptTabChange = (nextTab: string) => {
-    const promptField = getPromptFieldKey(activeTab as "duty" | "constraint" | "few-shots");
+    const promptField = getPromptFieldKey(
+      activeTab as "duty" | "constraint" | "few-shots"
+    );
     if (promptField) {
       const value = form.getFieldValue(promptField) || "";
       const storeField = {
         dutyPrompt: "duty_prompt",
         constraintPrompt: "constraint_prompt",
         fewShotsPrompt: "few_shots_prompt",
-      }[promptField] as "duty_prompt" | "constraint_prompt" | "few_shots_prompt";
+      }[promptField] as
+        "duty_prompt" | "constraint_prompt" | "few_shots_prompt";
       updateAgentConfig({ [storeField]: value });
     }
     setActiveTab(nextTab);
@@ -712,7 +795,12 @@ export default function AgentGenerateDetail({}) {
 
   // Custom validator for agent display name uniqueness
   const validateAgentDisplayNameUnique = async (_: any, value: string) => {
-    return validateAgentFieldUnique(_, value, "display_name", "displayNameExists");
+    return validateAgentFieldUnique(
+      _,
+      value,
+      "display_name",
+      "displayNameExists"
+    );
   };
 
   // Select options for available models
@@ -739,7 +827,8 @@ export default function AgentGenerateDetail({}) {
   });
 
   const isSelectedMainModelBare = Boolean(
-    selectedMainAgentModel && bareCapacityModelIds.has(selectedMainAgentModel.id)
+    selectedMainAgentModel &&
+    bareCapacityModelIds.has(selectedMainAgentModel.id)
   );
 
   const selectedBusinessLogicModel = useMemo(() => {
@@ -760,7 +849,7 @@ export default function AgentGenerateDetail({}) {
 
   const isSelectedBusinessLogicModelBare = Boolean(
     selectedBusinessLogicModel &&
-      bareCapacityModelIds.has(selectedBusinessLogicModel.id)
+    bareCapacityModelIds.has(selectedBusinessLogicModel.id)
   );
 
   const promptTemplateSelectOptions = useMemo(() => {
@@ -771,13 +860,16 @@ export default function AgentGenerateDetail({}) {
         : template.template_name,
     }));
 
-    const templateId = form.getFieldValue("promptTemplateId") || editedAgent.prompt_template_id || 0;
-    const templateName = form.getFieldValue("promptTemplateName") || editedAgent.prompt_template_name || "";
+    const templateId =
+      form.getFieldValue("promptTemplateId") ||
+      editedAgent.prompt_template_id ||
+      0;
+    const templateName =
+      form.getFieldValue("promptTemplateName") ||
+      editedAgent.prompt_template_name ||
+      "";
 
-    if (
-      templateId &&
-      !options.some((option) => option.value === templateId)
-    ) {
+    if (templateId && !options.some((option) => option.value === templateId)) {
       options.unshift({
         value: templateId,
         label: templateName || t("businessLogic.config.template.label"),
@@ -785,7 +877,13 @@ export default function AgentGenerateDetail({}) {
     }
 
     return options;
-  }, [editedAgent.prompt_template_id, editedAgent.prompt_template_name, promptTemplates, t, form]);
+  }, [
+    editedAgent.prompt_template_id,
+    editedAgent.prompt_template_name,
+    promptTemplates,
+    t,
+    form,
+  ]);
 
   const generationControlLabelStyle = {
     width: 84,
@@ -824,13 +922,20 @@ export default function AgentGenerateDetail({}) {
                     }}
                     autoSize={false}
                     disabled={!editable || isGenerating}
-                    onBlur={(e) => handleBusinessDescriptionChange(e.target.value)}
+                    onBlur={(e) =>
+                      handleBusinessDescriptionChange(e.target.value)
+                    }
                   />
                 </Form.Item>
 
                 {/* Control area */}
                 <Flex vertical gap={12} style={{ width: "100%" }}>
-                  <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                  <Flex
+                    align="center"
+                    justify="space-between"
+                    gap={12}
+                    wrap="wrap"
+                  >
                     <div
                       style={{
                         flex: "1 1 auto",
@@ -849,7 +954,11 @@ export default function AgentGenerateDetail({}) {
                       <Form.Item
                         name="promptTemplateId"
                         className="mb-0"
-                        style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 0,
+                          marginBottom: 0,
+                        }}
                       >
                         <Select
                           onChange={handlePromptTemplateChange}
@@ -871,7 +980,12 @@ export default function AgentGenerateDetail({}) {
                     </Button>
                   </Flex>
 
-                  <Flex align="center" justify="space-between" gap={12} wrap="wrap">
+                  <Flex
+                    align="center"
+                    justify="space-between"
+                    gap={12}
+                    wrap="wrap"
+                  >
                     <div
                       style={{
                         flex: "1 1 auto",
@@ -887,7 +1001,15 @@ export default function AgentGenerateDetail({}) {
                       >
                         {t("model.type.llm")}:
                       </span>
-                      <Form.Item name="businessLogicModelName" className="mb-0" style={{ flex: "1 1 200px", minWidth: 0, marginBottom: 0 }}>
+                      <Form.Item
+                        name="businessLogicModelName"
+                        className="mb-0"
+                        style={{
+                          flex: "1 1 200px",
+                          minWidth: 0,
+                          marginBottom: 0,
+                        }}
+                      >
                         <Select
                           onChange={handleModelChange}
                           loading={loadingModels}
@@ -912,7 +1034,8 @@ export default function AgentGenerateDetail({}) {
                       </span>
                     </Button>
                   </Flex>
-                  {(isSelectedMainModelBare || isSelectedBusinessLogicModelBare) && (
+                  {(isSelectedMainModelBare ||
+                    isSelectedBusinessLogicModelBare) && (
                     <Alert
                       type="warning"
                       showIcon
@@ -922,8 +1045,10 @@ export default function AgentGenerateDetail({}) {
                           : "agent.modelSelector.bareCapacity.formNoticeNoPermission",
                         {
                           modelName:
-                            (isSelectedMainModelBare && selectedMainAgentModel?.displayName) ||
-                            (isSelectedBusinessLogicModelBare && selectedBusinessLogicModel?.displayName) ||
+                            (isSelectedMainModelBare &&
+                              selectedMainAgentModel?.displayName) ||
+                            (isSelectedBusinessLogicModelBare &&
+                              selectedBusinessLogicModel?.displayName) ||
                             "",
                         }
                       )}
@@ -963,18 +1088,35 @@ export default function AgentGenerateDetail({}) {
             className="agent-config-tabs flex flex-col h-full w-full"
           >
             <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
-              <TabsTrigger value="agent-info">{t("agent.info.title")}</TabsTrigger>
-              <TabsTrigger value="duty">{t("systemPrompt.card.duty.title")}</TabsTrigger>
-              <TabsTrigger value="constraint">{t("systemPrompt.card.constraint.title")}</TabsTrigger>
-              <TabsTrigger value="few-shots">{t("systemPrompt.card.fewShots.title")}</TabsTrigger>
-              <TabsTrigger value="greeting">{t("agent.greeting.tabTitle")}</TabsTrigger>
+              <TabsTrigger value="agent-info">
+                {t("agent.info.title")}
+              </TabsTrigger>
+              <TabsTrigger value="duty">
+                {t("systemPrompt.card.duty.title")}
+              </TabsTrigger>
+              <TabsTrigger value="constraint">
+                {t("systemPrompt.card.constraint.title")}
+              </TabsTrigger>
+              <TabsTrigger value="few-shots">
+                {t("systemPrompt.card.fewShots.title")}
+              </TabsTrigger>
+              <TabsTrigger value="greeting">
+                {t("agent.greeting.tabTitle")}
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="agent-info" className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent
+              value="agent-info"
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
               <div className="overflow-y-auto overflow-x-hidden h-full px-3 pb-3">
                 <Row gutter={[16, 16]}>
                   <Col span={24}>
-                    <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
+                    <Form
+                      form={form}
+                      layout="vertical"
+                      disabled={!editable || isGenerating}
+                    >
                       <Form.Item
                         name="agentDisplayName"
                         label={t("agent.displayName")}
@@ -1008,7 +1150,10 @@ export default function AgentGenerateDetail({}) {
                             required: true,
                             message: t("agent.info.name.error.empty"),
                           },
-                          { max: 50, message: t("agent.info.name.error.length") },
+                          {
+                            max: 50,
+                            message: t("agent.info.name.error.length"),
+                          },
                           {
                             pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/,
                             message: t("agent.info.name.error.format"),
@@ -1034,7 +1179,9 @@ export default function AgentGenerateDetail({}) {
                             rules={[
                               {
                                 required: true,
-                                message: t("businessLogic.config.modelPlaceholder"),
+                                message: t(
+                                  "businessLogic.config.modelPlaceholder"
+                                ),
                               },
                               {
                                 type: "array",
@@ -1049,13 +1196,20 @@ export default function AgentGenerateDetail({}) {
                           >
                             <Select
                               mode="multiple"
-                              placeholder={t("businessLogic.config.modelPlaceholder")}
-                              value={form.getFieldValue("mainAgentModels") || []}
+                              placeholder={t(
+                                "businessLogic.config.modelPlaceholder"
+                              )}
+                              value={
+                                form.getFieldValue("mainAgentModels") || []
+                              }
                               onChange={(values: string[]) => {
-                                const selectedModels = availableLlmModels.filter(
-                                  (m) => values.includes(m.displayName)
+                                const selectedModels =
+                                  availableLlmModels.filter((m) =>
+                                    values.includes(m.displayName)
+                                  );
+                                const modelIds = selectedModels.map(
+                                  (m) => m.id
                                 );
-                                const modelIds = selectedModels.map((m) => m.id);
                                 form.setFieldsValue({
                                   mainAgentModels: values,
                                   mainAgentModelIds: modelIds,
@@ -1069,18 +1223,29 @@ export default function AgentGenerateDetail({}) {
                               maxTagTextLength={12}
                             >
                               {availableLlmModels.map((model) => {
-                                const isBare = bareCapacityModelIds.has(model.id);
+                                const isBare = bareCapacityModelIds.has(
+                                  model.id
+                                );
                                 return (
                                   <Select.Option
                                     key={model.id}
                                     value={model.displayName}
-                                    disabled={model.connect_status !== "available"}
+                                    disabled={
+                                      model.connect_status !== "available"
+                                    }
                                   >
                                     {isBare ? (
                                       <Flex align="center" gap={6}>
                                         <span>{model.displayName}</span>
-                                        <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
-                                          <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+                                        <Tooltip
+                                          title={t(
+                                            "agent.modelSelector.bareCapacity.tooltip"
+                                          )}
+                                        >
+                                          <TriangleAlert
+                                            size={14}
+                                            className="text-yellow-500 shrink-0"
+                                          />
                                         </Tooltip>
                                       </Flex>
                                     ) : (
@@ -1114,7 +1279,10 @@ export default function AgentGenerateDetail({}) {
               </div>
             </TabsContent>
 
-            <TabsContent value="duty" className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent
+              value="duty"
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
               {renderPromptSection(
                 "duty",
                 "dutyPrompt",
@@ -1123,7 +1291,10 @@ export default function AgentGenerateDetail({}) {
               )}
             </TabsContent>
 
-            <TabsContent value="constraint" className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent
+              value="constraint"
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
               {renderPromptSection(
                 "constraint",
                 "constraintPrompt",
@@ -1132,7 +1303,10 @@ export default function AgentGenerateDetail({}) {
               )}
             </TabsContent>
 
-            <TabsContent value="few-shots" className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent
+              value="few-shots"
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
               {renderPromptSection(
                 "few-shots",
                 "fewShotsPrompt",
@@ -1141,15 +1315,22 @@ export default function AgentGenerateDetail({}) {
               )}
             </TabsContent>
 
-            <TabsContent value="greeting" className="flex-1 min-h-0 overflow-y-auto">
+            <TabsContent
+              value="greeting"
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
               <div className="overflow-y-auto overflow-x-hidden h-full px-3 pb-3">
                 <div className="mb-4">
                   <div className="flex items-center mb-2">
-                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.messageTitle")}</h4>
+                    <h4 className="text-md font-medium text-gray-700">
+                      {t("agent.greeting.messageTitle")}
+                    </h4>
                   </div>
                   <Textarea
                     value={editedAgent.greeting_message || ""}
-                    onChange={(e) => updateAgentConfig({ greeting_message: e.target.value })}
+                    onChange={(e) =>
+                      updateAgentConfig({ greeting_message: e.target.value })
+                    }
                     disabled={!editable || isGenerating}
                     placeholder={t("agent.greeting.messagePlaceholder")}
                     className="w-full min-h-[80px]"
@@ -1158,49 +1339,68 @@ export default function AgentGenerateDetail({}) {
 
                 <div className="mb-4">
                   <div className="flex items-center mb-2">
-                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.questionsTitle")}</h4>
+                    <h4 className="text-md font-medium text-gray-700">
+                      {t("agent.greeting.questionsTitle")}
+                    </h4>
                   </div>
                   {(editedAgent.example_questions || []).length > 0 && (
                     <div className="space-y-2">
-                      {(editedAgent.example_questions || []).map((q: string, idx: number) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <Input
-                            value={q}
-                            onChange={(e) => {
-                              const newQuestions = [...(editedAgent.example_questions || [])];
-                              newQuestions[idx] = e.target.value;
-                              updateAgentConfig({ example_questions: newQuestions });
-                            }}
-                            disabled={!editable || isGenerating}
-                            className="flex-1"
-                          />
-                          <Button
-                            size="small"
-                            disabled={!editable || isGenerating}
-                            onClick={() => {
-                              const newQuestions = (editedAgent.example_questions || []).filter((_: string, i: number) => i !== idx);
-                              updateAgentConfig({ example_questions: newQuestions });
-                            }}
-                          >
-                            {t("agent.greeting.removeQuestion")}
-                          </Button>
-                        </div>
-                      ))}
+                      {(editedAgent.example_questions || []).map(
+                        (q: string, idx: number) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <Input
+                              value={q}
+                              onChange={(e) => {
+                                const newQuestions = [
+                                  ...(editedAgent.example_questions || []),
+                                ];
+                                newQuestions[idx] = e.target.value;
+                                updateAgentConfig({
+                                  example_questions: newQuestions,
+                                });
+                              }}
+                              disabled={!editable || isGenerating}
+                              className="flex-1"
+                            />
+                            <Button
+                              size="small"
+                              disabled={!editable || isGenerating}
+                              onClick={() => {
+                                const newQuestions = (
+                                  editedAgent.example_questions || []
+                                ).filter((_: string, i: number) => i !== idx);
+                                updateAgentConfig({
+                                  example_questions: newQuestions,
+                                });
+                              }}
+                            >
+                              {t("agent.greeting.removeQuestion")}
+                            </Button>
+                          </div>
+                        )
+                      )}
                     </div>
                   )}
-                  {(editedAgent.example_questions || []).length < 6 && editable && !isGenerating && (
-                    <Button
-                      size="small"
-                      type="dashed"
-                      onClick={() => {
-                        const newQuestions = [...(editedAgent.example_questions || []), ""];
-                        updateAgentConfig({ example_questions: newQuestions });
-                      }}
-                      className="mt-2"
-                    >
-                      {t("agent.greeting.addQuestion")}
-                    </Button>
-                  )}
+                  {(editedAgent.example_questions || []).length < 6 &&
+                    editable &&
+                    !isGenerating && (
+                      <Button
+                        size="small"
+                        type="dashed"
+                        onClick={() => {
+                          const newQuestions = [
+                            ...(editedAgent.example_questions || []),
+                            "",
+                          ];
+                          updateAgentConfig({
+                            example_questions: newQuestions,
+                          });
+                        }}
+                        className="mt-2"
+                      >
+                        {t("agent.greeting.addQuestion")}
+                      </Button>
+                    )}
                 </div>
               </div>
             </TabsContent>
@@ -1219,7 +1419,9 @@ export default function AgentGenerateDetail({}) {
         cancelText={t("common.cancel")}
         okButtonProps={{ disabled: !editable || isGenerating }}
         width={760}
-        styles={{ body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 } }}
+        styles={{
+          body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 8 },
+        }}
       >
         {/* Match the shared agent-detail tab style. */}
         <Tabs
@@ -1240,140 +1442,199 @@ export default function AgentGenerateDetail({}) {
 
           {/* Keep both panels mounted so unsaved form and guardrail state survive tab switches. */}
           <TabsContent value="basic" className="mt-4" forceMount>
-        <Form form={advancedSettingsForm} layout="vertical" disabled={!editable || isGenerating}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="agentAuthor"
-                label={t("agent.author")}
-                rules={[{ required: true, message: t("agent.authorPlaceholder") }]}
-              >
-                <Input placeholder={t("agent.authorPlaceholder")} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="isMainAgent"
-                label={t("agent.isMainAgent")}
-                rules={[{ required: true, message: t("agent.isMainAgent.error") }]}
-              >
-                <Select
-                  options={[
-                    { value: true, label: t("common.yes") },
-                    { value: false, label: t("common.no") },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Can permission="group:read">
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="group_ids" label={t("agent.userGroup")}>
-                  <Select
-                    mode="multiple"
-                    placeholder={t("agent.userGroup")}
-                    options={groupSelectOptions}
-                    allowClear
-                    disabled={!editable || isGenerating || !canEditGroupSettings}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  name="ingroup_permission"
-                  label={t("tenantResources.knowledgeBase.permission")}
-                >
-                  <Select
-                    placeholder={t("tenantResources.knowledgeBase.permission")}
-                    options={[
-                      { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
-                      { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
-                      { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+            <Form
+              form={advancedSettingsForm}
+              layout="vertical"
+              disabled={!editable || isGenerating}
+            >
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="agentAuthor"
+                    label={t("agent.author")}
+                    rules={[
+                      { required: true, message: t("agent.authorPlaceholder") },
                     ]}
-                    disabled={!editable || isGenerating || !canEditGroupSettings}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Can>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="mainAgentMaxStep"
-                label={t("businessLogic.config.maxSteps")}
-                rules={[
-                  { required: true, message: t("businessLogic.config.maxSteps") },
-                  { type: "number", min: 1, message: t("businessLogic.config.maxSteps") },
-                ]}
-              >
-                <InputNumber min={1} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="provideRunSummary"
-                label={t("agent.provideRunSummary")}
-                rules={[{ required: true, message: t("agent.provideRunSummary.error") }]}
-              >
-                <Select
-                  options={[
-                    { value: true, label: t("common.yes") },
-                    { value: false, label: t("common.no") },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="requestedOutputTokens"
-                label={t("agent.requestedOutputTokens")}
-                tooltip={t("agent.requestedOutputTokens.tooltip")}
-                rules={[
-                  { type: "number", min: 1, message: t("agent.requestedOutputTokens.error") },
-                  ...(minModelMaxOutputTokens
-                    ? [{
-                        type: "number" as const,
-                        max: minModelMaxOutputTokens,
-                        message: t("agent.requestedOutputTokens.maxError", {
-                          max: minModelMaxOutputTokens,
-                        }),
-                      }]
-                    : []),
-                ]}
-              >
-                <InputNumber
-                  min={1}
-                  max={minModelMaxOutputTokens}
-                  precision={0}
-                  placeholder={selectedMainAgentModel?.defaultOutputReserveTokens
-                    ? String(selectedMainAgentModel.defaultOutputReserveTokens)
-                    : undefined}
-                  style={{ width: "100%" }}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="verificationEnabled"
-                label={t("agent.verification")}
-                rules={[{ required: true, message: t("agent.verification.error") }]}
-              >
-                <Select
-                  options={[
-                    { value: true, label: t("common.yes") },
-                    { value: false, label: t("common.no") },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
+                  >
+                    <Input placeholder={t("agent.authorPlaceholder")} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="isMainAgent"
+                    label={t("agent.isMainAgent")}
+                    rules={[
+                      { required: true, message: t("agent.isMainAgent.error") },
+                    ]}
+                  >
+                    <Select
+                      options={[
+                        { value: true, label: t("common.yes") },
+                        { value: false, label: t("common.no") },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Can permission="group:read">
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item name="group_ids" label={t("agent.userGroup")}>
+                      <Select
+                        mode="multiple"
+                        placeholder={t("agent.userGroup")}
+                        options={groupSelectOptions}
+                        allowClear
+                        disabled={
+                          !editable || isGenerating || !canEditGroupSettings
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="ingroup_permission"
+                      label={t("tenantResources.knowledgeBase.permission")}
+                    >
+                      <Select
+                        placeholder={t(
+                          "tenantResources.knowledgeBase.permission"
+                        )}
+                        options={[
+                          {
+                            value: "EDIT",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.EDIT"
+                            ),
+                          },
+                          {
+                            value: "READ_ONLY",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.READ_ONLY"
+                            ),
+                          },
+                          {
+                            value: "PRIVATE",
+                            label: t(
+                              "tenantResources.knowledgeBase.permission.PRIVATE"
+                            ),
+                          },
+                        ]}
+                        disabled={
+                          !editable || isGenerating || !canEditGroupSettings
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Can>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="mainAgentMaxStep"
+                    label={t("businessLogic.config.maxSteps")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("businessLogic.config.maxSteps"),
+                      },
+                      {
+                        type: "number",
+                        min: 1,
+                        message: t("businessLogic.config.maxSteps"),
+                      },
+                    ]}
+                  >
+                    <InputNumber min={1} style={{ width: "100%" }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="provideRunSummary"
+                    label={t("agent.provideRunSummary")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("agent.provideRunSummary.error"),
+                      },
+                    ]}
+                  >
+                    <Select
+                      options={[
+                        { value: true, label: t("common.yes") },
+                        { value: false, label: t("common.no") },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="requestedOutputTokens"
+                    label={t("agent.requestedOutputTokens")}
+                    tooltip={t("agent.requestedOutputTokens.tooltip")}
+                    rules={[
+                      {
+                        type: "number",
+                        min: 1,
+                        message: t("agent.requestedOutputTokens.error"),
+                      },
+                      ...(minModelMaxOutputTokens
+                        ? [
+                            {
+                              type: "number" as const,
+                              max: minModelMaxOutputTokens,
+                              message: t(
+                                "agent.requestedOutputTokens.maxError",
+                                {
+                                  max: minModelMaxOutputTokens,
+                                }
+                              ),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  >
+                    <InputNumber
+                      min={1}
+                      max={minModelMaxOutputTokens}
+                      precision={0}
+                      placeholder={
+                        selectedMainAgentModel?.defaultOutputReserveTokens
+                          ? String(
+                              selectedMainAgentModel.defaultOutputReserveTokens
+                            )
+                          : undefined
+                      }
+                      style={{ width: "100%" }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="verificationEnabled"
+                    label={t("agent.verification")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("agent.verification.error"),
+                      },
+                    ]}
+                  >
+                    <Select
+                      options={[
+                        { value: true, label: t("common.yes") },
+                        { value: false, label: t("common.no") },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
           </TabsContent>
 
-        {/* Guardrail tab content */}
+          {/* Guardrail tab content */}
           <TabsContent value="guardrail" className="mt-4" forceMount>
             <GuardrailConfigContent
               key={guardrailContentKey}
@@ -1405,7 +1666,9 @@ export default function AgentGenerateDetail({}) {
         open={promptTemplateManagerOpen}
         editable={editable}
         templates={promptTemplates}
-        selectedTemplateId={watchedPromptTemplateId ?? editedAgent.prompt_template_id ?? 0}
+        selectedTemplateId={
+          watchedPromptTemplateId ?? editedAgent.prompt_template_id ?? 0
+        }
         onClose={() => setPromptTemplateManagerOpen(false)}
         onSelectTemplate={handleSelectPromptTemplate}
         onTemplatesChanged={invalidatePromptTemplates}
@@ -1423,31 +1686,35 @@ export default function AgentGenerateDetail({}) {
           sectionType={
             optimizeModalType === "few-shots" ? "few_shots" : optimizeModalType
           }
-          taskDescription={watchedBusinessDescription ?? editedAgent.business_description ?? ""}
+          taskDescription={
+            watchedBusinessDescription ?? editedAgent.business_description ?? ""
+          }
           currentContent={
             optimizeModalType === "duty"
-              ? watchedDutyPrompt ?? ""
+              ? (watchedDutyPrompt ?? "")
               : optimizeModalType === "constraint"
-                ? watchedConstraintPrompt ?? ""
-                : watchedFewShotsPrompt ?? ""
+                ? (watchedConstraintPrompt ?? "")
+                : (watchedFewShotsPrompt ?? "")
           }
           modelId={watchedBusinessLogicModelId ?? 0}
           agentId={currentAgentId ?? 0}
           toolIds={
             Array.isArray(editedAgent.tools)
-              ? editedAgent.tools.map((tool: any) =>
-                Number(typeof tool === "object" ? tool.id : tool)
-              ).filter((id: number) => Number.isFinite(id))
+              ? editedAgent.tools
+                  .map((tool: any) =>
+                    Number(typeof tool === "object" ? tool.id : tool)
+                  )
+                  .filter((id: number) => Number.isFinite(id))
               : []
           }
           subAgentIds={editedAgent.sub_agent_id_list || []}
           knowledgeBaseDisplayNames={
             Array.isArray(editedAgent.tools)
               ? editedAgent.tools.flatMap((tool: any) =>
-                typeof tool === "object" && Array.isArray(tool.display_names)
-                  ? tool.display_names
-                  : []
-              )
+                  typeof tool === "object" && Array.isArray(tool.display_names)
+                    ? tool.display_names
+                    : []
+                )
               : []
           }
           onClose={handleCloseOptimizeModal}

@@ -763,7 +763,6 @@
   "toolPool.selectedToolsLabel": "Selected Tools",
   "toolPool.noSearchResults": "No tools match your search",
   "toolPool.mcpModelUnavailableTooltip": "Selected model is unavailable",
-
   "nl2agent.toolRecommendations.title": "Recommended tools",
   "nl2agent.toolRecommendations.count": "{{count}} matching installed MCP tool",
   "nl2agent.toolRecommendations.count_other": "{{count}} matching installed MCP tools",
@@ -785,7 +784,6 @@
   "nl2agent.agentDraft.apply": "Apply to draft",
   "nl2agent.agentDraft.applied": "Applied",
   "nl2agent.assistant.description": "Describe the agent you want to create. I will search installed tools and help generate its configuration.",
-
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main Agent ID is not set, cannot update tool status",
   "tool.error.configFetchFailed": "Failed to get tool configuration",
@@ -3863,7 +3861,6 @@
   "space.new": "New Space",
   "toolConfig.validation.array.invalid": "Please enter valid array JSON",
   "toolConfig.validation.object.invalid": "Please enter valid object JSON",
-
   "aidpKnowledge.pageTitle": "AIDP Knowledge Bases",
   "aidpKnowledge.serverUrl": "AIDP Server URL",
   "aidpKnowledge.serverUrlPlaceholder": "https://aidp.example.com",
@@ -3884,7 +3881,6 @@
   "aidpKnowledge.kbUnavailable": "Unavailable",
   "aidpKnowledge.createKb": "Create Knowledge Base",
   "aidpKnowledge.refresh": "Refresh",
-
   "aidpKnowledge.listEmpty": "No knowledge bases found",
   "aidpKnowledge.tagDocs": "docs: {{count}}",
   "aidpKnowledge.tagChunks": "chunks: {{count}}",
@@ -3966,7 +3962,6 @@
   "aidpKnowledge.createAccessGroupsRequired": "Please select at least one user group, or switch to private",
   "aidpKnowledge.invalidFileType": "{{count}} file(s) with unsupported format have been filtered. Only Text (txt/json/markdown), Web (html), Docs (pdf/docx/doc/ppt/pptx), Sheets (xlsx/xls/csv), Images (png/jpeg/jpg/bmp) are supported",
   "aidpKnowledge.showTotal": "Total {{count}} items",
-
   "project.config": "System config",
   "project.config.title": "System name",
   "project.config.language.en": "Please enter the English configuration.",
@@ -3984,7 +3979,6 @@
   "project.config.page.complete.logo": "Full logo",
   "project.config.page.simple.log": "System logo",
   "project.config.description": "{productName} is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities.",
-  "project.config.page.simple.log": "System logo",
   "sidebar.agentEvaluation": "Agent Evaluation",
   "sidebar.annotationLabels": "Annotation Labels",
   "agentEvaluation.agentLabel": "Agent",
@@ -4337,5 +4331,6 @@
   "agentEvaluation.genTargetSetTitle": "Target Evaluation Set",
   "agentEvaluation.genSceneDescTitle": "Scene Description",
   "agentEvaluation.genOptionalContextTitle": "Optional Context (for more precise generation)",
-  "agentEvaluation.genRefDocLabel": "Upload Reference Document"
+  "agentEvaluation.genRefDocLabel": "Upload Reference Document",
+  "group.deleted": "Deleted user group"
 }
