@@ -35,7 +35,10 @@ DEFAULT_SCROLL_SIZE = 1000
 DEFAULT_HYBRID_ACCURATE_WEIGHT = 0.3
 NUMERIC_HYBRID_ACCURATE_WEIGHT = 0.7
 NUMERIC_EXACT_MATCH_BOOST = 100.0
-_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:[.,]\d+)*")
+# Python's ``\d`` also covers full-width digits. Accept the full-width
+# separators used by East Asian input methods so an identifier remains one
+# exact token.
+_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:[.,\uff0c\uff0e]\d+)*")
 
 
 def _build_numeric_exact_query(query_text: str) -> Optional[Dict[str, Any]]:

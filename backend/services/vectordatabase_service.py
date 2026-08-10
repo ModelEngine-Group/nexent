@@ -72,7 +72,9 @@ from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
 
 
-_HYBRID_NUMERIC_QUERY_PATTERN = re.compile(r"\d+(?:[.,]\d+)*")
+# Keep this in sync with the SDK token pattern: full-width separators are
+# common when identifiers are copied from Chinese documents.
+_HYBRID_NUMERIC_QUERY_PATTERN = re.compile(r"\d+(?:[.,\uff0c\uff0e]\d+)*")
 
 
 def _update_progress(task_id: str, processed: int, total: int):

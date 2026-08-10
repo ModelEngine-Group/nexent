@@ -1516,6 +1516,28 @@ def test_accurate_search_boosts_exact_numeric_matches(elasticsearch_core_instanc
         }
 
 
+def test_accurate_search_boosts_fullwidth_numeric_matches(elasticsearch_core_instance):
+    """Full-width numeric identifiers must be kept as one exact token."""
+    identifier = "\uff11\uff10\uff0e\uff11\uff12\uff18\uff0e\uff10\uff0e\uff14\uff12"
+    with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec, \
+            patch.object(elasticsearch_core_module, "calculate_term_weights") as mock_weights, \
+            patch.object(elasticsearch_core_module, "build_weighted_query") as mock_build:
+        mock_weights.return_value = {}
+        mock_build.return_value = {"query": {"match_all": {}}}
+        mock_exec.return_value = []
+
+        elasticsearch_core_instance.accurate_search(
+            ["test_index"], f"Find identifier {identifier}", top_k=3
+        )
+
+        _, search_query = mock_exec.call_args[0]
+        numeric_query = search_query["query"]["bool"]["should"][1]
+        assert numeric_query["bool"]["should"] == [
+            {"match_phrase": {"title": {"query": identifier, "boost": 100.0}}},
+            {"match_phrase": {"content": {"query": identifier, "boost": 100.0}}},
+        ]
+
+
 def test_semantic_search_success(elasticsearch_core_instance):
     """Test semantic search with vector similarity."""
     mock_embedding_model = MagicMock()
@@ -1690,6 +1712,27 @@ def test_hybrid_search_adapts_default_weight_for_numeric_queries(elasticsearch_c
     assert numeric_results[0]["document"]["id"] == "target"
     assert text_results[0]["document"]["id"] == "distractor"
     assert overridden_results[0]["document"]["id"] == "distractor"
+
+
+def test_hybrid_search_adapts_default_weight_for_fullwidth_numeric_queries(elasticsearch_core_instance):
+    """Full-width numeric identifiers should receive the numeric default weight."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "text"
+    accurate_results = [
+        {"score": 1.0, "document": {"id": "target"}, "index": "test_index"},
+        {"score": 0.2, "document": {"id": "distractor"}, "index": "test_index"},
+    ]
+    semantic_results = [
+        {"score": 1.0, "document": {"id": "distractor"}, "index": "test_index"},
+    ]
+
+    with patch.object(elasticsearch_core_instance, "accurate_search", return_value=accurate_results), \
+            patch.object(elasticsearch_core_instance, "semantic_search", return_value=semantic_results):
+        results = elasticsearch_core_instance.hybrid_search(
+            ["test_index"], "ID \uff11\uff10\uff0e\uff11\uff12\uff18\uff0e\uff10\uff0e\uff14\uff12", mock_embedding_model, top_k=2
+        )
+
+    assert results[0]["document"]["id"] == "target"
 
 
 def test_get_indices_detail_success(elasticsearch_core_instance):
