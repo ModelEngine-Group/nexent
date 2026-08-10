@@ -552,6 +552,7 @@ export interface McpServer {
   service_name: string;
   mcp_url: string;
   status: boolean;
+  enabled: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
