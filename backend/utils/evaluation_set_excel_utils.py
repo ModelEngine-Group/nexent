@@ -7,14 +7,35 @@ from openpyxl.styles import Font, PatternFill
 
 
 REQUIRED_HEADERS = ["query"]
-ALL_HEADERS = ["session_id", "request_id", "query",
-               "reference_output", "case_id"]
+ALL_HEADERS = [
+    "session_id",
+    "request_id",
+    "query",
+    "custom_variables",
+    "reference_output",
+    "case_id",
+]
 
 
 def _normalize_header(v: Any) -> str:
     if v is None:
         return ""
     return str(v).strip().lower()
+
+
+def _serialize_custom_variables(inputs: Dict[str, Any]) -> str:
+    """Return a JSON string of every input field that isn't one of the
+    reserved (column-level) inputs. Return empty string when nothing to
+    serialise so the Excel cell stays blank."""
+    reserved = {"query", "session_id", "request_id", "turn_order"}
+    extra: Dict[str, Any] = {
+        k: v for k, v in (inputs or {}).items() if k not in reserved
+    }
+    if not extra:
+        return ""
+    import json as _json
+
+    return _json.dumps(extra, ensure_ascii=False)
 
 
 # ── Template i18n ───────────────────────────────────────────────────
@@ -24,31 +45,33 @@ _INSTRUCTION_ROW = {
         "对话ID（同一对话的多轮使用相同ID）",
         "请求顺序（同一对话内从1递增）",
         "用户问题（必填*）",
+        '自定义变量JSON（可选，格式如{"key":"value"}）',
         "参考输出（可选）",
     ],
     "en": [
         "Session ID (same for all turns in one conversation)",
         "Turn order (increments from 1 within a session)",
         "User query (required*)",
+        'Custom variables JSON (optional, e.g. {"key":"value"})',
         "Reference output (optional)",
     ],
 }
 
 _TEMPLATE_HEADERS = {
-    "zh": ["session_id", "request_id", "query", "reference_output"],
-    "en": ["session_id", "request_id", "query", "reference_output"],
+    "zh": ["session_id", "request_id", "query", "custom_variables", "reference_output"],
+    "en": ["session_id", "request_id", "query", "custom_variables", "reference_output"],
 }
 
 _TEMPLATE_EXAMPLE_ROWS = {
     "zh": [
-        ["s1", "1", "1+1等于几？", "2"],
-        ["s1", "2", "再乘以3呢？", "6"],
-        ["s2", "1", "中国首都是哪里？", "北京"],
+        ["s1", "1", "1+1等于几？", '{"lang":"zh"}', "2"],
+        ["s1", "2", "再乘以3呢？", "", "6"],
+        ["s2", "1", "中国首都是哪里？", "", "北京"],
     ],
     "en": [
-        ["s1", "1", "What is 1+1?", "2"],
-        ["s2", "1", "What is the capital of France?", "Paris"],
-        ["s2", "2", "What is its population?", "About 2.1 million"],
+        ["s1", "1", "What is 1+1?", '{"lang":"en"}', "2"],
+        ["s2", "1", "What is the capital of France?", "", "Paris"],
+        ["s2", "2", "What is its population?", "", "About 2.1 million"],
     ],
 }
 
@@ -79,7 +102,9 @@ def build_evaluation_set_excel_template_bytes(language: str = "zh") -> bytes:
     # Styling
     bold = Font(bold=True)
     instruction_font = Font(italic=True, color="808080")
-    required_fill = PatternFill(start_color="FFF7E6", end_color="FFF7E6", fill_type="solid")
+    required_fill = PatternFill(
+        start_color="FFF7E6", end_color="FFF7E6", fill_type="solid"
+    )
 
     # Style the instruction row
     for col_idx in range(1, len(instructions) + 1):
@@ -97,7 +122,8 @@ def build_evaluation_set_excel_template_bytes(language: str = "zh") -> bytes:
     ws.column_dimensions["A"].width = 15  # session_id
     ws.column_dimensions["B"].width = 12  # request_id
     ws.column_dimensions["C"].width = 50  # query
-    ws.column_dimensions["D"].width = 50  # reference_output
+    ws.column_dimensions["D"].width = 35  # custom_variables
+    ws.column_dimensions["E"].width = 50  # reference_output
 
     # Example rows
     for row in example_rows:
@@ -108,7 +134,9 @@ def build_evaluation_set_excel_template_bytes(language: str = "zh") -> bytes:
     return out.getvalue()
 
 
-def build_evaluation_set_export_bytes(set_name: str, cases: List[Dict[str, Any]]) -> bytes:
+def build_evaluation_set_export_bytes(
+    set_name: str, cases: List[Dict[str, Any]]
+) -> bytes:
     """Build an XLSX file containing all cases of an evaluation set.
 
     Produces the same column layout as the import template so the file can
@@ -130,7 +158,9 @@ def build_evaluation_set_export_bytes(set_name: str, cases: List[Dict[str, Any]]
     # Styling
     bold = Font(bold=True)
     instruction_font = Font(italic=True, color="808080")
-    required_fill = PatternFill(start_color="FFF7E6", end_color="FFF7E6", fill_type="solid")
+    required_fill = PatternFill(
+        start_color="FFF7E6", end_color="FFF7E6", fill_type="solid"
+    )
 
     for col_idx in range(1, len(instructions) + 1):
         cell = ws.cell(row=1, column=col_idx)
@@ -146,29 +176,39 @@ def build_evaluation_set_export_bytes(set_name: str, cases: List[Dict[str, Any]]
     ws.column_dimensions["A"].width = 15  # session_id
     ws.column_dimensions["B"].width = 12  # request_id
     ws.column_dimensions["C"].width = 50  # query
-    ws.column_dimensions["D"].width = 50  # reference_output
+    ws.column_dimensions["D"].width = 35  # custom_variables
+    ws.column_dimensions["E"].width = 50  # reference_output
 
     for case in cases:
         inputs = case.get("inputs") or {}
         label = case.get("label") or {}
         session_id = inputs.get("session_id") or case.get("session_id") or ""
-        turn_order = inputs.get("request_id") or inputs.get("turn_order") or case.get("turn_order") or ""
+        turn_order = (
+            inputs.get("request_id")
+            or inputs.get("turn_order")
+            or case.get("turn_order")
+            or ""
+        )
         query = inputs.get("query", "")
+        custom_vars = _serialize_custom_variables(inputs)
         answer = label.get("answer", "")
-        ws.append([session_id, turn_order, query, answer])
+        ws.append([session_id, turn_order, query, custom_vars, answer])
 
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
 
 
-def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[str, Any]]:
+def parse_evaluation_cases_from_excel(
+    filename: str, raw: bytes
+) -> List[Dict[str, Any]]:
     """Parse evaluation cases from .xlsx or .xls.
 
     Expected headers (case-insensitive, trailing * ignored):
       - session_id
       - request_id  (or turn_order)
       - query       (or 问题) – required
+      - custom_variables  (optional JSON object whose keys are merged into inputs)
       - reference_output  (or answer, 答案)
 
     Chinese aliases (old format) are also recognized for backward compatibility:
@@ -180,6 +220,7 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
 
     Returns normalized case dicts compatible with insert_evaluation_set_cases.
     """
+    import json as _json
 
     HEADER_ALIASES = {
         # New format (Tencent Cloud compatible)
@@ -192,6 +233,8 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
         "turn": "request_id",
         "query": "query",
         "问题": "query",
+        "custom_variables": "custom_variables",
+        "customvariables": "custom_variables",
         "reference_output": "reference_output",
         "referenceoutput": "reference_output",
         "expected_output": "reference_output",
@@ -266,9 +309,12 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             case_id = get_col("case_id")
             session_id = get_col("session_id")
             request_id = get_col("request_id")
+            custom_vars_raw = get_col("custom_variables")
 
             # Skip fully empty rows
-            if not any([query, answer, case_id, session_id, request_id]):
+            if not any(
+                [query, answer, case_id, session_id, request_id, custom_vars_raw]
+            ):
                 continue
 
             if not query:
@@ -279,10 +325,24 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             if session_id:
                 inputs["session_id"] = session_id
             if request_id:
+                # Always keep request_id as string so round-trip stays
+                # deterministic regardless of whether Excel stored it as
+                # numeric or text.
+                inputs["request_id"] = request_id
+
+            # Merge custom_variables JSON into inputs; invalid JSON is kept
+            # verbatim on the `custom_variables` input key so the uploader
+            # can debug the payload.
+            if custom_vars_raw:
                 try:
-                    inputs["request_id"] = int(request_id)
+                    parsed = _json.loads(custom_vars_raw)
+                    if isinstance(parsed, dict):
+                        for k, v in parsed.items():
+                            inputs.setdefault(k, v)
+                    else:
+                        inputs["custom_variables"] = custom_vars_raw
                 except (ValueError, TypeError):
-                    inputs["request_id"] = request_id
+                    inputs["custom_variables"] = custom_vars_raw
 
             normalized: Dict[str, Any] = {
                 "case_id": case_id,
@@ -293,10 +353,7 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             if session_id:
                 normalized["session_id"] = session_id
             if request_id:
-                try:
-                    normalized["turn_order"] = int(request_id)
-                except (ValueError, TypeError):
-                    normalized["turn_order"] = request_id
+                normalized["turn_order"] = request_id
             cases.append(normalized)
 
         if not cases:
@@ -356,7 +413,10 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             case_id = get_cell("case_id")
             session_id = get_cell("session_id")
             request_id = get_cell("request_id")
-            if not any([query, answer, case_id, session_id, request_id]):
+            custom_vars_raw = get_cell("custom_variables")
+            if not any(
+                [query, answer, case_id, session_id, request_id, custom_vars_raw]
+            ):
                 continue
 
             if not query:
@@ -366,10 +426,18 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             if session_id:
                 inputs["session_id"] = session_id
             if request_id:
+                inputs["request_id"] = request_id
+
+            if custom_vars_raw:
                 try:
-                    inputs["request_id"] = int(request_id)
+                    parsed = _json.loads(custom_vars_raw)
+                    if isinstance(parsed, dict):
+                        for k, v in parsed.items():
+                            inputs.setdefault(k, v)
+                    else:
+                        inputs["custom_variables"] = custom_vars_raw
                 except (ValueError, TypeError):
-                    inputs["request_id"] = request_id
+                    inputs["custom_variables"] = custom_vars_raw
 
             normalized: Dict[str, Any] = {
                 "case_id": case_id,
@@ -380,10 +448,7 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
             if session_id:
                 normalized["session_id"] = session_id
             if request_id:
-                try:
-                    normalized["turn_order"] = int(request_id)
-                except (ValueError, TypeError):
-                    normalized["turn_order"] = request_id
+                normalized["turn_order"] = request_id
             cases.append(normalized)
 
         if not cases:

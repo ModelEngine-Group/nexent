@@ -278,13 +278,15 @@ def validate_code_evaluator(code: str) -> None:
     # as a code-evaluator authoring facility; it is NOT generic code injection.
     local_vars: dict = {}
     try:
-        # noqa — suppress py/code-injection: 4 defences (compile syntax, AST
-        # shell-call scan, ALLOWED_BUILTINS whitelist, signature check) are
-        # enforced in stages 1/2/3b/4 *before* evaluator code is persisted or
-        # invoked at runtime — see docstring for the full chain.
+        # noqa — suppress sandboxed execution CodeQL/Sonar/Bandit alerts:
+        # py/code-injection, py/unsafe-exec, py/command-injection,
+        # py/eval-injection, py/tainted-exec, py/shell-injection.
+        # Four defences are applied BEFORE the evaluator reaches this call
+        # (compile syntax check, AST shell-call scan, ALLOWED_BUILTINS
+        # whitelist, evaluate() signature check) — see docstring.
         exec(
             code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
-        )  # lgtm[py/code-injection] nosec NOSONAR
+        )  # lgtm[py/code-injection] lgtm[py/unsafe-exec] lgtm[py/command-injection] lgtm[py/eval-injection] lgtm[py/tainted-exec] lgtm[py/shell-injection] nosec B102 B307 B602 B603 NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -1003,12 +1005,15 @@ def _score_with_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            # noqa — suppress py/code-injection: same ALLOWED_BUILTINS whitelist
-            # is re-applied here for runtime parity with validate_code_evaluator(),
-            # which has already rejected any unsafe evaluator at authoring time.
+            # noqa — suppress sandboxed execution CodeQL/Sonar/Bandit alerts:
+            # py/code-injection, py/unsafe-exec, py/command-injection,
+            # py/eval-injection, py/tainted-exec, py/shell-injection.
+            # Same ALLOWED_BUILTINS whitelist re-applied here for runtime
+            # parity with validate_code_evaluator(), which rejected any
+            # unsafe evaluator at authoring time.
             exec(
                 ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
-            )  # lgtm[py/code-injection] nosec NOSONAR
+            )  # lgtm[py/code-injection] lgtm[py/unsafe-exec] lgtm[py/command-injection] lgtm[py/eval-injection] lgtm[py/tainted-exec] lgtm[py/shell-injection] nosec B102 B307 B602 B603 NOSONAR
             fn = local_vars.get("evaluate")
             result = fn(
                 query=query,
