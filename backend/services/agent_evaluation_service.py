@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from math import isfinite
 from statistics import mean
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from adapters.exception import JiuwenSDKUnavailableError
 
@@ -101,7 +101,7 @@ def _coerce_score(raw: Any) -> Any:
     return None
 
 
-def _coerce_reason(raw: Any) -> Dict[str, str]:
+def _coerce_reason(raw: Any) -> dict[str, str]:
     """Normalize a per-case ``reason`` column value to ``{name: reason_text}``.
 
     The column is TEXT – in well-formed runs it is ``str(json.dumps({name: reason}))``,
@@ -125,7 +125,7 @@ def _coerce_reason(raw: Any) -> Dict[str, str]:
     return {"reason": str(raw)}
 
 
-def _coerce_score_dict(raw: Any) -> Dict[str, float]:
+def _coerce_score_dict(raw: Any) -> dict[str, float]:
     """Best-effort conversion of a per-case score into ``{name: float}``.
 
     Numeric-only scores (legacy fallback / no-evaluator runs) are returned as
@@ -133,7 +133,7 @@ def _coerce_score_dict(raw: Any) -> Dict[str, float]:
     """
     value = _coerce_score(raw)
     if isinstance(value, dict):
-        out: Dict[str, float] = {}
+        out: dict[str, float] = {}
         for k, v in value.items():
             if isinstance(v, (int, float)) and isfinite(v):
                 out[str(k)] = float(v)
@@ -282,9 +282,7 @@ def validate_code_evaluator(code: str) -> None:
         # Four defences are applied BEFORE the evaluator reaches this call
         # (compile syntax check, AST shell-call scan, ALLOWED_BUILTINS
         # whitelist, evaluate() signature check) — see docstring.
-        # NOSONAR — sandboxed evaluator execution (defence-in-depth, not injection)
-        # lgtm [py/code-injection] lgtm [py/unsafe-exec] nosec B102
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  # lgtm[py/code-injection] lgtm[py/unsafe-exec] NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -360,7 +358,7 @@ def _extract_clean_reason(raw: Any) -> str:
     stripped = _LOG_PREFIX_RE.sub("", text).strip()
     if not stripped:
         return text
-    parsed: Optional[Dict[str, Any]] = None
+    parsed: dict[str, Any] | None = None
     try:
         parsed = json.loads(stripped)
     except (ValueError, TypeError):
@@ -436,7 +434,7 @@ def _iter_log_envelopes(text: str):
         cursor = payload_end
 
 
-def _reason_from_json_envelope(payload: str) -> Optional[str]:
+def _reason_from_json_envelope(payload: str) -> str | None:
     try:
         data = json.loads(payload)
     except (ValueError, TypeError):
@@ -583,8 +581,8 @@ def _is_llm_related_error(exc: Exception) -> bool:
 def _generate_friendly_error_message(
     exc: Exception,
     default_msg: str,
-    model_id: int = None,
-    tenant_id: str = None,
+    model_id: int | None = None,
+    tenant_id: str | None = None,
 ) -> str:
     if not model_id or not _is_llm_related_error(exc):
         return default_msg
@@ -644,8 +642,8 @@ async def _run_agent_to_final_answer(
     user_id: str,
     query: str,
     version_no: int,
-    history: Optional[List[Dict[str, Any]]] = None,
-) -> Tuple[str, List[dict]]:
+    history: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
     agent_request = AgentRequest(
         query=query,
@@ -656,14 +654,14 @@ async def _run_agent_to_final_answer(
         version_no=version_no,
         is_debug=True,
     )
-    agent_run_info, memory_context = await prepare_agent_run(
+    agent_run_info, _memory_context = await prepare_agent_run(
         agent_request=agent_request,
         user_id=user_id,
         tenant_id=tenant_id,
         allow_memory_search=False,
     )
-    final_answer_parts: List[str] = []
-    runtime_events: List[dict] = []
+    final_answer_parts: list[str] = []
+    runtime_events: list[dict] = []
     async for chunk in agent_run(agent_run_info):
         try:
             if isinstance(chunk, str):
@@ -696,7 +694,7 @@ async def _run_agent_to_final_answer(
 
 def _is_all_pass(
     scores: dict,
-    thresholds: Optional[Dict[str, float]] = None,
+    thresholds: dict[str, float] | None = None,
 ) -> bool:
     """Decide the per-case pass/fail status using per-evaluator thresholds.
 
@@ -750,7 +748,7 @@ def _is_all_pass(
 
 
 def _format_runtime_context(
-    runtime_events: List[dict], actual: str, max_tokens: int = 4096
+    runtime_events: list[dict], actual: str, max_tokens: int = 4096
 ) -> str:
     """Build an event-flow execution log for LLM evaluators.
 
@@ -766,8 +764,8 @@ def _format_runtime_context(
     stats = _extract_runtime_stats(runtime_events)
 
     # ── Step boundaries ───────────────────────────────────────────
-    steps: List[List[dict]] = []
-    current_step: List[dict] = []
+    steps: list[list[dict]] = []
+    current_step: list[dict] = []
     for e in runtime_events:
         if e.get("type") == "step_count" and current_step:
             steps.append(current_step)
@@ -799,7 +797,7 @@ def _format_runtime_context(
     remaining = budget
 
     # ── Build per-step output ─────────────────────────────────────
-    step_outputs: List[str] = []
+    step_outputs: list[str] = []
     for step_idx, step_events in enumerate(steps):
         available = min(per_step, remaining)
         if available <= 0:
@@ -808,7 +806,7 @@ def _format_runtime_context(
 
         # Count how many events in this step have trimmable content
         trimmable_events = []
-        fixed_lines: List[str] = []
+        fixed_lines: list[str] = []
         for e in step_events:
             t = e.get("type", "")
             if t == "step_count":
@@ -846,9 +844,7 @@ def _format_runtime_context(
                 if content.strip():
                     trimmable_events.append(("error", e, len(fixed_lines)))
                 fixed_lines.append("")
-            elif t == "final_answer":
-                continue
-            elif t == "token_count":
+            elif t == "final_answer" or t == "token_count":
                 continue
 
         # Distribute available budget across trimmable events
@@ -858,7 +854,7 @@ def _format_runtime_context(
         else:
             base_per_event = (available - trimmable_count * 2) // trimmable_count
             carry = 0
-            trimmed_results: List[str] = []
+            trimmed_results: list[str] = []
             for evt_type, evt, _ in trimmable_events:
                 event_budget = base_per_event + carry
                 carry = 0
@@ -928,8 +924,8 @@ def _format_runtime_context(
     return "\n".join(parts)
 
 
-def _extract_runtime_stats(runtime_events: List[dict]) -> dict:
-    stats: Dict[str, Any] = {
+def _extract_runtime_stats(runtime_events: list[dict]) -> dict:
+    stats: dict[str, Any] = {
         "steps": 0,
         "output_tokens": 0,
         "errors": 0,
@@ -969,17 +965,17 @@ def _extract_runtime_stats(runtime_events: List[dict]) -> dict:
 
 
 def _score_with_evaluators(
-    evaluators: Dict[int, Dict[str, Any]],
+    evaluators: dict[int, dict[str, Any]],
     judge_system_prompt: str,
     tenant_id: str,
     query: str,
     expected: str,
     actual: str,
     judge_model_id: int,
-    runtime_events: Optional[List[dict]] = None,
+    runtime_events: list[dict] | None = None,
     language: str = "zh",
     context_window: int = 4096,
-    conversation_history: Optional[List[Dict[str, Any]]] = None,
+    conversation_history: list[dict[str, Any]] | None = None,
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
     LLM evaluators run in parallel via ThreadPoolExecutor (I/O-bound)."""
@@ -1006,9 +1002,9 @@ def _score_with_evaluators(
             # Same ALLOWED_BUILTINS whitelist re-applied here for runtime
             # parity with validate_code_evaluator(), which rejected any
             # unsafe evaluator at authoring time.
-            # NOSONAR — sandboxed evaluator execution (defence-in-depth, not injection)
-            # lgtm [py/code-injection] lgtm [py/unsafe-exec] nosec B102
-            exec(ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)
+            exec(  # nosec B102  # lgtm[py/code-injection] lgtm[py/unsafe-exec] NOSONAR
+                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
+            )
             fn = local_vars.get("evaluate")
             result = fn(
                 query=query,
@@ -1026,7 +1022,7 @@ def _score_with_evaluators(
     if not llm_evals:
         return scores, reasons
 
-    def _call_one_llm(eid: int, ev: Dict[str, Any]):
+    def _call_one_llm(eid: int, ev: dict[str, Any]):
         """Single LLM evaluator call — submitted to thread pool."""
         prompt = (
             ev.get("prompt_en")
@@ -1113,13 +1109,13 @@ def create_agent_evaluation_run_impl(
     user_id: str,
     agent_id: int,
     judge_model_id: int,
-    evaluation_set_id: Optional[int] = None,
-    agent_version_no: Optional[int] = None,
-    evaluator_ids: Optional[list] = None,
-    field_mappings: Optional[dict] = None,
+    evaluation_set_id: int | None = None,
+    agent_version_no: int | None = None,
+    evaluator_ids: list | None = None,
+    field_mappings: dict | None = None,
     query_count: int = 10,
     language: str = "zh",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     _check_run_limits(tenant_id)
 
     # Validate evaluators
@@ -1142,7 +1138,7 @@ def create_agent_evaluation_run_impl(
                     f"Evaluator not published: {ev.get('name')}",
                 )
 
-    evaluator_config: Optional[Dict[str, Any]] = None
+    evaluator_config: dict[str, Any] | None = None
     if evaluator_ids:
         evaluator_config = {
             "evaluator_ids": evaluator_ids,
@@ -1233,13 +1229,76 @@ def create_agent_evaluation_run_impl(
     return run
 
 
+def _build_agent_profile_parts(profile: dict) -> list:
+    """Build the agent profile section for the query-generation prompt.
+
+    Conditionally includes each populated profile field so empty fields
+    don't pollute the prompt.
+    """
+    parts = [f"## Agent Profile\n- Name: {profile['name']}"]
+    if profile["description"]:
+        parts.append(f"- Description: {profile['description']}")
+    if profile["duty_prompt"]:
+        parts.append(f"- Duty: {profile['duty_prompt']}")
+    if profile["constraint_prompt"]:
+        parts.append(f"- Constraints: {profile['constraint_prompt']}")
+    if profile["business_description"]:
+        parts.append(f"- Business Context: {profile['business_description']}")
+    return parts
+
+
+def _extract_cases_from_markdown_fence(response: Any) -> list:
+    """Extract a cases list from a markdown-fenced JSON string.
+
+    The LLM occasionally wraps JSON in ```json ... ``` fences; this helper
+    peels the fence and parses the inner JSON, raising the standard
+    format-error if either step fails.
+    """
+    match = re.search(r"```(?:json)?\s*(\[.*?])\s*```", response, re.DOTALL)
+    if not match:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+            _QUERY_FORMAT_ERR_MSG,
+        )
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+            _QUERY_FORMAT_ERR_MSG,
+        ) from exc
+
+
+def _parse_cases_from_llm_response(response: Any) -> list:
+    """Parse the LLM response into a list of case dicts.
+
+    Handles three response shapes:
+    1. Already a list (passthrough)
+    2. JSON string with embedded cases
+    3. Markdown-fenced JSON string (e.g. ```json [...] ```)
+
+    Raises ``AppException`` with ``AGENT_EVALUATION_QUERY_GENERATION_FORMAT``
+    on any non-list / empty parse result.
+    """
+    try:
+        cases: Any = json.loads(response) if isinstance(response, str) else response
+    except json.JSONDecodeError:
+        cases = _extract_cases_from_markdown_fence(response)
+    if not isinstance(cases, list) or not cases:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
+            _QUERY_FORMAT_ERR_MSG,
+        )
+    return cases
+
+
 def _generate_test_queries(
     agent_id: int,
     tenant_id: str,
     model_id: int,
     query_count: int = 10,
     language: str = "zh",
-) -> List[str]:
+) -> list[str]:
     """Generate test queries from agent config via LLM.
 
     Uses the same template as case generation; extracts only the query strings.
@@ -1252,16 +1311,7 @@ def _generate_test_queries(
             ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND, f"Agent not found: {agent_id}"
         )
 
-    profile_parts = [f"## Agent Profile\n- Name: {profile['name']}"]
-    if profile["description"]:
-        profile_parts.append(f"- Description: {profile['description']}")
-    if profile["duty_prompt"]:
-        profile_parts.append(f"- Duty: {profile['duty_prompt']}")
-    if profile["constraint_prompt"]:
-        profile_parts.append(f"- Constraints: {profile['constraint_prompt']}")
-    if profile["business_description"]:
-        profile_parts.append(f"- Business Context: {profile['business_description']}")
-
+    profile_parts = _build_agent_profile_parts(profile)
     tpl = get_prompt_template("evaluation_generate_queries", language)
     user_prompt = "\n".join(profile_parts)
     user_prompt += f"\n\nGenerate {query_count} test cases for this agent."
@@ -1279,28 +1329,7 @@ def _generate_test_queries(
             ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED, str(exc)
         ) from exc
 
-    try:
-        cases: Any = json.loads(response) if isinstance(response, str) else response
-    except json.JSONDecodeError:
-        match = re.search(r"```(?:json)?\s*(\[.*?])\s*```", response, re.DOTALL)
-        if match:
-            try:
-                cases = json.loads(match.group(1))
-            except json.JSONDecodeError as exc:
-                raise AppException(
-                    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-                    _QUERY_FORMAT_ERR_MSG,
-                ) from exc
-        else:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-                _QUERY_FORMAT_ERR_MSG,
-            )
-    if not isinstance(cases, list) or not cases:
-        raise AppException(
-            ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT,
-            _QUERY_FORMAT_ERR_MSG,
-        )
+    cases = _parse_cases_from_llm_response(response)
 
     # Extract query strings from case objects [{inputs: {query: ...}, label: {answer: ...}}]
     result = [
@@ -1326,14 +1355,14 @@ async def _evaluate_query(
     query: str,
     judge_model_id: int,
     adapter: Any,
-    evaluators: Dict[int, Dict[str, Any]],
+    evaluators: dict[int, dict[str, Any]],
     judge_system_prompt: str,
-    runtime_events: Optional[List[dict]] = None,
+    runtime_events: list[dict] | None = None,
     language: str = "zh",
     context_window: int = 4096,
-    history: Optional[List[Dict[str, Any]]] = None,
+    history: list[dict[str, Any]] | None = None,
     expected: str = "",
-) -> Tuple[str, Optional[List[dict]], dict, dict]:
+) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
     answer_text, events = await _run_agent_to_final_answer(
         agent_id=agent_id,
@@ -1368,20 +1397,62 @@ async def _evaluate_query(
     return answer_text, events, score, reason
 
 
+def _build_evaluator_thresholds(evaluators: dict) -> dict:
+    """Build ``{name: pass_threshold}`` map from the per-run evaluator cache.
+
+    Values are floats; non-numeric / blank entries are skipped so legacy
+    evaluator rows with null thresholds fall through to the global DEFAULT
+    inside ``_is_all_pass``.
+    """
+    return {
+        str(ev["name"]): float(ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD))
+        for ev in evaluators.values()
+        if isinstance(ev, dict) and ev.get("name")
+    }
+
+
+def _determine_case_pass_status(score: Any, thresholds: dict) -> str:
+    """Map a per-case score to PASS / FAIL using the run's threshold map.
+
+    Dict-score path delegates to ``_is_all_pass``; scalar legacy path
+    (semantic_fallback returns score == 1 on success) treats scalar 1 as
+    PASS; anything else → FAIL.
+    """
+    if not isinstance(score, dict):
+        # Scalar legacy path (semantic_fallback returns score == 1 on
+        # success).  Non-dict scalar 1 → PASS; anything else → FAIL.
+        return EvalPassStatus.PASS if score == 1 else EvalPassStatus.FAIL
+    if _is_all_pass(score, thresholds):
+        return EvalPassStatus.PASS
+    return EvalPassStatus.FAIL
+
+
+def _compute_case_average_score(score: Any) -> float:
+    """Compute the per-case average score for run-level aggregation.
+
+    Dict scores: arithmetic mean of all numeric values (0.0 when empty).
+    Scalar scores: pass through as float.
+    """
+    if not isinstance(score, dict):
+        return float(score)
+    vals = [v for v in score.values() if isinstance(v, (int, float))]
+    return sum(vals) / len(vals) if vals else 0.0
+
+
 def _execute_single_case(
     tenant_id: str,
     user_id: str,
     agent_id: int,
     agent_version_no: int,
-    case: Dict[str, Any],
-    run: Dict[str, Any],
+    case: dict[str, Any],
+    run: dict[str, Any],
     judge_model_id: int,
     adapter: Any,
-    evaluators: Dict[int, Dict[str, Any]],
+    evaluators: dict[int, dict[str, Any]],
     judge_system_prompt: str,
     context_window: int = 4096,
-    history: Optional[List[Dict[str, Any]]] = None,
-) -> Tuple[float, str, Optional[List[dict]]]:
+    history: list[dict[str, Any]] | None = None,
+) -> tuple[float, str, list[dict] | None]:
     """Run a single evaluation case end-to-end and persist the result.
 
     Pipeline
@@ -1446,30 +1517,16 @@ def _execute_single_case(
             )
         )
         predict = {"answer": answer_text}
-        # Threshold map: build from the per-run evaluator cache.  Values are
-        # floats;  non-numeric / blank entries are skipped so legacy evaluator
-        # rows with null thresholds fall through to the global DEFAULT inside
-        # _is_all_pass.
-        thresholds = {
-            str(ev["name"]): float(ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD))
-            for ev in evaluators.values()
-            if isinstance(ev, dict) and ev.get("name")
-        }
+        # Threshold map: build from the per-run evaluator cache (delegated to
+        # ``_build_evaluator_thresholds`` so the same map can be reused by the
+        # analysis-report path).
+        thresholds = _build_evaluator_thresholds(evaluators)
 
         # CRITICAL: do NOT json.dumps(score).  agent_evaluation_case_t.score
         # is JSONB and SQLAlchemy serialises Python dicts for us.  Pre-
         # serialising would create a JSON-string-inside-JSONB double-wrap that
         # every reader has to repair through ``_coerce_score_dict``.
-        is_dict_score = isinstance(score, dict)
-        pass_status = EvalPassStatus.FAIL
-        if is_dict_score:
-            if _is_all_pass(score, thresholds):
-                pass_status = EvalPassStatus.PASS
-        else:
-            # Scalar legacy path (semantic_fallback returns score == 1 on
-            # success).  Non-dict scalar 1 → PASS; anything else → FAIL.
-            if score == 1:
-                pass_status = EvalPassStatus.PASS
+        pass_status = _determine_case_pass_status(score, thresholds)
         update_agent_evaluation_case_result(
             agent_evaluation_case_id=case_id,
             tenant_id=tenant_id,
@@ -1480,11 +1537,7 @@ def _execute_single_case(
             reason=str(json.dumps(reason) if isinstance(reason, dict) else reason),
             updated_by=user_id,
         )
-        if is_dict_score:
-            vals = [v for v in score.values() if isinstance(v, (int, float))]
-            avg = sum(vals) / len(vals) if vals else 0.0
-        else:
-            avg = float(score)
+        avg = _compute_case_average_score(score)
         logger.debug(
             "_execute_single_case: case_id=%s run_id=%s agent_id=%s judge_model=%s "
             "score_avg=%s pass_status=%s evaluator_count=%s answer_len=%s",
@@ -1643,9 +1696,9 @@ def _setup_no_set_and_execute(
         )
 
 
-def _preload_evaluators_for_run(run: dict, tenant_id: str) -> Dict[int, Dict[str, Any]]:
+def _preload_evaluators_for_run(run: dict, tenant_id: str) -> dict[int, dict[str, Any]]:
     """Preload PUBLISHED evaluators from the run's evaluator_config."""
-    evaluators: Dict[int, Dict[str, Any]] = {}
+    evaluators: dict[int, dict[str, Any]] = {}
     raw_config = run.get("evaluator_config")
     if isinstance(raw_config, dict) and raw_config.get("evaluator_ids"):
         for eid in raw_config["evaluator_ids"]:
@@ -1672,9 +1725,9 @@ def _resolve_judge_context_window(judge_model_id: int, tenant_id: str) -> int:
     return context_window
 
 
-def _load_all_evaluation_cases(agent_evaluation_id: int, tenant_id: str) -> List[dict]:
+def _load_all_evaluation_cases(agent_evaluation_id: int, tenant_id: str) -> list[dict]:
     """Load ALL evaluation cases with pagination (page size 200)."""
-    all_cases: List[dict] = []
+    all_cases: list[dict] = []
     offset = 0
     while True:
         batch = list_agent_evaluation_cases(
@@ -1693,9 +1746,9 @@ def _load_all_evaluation_cases(agent_evaluation_id: int, tenant_id: str) -> List
     return all_cases
 
 
-def _group_cases_by_session(all_cases: List[dict]) -> Dict[str, List[dict]]:
+def _group_cases_by_session(all_cases: list[dict]) -> dict[str, list[dict]]:
     """Group cases by session_id for multi-turn support."""
-    sessions: Dict[str, List[dict]] = defaultdict(list)
+    sessions: dict[str, list[dict]] = defaultdict(list)
     for c in all_cases:
         sid = c.get("session_id") or f"__single__{c['agent_evaluation_case_id']}"
         sessions[sid].append(c)
@@ -1706,7 +1759,7 @@ def execute_agent_evaluation_run(
     tenant_id: str,
     user_id: str,
     agent_evaluation_id: int,
-    judge_model_id: Optional[int] = None,
+    judge_model_id: int | None = None,
 ):
     try:
         update_agent_evaluation_status(
@@ -1744,7 +1797,7 @@ def execute_agent_evaluation_run(
         all_cases = _load_all_evaluation_cases(agent_evaluation_id, tenant_id)
         sessions = _group_cases_by_session(all_cases)
 
-        scores: List[float] = []
+        scores: list[float] = []
         done_count = 0
 
         for sid, session_cases in sorted(sessions.items()):
@@ -1757,9 +1810,9 @@ def execute_agent_evaluation_run(
                 )
                 session_cases = session_cases[:MAX_TURNS_PER_SESSION]
             session_cases.sort(key=lambda c: c.get("turn_order", 0))
-            history: List[Dict[str, Any]] = []
+            history: list[dict[str, Any]] = []
             for c in session_cases:
-                case_score, answer_text, events = _execute_single_case(
+                case_score, answer_text, _events = _execute_single_case(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     agent_id=agent_id,
@@ -1824,12 +1877,152 @@ def execute_agent_evaluation_run(
 # ══════════════════════════════════════════════════════════════════════
 
 
+def _normalize_cases_response(cases: Any) -> list:
+    """Normalize the ``list_agent_evaluation_cases`` response to a list.
+
+    The DB helper returns either a list of case dicts or a paginated dict
+    of shape ``{"items": [...]}``; this collapses both shapes (plus
+    ``None``) into a plain list for downstream iteration.
+    """
+    if isinstance(cases, dict):
+        return cases.get("items", [])
+    return cases or []
+
+
+def _load_evaluator_thresholds_from_config(raw_config: Any, tenant_id: str) -> dict:
+    """Build ``{name: pass_threshold}`` map from the run's evaluator_config.
+
+    Skips non-dict / blank entries so legacy evaluator rows with null
+    thresholds fall through to the global DEFAULT inside ``_is_all_pass``.
+    This is the same map consumed by ``_execute_single_case`` so the
+    analysis's "why did this fail" logic matches the pass/fail decision
+    recorded in the DB.
+    """
+    thresholds: dict[str, float] = {}
+    if not (
+        isinstance(raw_config, dict)
+        and isinstance(raw_config.get("evaluator_ids"), list)
+    ):
+        return thresholds
+    for eid in raw_config["evaluator_ids"]:
+        try:
+            ev = get_evaluator(int(eid), tenant_id)
+        except (ValueError, TypeError):
+            ev = None
+        if isinstance(ev, dict) and ev.get("name"):
+            thresholds[str(ev["name"])] = float(
+                ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
+            )
+    return thresholds
+
+
+def _build_analysis_failure_example(c: dict) -> dict:
+    """Build a compact failure-payload dict for the analysis LLM prompt.
+
+    Uses coerce helpers so historical rows (JSON stored inside a JSONB
+    string) are decoded consistently with new rows.  Each value is clamped
+    to 4000 chars to stay inside LLM context windows.
+    """
+    score_dict = _coerce_score_dict(c.get("score"))
+    reason_dict = _coerce_reason(c.get("reason"))
+
+    predict_answer = ""
+    predict = c.get("predict") or {}
+    if isinstance(predict, dict):
+        predict_answer = str(predict.get("answer") or "")
+
+    query_text = ""
+    inputs = c.get("inputs") or {}
+    if isinstance(inputs, dict):
+        query_text = str(inputs.get("query") or "")
+
+    # Compact score: single-evaluator score → scalar, multi-evaluator → keep dict
+    if len(score_dict) == 1:
+        _score_val = next(iter(score_dict.values()))
+    else:
+        _score_val = score_dict
+
+    # Compact reason: multi-evaluator dict → joined string, scalar → keep string
+    if isinstance(reason_dict, dict) and reason_dict:
+        _reason_str = " | ".join(f"{k}: {v}" for k, v in reason_dict.items())
+    else:
+        _reason_str = str(reason_dict or "")
+
+    return {
+        "case_id": c.get("agent_evaluation_case_id"),
+        "query": query_text,
+        "answer": predict_answer[:4000],
+        "score": _score_val,
+        "reason": _reason_str[:4000],
+    }
+
+
+def _render_analysis_stats_block(total: int, passed: int, thresholds: dict) -> str:
+    """Render the one-line stats header for the analysis prompt.
+
+    Includes the evaluator threshold map when present so the LLM knows the
+    pass/fail rules for every score column.
+    """
+    stats_block = f"Total cases: {total}, Passed: {passed}, Failed: {total - passed}, Pass rate: {passed}/{total}"
+    if thresholds:
+        stats_block += (
+            f"\nEvaluator pass thresholds: {json.dumps(thresholds, ensure_ascii=False)}"
+        )
+    return stats_block
+
+
+def _render_analysis_failures_block(failure_examples: list) -> str:
+    """Render the per-case failure details section for the analysis prompt.
+
+    Clamps to ``MAX_FAILURE_EXAMPLES`` entries (SDK constant, typically
+    ~20).  Each case is compacted onto one readable line per block so
+    token counts stay low and the model can parse cleanly.
+    """
+    if not failure_examples:
+        return "\nNo failed cases."
+    failures_block = ""
+    for i, ex in enumerate(failure_examples[:MAX_FAILURE_EXAMPLES]):
+        # Compact newlines out of the user query so each case fits on one
+        # readable line in the LLM prompt window (keeps token counts low
+        # and improves model parseability).
+        q = (ex["query"] or "(empty)").replace("\n", " ")[:1000]
+        failures_block += f"\nCase {i + 1}: Q={q}\n"
+        failures_block += f"Score: {json.dumps(ex['score'], ensure_ascii=False)}\n"
+        if ex["reason"]:
+            failures_block += f"Reason: {ex['reason']}\n"
+        if ex["answer"]:
+            failures_block += f"Answer: {ex['answer']}\n"
+    return failures_block
+
+
+def _call_analysis_llm_and_parse(
+    run: dict, language: str, user_prompt: str, tenant_id: str
+) -> dict:
+    """Call the analysis LLM and parse the JSON response.
+
+    Raises ``AppException`` with ``AGENT_EVALUATION_ANALYSIS_FAILED`` if the
+    parsed response is not a dict; the caller is responsible for catching
+    and logging the underlying ``Exception`` for observability.
+    """
+    template = get_prompt_template("evaluation_analyze_report", language)
+    response = call_llm_for_system_prompt(
+        model_id=int(run["judge_model_id"]),
+        user_prompt=user_prompt,
+        system_prompt=template["SYSTEM_PROMPT"],
+        tenant_id=tenant_id,
+    )
+    data = json.loads(response) if isinstance(response, str) else response
+    if not isinstance(data, dict):
+        raise AppException(ErrorCode.AGENT_EVALUATION_ANALYSIS_FAILED)
+    return data
+
+
 def generate_analysis_report_impl(
     agent_evaluation_id: int,
     tenant_id: str,
     language: str = "zh",
     force: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate (or re-generate) the LLM root-cause analysis report.
 
     Output is a structured dict stored in ``agent_evaluation_t.analysis_report``
@@ -1899,22 +2092,10 @@ def generate_analysis_report_impl(
         limit=5000,
         offset=0,
     )
-    cases = cases.get("items", []) if isinstance(cases, dict) else (cases or [])
+    cases = _normalize_cases_response(cases)
 
-    thresholds: Dict[str, float] = {}
     raw_config = run.get("evaluator_config") or {}
-    if isinstance(raw_config, dict) and isinstance(
-        raw_config.get("evaluator_ids"), list
-    ):
-        for eid in raw_config["evaluator_ids"]:
-            try:
-                ev = get_evaluator(int(eid), tenant_id)
-            except (ValueError, TypeError):
-                ev = None
-            if isinstance(ev, dict) and ev.get("name"):
-                thresholds[str(ev["name"])] = float(
-                    ev.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
-                )
+    thresholds = _load_evaluator_thresholds_from_config(raw_config, tenant_id)
 
     # ── Basic run stats ──────────────────────────────────────────────────
     total = len(cases)
@@ -1922,83 +2103,18 @@ def generate_analysis_report_impl(
     failed_cases = [c for c in cases if c.get("pass_status") == EvalPassStatus.FAIL]
 
     # ── Collect failure details for the LLM prompt ──────────────────────
-    failure_examples: List[Dict[str, Any]] = []
-    for c in failed_cases:
-        # Use coerce helpers so historical rows (JSON stored inside a JSONB
-        # string) are decoded consistently with new rows.
-        score_dict = _coerce_score_dict(c.get("score"))
-        reason_dict = _coerce_reason(c.get("reason"))
-
-        predict_answer = ""
-        predict = c.get("predict") or {}
-        if isinstance(predict, dict):
-            predict_answer = str(predict.get("answer") or "")
-
-        query_text = ""
-        inputs = c.get("inputs") or {}
-        if isinstance(inputs, dict):
-            query_text = str(inputs.get("query") or "")
-
-        # Compact score: single-evaluator score → scalar, multi-evaluator → keep dict
-        if len(score_dict) == 1:
-            _score_val = next(iter(score_dict.values()))
-        else:
-            _score_val = score_dict
-
-        # Compact reason: multi-evaluator dict → joined string, scalar → keep string
-        if isinstance(reason_dict, dict) and reason_dict:
-            _reason_str = " | ".join(f"{k}: {v}" for k, v in reason_dict.items())
-        else:
-            _reason_str = str(reason_dict or "")
-
-        failure_examples.append(
-            {
-                "case_id": c.get("agent_evaluation_case_id"),
-                "query": query_text,
-                "answer": predict_answer[:4000],
-                "score": _score_val,
-                "reason": _reason_str[:4000],
-            }
-        )
+    failure_examples = [_build_analysis_failure_example(c) for c in failed_cases]
 
     # ── Render prompt blocks ─────────────────────────────────────────────
-    stats_block = f"Total cases: {total}, Passed: {passed}, Failed: {total - passed}, Pass rate: {passed}/{total}"
-    if thresholds:
-        stats_block += (
-            f"\nEvaluator pass thresholds: {json.dumps(thresholds, ensure_ascii=False)}"
-        )
-
-    failures_block = ""
-    if failure_examples:
-        for i, ex in enumerate(failure_examples[:MAX_FAILURE_EXAMPLES]):
-            # Compact newlines out of the user query so each case fits on one
-            # readable line in the LLM prompt window (keeps token counts low
-            # and improves model parseability).
-            q = (ex["query"] or "(empty)").replace("\n", " ")[:1000]
-            failures_block += f"\nCase {i + 1}: Q={q}\n"
-            failures_block += f"Score: {json.dumps(ex['score'], ensure_ascii=False)}\n"
-            if ex["reason"]:
-                failures_block += f"Reason: {ex['reason']}\n"
-            if ex["answer"]:
-                failures_block += f"Answer: {ex['answer']}\n"
-    else:
-        failures_block = "\nNo failed cases."
+    stats_block = _render_analysis_stats_block(total, passed, thresholds)
+    failures_block = _render_analysis_failures_block(failure_examples)
 
     user_prompt = f"{stats_block}\n\nFailed case details (up to {MAX_FAILURE_EXAMPLES} examples):{failures_block}"
     prompt_chars = len(user_prompt)
 
     # ── LLM call + cache write ───────────────────────────────────────────
     try:
-        template = get_prompt_template("evaluation_analyze_report", language)
-        response = call_llm_for_system_prompt(
-            model_id=int(run["judge_model_id"]),
-            user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"],
-            tenant_id=tenant_id,
-        )
-        data = json.loads(response) if isinstance(response, str) else response
-        if not isinstance(data, dict):
-            raise AppException(ErrorCode.AGENT_EVALUATION_ANALYSIS_FAILED)
+        data = _call_analysis_llm_and_parse(run, language, user_prompt, tenant_id)
     except Exception as exc:
         # WARNING so ops can see the LLM failure independently of the stack
         # trace.  prompt_chars is an approximation of token consumption
@@ -2044,7 +2160,7 @@ def generate_analysis_report_impl(
 
 def get_agent_evaluation_run_impl(
     agent_evaluation_id: int, tenant_id: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return get_agent_evaluation(
         agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
     )
@@ -2055,7 +2171,7 @@ def list_agent_evaluations_by_agent_impl(
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     return list_agent_evaluations_by_agent(
         agent_id=agent_id, tenant_id=tenant_id, limit=limit, offset=offset
     )
@@ -2071,7 +2187,7 @@ def list_agent_evaluation_cases_impl(
     pass_filter: str | None = None,
     anno_schema_ids: list[int] | None = None,
     anno_values: list[str] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return list_agent_evaluation_cases(
         agent_evaluation_id=agent_evaluation_id,
         tenant_id=tenant_id,
@@ -2088,7 +2204,7 @@ def list_agent_evaluation_cases_impl(
 def get_evaluation_stats_impl(
     agent_evaluation_id: int,
     tenant_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute chart-ready aggregates for an evaluation run.
 
     The frontend detail page renders **three** distinct widgets from the
@@ -2244,11 +2360,11 @@ async def trial_run_evaluator_impl(
     agent_version_no: int,
     query: str,
     judge_model_id: int,
-    evaluator_ids: Optional[list] = None,
-    field_mappings: Optional[dict] = None,
+    evaluator_ids: list | None = None,
+    field_mappings: dict | None = None,
 ) -> dict:
     # Preload evaluators
-    evaluators: Dict[int, Dict[str, Any]] = {}
+    evaluators: dict[int, dict[str, Any]] = {}
     if evaluator_ids:
         for eid in evaluator_ids:
             ev = get_evaluator(eid, tenant_id)
@@ -2262,7 +2378,7 @@ async def trial_run_evaluator_impl(
         raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable")
     adapter = JiuwenSDKAdapter(model_id=judge_model_id, tenant_id=tenant_id)
 
-    answer_text, runtime_events, score, reason = await _evaluate_query(
+    answer_text, _runtime_events, score, reason = await _evaluate_query(
         tenant_id=tenant_id,
         user_id=user_id,
         agent_id=agent_id,

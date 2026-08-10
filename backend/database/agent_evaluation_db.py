@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import Float, select
 
@@ -26,10 +26,10 @@ def create_agent_evaluation(
     agent_version_no: int,
     evaluation_set_id: int,
     total: int,
-    judge_model_id: Optional[int],
-    created_by: Optional[str],
-    evaluator_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    judge_model_id: int | None,
+    created_by: str | None,
+    evaluator_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     with get_db_session() as session:
         rec = AgentEvaluation(
             tenant_id=tenant_id,
@@ -78,14 +78,14 @@ def update_agent_evaluation_status(
     agent_evaluation_id: int,
     tenant_id: str,
     status: str,
-    updated_by: Optional[str] = None,
-    error_message: Optional[str] = None,
-    score_overall: Optional[float] = None,
-    progress_done: Optional[int] = None,
-    pass_count: Optional[int] = None,
-    fail_count: Optional[int] = None,
+    updated_by: str | None = None,
+    error_message: str | None = None,
+    score_overall: float | None = None,
+    progress_done: int | None = None,
+    pass_count: int | None = None,
+    fail_count: int | None = None,
 ) -> None:
-    updates: Dict[str, Any] = {"status": status, "updated_by": updated_by}
+    updates: dict[str, Any] = {"status": status, "updated_by": updated_by}
     if error_message is not None:
         updates["error_message"] = error_message
     if score_overall is not None:
@@ -107,7 +107,7 @@ def update_agent_evaluation_status(
 def update_agent_evaluation_analysis_report(
     agent_evaluation_id: int,
     tenant_id: str,
-    report: Dict[str, Any],
+    report: dict[str, Any],
 ) -> None:
     """Store the LLM-generated analysis report.
 
@@ -122,7 +122,7 @@ def update_agent_evaluation_analysis_report(
         session.commit()
 
 
-def get_agent_evaluation(agent_evaluation_id: int, tenant_id: str) -> Dict[str, Any]:
+def get_agent_evaluation(agent_evaluation_id: int, tenant_id: str) -> dict[str, Any]:
     with get_db_session() as session:
         rec = (
             session.query(AgentEvaluation)
@@ -133,7 +133,9 @@ def get_agent_evaluation(agent_evaluation_id: int, tenant_id: str) -> Dict[str, 
             .first()
         )
         if not rec:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found"
+            )
         result = as_dict(rec)
 
         evaluation_set_name = (
@@ -183,7 +185,7 @@ def list_agent_evaluations_by_agent(
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = (
             session.query(
@@ -225,8 +227,8 @@ def list_agent_evaluations_by_agent(
 def create_agent_evaluation_cases(
     tenant_id: str,
     agent_evaluation_id: int,
-    set_cases: List[Dict[str, Any]],
-    created_by: Optional[str],
+    set_cases: list[dict[str, Any]],
+    created_by: str | None,
 ) -> int:
     with get_db_session() as session:
         inserted = 0
@@ -258,19 +260,19 @@ def update_agent_evaluation_case_result(
     agent_evaluation_case_id: int,
     tenant_id: str,
     status: str,
-    predict: Optional[Dict[str, Any]] = None,
+    predict: dict[str, Any] | None = None,
     score: Any = None,
-    reason: Optional[str] = None,
-    error_message: Optional[str] = None,
-    pass_status: Optional[str] = None,
-    updated_by: Optional[str] = None,
+    reason: str | None = None,
+    error_message: str | None = None,
+    pass_status: str | None = None,
+    updated_by: str | None = None,
 ) -> None:
     """Update a case result.
 
     ``score`` may be float (single-eval), JSON string, or dict (multi-eval).
     The ``pass_status`` is determined by the caller (service layer).
     """
-    updates: Dict[str, Any] = {"status": status, "updated_by": updated_by}
+    updates: dict[str, Any] = {"status": status, "updated_by": updated_by}
 
     if predict is not None:
         updates["predict"] = predict
@@ -288,7 +290,8 @@ def update_agent_evaluation_case_result(
         rows = (
             session.query(AgentEvaluationCase)
             .filter(
-                AgentEvaluationCase.agent_evaluation_case_id == agent_evaluation_case_id,
+                AgentEvaluationCase.agent_evaluation_case_id
+                == agent_evaluation_case_id,
                 AgentEvaluationCase.tenant_id == tenant_id,
             )
             .update(updates, synchronize_session=False)
@@ -311,7 +314,7 @@ def list_agent_evaluation_cases(
     pass_filter: str | None = None,
     anno_schema_ids: list[int] | None = None,
     anno_values: list[str] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return paginated cases with total count for an evaluation run.
 
     Two mutually exclusive sort modes:
@@ -367,7 +370,11 @@ def list_agent_evaluation_cases(
                 # so we intentionally do not add an equality predicate here.
                 if val:
                     anno_subq = anno_subq.filter(EvaluationAnnotation.value == val)
-                base = base.filter(AgentEvaluationCase.agent_evaluation_case_id.in_(anno_subq.subquery()))
+                base = base.filter(
+                    AgentEvaluationCase.agent_evaluation_case_id.in_(
+                        anno_subq.subquery()
+                    )
+                )
 
         total = base.count()
         q = base
@@ -390,7 +397,11 @@ def list_agent_evaluation_cases(
 
             q = q.order_by(
                 sa_case(
-                    (AgentEvaluationCase.session_id.is_(None) | (AgentEvaluationCase.session_id == ""), 0),
+                    (
+                        AgentEvaluationCase.session_id.is_(None)
+                        | (AgentEvaluationCase.session_id == ""),
+                        0,
+                    ),
                     else_=1,
                 ).asc(),
                 AgentEvaluationCase.session_id.asc(),
@@ -407,7 +418,11 @@ def list_agent_evaluation_cases(
             sort_by or "<session-default>",
             pass_filter or "<all>",
             len(anno_schema_ids or [])
-            if (anno_schema_ids and anno_values and len(anno_schema_ids) == len(anno_values))
+            if (
+                anno_schema_ids
+                and anno_values
+                and len(anno_schema_ids) == len(anno_values)
+            )
             else 0,
             total,
             offset,
@@ -420,7 +435,7 @@ def list_agent_evaluation_cases(
 def get_evaluation_case_scores(
     agent_evaluation_id: int,
     tenant_id: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return raw score/reason/pass rows for an evaluation run (ALL cases).
 
     **Unpaginated** on purpose.  The service layer consumes the full case
@@ -463,18 +478,23 @@ def get_evaluation_case_scores(
         return result
 
 
-def get_agent_evaluation_case(agent_evaluation_case_id: int, tenant_id: str) -> Dict[str, Any]:
+def get_agent_evaluation_case(
+    agent_evaluation_case_id: int, tenant_id: str
+) -> dict[str, Any]:
     with get_db_session() as session:
         rec = (
             session.query(AgentEvaluationCase)
             .filter(
-                AgentEvaluationCase.agent_evaluation_case_id == agent_evaluation_case_id,
+                AgentEvaluationCase.agent_evaluation_case_id
+                == agent_evaluation_case_id,
                 AgentEvaluationCase.tenant_id == tenant_id,
             )
             .first()
         )
         if not rec:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation case not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation case not found"
+            )
         return as_dict(rec)
 
 
@@ -534,7 +554,9 @@ def count_active_runs_using_schema(schema_id: int, tenant_id: str) -> int:
             .filter(
                 AgentEvaluation.tenant_id == tenant_id,
                 AgentEvaluation.annotation_schema_ids.contains([schema_id]),
-                AgentEvaluation.status.in_([EvalRunStatus.PENDING, EvalRunStatus.RUNNING]),
+                AgentEvaluation.status.in_(
+                    [EvalRunStatus.PENDING, EvalRunStatus.RUNNING]
+                ),
             )
             .count()
         )
@@ -563,7 +585,9 @@ def hard_delete_agent_evaluation(
             .first()
         )
         if not run:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Agent evaluation not found"
+            )
 
         set_id, eval_config = run
 
@@ -612,7 +636,9 @@ def hard_delete_agent_evaluation(
             try:
                 hard_delete_evaluation_set(set_id, tenant_id)
             except Exception as exc:
-                logger.warning("Failed to cascade-delete virtual set %d: %s", set_id, exc)
+                logger.warning(
+                    "Failed to cascade-delete virtual set %d: %s", set_id, exc
+                )
 
         session.commit()
 
@@ -676,7 +702,11 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
                 try:
                     hard_delete_evaluation_set(set_id, tenant_id)
                 except Exception as exc:
-                    logger.warning("Failed to cascade-delete virtual set %d during cleanup: %s", set_id, exc)
+                    logger.warning(
+                        "Failed to cascade-delete virtual set %d during cleanup: %s",
+                        set_id,
+                        exc,
+                    )
             deleted += 1
         session.commit()
     return deleted
@@ -705,13 +735,18 @@ def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
                 AgentEvaluation.agent_evaluation_id == eid,
                 AgentEvaluation.tenant_id == tenant_id,
             ).update(
-                {"status": EvalRunStatus.FAILED, "error_message": "Server restarted — evaluation was interrupted"},
+                {
+                    "status": EvalRunStatus.FAILED,
+                    "error_message": "Server restarted — evaluation was interrupted",
+                },
                 synchronize_session=False,
             )
             count += 1
         session.commit()
     if count:
-        logger.info("Reaped %d stale RUNNING evaluations for tenant %s", count, tenant_id)
+        logger.info(
+            "Reaped %d stale RUNNING evaluations for tenant %s", count, tenant_id
+        )
     return count
 
 
@@ -722,7 +757,9 @@ def count_active_runs(tenant_id: str) -> int:
             select(AgentEvaluation.agent_evaluation_id)
             .where(
                 AgentEvaluation.tenant_id == tenant_id,
-                AgentEvaluation.status.in_([EvalRunStatus.PENDING, EvalRunStatus.RUNNING]),
+                AgentEvaluation.status.in_(
+                    [EvalRunStatus.PENDING, EvalRunStatus.RUNNING]
+                ),
             )
             .with_for_update()
         )
@@ -730,7 +767,9 @@ def count_active_runs(tenant_id: str) -> int:
             session.query(AgentEvaluation)
             .filter(
                 AgentEvaluation.tenant_id == tenant_id,
-                AgentEvaluation.status.in_([EvalRunStatus.PENDING, EvalRunStatus.RUNNING]),
+                AgentEvaluation.status.in_(
+                    [EvalRunStatus.PENDING, EvalRunStatus.RUNNING]
+                ),
             )
             .count()
         )

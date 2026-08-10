@@ -34,21 +34,26 @@ def create_evaluation_set(
         return as_dict(rec)
 
 
-def update_evaluation_set_case_count(evaluation_set_id: int, case_count: int, updated_by: str | None = None) -> None:
+def update_evaluation_set_case_count(
+    evaluation_set_id: int, case_count: int, updated_by: str | None = None
+) -> None:
     with get_db_session() as session:
         session.query(EvaluationSet).filter(
             EvaluationSet.evaluation_set_id == evaluation_set_id,
+        ).update(
+            {"case_count": case_count, "updated_by": updated_by},
+            synchronize_session=False,
+        )
 
-        ).update({"case_count": case_count, "updated_by": updated_by}, synchronize_session=False)
 
-
-def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+def list_evaluation_sets(
+    tenant_id: str, limit: int = 50, offset: int = 0
+) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = (
             session.query(EvaluationSet)
             .filter(
                 EvaluationSet.tenant_id == tenant_id,
-
                 # Hide virtual sets created by no-set evaluation mode.
                 # - New virtual sets have source_filename='__no_set_virtual__'
                 # - Old virtual sets (before the marker was added) have NULL source_filename
@@ -69,20 +74,30 @@ def list_evaluation_sets(tenant_id: str, limit: int = 50, offset: int = 0) -> li
 
 def get_evaluation_set(evaluation_set_id: int, tenant_id: str) -> dict[str, Any] | None:
     with get_db_session() as session:
-        rec = session.query(EvaluationSet).filter(
-            EvaluationSet.evaluation_set_id == evaluation_set_id,
-            EvaluationSet.tenant_id == tenant_id,
-        ).first()
+        rec = (
+            session.query(EvaluationSet)
+            .filter(
+                EvaluationSet.evaluation_set_id == evaluation_set_id,
+                EvaluationSet.tenant_id == tenant_id,
+            )
+            .first()
+        )
         if not rec:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found"
+            )
         return as_dict(rec)
 
 
 def count_evaluation_sets(tenant_id: str) -> int:
     with get_db_session() as session:
-        return session.query(EvaluationSet).filter(
-            EvaluationSet.tenant_id == tenant_id,
-        ).count()
+        return (
+            session.query(EvaluationSet)
+            .filter(
+                EvaluationSet.tenant_id == tenant_id,
+            )
+            .count()
+        )
 
 
 def insert_evaluation_set_cases(
@@ -128,17 +143,20 @@ def list_evaluation_set_cases(
         q = session.query(EvaluationSetCase).filter(
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
             EvaluationSetCase.tenant_id == tenant_id,
-
         )
         if query:
             q = q.filter(EvaluationSetCase.inputs["query"].astext.ilike(f"%{query}%"))
-        q = q.order_by(
-            EvaluationSetCase.session_id.is_(None),
-            EvaluationSetCase.session_id.asc(),
-            EvaluationSetCase.turn_order.asc(),
-            EvaluationSetCase.order_no.asc(),
-            EvaluationSetCase.evaluation_set_case_id.asc(),
-        ).offset(offset).limit(limit)
+        q = (
+            q.order_by(
+                EvaluationSetCase.session_id.is_(None),
+                EvaluationSetCase.session_id.asc(),
+                EvaluationSetCase.turn_order.asc(),
+                EvaluationSetCase.order_no.asc(),
+                EvaluationSetCase.evaluation_set_case_id.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
         return [as_dict(x) for x in q.all()]
 
 
@@ -151,21 +169,21 @@ def count_evaluation_set_cases(
         q = session.query(EvaluationSetCase).filter(
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
             EvaluationSetCase.tenant_id == tenant_id,
-
         )
         if query:
             q = q.filter(EvaluationSetCase.inputs["query"].astext.ilike(f"%{query}%"))
         return q.count()
 
 
-def get_evaluation_set_cases_all(evaluation_set_id: int, tenant_id: str) -> list[dict[str, Any]]:
+def get_evaluation_set_cases_all(
+    evaluation_set_id: int, tenant_id: str
+) -> list[dict[str, Any]]:
     with get_db_session() as session:
         q = (
             session.query(EvaluationSetCase)
             .filter(
                 EvaluationSetCase.evaluation_set_id == evaluation_set_id,
                 EvaluationSetCase.tenant_id == tenant_id,
-
             )
             .order_by(
                 EvaluationSetCase.session_id.is_(None),
@@ -185,11 +203,15 @@ def batch_delete_evaluation_set_cases(
     if not case_ids:
         return 0
     with get_db_session() as session:
-        rows = session.query(EvaluationSetCase).filter(
-            EvaluationSetCase.evaluation_set_case_id.in_(case_ids),
-            EvaluationSetCase.tenant_id == tenant_id,
-            EvaluationSetCase.evaluation_set_id == evaluation_set_id,
-        ).delete(synchronize_session=False)
+        rows = (
+            session.query(EvaluationSetCase)
+            .filter(
+                EvaluationSetCase.evaluation_set_case_id.in_(case_ids),
+                EvaluationSetCase.tenant_id == tenant_id,
+                EvaluationSetCase.evaluation_set_id == evaluation_set_id,
+            )
+            .delete(synchronize_session=False)
+        )
         session.commit()
     return rows
 
@@ -201,16 +223,23 @@ def soft_delete_evaluation_set(
 ) -> None:
     """Mark an evaluation set as deleted (soft delete via delete_flag='Y')."""
     with get_db_session() as session:
-        rows = session.query(EvaluationSet).filter(
-            EvaluationSet.evaluation_set_id == evaluation_set_id,
-            EvaluationSet.tenant_id == tenant_id,
-            EvaluationSet.delete_flag == "N",
-        ).update(
-            {"delete_flag": "Y", "updated_by": deleted_by},
-            synchronize_session=False,
+        rows = (
+            session.query(EvaluationSet)
+            .filter(
+                EvaluationSet.evaluation_set_id == evaluation_set_id,
+                EvaluationSet.tenant_id == tenant_id,
+                EvaluationSet.delete_flag == "N",
+            )
+            .update(
+                {"delete_flag": "Y", "updated_by": deleted_by},
+                synchronize_session=False,
+            )
         )
         if not rows:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluation set not found or already deleted")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+                "Evaluation set not found or already deleted",
+            )
         session.commit()
 
 
@@ -222,10 +251,14 @@ def hard_delete_evaluation_set(evaluation_set_id: int, tenant_id: str) -> int:
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
             EvaluationSetCase.tenant_id == tenant_id,
         ).delete(synchronize_session=False)
-        deleted += session.query(EvaluationSet).filter(
-            EvaluationSet.evaluation_set_id == evaluation_set_id,
-            EvaluationSet.tenant_id == tenant_id,
-        ).delete(synchronize_session=False)
+        deleted += (
+            session.query(EvaluationSet)
+            .filter(
+                EvaluationSet.evaluation_set_id == evaluation_set_id,
+                EvaluationSet.tenant_id == tenant_id,
+            )
+            .delete(synchronize_session=False)
+        )
         session.commit()
     return deleted
 
@@ -243,7 +276,9 @@ def list_case_turn_orders_by_session(
             EvaluationSetCase.delete_flag == "N",
         )
         if exclude_case_ids:
-            q = q.filter(EvaluationSetCase.evaluation_set_case_id.notin_(exclude_case_ids))
+            q = q.filter(
+                EvaluationSetCase.evaluation_set_case_id.notin_(exclude_case_ids)
+            )
         rows = q.order_by(EvaluationSetCase.turn_order.asc()).all()
         return [r[0] for r in rows if r[0] is not None]
 
@@ -254,11 +289,15 @@ def get_case_ids_by_session(
 ) -> list[int]:
     """Return all case_ids belonging to a session."""
     with get_db_session() as session:
-        rows = session.query(EvaluationSetCase.evaluation_set_case_id).filter(
-            EvaluationSetCase.evaluation_set_id == evaluation_set_id,
-            EvaluationSetCase.session_id == session_id,
-            EvaluationSetCase.delete_flag == "N",
-        ).all()
+        rows = (
+            session.query(EvaluationSetCase.evaluation_set_case_id)
+            .filter(
+                EvaluationSetCase.evaluation_set_id == evaluation_set_id,
+                EvaluationSetCase.session_id == session_id,
+                EvaluationSetCase.delete_flag == "N",
+            )
+            .all()
+        )
         return [r[0] for r in rows]
 
 

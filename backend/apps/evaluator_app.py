@@ -2,8 +2,6 @@ import io
 import json
 import logging
 from http import HTTPStatus
-from typing import List as ListType
-from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -35,32 +33,36 @@ router = APIRouter(prefix="/evaluators")
 
 def _ok(data=None):
     """Standard success response."""
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success", "data": data})
+    return JSONResponse(
+        status_code=HTTPStatus.OK, content={"message": "Success", "data": data}
+    )
 
 
 class GenerateEvaluatorRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=500)
     model_id: int = Field(..., description="LLM model ID to use for generation")
-    agent_id: Optional[int] = Field(default=None, description="Optional agent ID for context-aware generation")
+    agent_id: int | None = Field(
+        default=None, description="Optional agent ID for context-aware generation"
+    )
 
 
 class ExportEvaluatorsRequest(BaseModel):
-    evaluator_ids: ListType[int] = Field(..., min_length=1, max_length=100)
+    evaluator_ids: list[int] = Field(..., min_length=1, max_length=100)
 
 
 class EvaluatorFields(BaseModel):
     """Shared fields for create/update evaluator requests."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    description: Optional[str] = Field(default=None, max_length=200)
-    prompt: Optional[str] = Field(default=None, max_length=5_000)
-    prompt_en: Optional[str] = Field(default=None, max_length=5_000)
-    code: Optional[str] = Field(default=None, max_length=20_000)
-    score_range_min: Optional[float] = None
-    score_range_max: Optional[float] = None
-    pass_threshold: Optional[float] = None
-    input_fields: Optional[ListType[dict]] = None
-    model_id: Optional[int] = None
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    description: str | None = Field(default=None, max_length=200)
+    prompt: str | None = Field(default=None, max_length=5_000)
+    prompt_en: str | None = Field(default=None, max_length=5_000)
+    code: str | None = Field(default=None, max_length=20_000)
+    score_range_min: float | None = None
+    score_range_max: float | None = None
+    pass_threshold: float | None = None
+    input_fields: list[dict] | None = None
+    model_id: int | None = None
 
     @model_validator(mode="after")
     def validate_score_range(self):
@@ -71,7 +73,9 @@ class EvaluatorFields(BaseModel):
             if any(math.isnan(v) or math.isinf(v) for v in (lo, hi) if v is not None):
                 raise ValueError("Score range parameters must not be NaN or Infinity")
             if lo >= hi:
-                raise ValueError(f"score_range_min ({lo}) must be less than score_range_max ({hi})")
+                raise ValueError(
+                    f"score_range_min ({lo}) must be less than score_range_max ({hi})"
+                )
             if th is not None and (th <= lo or th >= hi):
                 raise ValueError(
                     f"pass_threshold ({th}) must be between score_range_min ({lo}) and score_range_max ({hi})"
@@ -89,14 +93,12 @@ class CreateEvaluatorRequest(EvaluatorFields):
 class UpdateEvaluatorRequest(EvaluatorFields):
     """All fields optional — only supplied fields are updated."""
 
-    pass
-
 
 @router.get("")
 async def list_evaluators_api(
-    source: Optional[str] = Query(None, description="Filter: builtin / custom"),
-    evaluator_type: Optional[str] = Query(None, description="Filter: llm / code"),
-    authorization: Optional[str] = Header(None),
+    source: str | None = Query(None, description="Filter: builtin / custom"),
+    evaluator_type: str | None = Query(None, description="Filter: llm / code"),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -119,13 +121,15 @@ async def list_evaluators_api(
 @router.get("/{evaluator_id}")
 async def get_evaluator_api(
     evaluator_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
         data = get_evaluator_impl(evaluator_id=evaluator_id, tenant_id=tenant_id)
         if not data:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator not found"
+            )
         return _ok(data)
     except AppException:
         raise
@@ -138,7 +142,7 @@ async def get_evaluator_api(
 @router.post("")
 async def create_evaluator_api(
     payload: CreateEvaluatorRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -164,58 +168,74 @@ async def create_evaluator_api(
         raise
     except Exception as exc:
         logger.exception("Create evaluator error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create evaluator")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to create evaluator"
+        )
 
 
 @router.put("/{evaluator_id}")
 async def update_evaluator_api(
     evaluator_id: int,
     payload: UpdateEvaluatorRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
         kwargs = {k: v for k, v in payload.model_dump().items() if v is not None}
         exists = get_evaluator_impl(evaluator_id=evaluator_id, tenant_id=tenant_id)
         if not exists:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator not found")
-        data = update_evaluator_impl(evaluator_id=evaluator_id, tenant_id=tenant_id, **kwargs)
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator not found"
+            )
+        data = update_evaluator_impl(
+            evaluator_id=evaluator_id, tenant_id=tenant_id, **kwargs
+        )
         if not data:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Only DRAFT custom evaluators can be edited")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                "Only DRAFT custom evaluators can be edited",
+            )
         return _ok(data)
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Update evaluator error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to update evaluator")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to update evaluator"
+        )
 
 
 @router.delete("/{evaluator_id}")
 async def delete_evaluator_api(
     evaluator_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
         ok = delete_evaluator_impl(evaluator_id=evaluator_id, tenant_id=tenant_id)
         if not ok:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Only DRAFT custom evaluators can be deleted")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                "Only DRAFT custom evaluators can be deleted",
+            )
         return _ok()
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Delete evaluator error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluator")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluator"
+        )
 
 
 @router.post("/{evaluator_id}/publish")
 async def publish_evaluator_api(
     evaluator_id: int,
-    authorization: Optional[str] = Header(None),
-    version_name: Optional[str] = Body(None),
-    release_note: Optional[str] = Body(None),
+    authorization: str | None = Header(None),
+    version_name: str | None = Body(None),
+    release_note: str | None = Body(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -226,24 +246,31 @@ async def publish_evaluator_api(
             release_note=release_note,
         )
         if not data:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Only DRAFT evaluators can be published")
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR,
+                "Only DRAFT evaluators can be published",
+            )
         return _ok(data)
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Publish evaluator error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to publish evaluator")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to publish evaluator"
+        )
 
 
 @router.get("/{evaluator_id}/versions")
 async def list_evaluator_versions_api(
     evaluator_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = list_evaluator_versions_impl(evaluator_id=evaluator_id, tenant_id=tenant_id)
+        data = list_evaluator_versions_impl(
+            evaluator_id=evaluator_id, tenant_id=tenant_id
+        )
         return _ok(data)
     except UnauthorizedError:
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
@@ -251,53 +278,65 @@ async def list_evaluator_versions_api(
         raise
     except Exception as exc:
         logger.exception("List evaluator versions error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluator versions")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to list evaluator versions"
+        )
 
 
 @router.post("/{evaluator_id}/versions/{version_id}/restore")
 async def restore_evaluator_version_api(
     evaluator_id: int,
     version_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = restore_evaluator_version_impl(version_id=version_id, tenant_id=tenant_id)
+        data = restore_evaluator_version_impl(
+            version_id=version_id, tenant_id=tenant_id
+        )
         if not data:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator version not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator version not found"
+            )
         return _ok(data)
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Restore evaluator version error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to restore evaluator version")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to restore evaluator version"
+        )
 
 
 @router.delete("/{evaluator_id}/versions/{version_id}")
 async def delete_evaluator_version_api(
     evaluator_id: int,
     version_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
         ok = delete_evaluator_version_impl(version_id=version_id, tenant_id=tenant_id)
         if not ok:
-            raise AppException(ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator version not found")
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND, "Evaluator version not found"
+            )
         return _ok()
     except AppException:
         raise
 
     except Exception as exc:
         logger.exception("Delete evaluator version error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluator version")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to delete evaluator version"
+        )
 
 
 @router.post("/export")
 async def export_evaluators_api(
     payload: ExportEvaluatorsRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Export one or more custom evaluators as a JSON file."""
     try:
@@ -319,13 +358,15 @@ async def export_evaluators_api(
 
     except Exception as exc:
         logger.exception("Export evaluators error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to export evaluators")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to export evaluators"
+        )
 
 
 @router.post("/import")
 async def import_evaluators_api(
     file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Import evaluators from a previously exported JSON file.
 
@@ -338,7 +379,9 @@ async def import_evaluators_api(
         try:
             data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, f"Invalid JSON file: {exc}") from exc
+            raise AppException(
+                ErrorCode.COMMON_VALIDATION_ERROR, f"Invalid JSON file: {exc}"
+            ) from exc
         result = import_evaluators_impl(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -351,13 +394,15 @@ async def import_evaluators_api(
         raise
     except Exception as exc:
         logger.exception("Import evaluators error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to import evaluators")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to import evaluators"
+        )
 
 
 @router.post("/generate")
 async def generate_evaluator_api(
     payload: GenerateEvaluatorRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Generate an evaluator configuration from a natural language description."""
     try:
@@ -374,4 +419,6 @@ async def generate_evaluator_api(
 
     except Exception as exc:
         logger.exception("Generate evaluator error: %r", exc)
-        raise AppException(ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to generate evaluator")
+        raise AppException(
+            ErrorCode.SYSTEM_INTERNAL_ERROR, "Failed to generate evaluator"
+        )

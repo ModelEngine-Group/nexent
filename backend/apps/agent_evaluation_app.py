@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -45,12 +45,12 @@ router = APIRouter(prefix="/agent-evaluations")
 class CreateEvaluationRequest(BaseModel):
     agent_id: int
     judge_model_id: int
-    evaluator_ids: Optional[list] = None
-    field_mappings: Optional[dict] = None
+    evaluator_ids: list | None = None
+    field_mappings: dict | None = None
     # With-set mode
-    evaluation_set_id: Optional[int] = None
+    evaluation_set_id: int | None = None
     # No-set mode (AI generates test queries)
-    agent_version_no: Optional[int] = None
+    agent_version_no: int | None = None
     query_count: int = 10
 
 
@@ -59,8 +59,8 @@ class TrialRunRequest(BaseModel):
     agent_version_no: int = 1
     query: str
     judge_model_id: int
-    evaluator_ids: Optional[List[int]] = None
-    field_mappings: Optional[Dict[str, Any]] = None
+    evaluator_ids: list[int] | None = None
+    field_mappings: dict[str, Any] | None = None
 
 
 # Module-level constants for Sonar python:S1192 — duplicated string
@@ -86,7 +86,7 @@ _UNKNOWN_ID = "<unknown>"
 @router.post("")
 async def create_agent_evaluation_api(
     payload: CreateEvaluationRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
     request: Request = None,
 ):
     """Create and queue a new agent-evaluation run.
@@ -167,7 +167,7 @@ async def list_agent_evaluations_by_agent_api(
     agent_id: int = Query(...),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """List evaluation runs belonging to a specific agent (most-recent first).
 
@@ -209,7 +209,7 @@ async def list_agent_evaluations_by_agent_api(
 @router.get("/{agent_evaluation_id}")
 async def get_agent_evaluation_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Fetch the top-level metadata row for a single evaluation run.
 
@@ -247,12 +247,12 @@ async def list_agent_evaluation_cases_api(
     agent_evaluation_id: int,
     limit: int = Query(10, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    sort_by: Optional[str] = Query(None),
+    sort_by: str | None = Query(None),
     sort_order: str = Query("asc"),
-    pass_filter: Optional[str] = Query(None),
-    anno_schema_id: List[int] = Query([]),
-    anno_value: List[str] = Query([]),
-    authorization: Optional[str] = Header(None),
+    pass_filter: str | None = Query(None),
+    anno_schema_id: list[int] = Query([]),
+    anno_value: list[str] = Query([]),
+    authorization: str | None = Header(None),
 ):
     """Return a paginated window of cases for an evaluation run.
 
@@ -306,7 +306,7 @@ async def list_agent_evaluation_cases_api(
 @router.get("/{agent_evaluation_id}/stats")
 async def get_evaluation_stats_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Return chart-ready aggregates for the detail-page widgets.
 
@@ -344,7 +344,7 @@ async def get_evaluation_stats_api(
 @router.get("/{agent_evaluation_id}/report")
 async def download_agent_evaluation_report_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
     request: Request = None,
 ):
     """Stream the localized PDF report for a completed (or partial) evaluation run.
@@ -390,7 +390,7 @@ async def download_agent_evaluation_report_api(
 @router.post("/{agent_evaluation_id}/analyze")
 async def analyze_agent_evaluation_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
     force: bool = Query(False),
 ):
     """Generate or regenerate the LLM-powered root-cause analysis report.
@@ -440,8 +440,8 @@ async def analyze_agent_evaluation_api(
 @router.put("/{agent_evaluation_id}/annotation-schemas")
 async def update_annotation_schemas_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
-    schema_ids: List[int] = Body(..., embed=True),
+    authorization: str | None = Header(None),
+    schema_ids: list[int] = Body(..., embed=True),
 ):
     """Persist the set of annotation schemas enabled for this run.
 
@@ -483,7 +483,7 @@ async def update_annotation_schemas_api(
 @router.delete("/{agent_evaluation_id}")
 async def delete_agent_evaluation_api(
     agent_evaluation_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Soft-delete an evaluation run.  Only the creating user can delete.
 
@@ -528,7 +528,7 @@ async def delete_agent_evaluation_api(
 @router.post("/trial-run")
 async def trial_run_api(
     payload: TrialRunRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Run a single ad-hoc evaluation without creating a persistent run.
 
@@ -594,7 +594,7 @@ async def trial_run_api(
 #    ERROR log about "X failed" does not itself raise during format.
 
 
-def _safe_extract_tenant(authorization: Optional[str]) -> str:
+def _safe_extract_tenant(authorization: str | None) -> str:
     try:
         _, tenant_id = get_current_user_id(authorization)
         return str(tenant_id) if tenant_id else _UNKNOWN_ID
@@ -602,7 +602,7 @@ def _safe_extract_tenant(authorization: Optional[str]) -> str:
         return _UNKNOWN_ID
 
 
-def _safe_extract_user(authorization: Optional[str]) -> str:
+def _safe_extract_user(authorization: str | None) -> str:
     try:
         user_id, _ = get_current_user_id(authorization)
         return str(user_id) if user_id else _UNKNOWN_ID
@@ -610,7 +610,7 @@ def _safe_extract_user(authorization: Optional[str]) -> str:
         return _UNKNOWN_ID
 
 
-def _safe_extract_language(request: Optional[Request]) -> str:
+def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:

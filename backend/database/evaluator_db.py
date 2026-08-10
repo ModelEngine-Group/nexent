@@ -1,7 +1,7 @@
 """Database operations for evaluator_t table."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from consts.error_code import ErrorCode
 from consts.evaluation_status import EvalRunStatus
@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 def list_evaluators(
     tenant_id: str,
-    source: Optional[str] = None,
-    evaluator_type: Optional[str] = None,
-    status: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    source: str | None = None,
+    evaluator_type: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
     """List evaluators. Builtin evaluators (tenant_id='') are always included."""
     with get_db_session() as session:
         from database.db_models import Evaluator
@@ -37,7 +37,7 @@ def list_evaluators(
         return [_to_dict(r) for r in results]
 
 
-def get_evaluator(evaluator_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+def get_evaluator(evaluator_id: int, tenant_id: str) -> dict[str, Any] | None:
     """Get a single evaluator by ID."""
     with get_db_session() as session:
         from database.db_models import Evaluator
@@ -59,16 +59,16 @@ def create_evaluator(
     name: str,
     description: str,
     evaluator_type: str,
-    prompt: Optional[str],
-    prompt_en: Optional[str] = None,
-    code: Optional[str] = None,
+    prompt: str | None,
+    prompt_en: str | None = None,
+    code: str | None = None,
     score_range_min: float = 0.0,
     score_range_max: float = 1.0,
     pass_threshold: float = 0.5,
-    input_fields: Optional[List[Dict[str, Any]]] = None,
+    input_fields: list[dict[str, Any]] | None = None,
     source: str = "custom",
-    model_id: Optional[int] = None,
-) -> Dict[str, Any]:
+    model_id: int | None = None,
+) -> dict[str, Any]:
     """Create a new custom evaluator."""
     with get_db_session() as session:
         from database.db_models import Evaluator
@@ -103,7 +103,7 @@ def update_evaluator(
     evaluator_id: int,
     tenant_id: str,
     **kwargs,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Update evaluator fields (tenant-scoped).
 
     Behaviours by ``row.status``:
@@ -206,7 +206,9 @@ def update_evaluator(
 
         # DRAFT: mutate the row directly — no new snapshot required since
         # DRAFT rows are not yet frozen into any evaluation run plan.
-        touched = sorted([k for k in updatable if k in kwargs and kwargs[k] is not None])
+        touched = sorted(
+            [k for k in updatable if k in kwargs and kwargs[k] is not None]
+        )
         for key in updatable:
             if key in kwargs and kwargs[key] is not None:
                 setattr(row, key, kwargs[key])
@@ -223,7 +225,9 @@ def update_evaluator(
         return _to_dict(row)
 
 
-def _check_evaluator_in_use(evaluator_id: int, session, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def _check_evaluator_in_use(
+    evaluator_id: int, session, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
     """Return active (PENDING/RUNNING) evaluation runs referencing this evaluator.
 
     ``tenant_id`` — when provided — scopes the scan to a single tenant so
@@ -300,9 +304,9 @@ def delete_evaluator(evaluator_id: int, tenant_id: str) -> bool:
 def publish_evaluator(
     evaluator_id: int,
     tenant_id: str,
-    version_name: Optional[str] = None,
-    release_note: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
+    version_name: str | None = None,  # noqa: S1172  # reserved for future version naming
+    release_note: str | None = None,
+) -> dict[str, Any] | None:
     """Publish a DRAFT evaluator. On first publish, sets version_group_id."""
     if release_note:
         logger.info("Publishing evaluator %s with note: %s", evaluator_id, release_note)
@@ -331,7 +335,7 @@ def publish_evaluator(
 def list_evaluator_versions(
     evaluator_id: int,
     tenant_id: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List all versions of an evaluator (same version_group_id)."""
     with get_db_session() as session:
         from database.db_models import Evaluator
@@ -362,7 +366,7 @@ def list_evaluator_versions(
 def restore_evaluator_version(
     version_id: int,
     tenant_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Roll the "current" pointer of an evaluator version-group to a historical snapshot.
 
     Safety checks (in order):
@@ -506,7 +510,7 @@ def delete_evaluator_version(
         return True
 
 
-def _to_dict(row: Any) -> Dict[str, Any]:
+def _to_dict(row: Any) -> dict[str, Any]:
     """Convert an Evaluator ORM object to a dict."""
     return {
         "evaluator_id": row.evaluator_id,

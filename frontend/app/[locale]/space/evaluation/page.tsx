@@ -2300,7 +2300,7 @@ function SetsTab() {
     let h = 0;
     for (let i = 0; i < sid.length; i++) {
       h = (h << 5) - h + sid.charCodeAt(i);
-      h |= 0;
+      h = Math.trunc(h);
     }
     const colors = [
       "#1677ff",
