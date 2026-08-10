@@ -1589,6 +1589,37 @@ def test_semantic_search_multimodal_combines_queries(elasticsearch_core_instance
         assert mock_exec.call_count == 2
 
 
+def test_semantic_search_multimodal_boosts_exact_numeric_matches(elasticsearch_core_instance):
+    """Both multimodal kNN queries should receive the exact numeric clause."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.model_type = "multimodal"
+    mock_embedding_model.get_embeddings.return_value = [[0.1] * 8]
+
+    with patch.object(elasticsearch_core_instance, "exec_query") as mock_exec:
+        mock_exec.side_effect = [[], []]
+
+        elasticsearch_core_instance.semantic_search(
+            ["test_index"],
+            "Find identifier 95173042",
+            mock_embedding_model,
+            top_k=3,
+        )
+
+        text_query = mock_exec.call_args_list[0].args[1]
+        image_query = mock_exec.call_args_list[1].args[1]
+        expected_numeric_query = {
+            "bool": {
+                "should": [
+                    {"match_phrase": {"title": {"query": "95173042", "boost": 100.0}}},
+                    {"match_phrase": {"content": {"query": "95173042", "boost": 100.0}}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+        assert text_query["query"] == expected_numeric_query
+        assert image_query["query"] == expected_numeric_query
+
+
 def test_semantic_search_sets_knn_parameters(elasticsearch_core_instance):
     """Ensure semantic_search sets k and num_candidates based on top_k."""
     mock_embedding_model = MagicMock()
