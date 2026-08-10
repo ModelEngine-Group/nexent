@@ -7,6 +7,7 @@ import { Thread } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
@@ -19,6 +20,9 @@ export interface ChatProps {
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
+  variant?: "default" | "embedded";
+  skillFiles?: readonly SkillFileContent[];
+  onSkillFileSelect?: (path: string) => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -28,7 +32,9 @@ const AgentsLoadingState: FC = () => {
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">{t("chat.chat.loadingAgents")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("chat.chat.loadingAgents")}
+        </p>
       </div>
     </div>
   );
@@ -45,12 +51,15 @@ export const Chat: FC<ChatProps> = ({
   onChatModeChange = () => undefined,
   showModelSelector = true,
   isDictationConfigured = false,
+  variant = "default",
+  skillFiles,
+  onSkillFileSelect,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
       onAgentSelected?.(agent);
     },
-    [onAgentSelected],
+    [onAgentSelected]
   );
 
   if (!selectedAgent) {
@@ -74,6 +83,9 @@ export const Chat: FC<ChatProps> = ({
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
       isDictationConfigured={isDictationConfigured}
+      variant={variant}
+      skillFiles={skillFiles}
+      onSkillFileSelect={onSkillFileSelect}
     />
   );
 };

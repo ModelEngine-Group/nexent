@@ -169,26 +169,30 @@ class MockSkillResponse(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None
 
-class MockSkillCreateInteractiveRequest(BaseModel):
-    user_request: str
-    language: Optional[str] = "zh"
-    complexity: Optional[str] = "simple"
-    existing_skill: Optional[str] = None
+class MockNL2SkillRunRequest(BaseModel):
+    query: str
+    history: Optional[List[Dict[str, str]]] = None
+    draft_snapshot: Optional[Dict[str, Any]] = None
+    complexity: str = "complicated"
+    language: Optional[str] = None
 
 consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
 consts_model_mock.SkillUpdateRequest = MockSkillUpdateRequest
 consts_model_mock.SkillResponse = MockSkillResponse
-consts_model_mock.SkillCreateInteractiveRequest = MockSkillCreateInteractiveRequest
+consts_model_mock.NL2SkillRunRequest = MockNL2SkillRunRequest
 
 # Mock services
 services_mock = types.ModuleType('services')
 services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
+services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
+setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
 class MockSkillService:
@@ -197,17 +201,17 @@ class MockSkillService:
         self.skill_manager = MagicMock()
 services_skill_service_mock.SkillService = MockSkillService
 services_skill_service_mock.get_skill_manager = MagicMock()
-services_skill_service_mock.skill_creation_task_manager = MagicMock()
-services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("task123", MagicMock()))
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+services_nl2skill_service_mock.create_nl2skill_stream = AsyncMock()
 
 
 def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
     sys.modules['services.skill_service'] = services_skill_service_mock
+    sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
@@ -2497,30 +2501,33 @@ class TestScanSkillEndpoint:
 
 # ===== Create Skill Interactive Endpoint Tests =====
 class TestCreateSkillInteractiveEndpoint:
-    """Test POST /skills/create endpoint (nl2skill)."""
+    """Test POST /skills/nl2skill/run endpoint."""
 
     def test_create_skill_interactive_success(self, mocker):
         """Test successful interactive skill creation."""
         with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123", "zh")
-            with patch('backend.apps.skill_app._build_model_config_from_tenant') as mock_model:
-                mock_config = MagicMock()
-                mock_model.return_value = mock_config
-                with patch('backend.apps.skill_app.stream_skill_creation') as mock_stream:
-                    mock_stream.return_value = ("task123", MagicMock())
+            async def stream():
+                yield 'data: {"type":"done","content":""}\n\n'
 
-                    app = FastAPI()
-                    app.include_router(skill_app.skill_creator_router)
-                    client = TestClient(app)
+            with patch(
+                'backend.apps.skill_app.create_nl2skill_stream',
+                new_callable=AsyncMock,
+                return_value=stream(),
+            ) as mock_stream:
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                client = TestClient(app)
 
-                    response = client.post(
-                        "/skills/create",
-                        json={"user_request": "Create a skill", "language": "zh", "complexity": "simple"},
-                        headers={"Authorization": "Bearer token123"}
-                    )
+                response = client.post(
+                    "/skills/nl2skill/run",
+                    json={"query": "Create a skill", "language": "zh", "complexity": "simple"},
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-                    assert response.status_code == 200
-                    assert response.headers.get("x-task-id") == "task123"
+                assert response.status_code == 200
+                assert '"type":"done"' in response.text
+                mock_stream.assert_awaited_once()
 
     def test_create_skill_interactive_unauthorized(self, mocker):
         """Test interactive skill creation without auth."""
@@ -2532,8 +2539,8 @@ class TestCreateSkillInteractiveEndpoint:
             client = TestClient(app)
 
             response = client.post(
-                "/skills/create",
-                json={"user_request": "Create a skill"}
+                "/skills/nl2skill/run",
+                json={"query": "Create a skill"}
             )
 
             assert response.status_code == 401
@@ -2541,60 +2548,31 @@ class TestCreateSkillInteractiveEndpoint:
 
 # ===== Stop Skill Creation Endpoint Tests =====
 class TestStopSkillCreationEndpoint:
-    """Test GET /skills/stop/{task_id} endpoint."""
+    """The legacy stop endpoint is intentionally removed."""
 
     def test_stop_skill_creation_success(self, mocker):
         """Test successful stop skill creation."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
-                mock_manager.stop_task.return_value = True
-
-                app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
-                client = TestClient(app)
-
-                response = client.get(
-                    "/skills/stop/task123",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 200
-                data = response.json()
-                assert data["status"] == "success"
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/task123")
+        assert response.status_code == 404
 
     def test_stop_skill_creation_not_found(self, mocker):
         """Test stop skill creation when task not found."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
-                mock_manager.stop_task.return_value = False
-
-                app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
-                client = TestClient(app)
-
-                response = client.get(
-                    "/skills/stop/nonexistent",
-                    headers={"Authorization": "Bearer token123"}
-                )
-
-                assert response.status_code == 404
-                data = response.json()
-                assert data["status"] == "not_found"
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/nonexistent")
+        assert response.status_code == 404
 
     def test_stop_skill_creation_unauthorized(self, mocker):
-        """Test stop skill creation without auth."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.side_effect = Exception("Unauthorized")
-
-            app = FastAPI()
-            app.include_router(skill_app.skill_creator_router)
-            client = TestClient(app)
-
-            response = client.get("/skills/stop/task123")
-
-            assert response.status_code == 401
+        """Removed routes return not found before authentication."""
+        app = FastAPI()
+        app.include_router(skill_app.skill_creator_router)
+        client = TestClient(app)
+        response = client.get("/skills/stop/task123")
+        assert response.status_code == 404
 
 
 # ===== Update Skill Instance with config_values merge tests =====
@@ -2710,75 +2688,6 @@ class TestUpdateSkillWithFiles:
 
 
 # ===== Build Model Config From Tenant Tests =====
-class TestBuildModelConfigFromTenant:
-    """Test _build_model_config_from_tenant helper function (lines 532-553)."""
-
-    def test_build_model_config_success(self, mocker):
-        """Test successful model config building."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
-                sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-                mock_config_mgr.get_model_config.return_value = {
-                    "display_name": "GPT-4",
-                    "api_key": "test-key",
-                    "base_url": "https://api.openai.com",
-                    "model_factory": "openai",
-                    "ssl_verify": True
-                }
-                mock_get_model.return_value = "gpt-4"
-
-                from backend.apps.skill_app import _build_model_config_from_tenant
-                config = _build_model_config_from_tenant("tenant123")
-
-                assert config.cite_name == "GPT-4"
-                assert config.api_key == "test-key"
-                assert config.model_name == "gpt-4"
-                assert config.url == "https://api.openai.com"
-                assert config.temperature == 0.1
-                assert config.top_p == 0.95
-                assert config.ssl_verify is True
-                assert config.model_factory == "openai"
-                assert config.prompt_cache["mode"] == "openai_automatic"
-
-    def test_build_model_config_ssl_verify_default_false(self, mocker):
-        """Test that ssl_verify defaults to False when not present in config."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
-                sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-                mock_config_mgr.get_model_config.return_value = {
-                    "display_name": "GPT-4",
-                    "api_key": "test-key",
-                    "base_url": "https://api.openai.com",
-                    "model_factory": "openai"
-                }
-                mock_get_model.return_value = "gpt-4"
-
-                from backend.apps.skill_app import _build_model_config_from_tenant
-                config = _build_model_config_from_tenant("tenant123")
-
-                assert config.ssl_verify is False
-
-    def test_build_model_config_missing_quick_config(self, mocker):
-        """Test error when tenant has no LLM model configured."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-            mock_config_mgr.get_model_config.return_value = None
-
-            from backend.apps.skill_app import _build_model_config_from_tenant
-            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
-                _build_model_config_from_tenant("tenant123")
-
-    def test_build_model_config_empty_quick_config(self, mocker):
-        """Test error when tenant has empty LLM model config."""
-        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
-            sys.modules["consts.const"].MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
-            mock_config_mgr.get_model_config.return_value = {}
-
-            from backend.apps.skill_app import _build_model_config_from_tenant
-            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
-                _build_model_config_from_tenant("tenant123")
-
-
 class TestGetSkillByIdEndpoint:
     def test_get_skill_by_id_success(self, mocker):
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
