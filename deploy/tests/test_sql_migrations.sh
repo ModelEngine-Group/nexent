@@ -110,6 +110,12 @@ assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
   "COMMENT ON COLUMN nexent.conversation_message_unit_t.step_index" \
   "history projection migration should comment conversation_message_unit_t.step_index"
+assert_file_not_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_repository_skill_active" \
+  "v2.3 merged migration should not recreate the obsolete skill repository unique index"
+assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "multiple active snapshots may exist across statuses" \
+  "v2.3 merged migration should document support for multiple active skill snapshots"
 
 PLAN_FILE="$TMP_DIR/plan.sql"
 PATH="$BIN_DIR:$PATH" \
