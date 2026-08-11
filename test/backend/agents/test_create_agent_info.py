@@ -502,6 +502,9 @@ from backend.agents.create_agent_info import (
     _get_skill_script_tools,
     _extract_url_from_card,
     _build_external_agent_config,
+    _build_security_headers,
+    _resolve_scheme_field,
+    _build_auth_header_for_scheme,
     _get_external_a2a_agents,
     _build_internal_s3_url,
     _format_minio_files_for_content,
@@ -5199,6 +5202,7 @@ class TestBuildExternalAgentConfig:
                 protocol_type="JSONRPC",
                 timeout=300.0,
                 raw_card=None,
+                custom_headers=None,
             )
             assert result == MockConfig.return_value
 
@@ -5223,6 +5227,7 @@ class TestBuildExternalAgentConfig:
                 protocol_type="JSONRPC",
                 timeout=300.0,
                 raw_card=None,
+                custom_headers=None,
             )
             assert result == MockConfig.return_value
 
@@ -7343,3 +7348,142 @@ class TestCreateToolConfigListAidpSearch:
             assert "langchain_tool" in mock_tc_instance.metadata
             assert mock_tc_instance.metadata["langchain_tool"] is matching_langchain_tool
             assert "allowed_kds_set" in mock_tc_instance.metadata
+
+
+class TestBuildSecurityHeaders:
+    """Tests for _build_security_headers and related functions."""
+
+    def test_build_security_headers_apikey(self):
+        """Two apiKey-header schemes."""
+        agent = {
+            "security_schemes": {
+                "scheme_a": {"apiKeySecurityScheme": {"name": "X-Custom-Id", "location": "header"}},
+                "scheme_b": {"apiKeySecurityScheme": {"name": "X-Custom-Key", "location": "header"}},
+            },
+            "security_requirements": [{"schemes": {"scheme_a": {}, "scheme_b": {}}}],
+            "security_credentials": {"scheme_a": "id_value", "scheme_b": "key_value"},
+        }
+        assert _build_security_headers(agent) == {"X-Custom-Id": "id_value", "X-Custom-Key": "key_value"}
+
+    def test_build_security_headers_http_bearer(self):
+        """HTTP Bearer JWT."""
+        agent = {
+            "security_schemes": {"jwt": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}},
+            "security_requirements": [{"schemes": {"jwt": {}}}],
+            "security_credentials": {"jwt": "token123"},
+        }
+        assert _build_security_headers(agent) == {"Authorization": "Bearer token123"}
+
+    def test_build_security_headers_no_credentials(self):
+        """No credentials -> empty."""
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X-Key", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {},
+        }
+        assert _build_security_headers(agent) == {}
+
+    def test_build_security_headers_mixed(self):
+        """Mixed apiKey + httpAuth."""
+        agent = {
+            "security_schemes": {
+                "k": {"apiKeySecurityScheme": {"name": "X-Custom", "location": "header"}},
+                "j": {"httpAuthSecurityScheme": {"scheme": "bearer"}},
+            },
+            "security_requirements": [{"schemes": {"k": {}, "j": {}}}],
+            "security_credentials": {"k": "key-val", "j": "jwt-val"},
+        }
+        assert _build_security_headers(agent) == {"X-Custom": "key-val", "Authorization": "bearer jwt-val"}
+
+    def test_resolve_scheme_field_wrapper(self):
+        scheme = {"apiKeySecurityScheme": {"name": "X-Key", "location": "header"}}
+        assert _resolve_scheme_field(scheme, "apiKeySecurityScheme") == {"name": "X-Key", "location": "header"}
+
+    def test_resolve_scheme_field_flat_apikey(self):
+        scheme = {"name": "X-Key", "location": "header"}
+        assert _resolve_scheme_field(scheme, "apiKeySecurityScheme") == scheme
+
+    def test_resolve_scheme_field_flat_http(self):
+        scheme = {"scheme": "bearer", "bearerFormat": "JWT"}
+        assert _resolve_scheme_field(scheme, "httpAuthSecurityScheme") == scheme
+
+    def test_resolve_scheme_field_none(self):
+        assert _resolve_scheme_field({}, "apiKeySecurityScheme") is None
+        assert _resolve_scheme_field({"foo": "bar"}, "httpAuthSecurityScheme") is None
+
+    def test_build_auth_header_apikey(self):
+        scheme = {"apiKeySecurityScheme": {"name": "X-Custom", "location": "header"}}
+        assert _build_auth_header_for_scheme(scheme, "secret") == ("X-Custom", "secret")
+
+    def test_build_auth_header_http_bearer(self):
+        scheme = {"httpAuthSecurityScheme": {"scheme": "bearer"}}
+        assert _build_auth_header_for_scheme(scheme, "tok") == ("Authorization", "bearer tok")
+
+    def test_build_auth_header_http_jwt(self):
+        scheme = {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}
+        assert _build_auth_header_for_scheme(scheme, "tok") == ("Authorization", "Bearer tok")
+
+    def test_build_auth_header_apikey_query(self):
+        scheme = {"apiKeySecurityScheme": {"name": "key", "location": "query"}}
+        assert _build_auth_header_for_scheme(scheme, "val") is None
+
+    def test_build_auth_header_no_match(self):
+        assert _build_auth_header_for_scheme({"foo": "bar"}, "val") is None
+
+    def test_build_external_agent_config_with_security(self):
+        """_build_external_agent_config passes custom_headers from security."""
+        agent = {
+            "external_agent_id": "ext_sec",
+            "name": "Secured Agent",
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {"k": "secret-token"},
+        }
+        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+            _build_external_agent_config(agent, "http://test/a2a")
+            call_kwargs = MockConfig.call_args[1]
+            assert call_kwargs["custom_headers"] == {"X-Token": "secret-token"}
+
+    def test_resolve_scheme_field_empty_scheme_string(self):
+        """scheme['scheme'] is empty string -> None."""
+        from backend.agents.create_agent_info import _resolve_scheme_field
+        scheme = {"scheme": ""}
+        assert _resolve_scheme_field(scheme, "httpAuthSecurityScheme") is None
+
+    def test_build_auth_header_empty_auth_scheme(self):
+        """httpAuth with empty scheme -> None."""
+        from backend.agents.create_agent_info import _build_auth_header_for_scheme
+        scheme = {"httpAuthSecurityScheme": {"scheme": ""}}
+        assert _build_auth_header_for_scheme(scheme, "cred") is None
+
+    def test_collect_auth_headers_non_dict_req(self):
+        """Requirement is not a dict -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
+            "security_requirements": ["not_a_dict"],
+            "security_credentials": {"k": "v"},
+        }
+        assert _build_security_headers(agent) == {}
+
+    def test_build_security_headers_missing_credential(self):
+        """scheme_id in requirements but not in credentials -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
+            "security_requirements": [{"schemes": {"k": {}, "missing": {}}}],
+            "security_credentials": {"k": "v"},
+        }
+        headers = _build_security_headers(agent)
+        assert headers == {"X": "v"}
+
+    def test_build_security_headers_scheme_builds_none(self):
+        """Credential present but header build returns None (e.g. query location) -> skipped."""
+        from backend.agents.create_agent_info import _build_security_headers
+        agent = {
+            "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "key", "location": "query"}}},
+            "security_requirements": [{"schemes": {"k": {}}}],
+            "security_credentials": {"k": "v"},
+        }
+        assert _build_security_headers(agent) == {}
+
