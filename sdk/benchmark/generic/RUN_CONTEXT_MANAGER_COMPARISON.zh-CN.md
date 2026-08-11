@@ -36,7 +36,6 @@ backend/.venv/bin/python \
   --budget-profile synthetic_trigger \
   --runner-args \
     --agent-config sdk/benchmark/generic/configs/gaia_solver.yaml \
-    --production-parity-snapshot /tmp/gaia_solver_zh.parity.json \
     --language zh \
     --evaluators gaia_exact_match \
     --max-steps 15 \
@@ -60,15 +59,13 @@ backend/.venv/bin/python \
   --budget-profile synthetic_trigger \
   --runner-args \
     --agent-config sdk/benchmark/generic/configs/gaia_solver.yaml \
-    --production-parity-snapshot /tmp/gaia_solver_zh.parity.json \
     --language zh \
     --evaluators gaia_exact_match \
     --max-steps 15 \
     --temperature 0
 ```
 
-若要使用英文模板，必须把 `--language` 改为 `en` 并使用单独导出的英文 snapshot。不能复用
-中文 snapshot。
+若要使用英文模板，把 `--language` 改为 `en`。
 
 ## 参数
 
@@ -167,15 +164,9 @@ P/C 每轮使用相同 item IDs，并生成二元 outcome matrix：
 stable-prefix 和 hard-budget 检查。P 超过 hard budget 而失败属于新产品策略结果，必须与
 答案错误、工具错误分别统计。
 
-## Prompt/Tool parity 的使用边界
+## Prompt/Tool assembly 的使用边界
 
-`--production-parity-snapshot` 是 strict drift gate，不是 Agent YAML 的替代品：
-
-- `--agent-config` 仍负责构造实际 duty/constraint、Agent version、显式工具和其他运行参数；
-- snapshot v2 负责比较 Prompt/ContextItem/resource/tool/model/capacity/policy/runtime flags；
-- 未传 snapshot 仍能运行，但 manifest 标记为 `mechanism_only`；
-- YAML 重建 snapshot 通过时标记 `benchmark_reconstructed_snapshot`，不代表完整复刻实时生产数据库；
-- snapshot 与 language 绑定，切换 `en/zh` 必须重新导出；
+- `--agent-config` 负责构造实际 duty/constraint、Agent version、显式工具和其他运行参数；
 - `zh` 时 Benchmark 会和生产一样自动使用中文默认 `APP_DESCRIPTION`，无需手动 export；
 - trace 中的 `system_prompt` 使用生产 renderer，`### Available Resources` 应展示实际工具
   及其描述/schema。

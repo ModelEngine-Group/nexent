@@ -200,8 +200,6 @@ def make_nexent_task(
             language=language,
             template_version=prompt_template_version,
             template_source=prompt_template_source,
-            producer_kind="benchmark_runtime",
-            producer_component="sdk.benchmark.generic.runtime.task_adapter",
             resource_support=resource_support,
             intentional_empty_resources=intentional_empty_resources,
         )

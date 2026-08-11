@@ -44,14 +44,6 @@ compatibility aliases. New commands should use `--context-processing-mode`.
 CLI arguments override YAML values. Missing values fall back to the runner
 defaults.
 
-## Parity snapshot trust
-
-`tools/export_parity_snapshot.py` reconstructs a snapshot from Agent YAML and is
-labelled `benchmark_reconstructed`. Passing its strict gate produces
-`simulation_fidelity=benchmark_reconstructed_snapshot`, not a production claim.
-Schema v2 checks prompt, ContextItems, resources, tools, model, capacity, policy,
-and runtime flags captured by the benchmark-assembled `AgentRunInfo`.
-
 ## Rescoring
 
 Rescoring reuses existing traces and does not call the model.

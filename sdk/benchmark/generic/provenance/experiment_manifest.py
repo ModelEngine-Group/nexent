@@ -182,7 +182,6 @@ def build_manifest(
     evaluator_names: list[str],
     observation_policy: dict[str, Any],
     parity_snapshot: dict[str, Any] | None = None,
-    parity_gate: dict[str, Any] | None = None,
     budget_profile: str = "legacy_threshold",
     started_at: str | None = None,
 ) -> dict[str, Any]:
@@ -237,10 +236,6 @@ def build_manifest(
         "observation_policy": observation_policy,
         "parity_snapshot": parity_snapshot or {},
         "parity_snapshot_hash": sha256_value(parity_snapshot or {}),
-        "parity_gate": parity_gate or {
-            "passed": None,
-            "simulation_fidelity": "mechanism_only",
-        },
         "budget_profile": budget_profile,
     }
     manifest["manifest_hash"] = sha256_value(manifest)

@@ -91,14 +91,6 @@ def load_agent_config(config_path: str) -> dict:
     return resolve_env_references(config or {})
 
 
-def load_parity_snapshot(snapshot_path: str) -> dict:
-    """Load a production parity snapshot from JSON or YAML."""
-    with open(snapshot_path, "r", encoding="utf-8") as handle:
-        if snapshot_path.endswith(".json"):
-            return json.load(handle)
-        return yaml.safe_load(handle)
-
-
 def select_dataset_items(
     items: list,
     *,
@@ -274,35 +266,6 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
             from provenance.experiment_manifest import build_manifest, write_manifest_exclusive
 
             agent_config = output.get("agent_config", {})
-            expected_snapshot = manifest_context.get("expected_parity_snapshot")
-            parity_gate = {
-                "passed": None,
-                "simulation_fidelity": "mechanism_only",
-            }
-            if expected_snapshot is not None:
-                from provenance.parity_snapshot import (
-                    diff_parity_snapshots,
-                    simulation_fidelity_for_snapshot,
-                )
-                parity_diff = diff_parity_snapshots(
-                    expected_snapshot,
-                    output.get("parity_snapshot", {}),
-                )
-                if not parity_diff["passed"]:
-                    raise RuntimeError(
-                        "Parity snapshot gate failed: "
-                        + json.dumps(parity_diff, ensure_ascii=False, sort_keys=True)
-                    )
-                parity_gate = {
-                    "passed": True,
-                    "simulation_fidelity": simulation_fidelity_for_snapshot(expected_snapshot),
-                    "diff": parity_diff,
-                }
-            build_context = {
-                key: value
-                for key, value in manifest_context.items()
-                if key != "expected_parity_snapshot"
-            }
             manifest = build_manifest(
                 dataset_name=dataset_name,
                 dataset_version=dataset_version,
@@ -312,8 +275,7 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
                 model_config=output.get("model_config", {}),
                 agent_config=agent_config,
                 parity_snapshot=output.get("parity_snapshot", {}),
-                parity_gate=parity_gate,
-                **build_context,
+                **manifest_context,
             )
             manifest_path = write_manifest_exclusive(
                 manifest,
@@ -657,14 +619,6 @@ def main():
     parser.add_argument("--system-prompt-file", type=str,
                         help="Path to custom system prompt file (bypasses template)")
     parser.add_argument(
-        "--production-parity-snapshot",
-        type=str,
-        help=(
-            "JSON/YAML snapshot used as a strict parity gate; fidelity is derived "
-            "from its producer metadata"
-        ),
-    )
-    parser.add_argument(
         "--tenant-id",
         help="Tenant identity used by passively injected builtin skill tools",
     )
@@ -999,10 +953,6 @@ def main():
             },
             "started_at": datetime.now(timezone.utc).isoformat(),
             "budget_profile": budget_profile,
-            "expected_parity_snapshot": (
-                load_parity_snapshot(args.production_parity_snapshot)
-                if args.production_parity_snapshot else None
-            ),
         },
     )
 

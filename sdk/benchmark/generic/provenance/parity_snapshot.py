@@ -227,8 +227,6 @@ def build_parity_snapshot(
     template_source: str,
     resource_support: dict[str, bool] | None = None,
     intentional_empty_resources: dict[str, bool] | None = None,
-    producer_kind: str = "benchmark_runtime",
-    producer_component: str = "sdk.benchmark.generic",
     model: dict[str, Any] | None = None,
     capacity: dict[str, Any] | None = None,
     policy: dict[str, Any] | None = None,
@@ -236,15 +234,6 @@ def build_parity_snapshot(
 ) -> dict[str, Any]:
     return {
         "snapshot_schema_version": 2,
-        "producer": {
-            "kind": producer_kind,
-            "component": producer_component,
-            "capture_mode": (
-                "assembled_agent_run_info"
-                if producer_kind in {"benchmark_runtime", "production_runtime"}
-                else "configuration_reconstruction"
-            ),
-        },
         "coverage": {
             "captured": list(STRICT_SURFACES),
             "strict_gate": list(STRICT_SURFACES),
@@ -276,8 +265,6 @@ def build_agent_run_info_parity_snapshot(
     language: str,
     template_version: str,
     template_source: str,
-    producer_kind: str,
-    producer_component: str,
     resource_support: dict[str, bool] | None = None,
     intentional_empty_resources: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
@@ -352,23 +339,11 @@ def build_agent_run_info_parity_snapshot(
         template_source=template_source,
         resource_support=resource_support,
         intentional_empty_resources=intentional_empty_resources,
-        producer_kind=producer_kind,
-        producer_component=producer_component,
         model=model_snapshot,
         capacity=capacity_snapshot,
         policy=policy_snapshot,
         runtime_flags=runtime_flags,
     )
-
-
-def simulation_fidelity_for_snapshot(snapshot: dict[str, Any]) -> str:
-    """Return a trust label derived from the expected snapshot's producer."""
-    producer_kind = snapshot.get("producer", {}).get("kind")
-    return {
-        "production_runtime": "production_snapshot",
-        "benchmark_reconstructed": "benchmark_reconstructed_snapshot",
-        "benchmark_runtime": "benchmark_runtime_snapshot",
-    }.get(producer_kind, "mechanism_only")
 
 
 def diff_parity_snapshots(expected: dict[str, Any], actual: dict[str, Any]) -> dict[str, Any]:

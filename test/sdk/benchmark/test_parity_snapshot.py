@@ -5,7 +5,6 @@ from sdk.benchmark.generic.provenance.parity_snapshot import (
     build_parity_snapshot,
     canonical_tool_schema,
     diff_parity_snapshots,
-    simulation_fidelity_for_snapshot,
 )
 
 
@@ -55,7 +54,6 @@ def test_snapshot_records_prompt_context_resource_and_tool_contracts():
     assert snapshot["resources"]["tools"]["count"] == 1
     assert snapshot["resources"]["skills"]["status"] == "intentional_empty"
     assert snapshot["tools"]["ordered_names"] == ["search"]
-    assert snapshot["producer"]["kind"] == "benchmark_runtime"
     assert snapshot["snapshot_schema_version"] == 2
 
 
@@ -210,12 +208,9 @@ def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
         language="en",
         template_version="2",
         template_source="production",
-        producer_kind="production_runtime",
-        producer_component="production.factory",
     )
 
     serialized = str(snapshot)
-    assert snapshot["producer"]["kind"] == "production_runtime"
     assert snapshot["model"]["endpoint_configured"] is True
     assert snapshot["model"]["extra_body"]["nested_api_key"] == "[REDACTED]"
     assert snapshot["capacity"]["model_capacity"]["context_window_tokens"] == 32000
@@ -225,17 +220,6 @@ def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
     assert "secret-url" not in serialized
     assert "private query" not in serialized
     assert "private user" not in serialized
-
-
-def test_fidelity_label_requires_explicit_production_runtime_producer():
-    assert simulation_fidelity_for_snapshot({}) == "mechanism_only"
-    assert simulation_fidelity_for_snapshot({"producer": {"kind": "legacy"}}) == "mechanism_only"
-    assert simulation_fidelity_for_snapshot(
-        {"producer": {"kind": "benchmark_reconstructed"}}
-    ) == "benchmark_reconstructed_snapshot"
-    assert simulation_fidelity_for_snapshot(
-        {"producer": {"kind": "production_runtime"}}
-    ) == "production_snapshot"
 
 
 def test_diff_enforces_declared_runtime_surfaces():

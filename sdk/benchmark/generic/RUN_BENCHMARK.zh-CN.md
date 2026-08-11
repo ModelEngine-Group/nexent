@@ -60,7 +60,6 @@
 | `--constraint-prompt`  | 约束条件 prompt             |
 | `--few-shots-prompt`   | Few-shot 示例 prompt      |
 | `--system-prompt-file` | 自定义系统 prompt 文件（跳过模板引擎） |
-| `--production-parity-snapshot` | 可选 strict gate；可信度标签由 snapshot 的 producer 元数据决定 |
 | `--tenant-id` | builtin skill tools 的运行范围；默认依次取 CLI、YAML `agent_info.tenant_id`、`tenant_id` |
 | `--skills-path` | builtin skill tools 使用的本地 Skill 根目录；未传时读取 `SKILLS_PATH` |
 
@@ -554,7 +553,7 @@ python run_benchmark.py \
 | 统一入口        | ❌                  | ❌               | ✅                 |
 
 **结论**：`run_benchmark.py` 完全替代 `run_experiment.py` 和 `re_evaluate.py`。
-## Prompt、Tool assembly 与 parity snapshot
+## Prompt 与 Tool assembly
 
 Benchmark 不经过 `backend/agents/create_agent_info.py`，因此在 benchmark assembly 中显式模拟
 生产的被动注入行为：
@@ -571,46 +570,6 @@ Benchmark 不经过 `backend/agents/create_agent_info.py`，因此在 benchmark 
 trace output 的 `system_prompt` 使用生产 `ContextItemRenderer` 渲染压缩前静态上下文，因此
 `### Available Resources` 会包含实际装配的工具名称、描述、输入 schema 和输出类型，而不再
 只是空的资源标题。
-
-从生产导出的 Agent YAML 渲染重建 snapshot（不会初始化 MinIO、模型或执行工具）：
-
-```bash
-backend/.venv/bin/python sdk/benchmark/generic/tools/export_parity_snapshot.py \
-  --agent-config sdk/benchmark/generic/configs/gaia_solver.yaml \
-  --language zh \
-  --tenant-id tenant_id \
-  --output /tmp/gaia_solver_zh.parity.json
-```
-
-该输出的 producer 是 `benchmark_reconstructed`，不是生产运行时快照。输出文件使用排他创建，不覆盖
-已有文件；重复导出时应换文件名或先明确处理旧文件。
-如果当前 Agent 没有配置 Skill，`--skills-path` 可以不传；它不是 Skill 开关，只是 builtin
-skill tools 真正执行脚本时使用的本地根目录。`tenant_id` 必须与待模拟的生产 Agent scope
-一致；若 YAML 是新版 `export_agent_config.py` 导出的，运行器会默认读取
-`agent_info.tenant_id`。
-
-正式运行时启用 strict gate：
-
-```bash
-backend/.venv/bin/python sdk/benchmark/generic/run_benchmark.py \
-  --agent-config sdk/benchmark/generic/configs/gaia_solver.yaml \
-  --production-parity-snapshot /tmp/gaia_solver_zh.parity.json \
-  --tenant-id tenant_id \
-  --language zh \
-  --dataset gaia-level1 \
-  --run-name gaia-production-parity
-```
-
-gate 比较 prompt component、ContextItem 集合/顺序/priority/required、resource 状态，以及
-canonical tool set/order/schema/implementation。schema v2 还比较 model、capacity、policy 和 runtime
-flags。YAML 重建 snapshot 的作用是阻止 benchmark 相对冻结配置发生漂移，不能单独证明实时生产数据库、
-当前发布 Agent version 或动态资源与 Benchmark 完全一致。
-
-未传 snapshot 时实验可以运行，但 manifest 会标记
-`simulation_fidelity=mechanism_only`；YAML 重建 snapshot 通过后标记
-`benchmark_reconstructed_snapshot`。snapshot 绑定 language、Prompt component hash、
-template version、ContextItem 和工具集合，所以修改 Prompt、切换 `en/zh`、修改工具或改变
-tenant/version scope 后都应重新导出。
 
 ## 运行完整性检查
 
