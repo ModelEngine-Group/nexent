@@ -12,13 +12,15 @@ Webhook 服务，用于从 Langfuse UI 或命令行触发 benchmark 实验。
 ## 启动
 
 ```bash
-backend/.venv/bin/python sdk/benchmark/generic/integrations/langfuse/webhook_server.py --port 8090 --host 0.0.0.0
+backend/.venv/bin/python sdk/benchmark/generic/integrations/langfuse/webhook_server.py --port 8090 --host 127.0.0.1
 ```
 
 | 参数       | 默认值       | 说明   |
 | -------- | --------- | ---- |
 | `--port` | `8090`    | 监听端口 |
-| `--host` | `0.0.0.0` | 监听地址 |
+| `--host` | `127.0.0.1` | 监听地址 |
+
+Webhook 服务本身不提供身份认证。不要将其直接暴露到公网；远程使用时必须通过带有认证、请求大小限制和限流的反向代理，并只开放必要路径。
 
 ## API 端点
 

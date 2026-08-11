@@ -70,7 +70,7 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
         from langfuse import Langfuse
         from runtime.task_adapter import make_nexent_task
 
-        logger.info(f"Starting experiment '{run_name}' for dataset '{dataset_name}'")
+        logger.info("Starting experiment %r for dataset %r", run_name, dataset_name)
         lf = Langfuse()
         evaluator_fns = resolve_evaluators(evaluators)
 
@@ -83,12 +83,11 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
         if agent_config_path:
             if not os.path.isabs(agent_config_path):
                 agent_config_path = str(GENERIC_DIR / agent_config_path)
-            logger.info(f"Loading agent config from: {agent_config_path}")
+            logger.info("Loading agent config")
             with open(agent_config_path, "r", encoding="utf-8") as f:
                 agent_config = yaml.safe_load(f)
 
-            agent_info = agent_config.get("agent_info", {})
-            logger.info(f"  Agent: {agent_info.get('display_name', 'unknown')}")
+            logger.info("Agent config loaded")
 
             prompts = agent_config.get("prompts", {})
             agent_cfg = agent_config.get("agent_config", {})
@@ -109,7 +108,12 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
 
         dataset = lf.get_dataset(dataset_name)
         items = dataset.items
-        logger.info(f"Experiment '{run_name}': {len(items)} items, evaluators={evaluators}")
+        logger.info(
+            "Experiment %r: %d items, %d evaluators",
+            run_name,
+            len(items),
+            len(evaluator_fns),
+        )
 
         task_fn = make_nexent_task(
             system_prompt=system_prompt,
@@ -127,9 +131,6 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
         logger.info(f"  Temperature:  {temperature}")
         logger.info(f"  Language:     {language}")
         logger.info(f"  Context mgr:  {enable_cm}")
-        if duty_prompt:
-            logger.info(f"  Duty prompt:  {duty_prompt[:60]}...")
-
         total_scores = {}
         passed = 0
         failed = 0
@@ -138,8 +139,7 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
         agg_compression_cache_hits = 0
 
         for i, item in enumerate(items):
-            q_preview = str(item.input)[:60] if item.input else ""
-            logger.info(f"  [{i+1}/{len(items)}] {q_preview}...")
+            logger.info("  [%d/%d] Running item", i + 1, len(items))
             trace = lf.trace(
                 name=f"benchmark-{dataset_name}",
                 input=item.input,
@@ -148,9 +148,9 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
 
             try:
                 output = task_fn(item=item)
-            except Exception as e:
-                logger.error(f"  [{i+1}] ERROR: {e}")
-                output = {"final_answer": "", "errors": [str(e)]}
+            except Exception:
+                logger.error("  [%d] Task execution failed", i + 1)
+                output = {"final_answer": "", "errors": ["task execution failed"]}
 
             trace.update(
                 output=output,
@@ -209,8 +209,8 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
                             trace.score(name=r.get("name"), value=r.get("value"))
                             item_scores[r.get("name")] = r.get("value")
                             total_scores.setdefault(r.get("name"), []).append(r.get("value"))
-                except Exception as e:
-                    logger.error(f"  [{i+1}] EVAL_ERROR: {e}")
+                except Exception:
+                    logger.error("  [%d] Evaluator execution failed", i + 1)
 
             compression = output.get("compression", {})
             agg_compression_calls += compression.get("calls", 0)
@@ -242,7 +242,7 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
 
         lf.flush()
 
-        logger.info(f"Experiment '{run_name}' DONE:")
+        logger.info("Experiment %r DONE:", run_name)
         logger.info(f"  Total:  {len(items)}")
         logger.info(f"  Passed: {passed}")
         logger.info(f"  Failed: {failed}")
@@ -255,11 +255,19 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
             logger.info(f"    Total input tokens: {agg_compression_input_tokens}")
             logger.info(f"    Total cache hits:   {agg_compression_cache_hits}")
 
-    except Exception as e:
-        logger.error(f"Experiment '{run_name}' FAILED: {e}", exc_info=True)
+    except Exception:
+        logger.error("Experiment %r FAILED", run_name)
 
 
 def rescore_task(dataset_name: str, existing_run: str, evaluators: list, new_run_name: str):
+    """Re-evaluate existing traces without exposing exception details."""
+    try:
+        _rescore_task_impl(dataset_name, existing_run, evaluators, new_run_name)
+    except Exception:
+        logger.error("Rescore task %r FAILED", new_run_name)
+
+
+def _rescore_task_impl(dataset_name: str, existing_run: str, evaluators: list, new_run_name: str):
     """Re-evaluate existing traces with new evaluators (no LLM calls)."""
     from evaluators import resolve_evaluators
     from langfuse import Langfuse
@@ -272,7 +280,12 @@ def rescore_task(dataset_name: str, existing_run: str, evaluators: list, new_run
 
     existing = lf.get_dataset_run(dataset_name, existing_run)
     run_items = existing.dataset_run_items
-    logger.info(f"Rescore '{new_run_name}': {len(run_items)} traces from '{existing_run}'")
+    logger.info(
+        "Rescore %r: %d traces from %r",
+        new_run_name,
+        len(run_items),
+        existing_run,
+    )
 
     output_by_item_id = {}
     for ri in run_items:
@@ -312,8 +325,8 @@ def rescore_task(dataset_name: str, existing_run: str, evaluators: list, new_run
                         trace.score(name=r.get("name"), value=r.get("value"))
                         item_scores[r.get("name")] = r.get("value")
                         total_scores.setdefault(r.get("name"), []).append(r.get("value"))
-            except Exception as e:
-                logger.error(f"  [{i+1}] EVAL_ERROR: {e}")
+            except Exception:
+                logger.error("  [%d] Evaluator execution failed", i + 1)
 
         primary = next(iter(item_scores.values()), 0.0)
         if primary >= 1.0:
@@ -327,7 +340,13 @@ def rescore_task(dataset_name: str, existing_run: str, evaluators: list, new_run
     avg_str = ", ".join(
         f"avg_{k}={sum(v)/len(v):.4f}" for k, v in total_scores.items()
     )
-    logger.info(f"Rescore '{new_run_name}' DONE: {passed}/{len(items)} passed, {avg_str}")
+    logger.info(
+        "Rescore %r DONE: %d/%d passed, %s",
+        new_run_name,
+        passed,
+        len(items),
+        avg_str,
+    )
 
 
 @app.post("/webhook")
@@ -347,8 +366,7 @@ async def handle_webhook(payload: WebhookPayload, background_tasks: BackgroundTa
       agent-config: path to agent YAML config file (optional)
       existing_run: str (required for mode="rescore")
     """
-    logger.info(f"Webhook received: dataset_name={payload.dataset_name}, datasetName={payload.datasetName}, "
-                f"config_keys={list((payload.config or {}).keys())}, payload_type={type(payload.payload).__name__}")
+    logger.info("Webhook request received")
 
     dataset_name = payload.dataset_name or payload.datasetName
 
@@ -399,12 +417,17 @@ async def list_evaluators():
     return {"evaluators": list_evaluators()}
 
 
-if __name__ == "__main__":
-    import uvicorn
+def build_cli_parser() -> argparse.ArgumentParser:
+    """Build the webhook server CLI parser with local-only defaults."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    args = parser.parse_args()
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    return parser
+
+
+if __name__ == "__main__":
+    import uvicorn
+    args = build_cli_parser().parse_args()
 
     logger.info(f"Starting webhook server on {args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)

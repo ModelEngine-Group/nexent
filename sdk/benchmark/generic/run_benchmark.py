@@ -242,9 +242,9 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
 
         try:
             output = task_fn(item=item)
-        except Exception as e:
-            print(f"ERROR: {e}")
-            output = {"final_answer": "", "errors": [str(e)]}
+        except Exception:
+            print("ERROR: task execution failed")
+            output = {"final_answer": "", "errors": ["task execution failed"]}
 
         required_output_fields = {
             "agent_config",
@@ -258,8 +258,7 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
         if missing_output_fields:
             raise RuntimeError(
                 "Benchmark task output is incomplete; refusing to score or link "
-                f"an invalid run item. Missing: {', '.join(missing_output_fields)}; "
-                f"errors={output.get('errors', [])}"
+                f"an invalid run item. Missing: {', '.join(missing_output_fields)}"
             )
 
         if manifest is None and manifest_context is not None:
@@ -368,8 +367,8 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
                     total_scores[name] = []
                 total_scores[name].append(value)
 
-            except Exception as e:
-                print(f"EVAL_ERROR: {e}")
+            except Exception:
+                print("EVAL_ERROR: evaluator execution failed")
 
         compression = output.get("compression", {})
         agg_compression_calls += compression.get("calls", 0)
@@ -552,8 +551,8 @@ def rescore_experiment(dataset_name: str, existing_run: str, evaluator_fns: list
                         trace.score(name=r.get("name"), value=r.get("value"))
                         item_scores[r.get("name")] = r.get("value")
                         total_scores.setdefault(r.get("name"), []).append(r.get("value"))
-            except Exception as e:
-                print(f"  [{i+1}] EVAL_ERROR: {e}")
+            except Exception:
+                print(f"  [{i+1}] EVAL_ERROR: evaluator execution failed")
 
         primary = next(iter(item_scores.values()), 0.0)
         if primary >= 1.0:
@@ -795,8 +794,8 @@ def main():
     try:
         lf.auth_check()
         print(f"Langfuse connected: {os.environ.get('LANGFUSE_HOST')}")
-    except Exception as e:
-        print(f"ERROR: Langfuse connection failed: {e}")
+    except Exception:
+        print("ERROR: Langfuse connection failed")
         sys.exit(1)
 
     # Upload dataset if requested

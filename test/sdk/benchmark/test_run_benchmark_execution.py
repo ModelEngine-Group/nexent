@@ -226,7 +226,7 @@ def test_run_experiment_records_trace_scores_manifest_and_aggregates(
         return None
 
     def failing_evaluator(**kwargs):
-        raise ValueError("evaluator unavailable")
+        raise ValueError("api_key=secret-evaluator-value\nforged evaluator output")
 
     exa_cache = SimpleNamespace(snapshot=lambda: {"entries": 1})
     run_benchmark.run_experiment(
@@ -256,7 +256,9 @@ def test_run_experiment_records_trace_scores_manifest_and_aggregates(
     output = capsys.readouterr().out
     assert "Passed: 1" in output
     assert "Avg exact_match: 1.0000" in output
-    assert "EVAL_ERROR: evaluator unavailable" in output
+    assert "EVAL_ERROR: evaluator execution failed" in output
+    assert "secret-evaluator-value" not in output
+    assert "forged evaluator output" not in output
 
 
 def test_run_experiment_rejects_incomplete_task_output(monkeypatch):
@@ -270,6 +272,28 @@ def test_run_experiment_rejects_incomplete_task_output(monkeypatch):
             [],
             "run",
         )
+
+
+def test_run_experiment_redacts_task_exception(monkeypatch, capsys):
+    fake_langfuse = FakeLangfuse([FakeItem("item-1")])
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+
+    def failing_task(**kwargs):
+        raise RuntimeError("password=secret-task-value\nforged task output")
+
+    with pytest.raises(RuntimeError, match="Benchmark task output is incomplete") as exc_info:
+        run_benchmark.run_experiment(
+            "dataset",
+            failing_task,
+            [],
+            "run",
+        )
+
+    console_output = capsys.readouterr().out
+    assert "ERROR: task execution failed" in console_output
+    assert "secret-task-value" not in console_output
+    assert "forged task output" not in console_output
+    assert "secret-task-value" not in str(exc_info.value)
 
 
 def test_run_experiment_returns_without_traces_for_empty_dataset(monkeypatch, capsys):
@@ -321,8 +345,8 @@ def test_main_builds_runtime_configuration_and_dispatches_experiment(
 ):
     import agent_runner
     import evaluators
-    import runtime.exa_replay as exa_replay
     import runtime.task_adapter as runtime_task_adapter
+    from runtime import exa_replay
 
     config_path = tmp_path / "agent.yaml"
     config_path.write_text(
@@ -364,7 +388,7 @@ sub_agents: []
         "inject_production_managed_tools",
         lambda tools, **kwargs: [*tools, injected_tool],
     )
-    exa_cache = SimpleNamespace(snapshot=lambda: {})
+    exa_cache = SimpleNamespace(snapshot=dict)
     monkeypatch.setattr(
         exa_replay,
         "install_exa_record_replay",

@@ -171,6 +171,13 @@ async def test_health_and_evaluator_routes(monkeypatch):
     assert await webhook_server.list_evaluators() == {"evaluators": ["em", "f1"]}
 
 
+def test_webhook_cli_defaults_to_localhost():
+    args = webhook_server.build_cli_parser().parse_args([])
+
+    assert args.host == "127.0.0.1"
+    assert args.port == 8090
+
+
 def test_run_experiment_task_executes_scoring_tracing_and_compression(
     monkeypatch,
     tmp_path,
@@ -190,7 +197,7 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
         return [{"name": "f1", "value": 0.5}]
 
     def failing_evaluator(**kwargs):
-        raise ValueError("score failed")
+        raise ValueError("api_key=secret-evaluator-value\nforged evaluator log")
 
     monkeypatch.setattr(
         evaluators,
@@ -241,7 +248,7 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
 agent_info:
   display_name: Test agent
 prompts:
-  duty_prompt: Solve the task
+  duty_prompt: Solve the task with secret-prompt-value
   constraint_prompt: Be exact
   few_shots_prompt: Example
 agent_config:
@@ -264,7 +271,7 @@ agent_config:
 
     trace = fake_langfuse.traces[0]
     assert task_configuration["max_steps"] == 12
-    assert task_configuration["duty_prompt"] == "Solve the task"
+    assert task_configuration["duty_prompt"] == "Solve the task with secret-prompt-value"
     assert (
         task_configuration["context_manager_config"].policy_layers.platform[
             "processing_mode"
@@ -278,13 +285,18 @@ agent_config:
     }
     assert item.links == [(trace, "run")]
     assert fake_langfuse.flush_calls == 1
-    assert "EVAL_ERROR: score failed" in caplog.text
+    assert "Evaluator execution failed" in caplog.text
+    assert "secret-evaluator-value" not in caplog.text
+    assert "forged evaluator log" not in caplog.text
+    assert "secret-prompt-value" not in caplog.text
+    assert str(config_path) not in caplog.text
+    assert "question" not in caplog.text
     assert "Passed: 1" in caplog.text
 
 
 def test_run_experiment_task_logs_outer_failure_without_raising(monkeypatch, caplog):
     def fail_langfuse():
-        raise RuntimeError("Langfuse unavailable")
+        raise RuntimeError("api_key=secret-langfuse-value\nforged outer log")
 
     monkeypatch.setattr("langfuse.Langfuse", fail_langfuse)
 
@@ -298,7 +310,49 @@ def test_run_experiment_task_logs_outer_failure_without_raising(monkeypatch, cap
             "en",
         )
 
-    assert "Experiment 'run' FAILED: Langfuse unavailable" in caplog.text
+    assert "Experiment 'run' FAILED" in caplog.text
+    assert "secret-langfuse-value" not in caplog.text
+    assert "forged outer log" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+def test_run_experiment_task_redacts_task_exception_from_logs_and_trace(
+    monkeypatch,
+    caplog,
+):
+    import evaluators
+    import runtime.task_adapter as runtime_task_adapter
+
+    item = FakeItem("item-1")
+    fake_langfuse = FakeLangfuse([item])
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+    monkeypatch.setattr(evaluators, "resolve_evaluators", lambda names: [])
+
+    def failing_task(**kwargs):
+        raise RuntimeError("password=secret-task-value\nforged task log")
+
+    monkeypatch.setattr(
+        runtime_task_adapter,
+        "make_nexent_task",
+        lambda **kwargs: failing_task,
+    )
+
+    with caplog.at_level(logging.INFO, logger="benchmark-webhook"):
+        webhook_server.run_experiment_task(
+            "dataset",
+            [],
+            5,
+            "run",
+            0.0,
+            "en",
+        )
+
+    tracked_output = fake_langfuse.traces[0].updated_with["output"]
+    assert tracked_output["errors"] == ["task execution failed"]
+    assert "Task execution failed" in caplog.text
+    assert "secret-task-value" not in caplog.text
+    assert "forged task log" not in caplog.text
+    assert "secret-task-value" not in str(tracked_output)
 
 
 def test_rescore_task_scores_linked_items_and_skips_missing_traces(
@@ -323,7 +377,7 @@ def test_rescore_task_scores_linked_items_and_skips_missing_traces(
         return [{"name": "f1", "value": 0.5}]
 
     def failing_evaluator(**kwargs):
-        raise ValueError("score failed")
+        raise ValueError("api_key=secret-rescore-value\nforged rescore log")
 
     monkeypatch.setattr(
         evaluators,
@@ -346,4 +400,26 @@ def test_rescore_task_scores_linked_items_and_skips_missing_traces(
     assert fake_langfuse.flush_calls == 1
     assert "SKIP (no trace)" in caplog.text
     assert "1/2 passed" in caplog.text
-    assert "EVAL_ERROR: score failed" in caplog.text
+    assert "Evaluator execution failed" in caplog.text
+    assert "secret-rescore-value" not in caplog.text
+    assert "forged rescore log" not in caplog.text
+
+
+def test_rescore_task_redacts_outer_exception(monkeypatch, caplog):
+    def fail_langfuse():
+        raise RuntimeError("password=secret-rescore-outer\nforged outer rescore log")
+
+    monkeypatch.setattr("langfuse.Langfuse", fail_langfuse)
+
+    with caplog.at_level(logging.ERROR, logger="benchmark-webhook"):
+        webhook_server.rescore_task(
+            "dataset",
+            "old-run",
+            ["exact_match"],
+            "new-run",
+        )
+
+    assert "Rescore task 'new-run' FAILED" in caplog.text
+    assert "secret-rescore-outer" not in caplog.text
+    assert "forged outer rescore log" not in caplog.text
+    assert "Traceback" not in caplog.text

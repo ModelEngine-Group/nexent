@@ -190,10 +190,15 @@ def test_export_cli_dispatches_and_reports_failure(monkeypatch, tmp_path, capsys
     monkeypatch.setattr(
         export_module,
         "export_agent_config",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+        lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("password=secret-database-value\nforged exporter output")
+        ),
     )
     with pytest.raises(SystemExit) as exc_info:
         export_module.main()
 
     assert exc_info.value.code == 1
-    assert "database unavailable" in capsys.readouterr().err
+    error_output = capsys.readouterr().err
+    assert "agent configuration export failed" in error_output
+    assert "secret-database-value" not in error_output
+    assert "forged exporter output" not in error_output

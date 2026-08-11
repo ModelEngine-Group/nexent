@@ -266,8 +266,8 @@ def main():
             version=args.version,
             output_path=args.output
         )
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except Exception:
+        print("Error: agent configuration export failed", file=sys.stderr)
         sys.exit(1)
 
 
