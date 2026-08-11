@@ -218,7 +218,7 @@ export const Composer: FC<ComposerProps> = ({
       <PlanView />
 
       {/* Mode switcher above input */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+      <div className="flex items-center border-b border-border px-3 py-2">
         {/* Mode switcher */}
         <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
           <Button
@@ -253,27 +253,6 @@ export const Composer: FC<ComposerProps> = ({
             {t("chat.composer.execution")}
           </Button>
         </div>
-
-        {(knowledgeCapabilities?.sources.local.enabled ||
-          knowledgeCapabilities?.sources.aidp.enabled ||
-          knowledgeScope) && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 max-w-64 gap-1.5 truncate text-xs text-muted-foreground"
-            onClick={() => setKnowledgeModalOpen(true)}
-            disabled={isRunning}
-            title={
-              isRunning
-                ? t("chat.knowledgeScope.runningDisabled")
-                : knowledgeSummary
-            }
-          >
-            <Database className="size-3.5" />
-            <span className="truncate">{knowledgeSummary}</span>
-          </Button>
-        )}
       </div>
 
       {/* Composer Primitive Root */}
@@ -287,16 +266,38 @@ export const Composer: FC<ComposerProps> = ({
           autoFocus
         />
         <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-          {showModelSelector && (
-            <ModelSelector
-              models={models}
-              value={selectedModelId}
-              onValueChange={onModelChange}
-              variant="ghost"
-              size="sm"
-              className="text-xs"
-            />
-          )}
+          <div className="flex min-w-0 items-center gap-1">
+            {showModelSelector && (
+              <ModelSelector
+                models={models}
+                value={selectedModelId}
+                onValueChange={onModelChange}
+                variant="ghost"
+                size="sm"
+                className="shrink-0 text-xs"
+              />
+            )}
+            {(knowledgeCapabilities?.sources.local.enabled ||
+              knowledgeCapabilities?.sources.aidp.enabled ||
+              knowledgeScope) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                onClick={() => setKnowledgeModalOpen(true)}
+                disabled={isRunning}
+                title={
+                  isRunning
+                    ? t("chat.knowledgeScope.runningDisabled")
+                    : knowledgeSummary
+                }
+              >
+                <Database className="size-3.5 shrink-0" />
+                <span className="truncate">{knowledgeSummary}</span>
+              </Button>
+            )}
+          </div>
           <div className="ml-auto flex items-center gap-1">
             <ComposerAddAttachment />
             <AuiIf condition={(s) => !s.composer.dictation}>
