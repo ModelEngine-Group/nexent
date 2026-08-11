@@ -7179,10 +7179,11 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Verify env creds are in the params (overriding stale DB values)
-            assert mock_tc_instance.params["server_url"] == "https://aidp.test"
-            assert mock_tc_instance.params["api_key"] == "key-123"
-            assert mock_tc_instance.params["tenant_id"] == "aidp-tenant"
+            # Verify env creds were injected then removed from params
+            # (runtime params are handled by nexent_agent.py at tool creation time)
+            assert "server_url" not in mock_tc_instance.params
+            assert "api_key" not in mock_tc_instance.params
+            assert "tenant_id" not in mock_tc_instance.params
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_success(self):
@@ -7235,7 +7236,7 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.metadata["allowed_kds_set"] == {"kb_allowed_1", "kb_allowed_2"}
+            assert set(mock_tc_instance.metadata["allowed_kds_set"]) == {"kb_allowed_1", "kb_allowed_2"}
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
@@ -7288,7 +7289,7 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             # allowed_kds_set should be empty set on failure
             assert mock_tc_instance.metadata is not None
-            assert mock_tc_instance.metadata["allowed_kds_set"] == set()
+            assert mock_tc_instance.metadata["allowed_kds_set"] == []
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
