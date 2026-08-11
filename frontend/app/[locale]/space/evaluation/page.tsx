@@ -896,6 +896,25 @@ function EvaluatorsTab() {
       threshold: 0.5,
       modelId: undefined,
     });
+  const validateF = (): boolean => {
+    if (!f.name.trim()) {
+      message.warning(t("agentEvaluation.validation.nameRequired"));
+      return false;
+    }
+    if (f.sMin >= f.sMax) {
+      message.warning(t("agentEvaluation.validation.scoreMinMax"));
+      return false;
+    }
+    if (f.threshold < f.sMin || f.threshold > f.sMax) {
+      message.warning(t("agentEvaluation.validation.thresholdRange"));
+      return false;
+    }
+    if (f.sMax > 100) {
+      message.warning(t("agentEvaluation.validation.scoreMaxLimit"));
+      return false;
+    }
+    return true;
+  };
   const [genDesc, setGenDesc] = useState("");
   const [genModel, setGenModel] = useState<number | undefined>(undefined);
   const [genAgent, setGenAgent] = useState<number | undefined>(undefined);
@@ -1650,26 +1669,7 @@ function EvaluatorsTab() {
               type="primary"
               loading={busy}
               onClick={async () => {
-                if (!f.name.trim()) {
-                  message.warning(t("agentEvaluation.validation.nameRequired"));
-                  return;
-                }
-                if (f.sMin >= f.sMax) {
-                  message.warning(t("agentEvaluation.validation.scoreMinMax"));
-                  return;
-                }
-                if (f.threshold < f.sMin || f.threshold > f.sMax) {
-                  message.warning(
-                    t("agentEvaluation.validation.thresholdRange")
-                  );
-                  return;
-                }
-                if (f.sMax > 100) {
-                  message.warning(
-                    t("agentEvaluation.validation.scoreMaxLimit")
-                  );
-                  return;
-                }
+                if (!validateF()) return;
                 setBusy(true);
                 try {
                   const body: any = {

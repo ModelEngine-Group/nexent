@@ -1382,6 +1382,29 @@ class TestValidateCodeEvaluator:
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator("x = 1")
 
+    def test_dunder_globals_escape_raises(self, service_module):
+        from consts.exceptions import AppException
+        with pytest.raises(AppException, match="forbidden operations"):
+            service_module.validate_code_evaluator(
+                "esc = json.JSONDecoder.__init__.__globals__['__builtins__']"
+            )
+
+    def test_dunder_class_chain_escape_raises(self, service_module):
+        from consts.exceptions import AppException
+        with pytest.raises(AppException, match="forbidden operations"):
+            service_module.validate_code_evaluator(
+                "esc = ().__class__.__base__.__subclasses__()"
+            )
+
+    def test_plain_helpers_without_dunders_pass(self, service_module):
+        code = (
+            "def _safe(x):\n"
+            "    return {'score': 1, 'reason': 'ok'}\n"
+            "def evaluate(query, expected, actual, runtime_events):\n"
+            "    return _safe(query)\n"
+        )
+        service_module.validate_code_evaluator(code)
+
     def test_undefined_name_raises(self, service_module):
         from consts.exceptions import AppException
         with pytest.raises(AppException, match="forbidden or undefined name"):

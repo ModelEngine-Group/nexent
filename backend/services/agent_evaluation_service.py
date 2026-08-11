@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import logging
@@ -121,6 +122,34 @@ ALLOWED_BUILTINS = {
     "AttributeError": AttributeError,
 }
 
+
+def _scan_evaluator_introspection(code: str) -> list[str]:
+    """AST scan rejecting dunder attribute/name access used by sandbox escapes.
+
+    The whitelisted-builtins exec (see ``ALLOWED_BUILTINS``) cannot import
+    modules or reference ``open`` directly, but a whitelisted object (``json``,
+    ``str``, ``Exception``, ...) is still reachable; every classic escape chain
+    starts from a double-underscore attribute or name::
+
+        json.JSONDecoder.__init__.__globals__['__builtins__']
+        ().__class__.__base__.__subclasses__()
+
+    Rejecting ``__``-prefixed attributes/names statically closes those chains
+    while ordinary pure-python evaluators (which never touch dunders) pass.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            violations.append(f"dunder attribute access .{node.attr}")
+        elif isinstance(node, ast.Name) and node.id.startswith("__"):
+            violations.append(f"dunder name {node.id!r}")
+    return violations
+
+
 # Thread pool for parallel LLM evaluator calls (one case, multiple evaluators)
 _LLM_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
@@ -166,7 +195,10 @@ def validate_code_evaluator(code: str) -> None:
 
     # Stage 2: static AST scan for forbidden operations — runs BEFORE any
     # code executes so we never even sandbox-compile a dangerous AST.
-    violations = _scan_shell_calls(code)
+    # ``_scan_shell_calls`` blocks literal os./subprocess. shell calls;
+    # ``_scan_evaluator_introspection`` additionally rejects ``__``-prefixed
+    # attribute/name access, closing object-introspection sandbox escapes.
+    violations = _scan_shell_calls(code) + _scan_evaluator_introspection(code)
     if violations:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -180,9 +212,10 @@ def validate_code_evaluator(code: str) -> None:
     #
     # Defence-in-depth (already enforced BEFORE this exec is reached):
     #   1. compile() syntax check (stage 1) — trivial typos rejected first.
-    #   2. _scan_shell_calls() AST scan (stage 2) — identifiers / attributes
-    #      / imports matching open|subprocess|os|sys|eval|exec|socket|...
-    #      are rejected statically before ANY code runs.
+    #   2. _scan_shell_calls() + _scan_evaluator_introspection() AST scans
+    #      (stage 2) — shell primitives and any ``__``-prefixed attribute/name
+    #      (object-introspection escapes) are rejected statically before ANY
+    #      code runs.
     #   3. __builtins__ is restricted to the ALLOWED_BUILTINS whitelist
     #      (int/float/str/list/dict/math/json.* + a dozen read-only helpers);
     #      __import__, open, breakpoint, globals/locals are NOT in the dict
@@ -193,9 +226,10 @@ def validate_code_evaluator(code: str) -> None:
     # as a code-evaluator authoring facility; it is NOT generic code injection.
     local_vars: dict = {}
     try:
-        # Four defences are applied BEFORE the evaluator reaches this call
-        # (compile syntax check, AST shell-call scan, ALLOWED_BUILTINS
-        # whitelist, evaluate() signature check) — see docstring.
+        # Defence-in-depth (compile syntax check, AST shell-call scan, dunder
+        # introspection scan, ALLOWED_BUILTINS whitelist, evaluate() signature
+        # check) is applied BEFORE the evaluator reaches this call — see
+        # docstring.
         # codeql[py/code-injection]
         exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  NOSONAR
     except NameError as e:
