@@ -37,6 +37,14 @@ SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "uuid", "pprint", "operator", "typing",
 ]
 
+
+def get_local_python_authorized_imports() -> List[str]:
+    """Return the imports permitted by Nexent's default local code executor."""
+    from smolagents.local_python_executor import BASE_BUILTIN_MODULES
+
+    return sorted(set(BASE_BUILTIN_MODULES) | set(SAFE_PYTHON_INTERPRETER_IMPORTS))
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -340,8 +348,13 @@ class NexentAgent:
                 else:
                     tools_obj.memory_context_service = None
             elif class_name == "AidpSearchTool":
-                tools_obj = tool_class(**params)
+                # kds_name_to_id_map is exclude=True; inject via metadata after init
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["kds_name_to_id_map"]}
+                tools_obj = tool_class(**filtered_params)
                 tools_obj.observer = self.observer
+                tools_obj.kds_name_to_id_map = tool_config.metadata.get(
+                    "kds_name_to_id_map", {}) if tool_config.metadata else {}
                 # Install the KDS whitelist so the tool only retrieves from
                 # KBs the current user is permitted to see.  Guard against
                 # ``metadata=None`` the same way every other branch does
@@ -445,6 +458,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                config_overrides=params.get("config_overrides"),
             )
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
@@ -452,6 +466,15 @@ class NexentAgent:
         elif class_name == "UpdatePlanStepTool":
             from nexent.core.tools.plan_tools import UpdatePlanStepTool
             return UpdatePlanStepTool()
+        elif class_name == "CreateScheduledTaskProposalTool":
+            from nexent.core.tools.create_scheduled_task_tool import (
+                CreateScheduledTaskProposalTool,
+            )
+            metadata = tool_config.metadata or {}
+            return CreateScheduledTaskProposalTool(
+                create_proposal=metadata.get("create_proposal"),
+                observer=self.observer,
+            )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

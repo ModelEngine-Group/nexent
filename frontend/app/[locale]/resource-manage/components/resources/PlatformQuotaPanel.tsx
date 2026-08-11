@@ -66,7 +66,13 @@ function getProgressColor(usagePct: number | null | undefined): string {
   return STROKE_COLORS.normal;
 }
 
-export function PlatformQuotaPanel() {
+interface PlatformQuotaPanelProps {
+  showTenantAllocations?: boolean;
+}
+
+export function PlatformQuotaPanel({
+  showTenantAllocations = true,
+}: PlatformQuotaPanelProps) {
   const { t } = useTranslation("common");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PlatformQuotaOverview | null>(null);
@@ -534,7 +540,8 @@ export function PlatformQuotaPanel() {
         </Row>
       </Card>
 
-      {data?.platform_capacity_bytes != null &&
+      {showTenantAllocations &&
+        data?.platform_capacity_bytes != null &&
         !data.capacity_management_enforced && (
           <Alert
             type="info"
@@ -551,7 +558,7 @@ export function PlatformQuotaPanel() {
           />
         )}
 
-      {isOversubscribed && data && (
+      {showTenantAllocations && isOversubscribed && data && (
         <Alert
           type="warning"
           showIcon
@@ -573,16 +580,18 @@ export function PlatformQuotaPanel() {
       )}
 
       {/* Per-Tenant Table */}
-      <Table
-        dataSource={displayTenants}
-        columns={columns}
-        rowKey="tenant_id"
-        loading={loading}
-        pagination={false}
-        size="small"
-        scroll={{ x: 890 }}
-        locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
-      />
+      {showTenantAllocations && (
+        <Table
+          dataSource={displayTenants}
+          columns={columns}
+          rowKey="tenant_id"
+          loading={loading}
+          pagination={false}
+          size="small"
+          scroll={{ x: 890 }}
+          locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
+        />
+      )}
 
       {/* Capacity Settings Modal */}
       <Modal

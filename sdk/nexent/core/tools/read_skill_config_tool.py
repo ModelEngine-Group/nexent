@@ -1,7 +1,7 @@
 """Skill config reading tool."""
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -26,6 +26,7 @@ class ReadSkillConfigTool(Tool):
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
+        config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -34,12 +35,14 @@ class ReadSkillConfigTool(Tool):
             agent_id: Agent ID for filtering available skills in error messages.
             tenant_id: Tenant ID for filtering available skills in error messages.
             version_no: Version number for filtering available skills.
+            config_overrides: Effective per-agent values keyed by skill name.
         """
         super().__init__()
         self.local_skills_dir = local_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.config_overrides = config_overrides or {}
 
     def execute(self, skill_name: str) -> str:
         """Read the config.yaml file from a skill directory.
@@ -60,7 +63,7 @@ class ReadSkillConfigTool(Tool):
         if not os.path.isdir(skill_dir):
             return f"[Error] Skill directory not found: {skill_name}"
 
-        config_path = os.path.join(skill_dir, "config.yaml")
+        config_path = os.path.join(skill_dir, "config", "config.yaml")
         if not os.path.isfile(config_path):
             return f"[Error] config.yaml not found in skill: {skill_name}"
 
@@ -69,13 +72,16 @@ class ReadSkillConfigTool(Tool):
                 raw_config: Any = yaml.safe_load(f)
 
             if raw_config is None:
-                return "{}"
+                raw_config = {}
 
             if not isinstance(raw_config, dict):
                 return f"[Error] config.yaml must contain a YAML dictionary, got {type(raw_config).__name__}"
 
+            effective_config = dict(raw_config)
+            effective_config.update(self.config_overrides.get(skill_name) or {})
+
             import json
-            return json.dumps(raw_config, ensure_ascii=False, indent=2)
+            return json.dumps(effective_config, ensure_ascii=False, indent=2)
         except yaml.YAMLError as e:
             return f"[Error] Failed to parse config.yaml: {e}"
         except Exception as e:
@@ -91,6 +97,7 @@ def _uncached_read_skill_config_tool(
     agent_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     version_no: int = 0,
+    config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> ReadSkillConfigTool:
     """Get or create the read skill config tool instance.
 
@@ -103,7 +110,13 @@ def _uncached_read_skill_config_tool(
     Returns:
         Tool instance cached by tenant_id for tenant isolation.
     """
-    return ReadSkillConfigTool(local_skills_dir, agent_id, tenant_id, version_no)
+    return ReadSkillConfigTool(
+        local_skills_dir,
+        agent_id,
+        tenant_id,
+        version_no,
+        config_overrides,
+    )
 
 
 def _read_skill_config_without_context(skill_name: str) -> str:

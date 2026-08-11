@@ -126,8 +126,11 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     try {
       await deleteGroup(id);
       message.success(t("tenantResources.groups.deleted"));
-      // Invalidate all group queries to ensure all components get updated data
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      // Group deletion also changes each affected user's group_names.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["groups"] }),
+        queryClient.invalidateQueries({ queryKey: ["users"] }),
+      ]);
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);

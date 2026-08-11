@@ -316,6 +316,7 @@ class TestConversationManagementService(unittest.TestCase):
             unit_content="print('hi')",
             user_id=self.user_id,
             unit_status="streaming",
+            invocation_id="subagent-invocation-1",
         )
         self.assertEqual(unit_id, 555)
         mock_create_message_unit.assert_called_once_with(
@@ -327,6 +328,7 @@ class TestConversationManagementService(unittest.TestCase):
             user_id=self.user_id,
             unit_status="streaming",
             tool_call_id=None,
+            invocation_id="subagent-invocation-1",
         )
 
     @patch('backend.services.conversation_management_service.create_source_image')
@@ -650,6 +652,7 @@ class TestConversationManagementService(unittest.TestCase):
             "message_records": [
                 {
                     "message_id": 1,
+                    "message_index": 0,
                     "role": "user",
                     "message_content": "What is AI?",
                     "minio_files": [],
@@ -657,6 +660,7 @@ class TestConversationManagementService(unittest.TestCase):
                 },
                 {
                     "message_id": 2,
+                    "message_index": 1,
                     "role": "assistant",
                     "message_content": "AI stands for Artificial Intelligence.",
                     "units": [],
@@ -681,9 +685,11 @@ class TestConversationManagementService(unittest.TestCase):
         user_message = result[0]["message"][0]
         self.assertEqual(user_message["role"], "user")
         self.assertEqual(user_message["message"], "What is AI?")
+        self.assertEqual(user_message["message_index"], 0)
 
         assistant_message = result[0]["message"][1]
         self.assertEqual(assistant_message["role"], "assistant")
+        self.assertEqual(assistant_message["message_index"], 1)
         # Contains final_answer unit
         self.assertEqual(len(assistant_message["message"]), 1)
         self.assertEqual(
@@ -738,7 +744,7 @@ class TestConversationManagementService(unittest.TestCase):
                 "units": [{
                     "unit_id": 1001, "unit_type": "history_summary",
                     "unit_content": summary_content, "unit_index": 2,
-                    "unit_status": "completed",
+                    "unit_status": "completed", "invocation_id": None,
                 }],
                 "opinion_flag": None,
             }],
@@ -753,6 +759,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(summary_units, [{
             "type": "history_summary", "content": summary_content,
             "unit_index": 2, "unit_status": "completed", "tool_call_id": None,
+            "invocation_id": None,
         }])
 
     @patch('backend.services.conversation_management_service.get_conversation_history')

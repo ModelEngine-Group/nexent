@@ -167,6 +167,32 @@ async def test_llm_analyzer_skips_model_when_message_has_no_schedule_signal():
     assert result["analysis_source"] == "rule"
 
 
+@pytest.mark.asyncio
+async def test_llm_analyzer_force_mode_checks_trusted_user_message_without_rule_signal():
+    strategy = _StubLLMStrategy(json.dumps({
+        "is_automation_intent": False,
+        "confidence": 0.91,
+        "title": "",
+        "instruction": "",
+        "schedule": None,
+        "schedule_error": None,
+        "missing_fields": [],
+        "clarification_question": None,
+    }))
+    context = _context("稍后处理这个事情")
+    context = AutomationIntentContext(
+        **{
+            **context.__dict__,
+            "force_llm": True,
+        }
+    )
+
+    result = await strategy.analyze(context)
+
+    assert strategy.calls == 1
+    assert result["analysis_source"] == "llm"
+
+
 def test_strategy_factory_prefers_selected_llm_model(monkeypatch):
     captured = []
 

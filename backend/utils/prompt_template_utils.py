@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -252,7 +252,9 @@ def get_cluster_summary_reduce_prompt_template(language: str = LANGUAGE["ZH"]) -
 def get_skill_creation_simple_prompt_template(
     language: str = LANGUAGE["ZH"],
     existing_skill: Optional[Dict[str, Any]] = None,
-    complexity: str = "simple"
+    complexity: str = "simple",
+    user_request: str = "",
+    target_files: Optional[List[str]] = None,
 ) -> Dict[str, str]:
     """
     Get skill creation prompt template with Jinja2 rendering.
@@ -266,6 +268,8 @@ def get_skill_creation_simple_prompt_template(
         existing_skill: Optional dict containing existing skill info for update scenarios.
             Expected keys: name, description, tags, content
         complexity: Complexity level ('simple' or 'complicated')
+        user_request: Current conversation turn request
+        target_files: Existing skill files explicitly selected for this turn
 
     Returns:
         Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt', rendered with variables
@@ -295,9 +299,17 @@ def get_skill_creation_simple_prompt_template(
     with open(absolute_template_path, 'r', encoding='utf-8') as f:
         template_data = yaml.safe_load(f)
 
-    # Prepare template context with existing_skill info
+    # A draft snapshot is supplied for every interactive turn, including the empty initial draft.
+    existing_skill_content = ""
+    if isinstance(existing_skill, dict):
+        existing_skill_content = str(existing_skill.get("content") or "").strip()
+
+    # Prepare template context with existing_skill info.
     context = {
-        "existing_skill": existing_skill
+        "existing_skill": existing_skill,
+        "has_existing_skill_content": bool(existing_skill_content),
+        "user_request": user_request,
+        "target_files": target_files or [],
     }
 
     # Render templates with Jinja2

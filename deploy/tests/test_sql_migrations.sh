@@ -103,7 +103,7 @@ if grep -Eq '^COMMENT ON COLUMN .*conversation_message_unit_t.*step_index' "$DEP
   fail "init SQL should not comment conversation_message_unit_t.step_index before its migration adds the column"
 fi
 
-HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3.0_0703_history_projection_fields.sql"
+HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3_merged_migrations.sql"
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
   "ADD COLUMN IF NOT EXISTS step_index INTEGER DEFAULT NULL;" \
   "history projection migration should add conversation_message_unit_t.step_index"

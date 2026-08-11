@@ -7,6 +7,13 @@ import io
 import json
 import base64
 import types
+import ast
+
+# Python 3.14 removed the legacy AST alias still referenced by the service.
+if not hasattr(ast, "Num"):
+    ast.Num = ast.Constant
+if not hasattr(ast, "Str"):
+    ast.Str = ast.Constant
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -1203,6 +1210,35 @@ class TestSkillServiceUpdateSkill:
                 user_id="viewer",
             )
 
+    def test_update_skill_rejects_access_change_from_group_editor(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            return_value={
+                "skill_id": 1,
+                "name": "existing",
+                "created_by": "owner",
+                "group_ids": [1, 2],
+                "ingroup_permission": "EDIT",
+            },
+        )
+        mocker.patch(
+            "backend.services.skill_service._can_edit_skill", return_value=True
+        )
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update skill access",
+        ):
+            SkillService(tenant_id="test-tenant").update_skill(
+                "existing",
+                {"description": "updated", "group_ids": [1]},
+                user_id="group-editor",
+            )
+
     def test_update_skill_with_params(self, mocker):
         mocker.patch(
             'backend.services.skill_service.skill_db.get_skill_by_name',
@@ -1283,7 +1319,7 @@ class TestSkillServiceDeleteSkill:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('os.path.join', return_value="/tmp/skills/del_skill"):
                 with patch('shutil.rmtree'):
                     result = service.delete_skill("del_skill", tenant_id="test-tenant", user_id="user123")
@@ -1327,11 +1363,12 @@ class TestSkillServiceGetSkillFileContent:
     def test_get_file_content_success(self, mocker):
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', mock_open(read_data="file content")):
                 result = service.get_skill_file_content("test_skill", "README.md")
 
@@ -1340,11 +1377,12 @@ class TestSkillServiceGetSkillFileContent:
     def test_get_file_content_not_found(self, mocker):
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=False):
+        with patch('builtins.open', side_effect=FileNotFoundError):
             result = service.get_skill_file_content("test_skill", "nonexistent.md")
 
         assert result is None
@@ -2527,7 +2565,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service.skill_manager = mock_manager
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             from consts.exceptions import SkillException
             try:
                 service.create_skill({"name": "local_conflict"})
@@ -2551,6 +2589,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2568,6 +2607,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -2585,6 +2625,7 @@ class TestUploadZipFiles:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -3923,7 +3964,7 @@ class TestSkillServiceDeleteWithNoLocalDir:
 
         # The service joins local_skills_dir with skill_name, so os.path.join(None, x) would fail
         # We need to patch os.path.exists to handle the joined path check
-        with patch('os.path.exists', return_value=False):
+        with patch('os.path.isfile', return_value=False):
             with patch('os.path.join', return_value="/nonexistent/path/to_delete"):
                 result = service.delete_skill("to_delete", tenant_id="test-tenant", user_id="user123")
 
@@ -4357,11 +4398,12 @@ class TestSkillServiceGetSkillFileContentWithNestedPath:
         """Test getting file content with nested path."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', mock_open(read_data="nested content")):
                 result = service.get_skill_file_content("test_skill", "scripts/run.sh")
 
@@ -4375,11 +4417,12 @@ class TestSkillServiceGetSkillFileContentError:
         """Test getting file content with read error."""
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
                 from consts.exceptions import SkillException
                 try:
@@ -4612,12 +4655,13 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        service._upload_zip_files(
-            zip_buffer.getvalue(),
-            "new-skill copy",
-            "old-skill",
-            tenant_id=None,
-        )
+        with patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path)):
+            service._upload_zip_files(
+                zip_buffer.getvalue(),
+                "new-skill copy",
+                "old-skill",
+                tenant_id=None,
+            )
 
         assert (tmp_path / "new-skill copy" / "SKILL.md").is_file()
         assert (tmp_path / "new-skill copy" / "references" / "info.md").is_file()
@@ -4632,6 +4676,7 @@ class TestUploadZipFilesWithZipError:
 
         mock_manager = MagicMock()
         mock_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
+        mock_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
         service = SkillService()
         service.skill_manager = mock_manager
@@ -5489,6 +5534,30 @@ class TestInitSkillListForTenantAsync:
 
 
 class TestSkillServiceUpdateById:
+    def test_rejects_access_change_from_group_editor(self, mocker):
+        service = SkillService(tenant_id="tenant-1")
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={
+                "skill_id": 1,
+                "name": "Skill A",
+                "created_by": "owner",
+                "group_ids": [1, 2],
+                "ingroup_permission": "EDIT",
+            },
+        )
+        mocker.patch("backend.services.skill_service._can_edit_skill", return_value=True)
+        mocker.patch(
+            "backend.services.skill_service.get_user_tenant_by_user_id",
+            return_value={"user_role": "DEV"},
+        )
+
+        with pytest.raises(
+            skill_service.ForbiddenError,
+            match="Not authorized to update skill access",
+        ):
+            service.update_skill_by_id(1, {"group_ids": [1]}, user_id="group-editor")
+
     def test_rejects_non_creator(self, mocker):
         service = SkillService(tenant_id="tenant-1")
         mocker.patch(
@@ -5873,7 +5942,7 @@ class TestSkillServiceUpdateById:
             "os.path.realpath",
             side_effect=lambda p: outside if "escaped" in p else str(tmp_path) if str(tmp_path) in p else p,
         )
-        with pytest.raises(skill_service.SkillException, match="Unsafe local skill path"):
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
             skill_service._resolve_local_skill_path(str(tmp_path), "escaped_skill")
 
     def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
@@ -6103,6 +6172,10 @@ class TestExtractArgFromAddArgument:
         assert result["name"] == "input-file"
 
 
+@pytest.mark.skipif(
+    "ruamel.yaml" not in sys.modules,
+    reason="ruamel.yaml is not installed in this test environment",
+)
 class TestCommentedTreeToPlain:
     """Test _commented_tree_to_plain function."""
 
@@ -6123,6 +6196,10 @@ class TestCommentedTreeToPlain:
         assert result == data
 
 
+@pytest.mark.skipif(
+    "ruamel.yaml" not in sys.modules,
+    reason="ruamel.yaml is not installed in this test environment",
+)
 class TestRuamelTreeToPlain:
     """Test _ruamel_tree_to_plain function."""
 
@@ -6202,3 +6279,130 @@ class TestTooltipForCommentedMapKey:
         """Test with non-dict/cm value."""
         result = skill_service._tooltip_for_commented_map_key("not a map", [], 0, "key")
         assert result is None
+
+
+class TestSkillStreamingAndInstallation:
+    @pytest.mark.asyncio
+    async def test_init_skill_list_returns_early_when_initialized(self, mocker):
+        mocker.patch(
+            "backend.services.skill_service.skill_db.check_skill_list_initialized",
+            return_value=True,
+        )
+        update = mocker.patch("backend.services.skill_service.update_skill_list")
+
+        result = await skill_service.init_skill_list_for_tenant("tenant-1", "user-1")
+
+        assert result["status"] == "already_initialized"
+        update.assert_not_called()
+
+    def test_install_skills_for_tenant_handles_new_existing_and_invalid_templates(self, mocker):
+        database_skill_db_mock.get_skill_by_id_global = MagicMock(
+            side_effect=[
+                {"name": "new", "description": "new skill"},
+                {"name": "existing"},
+                {},
+                None,
+            ]
+        )
+        database_skill_db_mock.get_skill_by_name = MagicMock(
+            side_effect=[None, {"skill_id": 20}]
+        )
+        database_skill_db_mock.create_skill = MagicMock(return_value={"skill_id": 10})
+
+        result = skill_service.install_skills_for_tenant([1, 2, 3, 4], "tenant-1", "user-1")
+
+        assert result == [10, 20]
+        database_skill_db_mock.create_skill.assert_called_once()
+
+    def test_get_official_skills_status_covers_installable_and_missing_resources(self, mocker, tmp_path):
+        (tmp_path / "alpha.zip").write_bytes(b"zip")
+        (tmp_path / "beta.zip").write_bytes(b"zip")
+        mocker.patch("backend.services.skill_service.OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_name",
+            side_effect=lambda name, tenant: (
+                {"skill_id": 2} if name == "beta" and tenant == "tenant-1"
+                else {"skill_id": 1, "description": "alpha description"}
+                if name == "alpha" and tenant is None
+                else {"skill_id": 2, "description": "beta description"}
+                if name == "beta" and tenant is None
+                else None
+            ),
+        )
+        mocker.patch(
+            "backend.services.skill_service.skill_db.get_skill_by_id",
+            return_value={"description": "beta description"},
+        )
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path / "resources")
+        mocker.patch("backend.services.skill_service.get_skill_manager", return_value=manager)
+        mocker.patch("os.path.isdir", side_effect=lambda path: path == str(tmp_path))
+
+        result = skill_service.get_official_skills_with_status("tenant-1")
+
+        assert [(item["name"], item["status"]) for item in result] == [
+            ("alpha", "installable"),
+            ("beta", "resource_missing"),
+        ]
+
+
+class TestLocalSkillPathSecurity:
+    """Regression tests for ZIP Slip and local file traversal."""
+
+    @staticmethod
+    def _service_for_path(tmp_path):
+        manager = MagicMock()
+        manager.resolve_tenant_dir.return_value = str(tmp_path)
+        return SkillService(skill_manager=manager, tenant_id="tenant-1")
+
+    def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+
+        for unsafe_path in (
+            "../secret.txt",
+            os.path.abspath("secret.txt"),
+            "C:\\temp\\secret.txt",
+            "\\\\host\\share\\x",
+        ):
+            with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+                skill_service._resolve_local_skill_path(str(tmp_path), "safe-skill", unsafe_path)
+
+    def test_zip_slip_is_rejected_before_any_file_is_written(self, mocker, tmp_path):
+        import zipfile
+
+        service = self._service_for_path(tmp_path)
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("SKILL.md", "---\nname: poczip\ndescription: poc\n---\n")
+            zf.writestr("../../../../escape.txt", "escaped")
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service._upload_zip_files(
+                archive.getvalue(),
+                "poczip",
+                tenant_id="tenant-1",
+            )
+
+        assert not (tmp_path / "poczip" / "SKILL.md").exists()
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_file_read_traversal_is_rejected(self, mocker, tmp_path):
+        service = self._service_for_path(tmp_path)
+        mocker.patch("backend.services.skill_service.CONTAINER_SKILLS_PATH", str(tmp_path))
+        outside_file = tmp_path.parent / "secret.txt"
+        outside_file.write_text("secret", encoding="utf-8")
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service.get_skill_file_content("safe-skill", "../../secret.txt")
+
+    def test_file_read_rechecks_containment_before_open(self, mocker, tmp_path):
+        service = self._service_for_path(tmp_path)
+        outside_file = tmp_path.parent / "secret.txt"
+        mocker.patch(
+            "backend.services.skill_service._resolve_local_skill_path",
+            return_value=str(outside_file),
+        )
+
+        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            service.get_skill_file_content("safe-skill", "README.md")

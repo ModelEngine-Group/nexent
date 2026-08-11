@@ -4,6 +4,7 @@ import React, {
   forwardRef,
   useImperativeHandle,
   useEffect,
+  useMemo,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -116,7 +117,7 @@ interface DocumentListProps {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
-  onUpload?: () => void;
+  onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
 }
 
@@ -177,13 +178,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const uploadAreaRef = useRef<any>(null);
     const { state: docState } = useDocumentContext();
     const { modelConfig } = useConfig();
-    const { user, groupIds } = useAuthorizationContext();
+    const { user, getAccessibleGroupIds } = useAuthorizationContext();
     const tenantId = user?.tenantId || null;
     const storageQuota = useStorageQuotaBlocked(tenantId);
 
-    // Fetch tenant groups and limit selections to current user's groups.
+    // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
     const { data: groupData } = useGroupList(tenantId);
-    const { groups } = useGroupDetails(groupData?.groups ?? [], groupIds);
+    const accessibleGroupIds = useMemo(
+      () => getAccessibleGroupIds(),
+      [getAccessibleGroupIds]
+    );
+    const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
 
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
@@ -331,7 +336,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         const initDefaultGroup = async () => {
           try {
             const defaultGroupId = await getTenantDefaultGroupId(tenantId);
-            if (defaultGroupId && groupIds.includes(defaultGroupId)) {
+            if (defaultGroupId && accessibleGroupIds.includes(defaultGroupId)) {
               onSelectedGroupIdsChange([defaultGroupId]);
             }
           } catch (error) {
@@ -340,7 +345,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId, groupIds, onSelectedGroupIdsChange]);
+    }, [isCreatingMode, tenantId, accessibleGroupIds, onSelectedGroupIdsChange]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -1169,7 +1174,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               }
               ref={uploadAreaRef}
               onFileSelect={onFileSelect}
-              onUpload={onUpload || (() => {})}
+              onUpload={onUpload || (async () => {})}
               isUploading={isUploading}
               isDragging={isDragging}
               onDragOver={onDragOver}

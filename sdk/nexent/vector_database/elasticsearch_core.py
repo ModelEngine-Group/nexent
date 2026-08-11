@@ -401,7 +401,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         try:
             processed_docs = self._preprocess_documents(
                 documents, content_field)
-            
+
             # Preprocess documents
             processed_docs, embeddings = self._prepare_small_batch_embeddings(
                 processed_docs, content_field, embedding_model

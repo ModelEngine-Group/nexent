@@ -1,27 +1,31 @@
 """Skill management HTTP endpoints."""
 
-from nexent.core.agents.agent_model import ModelConfig
 import logging
+from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
-from starlette.responses import JSONResponse, StreamingResponse
-from http import HTTPStatus
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
+from starlette.responses import JSONResponse, StreamingResponse
 
-from consts.const import APP_VERSION, STREAMABLE_CONTENT_TYPES
+from consts.const import APP_VERSION
 from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.model import (
+    NL2SkillRunRequest,
+    SkillCreateRequest,
+    SkillInstanceInfoRequest,
+    SkillResponse,
+    SkillUpdateRequest,
+)
+from services.asset_owner_visibility import can_view_skill
+from services.nl2skill_service import create_nl2skill_stream
 from services.skill_service import (
     SkillService,
-    skill_creation_task_manager,
-    stream_skill_creation,
-    update_skill_list,
     get_official_skills_with_status,
     install_skills_from_zip_for_tenant,
+    update_skill_list,
 )
-from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
-from services.asset_owner_visibility import can_view_skill
 
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
@@ -229,6 +233,8 @@ async def create_skill_from_file(
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         error_msg = str(e).lower()
         logger.warning(f"SkillException: {e}")
@@ -269,6 +275,8 @@ async def get_skill_file_tree(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -309,6 +317,8 @@ async def get_skill_file_content(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -394,18 +404,16 @@ async def get_skill_instance(
         # The instance's per-agent overrides are mapped to config_values for the frontend.
         skill = service.get_skill_by_id(skill_id, tenant_id)
         if skill:
+            instance_config_values = instance.get("config_values") or {}
             instance["skill_name"] = skill.get("name")
             instance["skill_description"] = skill.get("description", "")
             instance["skill_content"] = skill.get("content", "")
             # Template defaults from YAML-enriched skill
             instance["config_schemas"] = skill.get("config_schemas") or []
-            instance["config_values"] = skill.get("config_values") or {}
             # Per-agent overrides from SkillInstance.config_values override the template defaults
-            instance_params = instance.get("config_values") or {}
-            if instance_params:
-                merged = dict(instance.get("config_values") or {})
-                merged.update(instance_params)
-                instance["config_values"] = merged
+            merged = dict(skill.get("config_values") or {})
+            merged.update(instance_config_values)
+            instance["config_values"] = merged
 
         return JSONResponse(content=instance)
     except UnauthorizedError as e:
@@ -446,16 +454,14 @@ async def update_skill_instance(
         )
 
         # Enrich with template info so the frontend gets config_schemas and config_values
+        instance_config_values = instance.get("config_values") or {}
         instance["skill_name"] = skill.get("name")
         instance["skill_description"] = skill.get("description", "")
         instance["skill_content"] = skill.get("content", "")
         instance["config_schemas"] = skill.get("config_schemas") or []
-        instance["config_values"] = skill.get("config_values") or {}
-        instance_params = instance.get("config_values") or {}
-        if instance_params:
-            merged = dict(instance.get("config_values") or {})
-            merged.update(instance_params)
-            instance["config_values"] = merged
+        merged = dict(skill.get("config_values") or {})
+        merged.update(instance_config_values)
+        instance["config_values"] = merged
 
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except UnauthorizedError as e:
@@ -691,93 +697,27 @@ async def delete_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
-    """Build ModelConfig from tenant's quick-config LLM model."""
-    from utils.config_utils import tenant_config_manager, get_model_name_from_config
-    from consts.const import MODEL_CONFIG_MAPPING
-    from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
-
-    quick_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"],
-        tenant_id=tenant_id
-    )
-    if not quick_config:
-        raise ValueError("No LLM model configured for tenant")
-
-    model_factory = quick_config.get("model_factory")
-    return ModelConfig(
-        cite_name=quick_config.get("display_name", "default"),
-        api_key=quick_config.get("api_key", ""),
-        model_name=get_model_name_from_config(quick_config),
-        url=quick_config.get("base_url", ""),
-        temperature=0.1,
-        top_p=0.95,
-        ssl_verify=quick_config.get("ssl_verify", False),
-        model_factory=model_factory,
-        prompt_cache=resolve_prompt_cache_profile(model_factory),
-    )
-
-
-@skill_creator_router.post("/create")
-async def create_skill(
-    request: SkillCreateInteractiveRequest,
+@skill_creator_router.post("/nl2skill/run")
+async def nl2skill_run_api(
+    request: NL2SkillRunRequest,
     authorization: Optional[str] = Header(None)
 ):
-    """Create a skill interactively via LLM agent.
-
-    Loads the skill creation prompt template (simple or complicated based on complexity),
-    runs an internal agent with WriteSkillFileTool and ReadSkillMdTool, extracts the skill content
-    from the final answer, and streams step progress and token content via SSE.
-
-    Yields SSE events:
-        - step_count: Current agent step number
-        - skill_content: Token-level content (thinking, code, deep_thinking, tool output)
-        - final_answer: Complete skill content with <SKILL> and <FILE> delimiters
-        - done: Stream completion signal
-    """
+    """Run one non-persistent, multi-turn NL2Skill conversation turn."""
     try:
         _, tenant_id, user_language = get_current_user_info(authorization)
     except Exception as e:
         logger.error(f"Unauthorized access attempt: {e}")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Build model config from tenant
-    model_config = _build_model_config_from_tenant(tenant_id)
-
-    # Get language from request or user preference
-    lang = request.language or user_language or "zh"
-
-    # Delegate to service layer
-    task_id, generator = stream_skill_creation(
-        user_request=request.user_request,
-        language=lang,
-        model_config=model_config,
-        existing_skill=request.existing_skill,
-        complexity=request.complexity or "simple"
-    )
-
-    return StreamingResponse(generator(), media_type="text/event-stream", headers={"X-Task-ID": task_id})
-
-
-@skill_creator_router.get("/stop/{task_id}")
-async def stop_skill_creation(
-    task_id: str,
-    authorization: Optional[str] = Header(None)
-):
-    """Stop an active skill creation task.
-
-    Args:
-        task_id: The task ID returned from the /create endpoint (passed via X-Task-ID header)
-    """
     try:
-        _, _ = get_current_user_id(authorization)
-    except Exception as e:
-        logger.error(f"Unauthorized access attempt: {e}")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    success = skill_creation_task_manager.stop_task(task_id)
-
-    if success:
-        return JSONResponse(content={"status": "success", "message": "Skill creation task stopped"})
-    else:
-        return JSONResponse(content={"status": "not_found", "message": "Task not found or already completed"}, status_code=404)
+        stream = await create_nl2skill_stream(
+            request=request,
+            tenant_id=tenant_id,
+            language=request.language or user_language or "zh",
+        )
+        return StreamingResponse(stream, media_type="text/event-stream")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("NL2Skill run error")
+        raise HTTPException(status_code=500, detail="NL2Skill run error.")

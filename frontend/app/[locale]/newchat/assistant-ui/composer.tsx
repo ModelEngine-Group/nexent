@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowUp,
   Mic,
+  MicOff,
   Square,
   Lightbulb,
   Play,
@@ -15,19 +16,17 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
 import {
-  AuiIf,
-  ComposerPrimitive,
-} from "@assistant-ui/react";
+  LexicalComposerInput,
+  type DirectiveChipProps as LexicalDirectiveChipProps,
+} from "@assistant-ui/react-lexical";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  ModelSelector,
-  type ModelOption,
-} from "../ui/model-selector";
+import { ModelSelector, type ModelOption } from "../ui/model-selector";
 import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
 import {
   Collapsible,
@@ -38,6 +37,13 @@ import {
   planRegistry,
   type PlanData,
 } from "../adapter/remote-chat-model-adapter";
+import type { SkillFileContent } from "@/types/skill";
+import { SkillFileMentionPopover } from "../ui/skill-file-mention";
+import { DirectiveChip } from "../ui/directive-text";
+import {
+  combinedSkillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../ui/skill-directives";
 
 export type ChatMode = "planning" | "execution";
 
@@ -48,6 +54,9 @@ export interface ComposerProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  isDictationConfigured?: boolean;
+  compact?: boolean;
+  skillFiles?: readonly SkillFileContent[];
 }
 
 // Simple tooltip wrapper
@@ -69,14 +78,17 @@ const PlanView: FC = () => {
   const plan = useSyncExternalStore<PlanData | null>(
     planRegistry.subscribe,
     () => planRegistry.data,
-    () => null,
+    () => null
   );
 
   if (!plan || plan.steps.length === 0) return null;
 
   return (
     <Collapsible asChild defaultOpen>
-      <section className="border-b border-border" aria-label={t("chat.composer.plan")}>
+      <section
+        className="border-b border-border"
+        aria-label={t("chat.composer.plan")}
+      >
         <CollapsibleTrigger asChild>
           <button
             type="button"
@@ -99,18 +111,21 @@ const PlanView: FC = () => {
                   key={step.id}
                   className={cn(
                     "flex min-w-0 items-center gap-3 text-xs leading-5 text-muted-foreground",
-                    completed && "text-muted-foreground/60",
+                    completed && "text-muted-foreground/60"
                   )}
                 >
                   {completed ? (
-                    <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
+                    <Check
+                      className="size-4 shrink-0 text-emerald-600"
+                      aria-hidden
+                    />
                   ) : (
                     <Circle className="size-4 shrink-0" aria-hidden />
                   )}
                   <span
                     className={cn(
                       "min-w-0 max-w-[40%] shrink-0 truncate font-medium text-foreground",
-                      completed && "text-muted-foreground/60 line-through",
+                      completed && "text-muted-foreground/60 line-through"
                     )}
                     title={step.title}
                   >
@@ -120,7 +135,7 @@ const PlanView: FC = () => {
                     <span
                       className={cn(
                         "min-w-0 flex-1 truncate text-left",
-                        completed && "line-through",
+                        completed && "line-through"
                       )}
                       title={step.description}
                     >
@@ -137,6 +152,22 @@ const PlanView: FC = () => {
   );
 };
 
+const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
+  directiveId,
+  directiveType,
+  label,
+}) => (
+  <DirectiveChip
+    segment={{
+      kind: "mention",
+      id: directiveId,
+      type: directiveType,
+      label,
+    }}
+    iconMap={skillDirectiveIconMap}
+  />
+);
+
 export const Composer: FC<ComposerProps> = ({
   models,
   selectedModelId,
@@ -144,83 +175,147 @@ export const Composer: FC<ComposerProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  isDictationConfigured = false,
+  compact = false,
+  skillFiles,
 }) => {
   const { t } = useTranslation();
 
   return (
-    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <PlanView />
+    <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
+      {!compact && <PlanView />}
 
       {/* Mode switcher above input */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        {/* Mode switcher */}
-        <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "planning" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
-            )}
-            onClick={() => onChatModeChange("planning")}
-          >
-            <Lightbulb className={cn("size-3", chatMode === "planning" ? "text-blue-600" : "")} />
-            {t("chat.composer.planning")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-              chatMode === "execution" && "bg-blue-50 text-blue-600 hover:bg-blue-50"
-            )}
-            onClick={() => onChatModeChange("execution")}
-          >
-            <Play className="size-3" />
-            {t("chat.composer.execution")}
-          </Button>
-        </div>
-
-        {/* Placeholder for alignment */}
-        <div className="w-16" />
-      </div>
-
-      {/* Composer Primitive Root */}
-      <ComposerPrimitive.Root
-        className="flex w-full flex-col px-1 py-1 outline-none"
-      >
-        <ComposerAttachments />
-        <ComposerPrimitive.Input
-          placeholder={t("chat.composer.placeholder")}
-          className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
-          rows={1}
-          submitMode="enter"
-          autoFocus
-        />
-        <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-          {showModelSelector && (
-            <ModelSelector
-              models={models}
-              value={selectedModelId}
-              onValueChange={onModelChange}
+      {!compact && (
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          {/* Mode switcher */}
+          <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+            <Button
               variant="ghost"
               size="sm"
-              className="text-xs"
+              className={cn(
+                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                chatMode === "planning" &&
+                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              )}
+              onClick={() => onChatModeChange("planning")}
+            >
+              <Lightbulb
+                className={cn(
+                  "size-3",
+                  chatMode === "planning" ? "text-blue-600" : ""
+                )}
+              />
+              {t("chat.composer.planning")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                chatMode === "execution" &&
+                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
+              )}
+              onClick={() => onChatModeChange("execution")}
+            >
+              <Play className="size-3" />
+              {t("chat.composer.execution")}
+            </Button>
+          </div>
+
+          {/* Placeholder for alignment */}
+          <div className="w-16" />
+        </div>
+      )}
+
+      {/* Composer Primitive Root */}
+      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
+        <ComposerPrimitive.Root className="flex w-full flex-col px-1 py-1 outline-none">
+          {!compact && <ComposerAttachments />}
+          {skillFiles ? (
+            <LexicalComposerInput
+              placeholder={t("chat.composer.placeholder")}
+              className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
+              submitMode="enter"
+              autoFocus
+              formatter={combinedSkillDirectiveFormatter}
+              directiveChip={SkillComposerDirectiveChip}
+            />
+          ) : (
+            <ComposerPrimitive.Input
+              placeholder={t("chat.composer.placeholder")}
+              className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
+              rows={1}
+              submitMode="enter"
+              autoFocus
             />
           )}
-          <div className="ml-auto flex items-center gap-1">
-            <ComposerAddAttachment />
-            <ComposerPrimitive.Dictate asChild>
-              <TooltipWrapper tooltip={t("chat.composer.voiceInput")}>
-                <Button variant="ghost" size="icon" className="size-8 text-muted-foreground">
-                  <Mic className="size-4" />
-                </Button>
-              </TooltipWrapper>
-            </ComposerPrimitive.Dictate>
-            <ComposerSendOrCancel />
+          <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
+            {showModelSelector && (
+              <ModelSelector
+                models={models}
+                value={selectedModelId}
+                onValueChange={onModelChange}
+                variant="ghost"
+                size="sm"
+                className="text-xs"
+              />
+            )}
+            <div className="ml-auto flex items-center gap-1">
+              {!compact && <ComposerAddAttachment />}
+              {!compact && (
+                <AuiIf condition={(s) => !s.composer.dictation}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <ComposerPrimitive.Dictate asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={!isDictationConfigured}
+                            className="size-8 text-muted-foreground"
+                          >
+                            <Mic className="size-4" />
+                          </Button>
+                        </ComposerPrimitive.Dictate>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isDictationConfigured
+                        ? t("chat.composer.voiceInput")
+                        : t("chat.composer.voiceInputDisabled")}
+                    </TooltipContent>
+                  </Tooltip>
+                </AuiIf>
+              )}
+              {!compact && (
+                <AuiIf condition={(s) => !!s.composer.dictation}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <ComposerPrimitive.StopDictation asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-destructive hover:text-destructive"
+                        >
+                          <MicOff className="size-4" />
+                        </Button>
+                      </ComposerPrimitive.StopDictation>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t("chat.composer.stopVoiceInput")}
+                    </TooltipContent>
+                  </Tooltip>
+                </AuiIf>
+              )}
+              <ComposerSendOrCancel />
+            </div>
           </div>
-        </div>
-      </ComposerPrimitive.Root>
+        </ComposerPrimitive.Root>
+      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </div>
   );
 };

@@ -732,6 +732,7 @@ class TestStartStreamingChat:
         assert chunks == [b"data: hello\n\n"]
         assert response.headers["conversation_id"] == "123"
         assert response.headers["X-Request-Id"] == ctx.request_id
+        assert response.headers["X-Accel-Buffering"] == "no"
         assert response.headers["x-existing"] == "1"
 
 
@@ -781,14 +782,15 @@ class TestListConversations:
         assert result["message"] == "success"
         assert "data" in result
 
-    async def test_list_conversations_with_metadata(self):
-        """Test that metadata is added when token_id > 0."""
+    async def test_list_conversations_does_not_fetch_metadata(self):
+        """Test that listing conversations does not fetch usage metadata."""
         ctx = MockNorthboundContext(token_id=1)
-        token_db_mod.get_latest_usage_metadata.return_value = {"query": "test query"}
+        token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
 
-        token_db_mod.get_latest_usage_metadata.assert_called()
+        token_db_mod.get_latest_usage_metadata.assert_not_called()
+        assert result["message"] == "success"
 
 
 @pytest.mark.asyncio
@@ -1287,68 +1289,50 @@ class TestStopChatErrorHandling:
 
 
 class TestListConversationsErrorHandling:
-    """Tests for error handling in list_conversations function."""
+    """Tests for list_conversations behavior with conversation metadata."""
 
-    async def test_list_conversations_with_metadata_error(self):
-        """Test that metadata fetch error is handled gracefully."""
+    async def test_list_conversations_preserves_empty_metadata(self):
+        """Test that conversation metadata returned by the service is preserved."""
         ctx = MockNorthboundContext(token_id=1)
-        conv_mgmt_mod.get_conversation_list_service.return_value = [
-            {"conversation_id": "1", "title": "Test"}
-        ]
-        token_db_mod.get_latest_usage_metadata.side_effect = Exception("DB error")
-
-        # Should not raise even if metadata fetch fails
-        result = await ns.list_conversations(ctx=ctx)
-        assert result["message"] == "success"
-
-    async def test_list_conversations_empty_meta_data_removed(self):
-        """Test that empty meta_data keys are removed from items."""
-        ctx = MockNorthboundContext(token_id=1)
-        conv_mgmt_mod.get_conversation_list_service.return_value = [
+        conversations = [
             {"conversation_id": "1", "title": "Test", "meta_data": {}}
         ]
+        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
-        assert "meta_data" not in result["data"][0]
 
-    async def test_list_conversations_meta_data_with_no_usage_record(self):
-        """Test that meta_data is removed when get_latest_usage_metadata returns empty."""
+        assert result["data"] == conversations
+        assert result["data"][0]["meta_data"] == {}
+        token_db_mod.get_latest_usage_metadata.assert_not_called()
+
+    async def test_list_conversations_preserves_metadata_without_usage_lookup(self):
+        """Test that listing does not add or remove conversation metadata."""
         ctx = MockNorthboundContext(token_id=1)
-        conv_mgmt_mod.get_conversation_list_service.return_value = [
-            {"conversation_id": "1", "title": "Test"}
+        conversations = [
+            {"conversation_id": "1", "title": "Test", "meta_data": {"query": "stored query"}}
         ]
-        token_db_mod.get_latest_usage_metadata.return_value = None
+        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
 
         result = await ns.list_conversations(ctx=ctx)
-        assert "meta_data" not in result["data"][0]
 
-    async def test_list_conversations_meta_data_set_when_present(self):
-        """Test that meta_data is set on item when get_latest_usage_metadata returns a non-empty value."""
+        assert result["data"] == conversations
+        token_db_mod.get_latest_usage_metadata.assert_not_called()
+
+    async def test_list_conversations_does_not_add_metadata_from_usage_record(self):
+        """Test that usage metadata is not injected into conversation items."""
         ctx = MockNorthboundContext(token_id=1)
-        conv_mgmt_mod.get_conversation_list_service.return_value = [
-            {"conversation_id": "1", "title": "Test"}
-        ]
-        # Reset side_effect and set return_value
-        token_db_mod.get_latest_usage_metadata.side_effect = None
+        conversations = [{"conversation_id": "1", "title": "Test"}]
+        conv_mgmt_mod.get_conversation_list_service.return_value = conversations
+        token_db_mod.get_latest_usage_metadata.reset_mock(side_effect=True)
         token_db_mod.get_latest_usage_metadata.return_value = {"query": "test query"}
 
         result = await ns.list_conversations(ctx=ctx)
-        assert "meta_data" in result["data"][0]
-        assert result["data"][0]["meta_data"]["query"] == "test query"
 
-    async def test_list_conversations_meta_data_empty_dict_removed(self):
-        """Test that empty meta_data (empty dict) is removed from item."""
-        ctx = MockNorthboundContext(token_id=1)
-        conv_mgmt_mod.get_conversation_list_service.return_value = [
-            {"conversation_id": "1", "title": "Test"}
-        ]
-        # Reset side_effect and set return_value to empty dict (falsy)
-        token_db_mod.get_latest_usage_metadata.side_effect = None
-        token_db_mod.get_latest_usage_metadata.return_value = {}
-
-        result = await ns.list_conversations(ctx=ctx)
-        # Empty dict is falsy, so meta_data should be popped
+        assert result["data"] == conversations
         assert "meta_data" not in result["data"][0]
+        token_db_mod.get_latest_usage_metadata.assert_not_called()
 
 
 class TestGetConversationHistoryErrorHandling:

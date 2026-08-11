@@ -51,10 +51,6 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import log from "@/lib/logger";
 import { MODEL_TYPES } from "@/const/modelConfig";
-import {
-  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
-  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
-} from "@/lib/knowledgeBaseCompatibility";
 import { isZhLocale, getLocalizedDescription, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
 import { ModelOption, ModelType } from "@/types/modelConfig";
 
@@ -572,6 +568,7 @@ export default function ToolConfigModal({
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
+    isSuccess: isKbListLoaded,
     refetch: refetchKnowledgeBases,
     clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(toolKbType, resolveKbConfig());
@@ -737,100 +734,6 @@ export default function ToolConfigModal({
     }
   }, [isOpen, toolKbType, idataConfig.knowledgeSpaceId]);
 
-  // Get current embedding model from config for model matching
-  const currentEmbeddingModel = useMemo(() => {
-    try {
-      const modelConfig = configData?.models;
-      return (
-        modelConfig?.embedding?.modelName ||
-        modelConfig?.embedding?.displayName ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }, [configData]);
-
-  const currentMultiEmbeddingModel = useMemo(() => {
-    try {
-      const modelConfig = configData?.models;
-      return (
-        modelConfig?.multiEmbedding?.modelName ||
-        modelConfig?.multiEmbedding?.displayName ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }, [configData]);
-
-  const hasEmbeddingModel = Boolean(currentEmbeddingModel);
-  const hasMultiEmbeddingModel = Boolean(currentMultiEmbeddingModel);
-  const canToggleMultimodalParam = hasEmbeddingModel && hasMultiEmbeddingModel;
-  const forcedMultimodalValue = useMemo(() => {
-    if (!hasEmbeddingModel && hasMultiEmbeddingModel) {
-      return true;
-    }
-    if (hasEmbeddingModel && !hasMultiEmbeddingModel) {
-      return false;
-    }
-    return null;
-  }, [hasEmbeddingModel, hasMultiEmbeddingModel]);
-
-  const toolMultimodal = useMemo(() => {
-    const multimodalParam = currentParams.find(
-      (param) => param.name === "multimodal"
-    );
-    const value = multimodalParam?.value;
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (typeof value === "string") {
-      const normalized = value.trim().toLowerCase();
-      if (["true", "1", "yes", "y"].includes(normalized)) return true;
-      if (["false", "0", "no", "n"].includes(normalized)) return false;
-    }
-    return null;
-  }, [currentParams]);
-
-  useEffect(() => {
-    if (tool?.name !== "knowledge_base_search") return;
-    if (forcedMultimodalValue === null) return;
-
-    const index = currentParams.findIndex(
-      (param) => param.name === "multimodal"
-    );
-    if (index < 0) return;
-
-    const param = currentParams[index];
-    if (param.value === forcedMultimodalValue) return;
-
-    const updatedParams = [...currentParams];
-    updatedParams[index] = { ...param, value: forcedMultimodalValue };
-    setCurrentParams(updatedParams);
-
-    const fieldName = `param_${index}`;
-    safeSetFieldValue(form, fieldName, forcedMultimodalValue);
-  }, [tool?.name, forcedMultimodalValue, currentParams, form]);
-
-  const isMultimodalConstraintMismatch = useCallback(
-    (kb: KnowledgeBase) => {
-      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
-    },
-    [toolMultimodal]
-  );
-
-  const isEmbeddingModelCompatible = useCallback(
-    (kb: KnowledgeBase) => {
-      return isEmbeddingModelCompatibleBase(
-        kb,
-        currentEmbeddingModel,
-        currentMultiEmbeddingModel
-      );
-    },
-    [currentEmbeddingModel, currentMultiEmbeddingModel]
-  );
-
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -841,16 +744,9 @@ export default function ToolConfigModal({
         return false;
       }
 
-      if (kb.source === "nexent") {
-        if (isMultimodalConstraintMismatch(kb)) {
-          return false;
-        }
-        return isEmbeddingModelCompatible(kb);
-      }
-
       return true;
     },
-    [isEmbeddingModelCompatible, isMultimodalConstraintMismatch]
+    []
   );
 
   // Track whether this is the first time opening the modal (reset when modal closes)
@@ -1159,10 +1055,15 @@ export default function ToolConfigModal({
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Filter selectedKbIds to only include knowledge bases that exist in the current list
-  // This handles cases where knowledge bases are no longer available (e.g., wrong URL)
+  // Filter selected KB IDs to the current accessible list. For AIDP, an
+  // successfully loaded empty list is meaningful: the current user cannot
+  // read any of the KBs saved by the agent creator.
   useEffect(() => {
-    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+    const canValidateSelection =
+      knowledgeBases.length > 0 ||
+      (toolKbType === "aidp_search" && isKbListLoaded);
+
+    if (selectedKbIds.length > 0 && canValidateSelection) {
       const validKbIds = selectedKbIds.filter((id) =>
         knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
       );
@@ -1176,9 +1077,28 @@ export default function ToolConfigModal({
           return kb?.display_name || kb?.name || id;
         });
         setSelectedKbDisplayNames(displayNames);
+
+        if (toolKbType === "aidp_search") {
+          setTestPanelKbIds(validKbIds);
+          setTestPanelKbDisplayNames(displayNames);
+          const fieldIndex = currentParams.findIndex((p) => p.name === "kds_list");
+          if (fieldIndex !== -1) {
+            form.setFieldValue(`param_${fieldIndex}`, validKbIds);
+          }
+          setCurrentParams((prevParams) => {
+            const prevFieldIndex = prevParams.findIndex((p) => p.name === "kds_list");
+            if (prevFieldIndex === -1) return prevParams;
+            const updatedParams = [...prevParams];
+            updatedParams[prevFieldIndex] = {
+              ...updatedParams[prevFieldIndex],
+              value: validKbIds,
+            };
+            return updatedParams;
+          });
+        }
       }
     }
-  }, [knowledgeBases]);
+  }, [knowledgeBases, isKbListLoaded, toolKbType, selectedKbIds, currentParams, form]);
 
   // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
   // This ensures the modal receives the correct selected IDs
@@ -1707,6 +1627,14 @@ export default function ToolConfigModal({
         // Value can be an array or a JSON string
         ids = parseKbIds(formValue);
 
+        if (toolKbType === "aidp_search" && isKbListLoaded) {
+          ids = ids.filter((id) =>
+            knowledgeBases.some(
+              (kb) => String(kb.id).trim() === String(id).trim()
+            )
+          );
+        }
+
         // Map IDs to display names
         if (ids.length > 0) {
           if (toolKbType === "haotian_search" && haotianKnowledgeSets.length > 0) {
@@ -1728,7 +1656,11 @@ export default function ToolConfigModal({
       }
 
       // Fallback to selectedKbDisplayNames if displayNames is empty
-      if (displayNames.length === 0 && selectedKbDisplayNames.length > 0) {
+      if (
+        toolKbType !== "aidp_search" &&
+        displayNames.length === 0 &&
+        selectedKbDisplayNames.length > 0
+      ) {
         displayNames = selectedKbDisplayNames;
         ids = selectedKbIds;
       }
@@ -1817,6 +1749,8 @@ export default function ToolConfigModal({
     [
       form,
       knowledgeBases,
+      isKbListLoaded,
+      toolKbType,
       selectedKbIds,
       selectedKbDisplayNames,
       kbLoading,
@@ -2415,9 +2349,6 @@ export default function ToolConfigModal({
           }}
           syncLoading={kbLoading}
           isSelectable={canSelectKnowledgeBase}
-          currentEmbeddingModel={currentEmbeddingModel}
-          currentMultiEmbeddingModel={currentMultiEmbeddingModel}
-          toolMultimodal={toolMultimodal}
           difyConfig={resolveDifyModalConfig()}
         />
       )}

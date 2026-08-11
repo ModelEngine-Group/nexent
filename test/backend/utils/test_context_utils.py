@@ -112,6 +112,29 @@ def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
     assert all(item.type == ContextItemType.SYSTEM for item in items)
 
 
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_restricted_python_policy_is_injected_before_code_norms(language):
+    items = build_context_inputs(
+        restricted_python_authorized_imports=["json", "csv", "math", "json"],
+        language=language,
+    )
+
+    policy_item = next(
+        item for item in items if item.id == "system:restricted_python_execution"
+    )
+    policy_text = policy_item.content["text"]
+    item_ids = [item.id for item in items]
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.metadata["authority"] == "platform"
+    assert policy_item.priority == 25
+    assert "`csv`, `json`, `math`" in policy_text
+    assert "`requests`" in policy_text
+    assert item_ids.index(policy_item.id) < item_ids.index("system:code_norms")
+    if language == "en":
+        assert "### Python Code Execution Boundary" in policy_text
+
+
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
     items = build_context_inputs(
         duty="duty",
@@ -208,6 +231,21 @@ def test_memory_tool_policy_is_omitted_when_empty():
     items = build_context_inputs(memory_tool_policy="")
 
     assert all(item.id != "system:memory_tool_policy" for item in items)
+
+
+def test_automation_tool_policy_is_required_platform_context():
+    policy = "Use create_scheduled_task_proposal without executing the business task."
+
+    items = build_context_inputs(automation_tool_policy=policy, language="en")
+    policy_item = next(item for item in items if item.id == "system:automation_tool_policy")
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.content == {"text": policy}
+    assert policy_item.metadata["authority"] == "platform"
+    normalized = normalize_context_inputs(items)
+    assert next(
+        item for item in normalized if item.id == "system:automation_tool_policy"
+    ).required is True
 
 
 def test_long_term_memory_prompt_is_a_required_system_item():

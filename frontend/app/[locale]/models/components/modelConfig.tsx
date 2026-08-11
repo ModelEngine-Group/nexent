@@ -28,6 +28,7 @@ import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
+import { useModelList } from "@/hooks/model/useModelList";
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
@@ -124,7 +125,7 @@ export const ModelConfigSection = forwardRef<
   const [isVerifying, setIsVerifying] = useState(false);
   const [capacityCoverage, setCapacityCoverage] =
     useState<CapacityCoverage | null>(null);
-
+  const  { invalidate } = useModelList();
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
     "llm.main": false,
@@ -262,6 +263,7 @@ export const ModelConfigSection = forwardRef<
     if (!modelConfig) return;
 
     try {
+      invalidate()
       const [allModels, coverage] = await Promise.all([
         modelService.getAllModels(),
         modelService.getCapacityCoverage(),
@@ -918,8 +920,10 @@ export const ModelConfigSection = forwardRef<
             justifyContent: "flex-start",
             gap: 8,
             paddingRight: 12,
+            paddingTop: "16px",
             marginLeft: "4px",
             minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
+            marginBottom: "16px",
           }}
         >
           {modelEngineEnable && (

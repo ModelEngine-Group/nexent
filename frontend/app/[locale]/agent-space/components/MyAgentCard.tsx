@@ -229,15 +229,7 @@ export function MyAgentCard({
               {t("agentRepository.mine.view")}
             </Button>
           )}
-          <Button
-            type="default"
-            className="min-w-0 flex-1"
-            icon={<LineChart className="size-3.5" aria-hidden />}
-            onClick={onEvaluate}
-            disabled={!canEvaluate}
-          >
-            {t("agentRepository.mine.evaluate")}
-          </Button>
+          {/* Evaluate button hidden: agent evaluation feature temporarily disabled */}
         </div>
       </div>
     </Card>

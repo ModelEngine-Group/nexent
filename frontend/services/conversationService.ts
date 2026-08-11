@@ -38,10 +38,13 @@ export const conversationService = {
 
   // Get conversation detail
   async getById(conversationId: string): Promise<ApiConversationDetail> {
-    const response = await fetch(API_ENDPOINTS.conversation.detail(Number(conversationId)), {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      API_ENDPOINTS.conversation.detail(Number(conversationId)),
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
 
     const data = (await response.json()) as ApiConversationResponse;
     const conversationData = data.data?.[0];
@@ -92,7 +95,6 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
-
   // Get conversation details
   async getDetail(
     conversationId: number,
@@ -137,6 +139,7 @@ export const conversationService = {
     mode: "all" | "selected";
     selected_user_message_ids?: number[];
     expire_time?: string | null;
+    render_version?: "legacy" | "newchat";
   }) {
     const response = await fetch(
       API_ENDPOINTS.share.createConversation(params.conversationId),
@@ -147,6 +150,7 @@ export const conversationService = {
           mode: params.mode,
           selected_user_message_ids: params.selected_user_message_ids || [],
           expire_time: params.expire_time || null,
+          render_version: params.render_version || "legacy",
         }),
       }
     );
@@ -924,11 +928,16 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
-      runtime_mode?: "nl2agent";
+      runtime_mode?: "nl2agent" | "nl2skill";
+      draft_snapshot?: Record<string, unknown>;
+      complexity?: "simple" | "complicated";
+      language?: "zh" | "en";
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void
-  ): Promise<ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }> {
+  ): Promise<
+    ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
+  > {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -939,9 +948,17 @@ export const conversationService = {
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
       };
+      if (params.runtime_mode === "nl2skill") {
+        requestParams.draft_snapshot = params.draft_snapshot;
+        requestParams.complexity = params.complexity || "complicated";
+        requestParams.language = params.language;
+      }
 
       // Only include conversation_id if it has a value
-      if (params.conversation_id !== undefined && params.conversation_id !== null) {
+      if (
+        params.conversation_id !== undefined &&
+        params.conversation_id !== null
+      ) {
         requestParams.conversation_id = params.conversation_id;
       }
 
@@ -957,9 +974,12 @@ export const conversationService = {
       }
 
       // Build URL with query parameters for resume mode
-      let url = params.runtime_mode === "nl2agent"
-        ? API_ENDPOINTS.agent.nl2agentRun
-        : API_ENDPOINTS.agent.run;
+      let url = API_ENDPOINTS.agent.run;
+      if (params.runtime_mode === "nl2agent") {
+        url = API_ENDPOINTS.agent.nl2agentRun;
+      } else if (params.runtime_mode === "nl2skill") {
+        url = API_ENDPOINTS.skills.nl2skillRun;
+      }
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");

@@ -4,10 +4,14 @@ import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Tag, theme, Input } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { Plus, FileInput, ChevronDown, ChevronLeft, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History, Search } from "lucide-react";
-import { Sparkles } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -39,20 +43,17 @@ interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
   isShowVersionManagePanel?: boolean;
   onCloseVersionManagePanel?: () => void;
-  onOpenGenerationAssistant: () => void;
-  isGenerationAssistantOpen?: boolean;
 }
 
 export default function AgentSelectorHeader({
   onOpenVersionManage,
   isShowVersionManagePanel = false,
   onCloseVersionManagePanel,
-  onOpenGenerationAssistant,
-  isGenerationAssistantOpen = false,
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
@@ -409,6 +410,9 @@ export default function AgentSelectorHeader({
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
         setCurrentAgent(result.data);
+        const nextSearchParams = new URLSearchParams(searchParams.toString());
+        nextSearchParams.set("agent_id", String(agent.id));
+        router.replace(`${pathname}?${nextSearchParams.toString()}`);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -583,6 +587,14 @@ export default function AgentSelectorHeader({
     router.push(`/${locale}/agent-space?tab=mine`);
   };
 
+  const handleCreateAgent = () => {
+    enterCreateMode();
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.delete("agent_id");
+    const query = nextSearchParams.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
+
   return (
     <>
       <div className="w-full h-full px-6" style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -599,16 +611,17 @@ export default function AgentSelectorHeader({
             lg={12}
             className="flex min-w-0"
           >
-            <Flex vertical className="min-w-0 w-full">
+            <Flex align="center" className="min-w-0 w-full" gap={4}>
               {showBackFromRepository ? (
-                <Button
-                  type="text"
-                  className="mb-1 flex w-fit items-center gap-1 px-2 text-gray-600"
-                  icon={<ChevronLeft className="size-4" aria-hidden />}
-                  onClick={handleBackToRepository}
-                >
-                  {t("agentRepository.mine.backToRepository")}
-                </Button>
+                <Tooltip title={t("agentRepository.mine.backToRepository")}>
+                  <Button
+                    type="text"
+                    aria-label={t("agentRepository.mine.backToRepository")}
+                    className="flex shrink-0 items-center px-2 text-gray-600"
+                    icon={<ChevronLeft className="size-4" aria-hidden />}
+                    onClick={handleBackToRepository}
+                  />
+                </Tooltip>
               ) : null}
               <Dropdown
               trigger={["click"]}
@@ -649,10 +662,11 @@ export default function AgentSelectorHeader({
               )}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
               classNames={{ root: "agent-selector-dropdown" }}
+              className="min-w-0 flex-1"
               styles={{
                 root: {
-                  width: 'calc(100% - 32px)',
-                }
+                  width: showBackFromRepository ? "calc(100% - 68px)" :  'calc(100% - 32px)',
+                },
               }}
             >
               <div
@@ -709,7 +723,7 @@ export default function AgentSelectorHeader({
               <Flex align="center" gap={8} wrap="wrap" className="ml-4">
                 <Button
                   size="middle"
-                  onClick={enterCreateMode}
+                  onClick={handleCreateAgent}
                   className="flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
@@ -723,24 +737,12 @@ export default function AgentSelectorHeader({
                   <FileInput className="w-4 h-4" />
                   <span>{t("agentConfig.button.import")}</span>
                 </Button>
-                <Button
-                  size="middle"
-                  onClick={onOpenGenerationAssistant}
-                  disabled={isGenerationAssistantOpen}
-                  className="flex shrink-0 items-center gap-1 whitespace-nowrap"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="whitespace-nowrap">
-                    {t("agentConfig.button.generationAssistant")}
-                  </span>
-                </Button>
               </Flex>
 
               <Button
                 icon={<GitBranch size={16} />}
                 onClick={isShowVersionManagePanel ? onCloseVersionManagePanel : onOpenVersionManage}
                 type={isShowVersionManagePanel ? "primary" : "default"}
-                disabled={isGenerationAssistantOpen}
               >
                 {t("agent.version.manage")}
               </Button>

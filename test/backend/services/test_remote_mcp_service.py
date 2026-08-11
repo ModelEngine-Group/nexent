@@ -840,6 +840,11 @@ class TestIsContainerRecordApiType(unittest.TestCase):
         record = {"container_id": "abc123", "config_json": None}
         self.assertTrue(_is_container_record(record))
 
+    def test_empty_config_json_returns_false(self):
+        """_is_container_record should return False for an empty config_json (e.g. {})."""
+        record = {"config_json": {}, "container_id": None}
+        self.assertFalse(_is_container_record(record))
+
 
 # ============================================================================
 # update_mcp_service_enabled - API type tests
@@ -1547,6 +1552,76 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             authorization_token='tok',
             custom_headers=None,
         )
+
+
+# ============================================================================
+# add_container_mcp_service deploy-time port conflict guard
+# ============================================================================
+
+class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
+    """Test the port-conflict guard in add_container_mcp_service.
+
+    The conflict check always runs: an occupied port is rejected before the
+    container is started, and a free port allows deployment to proceed.
+    """
+
+    def _make_mcp_config(self):
+        return MCPConfigRequest(mcpServers={
+            "test-svc": {"command": "echo", "args": [], "env": {}}
+        })
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_rejects_in_use_port(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """An occupied port is rejected before starting the container."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = False  # port already in use
+
+        with self.assertRaises(McpPortConflictError):
+            await add_container_mcp_service(
+                tenant_id='tid', user_id='uid', name='test-svc',
+                description='desc', source='local', tags=[],
+                authorization_token=None, registry_json=None,
+                market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+            )
+
+        mock_port_check.assert_called_once_with(port=8080)
+        mock_mgr_cls.assert_not_called()
+        mock_add.assert_not_awaited()
+
+    @patch('backend.services.remote_mcp_service.add_mcp_service')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_proceeds_when_port_free(
+        self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
+    ):
+        """A free port passes the conflict check and deploys."""
+        mock_check_name.return_value = False
+        mock_port_check.return_value = True
+        mock_mgr = MagicMock()
+        mock_mgr.start_mcp_container = AsyncMock(return_value={
+            "container_id": "cid",
+            "mcp_url": "https://localhost:8080/mcp",
+            "host_port": 8080,
+            "container_name": "test-svc-xyz",
+        })
+        mock_mgr_cls.return_value = mock_mgr
+
+        await add_container_mcp_service(
+            tenant_id='tid', user_id='uid', name='test-svc',
+            description='desc', source='local', tags=[],
+            authorization_token=None, registry_json=None,
+            market_id=None, port=8080, mcp_config=self._make_mcp_config(),
+        )
+
+        mock_port_check.assert_called_once_with(port=8080)
+        mock_mgr.start_mcp_container.assert_awaited_once()
+        mock_add.assert_awaited_once()
 
 
 # ============================================================================

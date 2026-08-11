@@ -379,11 +379,18 @@ export default function InvitationList({
           return (
             <Tag
               color={color}
-              className="inline-flex items-center"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                lineHeight: "20px",
+                height: "auto",
+                whiteSpace: "nowrap",
+              }}
               variant="solid"
             >
               {icon}
-              {t(`tenantResources.invitation.status.${status}`)}
+              <span>{t(`tenantResources.invitation.status.${status}`)}</span>
             </Tag>
           );
         },

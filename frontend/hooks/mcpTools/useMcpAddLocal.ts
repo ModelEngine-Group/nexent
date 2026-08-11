@@ -65,18 +65,29 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       }
     }
 
-    // Parse OpenAPI JSON for API type
+    // Parse OpenAPI JSON for API type. A valid OpenAPI spec is required:
+    // without it the backend cannot register any tools and the record is
+    // treated as a plain remote MCP instead of an API-type service.
     let configJson: Record<string, unknown> | undefined;
     if (isApi) {
       const raw = (draft.openApiJson ?? "").trim();
       if (!raw) {
-        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
         return false;
       }
       try {
         configJson = JSON.parse(raw);
       } catch {
-        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJsonFormat"));
+        return false;
+      }
+      if (
+        !configJson ||
+        typeof configJson !== "object" ||
+        Array.isArray(configJson) ||
+        !("openapi" in configJson)
+      ) {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
         return false;
       }
     }
