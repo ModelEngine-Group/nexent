@@ -1152,6 +1152,20 @@ const AssistantMessage: FC<{
                 }
                 return <MarkdownText />;
               }
+              case "image": {
+                const imageUrl = (part as typeof part & { image?: string })
+                  .image;
+                return imageUrl ? (
+                  <GlobalSearchImage
+                    source={{
+                      type: "source",
+                      sourceType: "url",
+                      url: imageUrl,
+                      title: imageUrl,
+                    }}
+                  />
+                ) : null;
+              }
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
@@ -1380,6 +1394,8 @@ interface SourcePartLike {
 const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
   const imageUrl = source.url || "";
   if (!imageUrl) return null;
+  const displayTitle =
+    source.title && source.title !== imageUrl ? source.title : undefined;
   return (
     <figure
       className="aui-global-search-image w-full max-w-xl overflow-hidden rounded-md border bg-muted/30"
@@ -1387,16 +1403,17 @@ const GlobalSearchImage: FC<{ source: SourcePartLike }> = ({ source }) => {
     >
       <AuthenticatedImage
         src={imageUrl}
-        alt={source.title || imageUrl}
+        alt={displayTitle || imageUrl}
         loading="lazy"
         preview
+        proxy
         className="max-h-[28rem] w-full bg-muted/50 object-contain"
       />
-      {source.title || source.text ? (
+      {displayTitle || source.text ? (
         <figcaption className="border-t bg-card px-3 py-2">
-          {source.title ? (
+          {displayTitle ? (
             <div className="text-sm font-medium text-foreground">
-              {source.title}
+              {displayTitle}
             </div>
           ) : null}
           {source.text ? (
