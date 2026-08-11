@@ -6,7 +6,7 @@ triggers naturally as the history grows. After every turn a debug panel shows
 how the context was built and compressed.
 
 Run from this directory (sdk/benchmark/tools/ctx_debugger):
-    ../../backend/.venv/bin/python interactive.py
+    ../../../../backend/.venv/bin/python interactive.py
 
 Slash commands:
     /help              list commands
@@ -22,6 +22,9 @@ Slash commands:
     /reset [threshold] clear history + compression state (optional new threshold)
     /quit  /q          exit
 """
+# Imports below the path bootstrap are intentionally delayed.
+# ruff: noqa: E402, I001
+
 
 import asyncio
 import contextlib
@@ -30,6 +33,7 @@ import json
 import os
 import sys
 from collections import Counter
+
 
 try:
     # Importing readline transparently gives input() shell-style line editing
@@ -53,6 +57,7 @@ from rich.table import Table
 
 from agent_runner import build_agent_run_info, run_agent_with_tracking
 
+
 # agent_runner rebinds sys.stdout to a UTF-8 TextIOWrapper over the same
 # terminal buffer. Use that wrapper for our console. Do NOT restore the
 # previous stdout: restoring would orphan the wrapper, and closing it on GC
@@ -64,6 +69,7 @@ from nexent.core.agents.agent_model import AgentHistory
 from nexent.core.utils.token_estimation import estimate_tokens_text
 
 from ctx_debugger import ContextDebugger, attach_debugger
+
 
 TRACE_PATH = os.environ.get("NEXENT_CONTEXT_DEBUG", "/tmp/nexent_ctx_interactive.jsonl")
 # Shell-style persistent command history, kept across sessions like ~/.bash_history.

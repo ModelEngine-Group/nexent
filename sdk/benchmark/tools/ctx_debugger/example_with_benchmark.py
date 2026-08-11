@@ -15,6 +15,7 @@ Trace lands at $NEXENT_CONTEXT_DEBUG or /tmp/nexent_ctx_trace.jsonl by default.
 import os
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.dirname(HERE)
 BENCHMARK_DIR = os.path.dirname(TOOLS_DIR)
@@ -41,10 +42,11 @@ def _install_auto_attach():
     compress_* events and llm_call(tag=compression) events live in the same
     run.
     """
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.core_agent import CoreAgent  # noqa: I001
     from ctx_debugger import attach_debugger
     from ctx_debugger.debugger import _wrap_compress_if_needed
     import logging
+
     log = logging.getLogger(__name__)
 
     original_agent_init = CoreAgent.__init__

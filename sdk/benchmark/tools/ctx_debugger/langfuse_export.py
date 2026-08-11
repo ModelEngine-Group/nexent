@@ -38,6 +38,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
+
 # Begin event -> its matching end event. Everything else is standalone.
 BEGIN_TO_END = {
     "compress_begin": "compress_end",

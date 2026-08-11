@@ -19,6 +19,7 @@ import asyncio
 import os
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.dirname(HERE)
 BENCHMARK_DIR = os.path.dirname(TOOLS_DIR)
@@ -35,14 +36,14 @@ TRACE_PATH = os.environ.get(
 os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 # Reuse the CoreAgent auto-attach monkey-patch from the sibling example.
-from example_with_benchmark import _install_auto_attach
+from example_with_benchmark import _install_auto_attach  # noqa: E402
 
 
 def main():
     _install_auto_attach()
 
     os.chdir(EVENTQA_DIR)
-    from run_eventqa import main as eventqa_main, _build_arg_parser
+    from run_eventqa import main as eventqa_main, _build_arg_parser  # noqa: I001
 
     args = _build_arg_parser().parse_args()
     asyncio.run(eventqa_main(args))

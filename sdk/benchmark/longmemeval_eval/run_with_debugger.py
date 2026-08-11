@@ -32,6 +32,7 @@ import asyncio
 import os
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCHMARK_DIR = os.path.dirname(HERE)
 SDK_DIR = os.path.dirname(BENCHMARK_DIR)
@@ -49,10 +50,11 @@ os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 def _install_auto_attach():
     """Wrap CoreAgent.__init__ to auto-attach debugger."""
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.core_agent import CoreAgent  # noqa: I001
     from ctx_debugger import attach_debugger
     from ctx_debugger.debugger import _wrap_compress_if_needed
     import logging
+
     log = logging.getLogger(__name__)
 
     original_agent_init = CoreAgent.__init__
@@ -89,7 +91,7 @@ def main():
     _install_auto_attach()
 
     os.chdir(HERE)
-    from run_longmemeval import main as longmemeval_main, _build_arg_parser
+    from run_longmemeval import main as longmemeval_main, _build_arg_parser  # noqa: I001
 
     args = _build_arg_parser().parse_args()
     asyncio.run(longmemeval_main(args))

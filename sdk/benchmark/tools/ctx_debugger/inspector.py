@@ -15,7 +15,8 @@ import argparse
 import json
 import sys
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
+
 
 try:
     from rich import box
@@ -399,9 +400,9 @@ def _build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("compress", help="All compression cycles with stats.")
     c.add_argument("trace")
 
-    l = sub.add_parser("llm", help="LLM calls with durations and tokens.")
-    l.add_argument("trace")
-    l.add_argument("--tag", choices=["main", "compression"])
+    llm_parser = sub.add_parser("llm", help="LLM calls with durations and tokens.")
+    llm_parser.add_argument("trace")
+    llm_parser.add_argument("--tag", choices=["main", "compression"])
 
     st = sub.add_parser("step", help="Dump every event for one agent step.")
     st.add_argument("trace")
