@@ -17,7 +17,7 @@ class ModelContext:
 
     ``modality`` is the capability family: ``llm`` | ``llm_long_context`` |
     ``vlm`` | ``stt`` | ``tts`` | ``embedding`` | ``multi_embedding`` |
-    ``rerank`` | ``realtime``.
+    ``rerank``.
 
     ``factory`` is the normalized provider name: ``openai`` | ``ali`` |
     ``volc`` | ``jina`` | ``siliconflow`` | ``dashscope`` | ``cohere`` |
