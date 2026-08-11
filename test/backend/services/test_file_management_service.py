@@ -19,6 +19,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
+from consts.exceptions import QuotaExceededError
+
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
 
@@ -1056,7 +1058,7 @@ class TestUploadQuotaEnforcement:
         context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
-        quota_error = file_management_service.QuotaExceededError("quota exceeded")
+        quota_error = QuotaExceededError("quota exceeded")
         quota_service.check_hard_limit.side_effect = quota_error
 
         quota_module = self._quota_module(quota_service)
@@ -1067,7 +1069,7 @@ class TestUploadQuotaEnforcement:
             "backend.services.file_management_service.upload_to_minio",
             new_callable=AsyncMock,
         ) as upload_to_minio_mock:
-            with pytest.raises(file_management_service.QuotaExceededError) as raised:
+            with pytest.raises(QuotaExceededError) as raised:
                 await upload_files_impl(
                     destination="minio",
                     file=uploads,
