@@ -1,5 +1,4 @@
 from .openai_llm import OpenAIModel
-from .openai_vlm import OpenAIVLModel
 from .openai_long_context_model import OpenAILongContextModel
 from .capacity_resolver import (
     CapabilityProfile,
@@ -27,7 +26,6 @@ from . import gateway
 
 __all__ = [
     "OpenAIModel",
-    "OpenAIVLModel",
     "OpenAILongContextModel",
     "CapabilityProfile",
     "ModelCapacitySnapshot",

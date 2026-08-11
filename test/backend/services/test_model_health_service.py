@@ -68,6 +68,12 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Mock services packages
 sys.modules['services'] = MockModule()
 sys.modules['services.voice_service'] = MockModule()
+# model_health_service imports build_adapter_fresh / get_llm_adapter_from_config
+# from the real services.model_gateway_service since the gateway bridge landed;
+# the blanket ``services`` mock above shadows it, so expose a mock submodule
+# (tests that exercise the VLM/LLM paths patch the name on model_health_service
+# directly, so the mock's attribute values are never used).
+sys.modules['services.model_gateway_service'] = MockModule()
 
 # Define the ModelConnectStatusEnum for testing
 
@@ -194,14 +200,13 @@ async def test_perform_connectivity_check_llm():
 async def test_perform_connectivity_check_vlm():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         # Execute
         result = await _perform_connectivity_check(
@@ -213,14 +218,13 @@ async def test_perform_connectivity_check_vlm():
 
         # Assert
         assert result is True
-        mock_model.assert_called_once_with(
-            mock_observer_instance,
-            model_id="gpt-4-vision",
-            api_base="https://api.openai.com",
-            api_key="test-key",
-            ssl_verify=True
+        mock_build.assert_called_once_with(
+            {"base_url": "https://api.openai.com", "api_key": "test-key",
+             "ssl_verify": True},
+            "vlm", "vlm", None, model_name="gpt-4-vision",
+            observer=mock_observer_instance, display_name=None,
         )
-        mock_model_instance.check_connectivity.assert_called_once()
+        mock_adapter.health_check.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -231,7 +235,7 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
     ])
 
     with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}), \
-            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model:
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
         result = await _perform_connectivity_check(
             "qwen-image-max",
             "vlm2",
@@ -246,7 +250,7 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
         "model_type": "vlm2",
         "api_key": "test-key",
     })
-    mock_model.assert_not_called()
+    mock_build.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -985,15 +989,14 @@ async def test_perform_connectivity_check_llm_sets_monitoring_operation():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm_sets_monitoring_operation():
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model, \
+            mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
             mock.patch("backend.services.model_health_service.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
-        mock_model_instance = mock.MagicMock()
-        mock_model_instance.check_connectivity = mock.AsyncMock(
-            return_value=True)
-        mock_model.return_value = mock_model_instance
+        mock_adapter = mock.MagicMock()
+        mock_adapter.health_check = mock.AsyncMock(return_value=True)
+        mock_build.return_value = mock_adapter
 
         await _perform_connectivity_check(
             "gpt-4-vision", "vlm", "https://api.openai.com", "test-key",

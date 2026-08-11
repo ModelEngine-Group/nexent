@@ -7,13 +7,12 @@ Supports video from S3, HTTP, and HTTPS URLs.
 
 import logging
 from io import BytesIO
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models import OpenAIVLModel
 from ...core.models.gateway.modality.vlm_adapter import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
@@ -75,7 +74,7 @@ class AnalyzeVideoTool(Tool):
                 description="Message observer",
                 default=None,
                 exclude=True),
-            vlm_model: OpenAIVLModel = Field(
+            vlm_model: Any = Field(
                 description="The video understanding model to use",
                 default=None,
                 exclude=True),
