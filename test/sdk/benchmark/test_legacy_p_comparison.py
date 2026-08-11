@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from sdk.benchmark.generic import run_legacy_p_comparison as legacy_module
 from sdk.benchmark.generic.run_legacy_p_comparison import (
     build_run_name,
     build_runner_command,
@@ -268,3 +270,163 @@ def test_manifest_parity_rejects_prompt_drift(tmp_path):
             run_names,
             require_assembly_parity=True,
         )
+
+
+def test_main_runs_legacy_and_candidate_arms_and_writes_report(
+    monkeypatch,
+    tmp_path,
+):
+    legacy_root = tmp_path / "legacy"
+    candidate_root = tmp_path / "candidate"
+    args = SimpleNamespace(
+        dataset="dataset",
+        run_prefix="lp-test",
+        legacy_root=legacy_root,
+        candidate_root=candidate_root,
+        legacy_python=legacy_root / "python",
+        candidate_python=candidate_root / "python",
+        candidate_soft_input_budget=100,
+        candidate_hard_input_budget=200,
+        candidate_context_window_tokens=300,
+        candidate_budget_profile="synthetic_trigger",
+        repeat=1,
+        smoke_items=1,
+        skip_smoke=True,
+        smoke_only=False,
+        formal_items=1,
+        seed=0,
+        required_url=[],
+        require_assembly_parity=True,
+        runner_args=["--evaluators", "exact_match"],
+    )
+    monkeypatch.setattr(legacy_module, "parse_args", lambda: args)
+    monkeypatch.setattr(legacy_module, "ARTIFACT_ROOT", tmp_path)
+    monkeypatch.setattr(legacy_module, "validate_arm_paths", lambda arms: None)
+    monkeypatch.setattr(
+        legacy_module,
+        "validate_local_collisions",
+        lambda *args, **kwargs: None,
+    )
+    langfuse = object()
+    monkeypatch.setattr(
+        legacy_module,
+        "preflight",
+        lambda **kwargs: (langfuse, ["item-1"]),
+    )
+    commands = []
+    monkeypatch.setattr(
+        legacy_module.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append((command, kwargs)),
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "fetch_run_results",
+        lambda langfuse, dataset, run_name, evaluator, **kwargs: {
+            "item-1": "-l-legacy" in run_name
+        },
+    )
+    provider_cache = {
+        "status": "unsupported",
+        "available_calls": 0,
+        "hit_calls": 0,
+        "provider_prefix_hit_rate": None,
+        "provider_cached_tokens": 0,
+    }
+    summary_cache = {"summary_cache_hits": 0, "summary_cache_types": []}
+    monkeypatch.setattr(
+        legacy_module,
+        "fetch_run_provider_cache",
+        lambda *args, **kwargs: [{}],
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "aggregate_provider_cache",
+        lambda items: provider_cache,
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "fetch_run_summary_cache",
+        lambda *args, **kwargs: [{}],
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "aggregate_summary_cache",
+        lambda items: summary_cache,
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "validate_manifest_parity",
+        lambda *args, **kwargs: {"status": "matched"},
+    )
+    written = {}
+
+    def fake_write_report(report, prefix):
+        written["report"] = report
+        written["prefix"] = prefix
+        return tmp_path / "report.json", tmp_path / "report.md"
+
+    monkeypatch.setattr(
+        legacy_module,
+        "write_report_exclusive",
+        fake_write_report,
+    )
+
+    legacy_module.main()
+
+    assert len(commands) == 2
+    assert {call[1]["cwd"] for call in commands} == {legacy_root, candidate_root}
+    candidate_command = next(
+        command for command, kwargs in commands if kwargs["cwd"] == candidate_root
+    )
+    assert "--soft-input-budget" in candidate_command
+    legacy_command = next(
+        command for command, kwargs in commands if kwargs["cwd"] == legacy_root
+    )
+    assert "--soft-input-budget" not in legacy_command
+    result = written["report"]["results"][0]
+    assert result["paired"]["outcome_matrix"] == {"PF": 1}
+    assert result["manifest_parity"] == {"status": "matched"}
+    assert written["prefix"] == "lp-test"
+
+
+def test_write_report_exclusive_renders_cross_revision_summary(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(legacy_module, "ARTIFACT_ROOT", tmp_path)
+    provider_cache = {
+        "status": "available",
+        "available_calls": 2,
+        "hit_calls": 1,
+        "provider_prefix_hit_rate": 0.5,
+        "provider_cached_tokens": 20,
+    }
+    report = {
+        "results": [
+            {
+                "phase": "formal",
+                "repeat_index": 1,
+                "paired": {
+                    "paired_item_count": 1,
+                    "outcome_matrix": {"PF": 1},
+                },
+                "provider_cache": {
+                    "L": provider_cache,
+                    "P": provider_cache,
+                },
+            }
+        ]
+    }
+
+    json_path, markdown_path = legacy_module.write_report_exclusive(
+        report,
+        "lp unsafe/name",
+    )
+
+    assert json_path.name == "lp_unsafe_name.legacy-p.json"
+    assert json.loads(json_path.read_text(encoding="utf-8")) == report
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "cross-revision regression comparison" in markdown
+    assert "| formal | 1 | 1 | 0 | 1 | 0 | 0 |" in markdown
+    assert "50.00%" in markdown

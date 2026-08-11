@@ -1,3 +1,8 @@
+import sys
+
+import pytest
+
+from sdk.benchmark.generic.tools import context_evidence_diff
 from sdk.benchmark.generic.tools.context_evidence_diff import (
     compare_context_evidence,
     first_paired_differences,
@@ -77,3 +82,34 @@ def test_first_paired_differences_returns_only_first_step_per_item_and_pair():
             "differences": ["history_message_diff"],
         },
     ]
+
+
+def test_context_evidence_diff_cli_reads_named_groups(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    left_path = tmp_path / "left.json"
+    right_path = tmp_path / "right.json"
+    left_path.write_text("[]", encoding="utf-8")
+    right_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context_evidence_diff.py",
+            "--group",
+            f"P={left_path}",
+            "--group",
+            f"C={right_path}",
+        ],
+    )
+
+    context_evidence_diff.main()
+
+    assert capsys.readouterr().out.strip() == "[]"
+
+
+def test_parse_group_rejects_missing_name_or_path():
+    with pytest.raises(Exception, match="NAME=PATH"):
+        context_evidence_diff._parse_group("invalid")

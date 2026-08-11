@@ -99,8 +99,13 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
             max_steps = max_steps or agent_cfg.get("max_steps", 10)
             enable_cm = agent_cfg.get("enable_context_manager", False)
 
-        from nexent.core.agents.agent_context import ContextManagerConfig
-        cm_config = ContextManagerConfig(enabled=enable_cm)
+        from nexent.core.agents.context import ContextManagerConfig, PolicyLayers
+        processing_mode = "adaptive_compact" if enable_cm else "passthrough"
+        cm_config = ContextManagerConfig(
+            policy_layers=PolicyLayers(
+                platform={"processing_mode": processing_mode}
+            )
+        )
 
         dataset = lf.get_dataset(dataset_name)
         items = dataset.items

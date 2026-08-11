@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +8,9 @@ from sdk.benchmark.generic.provenance.experiment_manifest import (
     _jsonable,
     _resolve_cm_budget_defaults,
     build_manifest,
+    check_untracked_risk,
+    compute_source_tree_hash,
+    resolve_code_commit,
     sha256_value,
     write_manifest_exclusive,
 )
@@ -202,6 +206,95 @@ class TestResolveCmBudgetDefaults:
         assert config["hard_input_budget_tokens"] == 11_000
         assert config["max_summary_input_tokens"] == 12_000
         assert config["max_summary_reduce_tokens"] == 2_000
+
+
+def test_git_provenance_helpers_capture_commit_and_relevant_untracked_files(
+    monkeypatch,
+    tmp_path,
+):
+    responses = iter(
+        [
+            SimpleNamespace(stdout="commit-sha\n"),
+            SimpleNamespace(stdout=" M sdk/benchmark/file.py\n?? notes.txt\n"),
+            SimpleNamespace(
+                stdout="\n".join(
+                    [
+                        "sdk/benchmark/new.py",
+                        "backend/new.yaml",
+                        "notes/config.yml",
+                        "sdk/benchmark/__pycache__/ignored.py",
+                        "sdk/benchmark/ignored.pyc",
+                        "frontend/ignored.ts",
+                    ]
+                )
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "sdk.benchmark.generic.provenance.experiment_manifest.subprocess.run",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    assert resolve_code_commit(tmp_path) == "commit-sha"
+    risk = check_untracked_risk(tmp_path)
+    assert risk == {
+        "tracked_worktree_dirty": True,
+        "relevant_untracked_files": [
+            "backend/new.yaml",
+            "notes/config.yml",
+            "sdk/benchmark/new.py",
+        ],
+        "source_snapshot_method": "temporary_index_write_tree_v1",
+    }
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_prefix"),
+    [
+        (
+            __import__("subprocess").CalledProcessError(
+                1,
+                ["git", "read-tree"],
+                stderr="bad index",
+            ),
+            "error:bad index",
+        ),
+        (FileNotFoundError(), "error:git not found"),
+    ],
+)
+def test_source_tree_hash_returns_diagnostic_for_git_failure(
+    monkeypatch,
+    tmp_path,
+    error,
+    expected_prefix,
+):
+    monkeypatch.setattr(
+        "sdk.benchmark.generic.provenance.experiment_manifest.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+
+    assert compute_source_tree_hash(tmp_path) == expected_prefix
+
+
+def test_jsonable_handles_paths_model_dump_public_objects_and_depth_limit():
+    class Model:
+        def model_dump(self, **kwargs):
+            return {"value": 1, "api_key": "secret"}
+
+    class BrokenModel:
+        visible = "fallback"
+
+        def __init__(self):
+            self.visible = "fallback"
+            self.metadata = {"ignored": True}
+
+        def model_dump(self, **kwargs):
+            raise ValueError("cannot dump")
+
+    assert _jsonable(Path("/tmp/file")) == "/tmp/file"
+    assert _jsonable(Model()) == {"value": 1, "api_key": "[REDACTED]"}
+    assert _jsonable(BrokenModel()) == {"visible": "fallback"}
+    assert _jsonable([], _depth=50) == "[MAX_DEPTH:list]"
 
     def test_explicit_values_preserved(self):
         config = {

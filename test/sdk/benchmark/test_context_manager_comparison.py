@@ -1,4 +1,5 @@
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -471,3 +472,371 @@ def test_fetch_run_results_preserves_visible_failing_score(mocker):
     )
 
     assert result == {"one": False}
+
+
+def test_main_runs_both_groups_and_writes_paired_report(
+    monkeypatch,
+    tmp_path,
+):
+    from sdk.benchmark.generic import run_integrity
+
+    args = SimpleNamespace(
+        dataset="dataset",
+        run_prefix="pc-test",
+        repeat=1,
+        smoke_items=1,
+        skip_smoke=True,
+        formal_items=1,
+        compression_threshold=None,
+        soft_input_budget=100,
+        hard_input_budget=200,
+        budget_profile="synthetic_trigger",
+        seed=0,
+        required_url=[],
+        python="python",
+        runner_args=["--evaluators", "exact_match", "f1"],
+    )
+    monkeypatch.setattr(comparison_module, "parse_args", lambda: args)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    langfuse = object()
+    monkeypatch.setattr(
+        comparison_module,
+        "preflight",
+        lambda **kwargs: (langfuse, ["item-1"]),
+    )
+    commands = []
+    monkeypatch.setattr(
+        comparison_module.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append((command, kwargs)),
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "fetch_run_results",
+        lambda langfuse, dataset, run_name, evaluator, **kwargs: {
+            "item-1": run_name.endswith("-p-passthrough")
+        },
+    )
+    provider_cache = {
+        "status": "available",
+        "available_calls": 1,
+        "hit_calls": 1,
+        "provider_prefix_hit_rate": 1.0,
+        "provider_cached_tokens": 10,
+        "provider_input_tokens": 20,
+        "provider_cached_input_ratio": 0.5,
+        "metrics_sources": ["usage"],
+    }
+    summary_cache = {"summary_cache_hits": 0, "summary_cache_types": []}
+    budget_evidence = {
+        "total_items": 1,
+        "over_soft_budget_count": 0,
+        "over_hard_budget_count": 0,
+        "compression_triggered_count": 0,
+        "overflow_avoidance_rate": None,
+        "max_peak_context_tokens": 50,
+    }
+    monkeypatch.setattr(
+        comparison_module,
+        "fetch_run_provider_cache",
+        lambda *args, **kwargs: [{}],
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "aggregate_provider_cache",
+        lambda items: provider_cache,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "fetch_run_summary_cache",
+        lambda *args, **kwargs: [{}],
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "aggregate_summary_cache",
+        lambda items: summary_cache,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "fetch_run_budget_evidence",
+        lambda *args, **kwargs: [{}],
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "aggregate_budget_evidence",
+        lambda items: budget_evidence,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "validate_manifest_parity",
+        lambda run_names: {"status": "matched"},
+    )
+    integrity_report = SimpleNamespace(
+        run_complete=True,
+        to_dict=lambda: {"status": "complete"},
+        summary=lambda: "complete",
+    )
+    monkeypatch.setattr(
+        run_integrity,
+        "check_run_integrity",
+        lambda **kwargs: integrity_report,
+    )
+    written = {}
+
+    def fake_write_report(report, prefix):
+        written["report"] = report
+        written["prefix"] = prefix
+        return tmp_path / "report.json", tmp_path / "report.md"
+
+    monkeypatch.setattr(
+        comparison_module,
+        "write_report_exclusive",
+        fake_write_report,
+    )
+
+    comparison_module.main()
+
+    assert len(commands) == 2
+    processing_modes = {
+        command[0][command[0].index("--context-processing-mode") + 1]
+        for command in commands
+    }
+    assert processing_modes == {"passthrough", "adaptive_compact"}
+    result = written["report"]["results"][0]
+    assert result["phase"] == "formal"
+    assert result["paired"]["outcome_matrix"] == {"PF": 1}
+    assert result["integrity"] == {
+        "P": {"status": "complete"},
+        "C": {"status": "complete"},
+    }
+    assert written["prefix"] == "pc-test"
+
+
+def test_fetch_trace_metrics_handles_dict_json_and_invalid_outputs(monkeypatch):
+    run = SimpleNamespace(
+        dataset_run_items=[
+            SimpleNamespace(dataset_item_id="one", trace_id="trace-one"),
+            SimpleNamespace(dataset_item_id="two", trace_id="trace-two"),
+            SimpleNamespace(dataset_item_id="three", trace_id="trace-three"),
+        ]
+    )
+    outputs = {
+        "trace-one": {
+            "provider_cache": {"status": "available", "available_calls": 1},
+            "compression": {
+                "summary_cache_hits": 2,
+                "summary_cache_types": ["history"],
+            },
+            "budget_evidence": {
+                "over_soft_budget": True,
+                "over_hard_budget": False,
+                "compression_triggered": True,
+                "peak_context_tokens": 100,
+            },
+        },
+        "trace-two": json.dumps(
+            {
+                "provider_cache": {"status": "unsupported"},
+                "compression": {},
+                "budget_evidence": {
+                    "over_hard_budget": True,
+                    "peak_context_tokens": 200,
+                },
+            }
+        ),
+        "trace-three": "not-json",
+    }
+    langfuse = SimpleNamespace(
+        get_trace=lambda trace_id: SimpleNamespace(output=outputs[trace_id])
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "fetch_complete_dataset_run",
+        lambda *args, **kwargs: run,
+    )
+
+    provider = comparison_module.fetch_run_provider_cache(
+        langfuse,
+        "dataset",
+        "run",
+    )
+    summary = comparison_module.fetch_run_summary_cache(
+        langfuse,
+        "dataset",
+        "run",
+    )
+    budget = comparison_module.fetch_run_budget_evidence(
+        langfuse,
+        "dataset",
+        "run",
+    )
+
+    assert provider["one"]["status"] == "available"
+    assert provider["three"] == {}
+    assert summary["one"] == {
+        "summary_cache_hits": 2,
+        "summary_cache_types": ["history"],
+    }
+    assert summary["three"] == {
+        "summary_cache_hits": 0,
+        "summary_cache_types": [],
+    }
+    aggregate = comparison_module.aggregate_budget_evidence(budget)
+    assert aggregate == {
+        "total_items": 3,
+        "over_soft_budget_count": 1,
+        "over_hard_budget_count": 1,
+        "compression_triggered_count": 1,
+        "overflow_avoidance_rate": pytest.approx(2 / 3, abs=0.0001),
+        "max_peak_context_tokens": 200,
+        "avg_peak_context_tokens": 100,
+    }
+
+
+def test_preflight_validates_service_dataset_and_remote_run_uniqueness(
+    monkeypatch,
+    tmp_path,
+):
+    from sdk.benchmark.generic import provenance
+    from sdk.benchmark.generic.provenance import experiment_manifest
+
+    monkeypatch.setitem(sys.modules, "provenance", provenance)
+    monkeypatch.setitem(
+        sys.modules,
+        "provenance.experiment_manifest",
+        experiment_manifest,
+    )
+
+    class NotFoundError(Exception):
+        status_code = 404
+
+    langfuse = SimpleNamespace(
+        auth_check=lambda: True,
+        get_dataset=lambda name: SimpleNamespace(
+            items=[SimpleNamespace(id="one"), SimpleNamespace(id="two")]
+        ),
+        get_dataset_run=lambda dataset, run: (_ for _ in ()).throw(NotFoundError()),
+    )
+    monkeypatch.setattr("langfuse.Langfuse", lambda: langfuse)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    requested = []
+    monkeypatch.setattr(
+        comparison_module.requests,
+        "get",
+        lambda url, timeout: requested.append((url, timeout))
+        or SimpleNamespace(status_code=200),
+    )
+
+    result, item_ids = comparison_module.preflight(
+        dataset_name="dataset",
+        required_urls=["langfuse=http://localhost:3100"],
+        planned_run_names=["run-one", "run-two"],
+    )
+
+    assert result is langfuse
+    assert item_ids == ["one", "two"]
+    assert requested == [("http://localhost:3100", 10)]
+
+
+@pytest.mark.parametrize(
+    ("required_urls", "status_code", "expected_error"),
+    [
+        (["invalid"], 200, ValueError),
+        (["service=http://localhost"], 503, RuntimeError),
+    ],
+)
+def test_preflight_rejects_invalid_or_unhealthy_required_service(
+    monkeypatch,
+    tmp_path,
+    required_urls,
+    status_code,
+    expected_error,
+):
+    langfuse = SimpleNamespace(
+        auth_check=lambda: True,
+        get_dataset=lambda name: SimpleNamespace(items=[SimpleNamespace(id="one")]),
+    )
+    monkeypatch.setattr("langfuse.Langfuse", lambda: langfuse)
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        comparison_module.requests,
+        "get",
+        lambda url, timeout: SimpleNamespace(status_code=status_code),
+    )
+
+    with pytest.raises(expected_error):
+        comparison_module.preflight(
+            dataset_name="dataset",
+            required_urls=required_urls,
+            planned_run_names=[],
+        )
+
+
+def test_write_report_exclusive_renders_cache_and_budget_sections(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    provider_cache = {
+        "status": "available",
+        "available_calls": 2,
+        "hit_calls": 1,
+        "provider_prefix_hit_rate": 0.5,
+        "provider_cached_tokens": 20,
+        "provider_cached_input_ratio": 0.25,
+    }
+    summary_cache = {
+        "summary_cache_hits": 1,
+        "summary_cache_types": ["history"],
+    }
+    budget_evidence = {
+        "total_items": 1,
+        "over_soft_budget_count": 1,
+        "over_hard_budget_count": 0,
+        "compression_triggered_count": 1,
+        "overflow_avoidance_rate": 1.0,
+        "max_peak_context_tokens": 100,
+    }
+    report = {
+        "budget_profile": "synthetic_trigger",
+        "thresholds": {
+            "soft_input_budget": 100,
+            "hard_input_budget": 200,
+        },
+        "results": [
+            {
+                "phase": "formal",
+                "repeat_index": 1,
+                "paired": {
+                    "paired_item_count": 1,
+                    "outcome_matrix": {"PC": 1},
+                },
+                "provider_cache": {
+                    "P": provider_cache,
+                    "C": provider_cache,
+                },
+                "summary_cache": {
+                    "P": summary_cache,
+                    "C": summary_cache,
+                },
+                "budget_evidence": {
+                    "P": budget_evidence,
+                    "C": budget_evidence,
+                },
+            }
+        ],
+    }
+
+    json_path, markdown_path = comparison_module.write_report_exclusive(
+        report,
+        "pc unsafe/name",
+    )
+
+    assert json_path.name == "pc_unsafe_name.comparison.json"
+    assert json.loads(json_path.read_text(encoding="utf-8")) == report
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "## Provider prefix cache" in markdown
+    assert "## ContextManager summary cache" in markdown
+    assert "## Budget & overflow" in markdown
+    assert "50.00%" in markdown
+    assert "100.00%" in markdown

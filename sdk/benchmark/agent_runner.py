@@ -229,7 +229,9 @@ def build_agent_run_info(
         ]
     if fallback_prompt and not any((duty_prompt, constraint_prompt, few_shots_prompt)):
         context_items = [ContextItemInput(
-            id="system:fallback", type="system_prompt", content={"text": fallback_prompt}, required=True
+            id="system:fallback",
+            type="system",
+            content={"text": fallback_prompt},
         )]
 
     prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
@@ -330,9 +332,13 @@ def build_agent_run_info_with_custom_prompt(
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
         context_manager_config=context_manager_config or ContextManagerConfig(),
-        context_items=[ContextItemInput(
-            id="system:custom", type="system_prompt", content={"text": system_prompt}, required=True
-        )],
+        context_items=[
+            ContextItemInput(
+                id="system:custom",
+                type="system",
+                content={"text": system_prompt},
+            )
+        ],
     )
 
     import threading
