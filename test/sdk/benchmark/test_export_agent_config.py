@@ -112,8 +112,9 @@ def test_export_agent_config_externalizes_tool_secrets(
         "password": {"$env": "TERMINAL_PASSWORD"},
         "ssh_host": "localhost",
     }
-    assert "EXA_API_KEY" in console_output
-    assert "TERMINAL_PASSWORD" in console_output
+    assert "Secret values externalized as environment references" in console_output
+    assert "EXA_API_KEY" not in console_output
+    assert "TERMINAL_PASSWORD" not in console_output
     assert "secret-exa-value" not in raw_output
     assert "secret-terminal-value" not in raw_output
     assert "secret-exa-value" not in console_output

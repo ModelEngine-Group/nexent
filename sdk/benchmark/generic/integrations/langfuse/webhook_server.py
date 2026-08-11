@@ -351,8 +351,9 @@ async def handle_webhook(payload: WebhookPayload, background_tasks: BackgroundTa
     if config is None and payload.payload is not None:
         try:
             config = json.loads(payload.payload) if isinstance(payload.payload, str) else payload.payload
-        except (json.JSONDecodeError, TypeError) as e:
-            return {"status": "error", "message": f"invalid payload JSON: {e}"}
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Rejected webhook request with invalid payload JSON")
+            return {"status": "error", "message": "invalid payload JSON"}
     config = config or {}
 
     mode = config.get("mode", "run")

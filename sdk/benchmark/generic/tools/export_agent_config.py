@@ -236,10 +236,7 @@ def export_agent_config(agent_id: int = None, agent_name: str = None,
         print(f"  - Sub-agents: {len(sub_agents)}")
         print(f"  - Skills: {len(skills)}")
         if required_secret_env_vars:
-            print(
-                "  - Required secret environment variables: "
-                + ", ".join(sorted(required_secret_env_vars))
-            )
+            print("  - Secret values externalized as environment references")
 
         return output_file
 
