@@ -647,6 +647,48 @@ def test_list_my_editable_skills_filters_to_current_user_and_search():
     assert [item["name"] for item in result["items"]] == ["Excel Report"]
 
 
+def test_list_my_editable_skills_normalizes_string_tags_for_response_and_search():
+    class ListSkillService(_SkillServiceMock):
+        def list_skills(self, tenant_id=None):
+            return [{
+                "skill_id": 1,
+                "name": "Clinic Report",
+                "description": "build clinic reports",
+                "source": "custom",
+                "tags": '["table analysis", "visit volume", "medical statistics"]',
+                "created_by": "user-1",
+            }]
+
+    with patch.object(srs, "SkillService", ListSkillService):
+        result = srs.list_my_editable_skills_impl(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            search="visit volume",
+        )
+
+    assert result["items"][0]["tags"] == [
+        "table analysis",
+        "visit volume",
+        "medical statistics",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ([" tag ", "", 1, "second"], ["tag", "second"]),
+        ('["json", "array"]', ["json", "array"]),
+        ("[table analysis, visit volume]", []),
+        ("plain text", []),
+        ("[invalid", []),
+        (None, []),
+        ({"tag": "value"}, []),
+    ],
+)
+def test_normalize_mine_skill_tags(tags, expected):
+    assert srs._normalize_mine_skill_tags(tags) == expected
+
+
 def test_mine_ownership_uses_creator_not_edit_permission():
     class ListSkillService(_SkillServiceMock):
         def list_skills(self, tenant_id=None):
