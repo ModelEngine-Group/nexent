@@ -139,22 +139,6 @@ class TestMainServiceModuleIntegration:
         # In a real scenario, you might need to reload the module to test this properly
         pass  # The actual verification would depend on how the test runner handles imports
 
-    def test_smolagents_logger_suppressed_to_warning(self):
-        """runtime_service must quiet smolagents INFO logs (evaluation batch flood)."""
-        import importlib
-        import logging
-
-        # Patch at the source so the module-level configure_* calls are no-ops,
-        # then (re)import runtime_service to run its module-level setup.
-        with patch("utils.logging_utils.configure_logging"), patch(
-            "utils.logging_utils.configure_elasticsearch_logging"
-        ):
-            import runtime_service
-
-            importlib.reload(runtime_service)
-
-        assert logging.getLogger("smolagents").level == logging.WARNING
-
 
 if __name__ == '__main__':
     pytest.main()

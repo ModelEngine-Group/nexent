@@ -143,10 +143,7 @@ export function MineAgentsView({
     });
   };
 
-  const handleEdit = (
-    agentId: number,
-    permission?: MyEditableAgentItem["permission"]
-  ) => {
+  const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
     if (permission === "READ_ONLY") {
       return;
     }
@@ -171,9 +168,7 @@ export function MineAgentsView({
           );
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({
-              queryKey: [AGENTS_LIST_QUERY_KEY],
-            }),
+            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
           ]);
         } catch (error) {
           log.error("Failed to delete agent:", error);
@@ -231,7 +226,9 @@ export function MineAgentsView({
         versionNo,
         payload,
       });
-      message.success(t("repository.mine.applySuccess"));
+      message.success(
+        t("repository.mine.applySuccess")
+      );
       closeApplyModal();
     } catch {
       message.error(t("repository.mine.applyError"));

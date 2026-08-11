@@ -1,4 +1,4 @@
-﻿﻿﻿﻿{
+﻿{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | 智能问答",
   "mainPage.layout.titleTemplate": "%s | {productName} 智能问答",
@@ -736,6 +736,7 @@
   "toolPool.selectedToolsLabel": "已选择工具",
   "toolPool.noSearchResults": "没有搜索到匹配的工具",
   "toolPool.mcpModelUnavailableTooltip": "工具所选模型不可用",
+
   "nl2agent.toolRecommendations.title": "推荐工具",
   "nl2agent.toolRecommendations.count": "匹配到 {{count}} 个已安装的 MCP 工具",
   "nl2agent.toolRecommendations.match": "匹配度 {{score}}",
@@ -754,6 +755,7 @@
   "nl2agent.agentDraft.apply": "应用到草稿",
   "nl2agent.agentDraft.applied": "已应用",
   "nl2agent.assistant.description": "请描述你想创建的智能体，我会搜索已安装的工具并协助生成智能体配置。",
+
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",
@@ -1547,6 +1549,9 @@
   "skillManagement.delete.success": "技能删除成功",
   "skillManagement.noEditPermission": "无技能编辑权限",
   "skillManagement.delete.failed": "技能删除失败",
+  "skillManagement.fileCard.run": "运行",
+  "skillManagement.mentions.files": "技能文件",
+  "skillManagement.mentions.noFiles": "没有匹配的 .md、.sh 或 .py 文件",
   "mcpConfig.modal.title": "MCP服务器配置",
   "mcpConfig.modal.close": "关闭",
   "mcpConfig.modal.updatingTools": "正在更新工具列表...",
@@ -3575,6 +3580,7 @@
   "systemPrompt.finetune.modeInsertDesc": "在指定位置插入新的内容",
   "systemPrompt.finetune.modeSelect": "替换选中",
   "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围",
+
   "aidpKnowledge.pageTitle": "AIDP 知识库",
   "aidpKnowledge.serverUrl": "AIDP 服务器地址",
   "aidpKnowledge.serverUrlPlaceholder": "https://aidp.example.com",
@@ -3595,6 +3601,7 @@
   "aidpKnowledge.kbUnavailable": "不可用",
   "aidpKnowledge.createKb": "创建知识库",
   "aidpKnowledge.refresh": "刷新",
+
   "aidpKnowledge.listEmpty": "暂无知识库",
   "aidpKnowledge.tagDocs": "文档: {{count}}",
   "aidpKnowledge.tagChunks": "分块: {{count}}",
@@ -3959,6 +3966,7 @@
   "systemPrompt.finetune.selectTip": "在下方编辑器中选择文本以获取位置",
   "toolConfig.validation.array.invalid": "请输入有效的数组 JSON",
   "toolConfig.validation.object.invalid": "请输入有效的对象 JSON",
+
   "project.config": "系统配置",
   "project.config.title": "系统名",
   "project.config.language.en": "请输入英文配置",

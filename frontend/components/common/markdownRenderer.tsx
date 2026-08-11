@@ -24,6 +24,13 @@ import {
 } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
+import { DirectiveChip } from "../../app/[locale]/newchat/ui/directive-text";
+import {
+  escapeSkillDirectivesForMarkdown,
+  remarkSkillXmlDirectives,
+  skillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../../app/[locale]/newchat/ui/skill-directives";
 
 interface MarkdownRendererProps {
   content: string;
@@ -44,6 +51,10 @@ interface MarkdownRendererProps {
    * verified images are rendered separately.
    */
   trustedImageUrls?: string[];
+  /** Render registered skill XML tags as assistant-ui directive chips. */
+  enableSkillDirectives?: boolean;
+  /** Navigate to the skill file referenced by a directive chip. */
+  onSkillDirectiveClick?: (path: string) => void;
 }
 
 export interface MarkdownHeading {
@@ -1084,13 +1095,18 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   enableMultimodal = true,
   resolveS3Media = false,
   trustedImageUrls = [],
+  enableSkillDirectives = false,
+  onSkillDirectiveClick,
 }) => {
   const { t } = useTranslation("common");
 
   // Preprocess content: convert LaTeX delimiters and custom code tags
-  const processedContent = convertCustomCodeTags(
+  const convertedContent = convertCustomCodeTags(
     convertLatexDelimiters(content)
   );
+  const processedContent = enableSkillDirectives
+    ? escapeSkillDirectivesForMarkdown(convertedContent)
+    : convertedContent;
   const extractedHeadings = React.useMemo(
     () => extractParsedMarkdownHeadings(content),
     [content]
@@ -1236,10 +1252,36 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
   };
 
+  const processTextWithDirectives = (text: string) => {
+    if (!enableSkillDirectives) return processText(text);
+    const segments = skillDirectiveFormatter.parse(text);
+    if (segments.length === 1 && segments[0]?.kind === "text") {
+      return processText(text);
+    }
+    return segments.map((segment, index) =>
+      segment.kind === "text" ? (
+        <React.Fragment key={`text-${index}`}>
+          {processText(segment.text)}
+        </React.Fragment>
+      ) : (
+        <DirectiveChip
+          key={`${segment.type}-${segment.id}-${index}`}
+          segment={segment}
+          iconMap={skillDirectiveIconMap}
+          onClick={
+            onSkillDirectiveClick
+              ? (clickedSegment) => onSkillDirectiveClick(clickedSegment.id)
+              : undefined
+          }
+        />
+      )
+    );
+  };
+
   // Create wrapper component to handle different types of child elements
   const TextWrapper = ({ children }: { children: any }) => {
     if (typeof children === "string") {
-      return processText(children);
+      return processTextWithDirectives(children);
     }
     if (Array.isArray(children)) {
       return (
@@ -1248,7 +1290,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             if (typeof child === "string") {
               return (
                 <React.Fragment key={index}>
-                  {processText(child)}
+                  {processTextWithDirectives(child)}
                 </React.Fragment>
               );
             }
@@ -1322,7 +1364,13 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       <div className={`markdown-body ${className || ""}`}>
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath] as any}
+            remarkPlugins={
+              [
+                remarkGfm,
+                remarkMath,
+                ...(enableSkillDirectives ? [remarkSkillXmlDirectives] : []),
+              ] as any
+            }
             rehypePlugins={
               [
                 rehypeUnwrapMedia,
@@ -1450,7 +1498,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     className={`markdown-code ${className || ""}`}
                     {...props}
                   >
-                    <TextWrapper>{children}</TextWrapper>
+                    {children}
                   </code>
                 );
               },

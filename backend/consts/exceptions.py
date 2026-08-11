@@ -20,10 +20,9 @@ This module provides two types of exceptions:
 The exception handler automatically maps legacy exception class names to ErrorCode.
 """
 
-from typing import List
-
-from .error_code import ERROR_CODE_HTTP_STATUS, ErrorCode
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from .error_message import ErrorMessage
+from typing import List
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -110,12 +109,6 @@ class SignatureValidationError(Exception):
 
 class MemoryPreparationException(Exception):
     """Raised when memory preprocessing or retrieval fails prior to agent run."""
-
-    pass
-
-
-class ResourceInUseError(Exception):
-    """Raised when a resource cannot be deleted because it is still referenced."""
 
     pass
 

@@ -1,4 +1,4 @@
-﻿﻿{
+﻿{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | AI Agents",
   "mainPage.layout.titleTemplate": "%s | {productName} AI Agents",
@@ -763,6 +763,7 @@
   "toolPool.selectedToolsLabel": "Selected Tools",
   "toolPool.noSearchResults": "No tools match your search",
   "toolPool.mcpModelUnavailableTooltip": "Selected model is unavailable",
+
   "nl2agent.toolRecommendations.title": "Recommended tools",
   "nl2agent.toolRecommendations.count": "{{count}} matching installed MCP tool",
   "nl2agent.toolRecommendations.count_other": "{{count}} matching installed MCP tools",
@@ -784,6 +785,7 @@
   "nl2agent.agentDraft.apply": "Apply to draft",
   "nl2agent.agentDraft.applied": "Applied",
   "nl2agent.assistant.description": "Describe the agent you want to create. I will search installed tools and help generate its configuration.",
+
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main Agent ID is not set, cannot update tool status",
   "tool.error.configFetchFailed": "Failed to get tool configuration",
@@ -1579,6 +1581,9 @@
   "skillManagement.delete.success": "Skill deleted successfully",
   "skillManagement.noEditPermission": "No permission to edit this skill",
   "skillManagement.delete.failed": "Failed to delete skill",
+  "skillManagement.fileCard.run": "Run",
+  "skillManagement.mentions.files": "Skill files",
+  "skillManagement.mentions.noFiles": "No matching .md, .sh, or .py files",
   "mcpConfig.modal.title": "MCP Server Configuration",
   "mcpConfig.modal.close": "Close",
   "mcpConfig.modal.updatingTools": "Updating tools list...",
@@ -3861,6 +3866,7 @@
   "space.new": "New Space",
   "toolConfig.validation.array.invalid": "Please enter valid array JSON",
   "toolConfig.validation.object.invalid": "Please enter valid object JSON",
+
   "aidpKnowledge.pageTitle": "AIDP Knowledge Bases",
   "aidpKnowledge.serverUrl": "AIDP Server URL",
   "aidpKnowledge.serverUrlPlaceholder": "https://aidp.example.com",
@@ -3881,6 +3887,7 @@
   "aidpKnowledge.kbUnavailable": "Unavailable",
   "aidpKnowledge.createKb": "Create Knowledge Base",
   "aidpKnowledge.refresh": "Refresh",
+
   "aidpKnowledge.listEmpty": "No knowledge bases found",
   "aidpKnowledge.tagDocs": "docs: {{count}}",
   "aidpKnowledge.tagChunks": "chunks: {{count}}",
@@ -3962,6 +3969,7 @@
   "aidpKnowledge.createAccessGroupsRequired": "Please select at least one user group, or switch to private",
   "aidpKnowledge.invalidFileType": "{{count}} file(s) with unsupported format have been filtered. Only Text (txt/json/markdown), Web (html), Docs (pdf/docx/doc/ppt/pptx), Sheets (xlsx/xls/csv), Images (png/jpeg/jpg/bmp) are supported",
   "aidpKnowledge.showTotal": "Total {{count}} items",
+
   "project.config": "System config",
   "project.config.title": "System name",
   "project.config.language.en": "Please enter the English configuration.",

@@ -1,23 +1,7 @@
-from sqlalchemy import (
-    JSON,
-    TIMESTAMP,
-    BigInteger,
-    Boolean,
-    Column,
-    Float,
-    Index,
-    Integer,
-    Numeric,
-    Sequence,
-    String,
-    Text,
-    UniqueConstraint,
-    text,
-)
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
-
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -1843,6 +1827,7 @@ class EvaluationSet(TableBase):
     """Evaluation set metadata."""
 
     __tablename__ = "evaluation_set_t"
+    __table_args__ = {"schema": SCHEMA}
 
     evaluation_set_id = Column(
         BigInteger,
@@ -1872,6 +1857,7 @@ class EvaluationSetCase(TableBase):
     """Evaluation cases belonging to a set."""
 
     __tablename__ = "evaluation_set_case_t"
+    __table_args__ = {"schema": SCHEMA}
 
     evaluation_set_case_id = Column(
         BigInteger,

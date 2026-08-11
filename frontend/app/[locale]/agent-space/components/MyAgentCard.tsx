@@ -40,12 +40,16 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
   reviewUpdate: "agentRepository.mine.menu.reviewUpdate",
 };
 
-const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
+const STATUS_BADGE_CLASS: Record<
+  "pending" | "shared" | "rejected",
+  string
+> = {
   pending:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
   shared:
     "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
-  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+  rejected:
+    "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
 export function MyAgentCard({
@@ -187,10 +191,7 @@ export function MyAgentCard({
           <div className="min-w-0">
             {versionLabel != null ? (
               <span className="inline-flex items-center gap-1.5">
-                <span
-                  className="size-1.5 rounded-full bg-primary"
-                  aria-hidden
-                />
+                <span className="size-1.5 rounded-full bg-primary" aria-hidden />
                 {t("agentRepository.mine.currentVersion", {
                   version: versionLabel,
                 })}
