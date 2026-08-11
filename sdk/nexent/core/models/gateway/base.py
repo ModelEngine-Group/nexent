@@ -2,7 +2,7 @@
 
 Adapters *compose* (do not inherit) the existing, stable model classes — they
 hold a reference to a wrapped instance (``_inner``) and forward calls. This
-keeps ``OpenAIVLModel``/``AliSTTModel`` etc. untouched and test-covered.
+keeps ``OpenAIModel``/``OpenAIVLModel`` etc. untouched and test-covered.
 """
 
 from abc import ABC, abstractmethod
