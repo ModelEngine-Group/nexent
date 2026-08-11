@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render an exported Agent YAML into a production-parity snapshot."""
+"""Render exported Agent YAML into a benchmark-reconstructed parity snapshot."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from agent_runner import (  # noqa: E402
     build_tools_from_yaml,
     inject_production_managed_tools,
 )
-from provenance.parity_snapshot import build_parity_snapshot  # noqa: E402
+from provenance.parity_snapshot import build_agent_run_info_parity_snapshot  # noqa: E402
 
 
 def export_snapshot(
@@ -57,13 +57,13 @@ def export_snapshot(
         user_id="user_id",
         prompt_components=config.get("prompt_components"),
     )
-    snapshot = build_parity_snapshot(
-        context_items=run_info.agent_config.context_items or [],
-        prompt_templates=run_info.agent_config.prompt_templates,
-        tools=tools,
+    snapshot = build_agent_run_info_parity_snapshot(
+        run_info,
         language=language,
         template_version=str(agent_config.get("prompt_template_id", "")),
         template_source=str(agent_config_path.resolve()),
+        producer_kind="benchmark_reconstructed",
+        producer_component="sdk.benchmark.generic.tools.export_parity_snapshot",
         resource_support={
             "tools": True,
             "skills": True,

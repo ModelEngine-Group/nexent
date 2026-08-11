@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
 from sdk.benchmark.generic.provenance.parity_snapshot import (
+    build_agent_run_info_parity_snapshot,
     build_parity_snapshot,
     canonical_tool_schema,
     diff_parity_snapshots,
+    simulation_fidelity_for_snapshot,
 )
 
 
@@ -53,6 +55,8 @@ def test_snapshot_records_prompt_context_resource_and_tool_contracts():
     assert snapshot["resources"]["tools"]["count"] == 1
     assert snapshot["resources"]["skills"]["status"] == "intentional_empty"
     assert snapshot["tools"]["ordered_names"] == ["search"]
+    assert snapshot["producer"]["kind"] == "benchmark_runtime"
+    assert snapshot["snapshot_schema_version"] == 2
 
 
 def test_canonical_tool_schema_excludes_metadata_and_secrets():
@@ -149,3 +153,104 @@ def test_diff_detects_configured_tool_masquerading_as_injected_builtin():
 
     assert diff["tool_assembly_origin_mismatches"] == ["run_skill_script"]
     assert diff["tool_implementation_mismatches"] == ["run_skill_script"]
+    runtime_scope = injected_snapshot["tools"]["schemas"][0]["implementation"]["runtime_scope"]
+    assert "tenant_id" not in runtime_scope
+    assert runtime_scope["tenant_fingerprint"]
+
+
+def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
+    model = SimpleNamespace(
+        cite_name="main",
+        model_name="model-a",
+        url="https://user:password@example.invalid?api_key=secret-url",
+        api_key="secret-api-key",
+        temperature=0.2,
+        top_p=0.9,
+        ssl_verify=True,
+        model_factory="openai",
+        extra_body={"nested_api_key": "secret-extra", "thinking": False},
+    )
+    context_config = SimpleNamespace(
+        policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
+        token_threshold=1000,
+        context_window_tokens=32000,
+        soft_input_budget_tokens=8000,
+        hard_input_budget_tokens=12000,
+        keep_recent_steps=4,
+    )
+    agent_config = SimpleNamespace(
+        model_name="main",
+        context_items=[_item("system:header", "system", "Basic", 100)],
+        prompt_templates={},
+        tools=[],
+        context_manager_config=context_config,
+        enable_planning=True,
+        provide_run_summary=False,
+        verification_config={"enabled": True},
+        max_steps=12,
+        requested_output_tokens=2048,
+        capacity_snapshot={"context_window_tokens": 32000},
+        safe_input_budget_snapshot={"safe_input_tokens": 12000},
+    )
+    run_info = SimpleNamespace(
+        agent_config=agent_config,
+        model_config_list=[model],
+        history=[],
+        mcp_host=[],
+        sandbox_config=None,
+        run_time="frozen",
+        capacity_snapshot=agent_config.capacity_snapshot,
+        safe_input_budget_snapshot=agent_config.safe_input_budget_snapshot,
+        query="private query",
+        user_id="private user",
+    )
+
+    snapshot = build_agent_run_info_parity_snapshot(
+        run_info,
+        language="en",
+        template_version="2",
+        template_source="production",
+        producer_kind="production_runtime",
+        producer_component="production.factory",
+    )
+
+    serialized = str(snapshot)
+    assert snapshot["producer"]["kind"] == "production_runtime"
+    assert snapshot["model"]["endpoint_configured"] is True
+    assert snapshot["model"]["extra_body"]["nested_api_key"] == "[REDACTED]"
+    assert snapshot["capacity"]["model_capacity"]["context_window_tokens"] == 32000
+    assert snapshot["policy"]["effective_processing_mode"] == "adaptive_compact"
+    assert snapshot["runtime_flags"]["enable_planning"] is True
+    assert "secret-api-key" not in serialized
+    assert "secret-url" not in serialized
+    assert "private query" not in serialized
+    assert "private user" not in serialized
+
+
+def test_fidelity_label_requires_explicit_production_runtime_producer():
+    assert simulation_fidelity_for_snapshot({}) == "mechanism_only"
+    assert simulation_fidelity_for_snapshot({"producer": {"kind": "legacy"}}) == "mechanism_only"
+    assert simulation_fidelity_for_snapshot(
+        {"producer": {"kind": "benchmark_reconstructed"}}
+    ) == "benchmark_reconstructed_snapshot"
+    assert simulation_fidelity_for_snapshot(
+        {"producer": {"kind": "production_runtime"}}
+    ) == "production_snapshot"
+
+
+def test_diff_enforces_declared_runtime_surfaces():
+    base = build_parity_snapshot(
+        context_items=[],
+        prompt_templates={},
+        tools=[],
+        language="en",
+        template_version="2",
+        template_source="config",
+        model={"model_name": "a"},
+    )
+    changed = {**base, "model": {"model_name": "b"}}
+
+    diff = diff_parity_snapshots(base, changed)
+
+    assert diff["passed"] is False
+    assert diff["runtime_surface_mismatches"] == ["model"]

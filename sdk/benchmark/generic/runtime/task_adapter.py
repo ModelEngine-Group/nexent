@@ -192,16 +192,16 @@ def make_nexent_task(
         system_prompt_text = render_precompact_system_prompt(context_items)
         model_config = agent_run_info.model_config_list[0] if agent_run_info.model_config_list else None
         try:
-            from provenance.parity_snapshot import build_parity_snapshot
+            from provenance.parity_snapshot import build_agent_run_info_parity_snapshot
         except ImportError:
-            from ..provenance.parity_snapshot import build_parity_snapshot
-        parity_snapshot = build_parity_snapshot(
-            context_items=context_items,
-            prompt_templates=agent_run_info.agent_config.prompt_templates,
-            tools=agent_run_info.agent_config.tools or [],
+            from ..provenance.parity_snapshot import build_agent_run_info_parity_snapshot
+        parity_snapshot = build_agent_run_info_parity_snapshot(
+            agent_run_info,
             language=language,
             template_version=prompt_template_version,
             template_source=prompt_template_source,
+            producer_kind="benchmark_runtime",
+            producer_component="sdk.benchmark.generic.runtime.task_adapter",
             resource_support=resource_support,
             intentional_empty_resources=intentional_empty_resources,
         )

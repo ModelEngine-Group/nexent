@@ -1,4 +1,4 @@
-"""Build and compare prompt, context-item, resource, and tool parity snapshots."""
+"""Build and compare redacted AgentRunInfo parity snapshots."""
 
 from __future__ import annotations
 
@@ -35,6 +35,17 @@ TOOL_SCHEMA_FIELDS = (
     "usage",
     "labels",
 )
+MODEL_SNAPSHOT_FIELDS = (
+    "cite_name", "model_name", "temperature", "top_p", "ssl_verify",
+    "model_factory", "extra_body", "max_output_tokens", "max_tokens",
+    "context_window_tokens", "max_input_tokens", "default_output_reserve_tokens",
+    "tokenizer_family", "capacity_source", "capability_profile_version",
+    "timeout_seconds", "concurrency_limit", "prompt_cache",
+)
+STRICT_SURFACES = (
+    "prompt", "context_items", "resources", "tools", "model", "capacity",
+    "policy", "runtime_flags",
+)
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -59,8 +70,13 @@ def canonical_tool_schema(tool: Any) -> dict[str, Any]:
     metadata = _field(tool, "metadata", {}) or {}
     runtime_scope = (
         {
-            key: metadata.get(key)
-            for key in ("agent_id", "tenant_id", "version_no")
+            "agent_id": metadata.get("agent_id"),
+            "tenant_fingerprint": (
+                sha256_value(str(metadata.get("tenant_id")))
+                if metadata.get("tenant_id") is not None
+                else None
+            ),
+            "version_no": metadata.get("version_no"),
         }
         if isinstance(metadata, dict)
         and metadata.get("_benchmark_assembly_origin") == "injected_builtin"
@@ -211,9 +227,28 @@ def build_parity_snapshot(
     template_source: str,
     resource_support: dict[str, bool] | None = None,
     intentional_empty_resources: dict[str, bool] | None = None,
+    producer_kind: str = "benchmark_runtime",
+    producer_component: str = "sdk.benchmark.generic",
+    model: dict[str, Any] | None = None,
+    capacity: dict[str, Any] | None = None,
+    policy: dict[str, Any] | None = None,
+    runtime_flags: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
-        "snapshot_schema_version": 1,
+        "snapshot_schema_version": 2,
+        "producer": {
+            "kind": producer_kind,
+            "component": producer_component,
+            "capture_mode": (
+                "assembled_agent_run_info"
+                if producer_kind in {"benchmark_runtime", "production_runtime"}
+                else "configuration_reconstruction"
+            ),
+        },
+        "coverage": {
+            "captured": list(STRICT_SURFACES),
+            "strict_gate": list(STRICT_SURFACES),
+        },
         "prompt": build_prompt_snapshot(
             context_items,
             prompt_templates,
@@ -228,7 +263,112 @@ def build_parity_snapshot(
             intentional_empty=intentional_empty_resources,
         ),
         "tools": build_tool_snapshot(tools),
+        "model": _jsonable(model or {}),
+        "capacity": _jsonable(capacity or {}),
+        "policy": _jsonable(policy or {}),
+        "runtime_flags": _jsonable(runtime_flags or {}),
     }
+
+
+def build_agent_run_info_parity_snapshot(
+    agent_run_info: Any,
+    *,
+    language: str,
+    template_version: str,
+    template_source: str,
+    producer_kind: str,
+    producer_component: str,
+    resource_support: dict[str, bool] | None = None,
+    intentional_empty_resources: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    """Capture a secret-free snapshot from an already assembled AgentRunInfo."""
+    agent_config = agent_run_info.agent_config
+    model_configs = list(agent_run_info.model_config_list or [])
+    active_model_name = _field(agent_config, "model_name", "")
+    active_model = next(
+        (
+            config for config in model_configs
+            if _field(config, "cite_name", "") == active_model_name
+        ),
+        model_configs[0] if model_configs else None,
+    )
+    model_snapshot = {
+        field: _jsonable(_field(active_model, field))
+        for field in MODEL_SNAPSHOT_FIELDS
+        if active_model is not None and _field(active_model, field) is not None
+    }
+    if active_model is not None:
+        model_snapshot["endpoint_configured"] = bool(_field(active_model, "url", ""))
+
+    context_config = _field(agent_config, "context_manager_config")
+    policy_layers = _field(context_config, "policy_layers") if context_config else None
+    effective_mode = None
+    if policy_layers is not None:
+        try:
+            from nexent.core.agents.context import resolve_policy
+
+            processing_mode = resolve_policy(policy_layers).processing_mode
+            effective_mode = str(getattr(processing_mode, "value", processing_mode))
+        except (AttributeError, ImportError, TypeError, ValueError):
+            effective_mode = None
+    policy_snapshot = {
+        "effective_processing_mode": effective_mode,
+        "policy_layers": _jsonable(policy_layers),
+        "token_threshold": _field(context_config, "token_threshold", 0) if context_config else 0,
+        "context_window_tokens": _field(context_config, "context_window_tokens", 0) if context_config else 0,
+        "soft_input_budget_tokens": _field(context_config, "soft_input_budget_tokens", 0) if context_config else 0,
+        "hard_input_budget_tokens": _field(context_config, "hard_input_budget_tokens", 0) if context_config else 0,
+        "keep_recent_steps": _field(context_config, "keep_recent_steps", 0) if context_config else 0,
+    }
+    history = list(_field(agent_run_info, "history", []) or [])
+    mcp_host = list(_field(agent_run_info, "mcp_host", []) or [])
+    runtime_flags = {
+        "enable_planning": bool(
+            _field(agent_config, "enable_planning", False)
+            or _field(agent_run_info, "enable_planning", False)
+        ),
+        "provide_run_summary": bool(_field(agent_config, "provide_run_summary", False)),
+        "verification_config": _jsonable(_field(agent_config, "verification_config")),
+        "max_steps": _field(agent_config, "max_steps"),
+        "requested_output_tokens": _field(agent_config, "requested_output_tokens"),
+        "history_count": len(history),
+        "history_present": bool(history),
+        "mcp_host_count": len(mcp_host),
+        "mcp_present": bool(mcp_host),
+        "sandbox_present": _field(agent_run_info, "sandbox_config") is not None,
+    }
+    capacity_snapshot = {
+        "model_capacity": _field(agent_run_info, "capacity_snapshot")
+        or _field(agent_config, "capacity_snapshot"),
+        "safe_input_budget": _field(agent_run_info, "safe_input_budget_snapshot")
+        or _field(agent_config, "safe_input_budget_snapshot"),
+    }
+    return build_parity_snapshot(
+        context_items=list(_field(agent_config, "context_items", []) or []),
+        prompt_templates=_field(agent_config, "prompt_templates", {}) or {},
+        tools=list(_field(agent_config, "tools", []) or []),
+        language=language,
+        template_version=template_version,
+        template_source=template_source,
+        resource_support=resource_support,
+        intentional_empty_resources=intentional_empty_resources,
+        producer_kind=producer_kind,
+        producer_component=producer_component,
+        model=model_snapshot,
+        capacity=capacity_snapshot,
+        policy=policy_snapshot,
+        runtime_flags=runtime_flags,
+    )
+
+
+def simulation_fidelity_for_snapshot(snapshot: dict[str, Any]) -> str:
+    """Return a trust label derived from the expected snapshot's producer."""
+    producer_kind = snapshot.get("producer", {}).get("kind")
+    return {
+        "production_runtime": "production_snapshot",
+        "benchmark_reconstructed": "benchmark_reconstructed_snapshot",
+        "benchmark_runtime": "benchmark_runtime_snapshot",
+    }.get(producer_kind, "mechanism_only")
 
 
 def diff_parity_snapshots(expected: dict[str, Any], actual: dict[str, Any]) -> dict[str, Any]:
@@ -302,6 +442,15 @@ def diff_parity_snapshots(expected: dict[str, Any], actual: dict[str, Any]) -> d
             if expected_tool_map[name].get("implementation") != actual_tool_map[name].get("implementation")
         ),
     }
+    strict_surfaces = set(
+        expected.get("coverage", {}).get("strict_gate")
+        or ("prompt", "context_items", "resources", "tools")
+    )
+    diff["runtime_surface_mismatches"] = sorted(
+        surface
+        for surface in ("model", "capacity", "policy", "runtime_flags")
+        if surface in strict_surfaces and expected.get(surface, {}) != actual.get(surface, {})
+    )
     diff["passed"] = not any(
         value for key, value in diff.items() if key != "passed"
     )

@@ -1,7 +1,9 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
+from sdk.benchmark.generic import run_context_manager_comparison as comparison_module
 from sdk.benchmark.generic.run_context_manager_comparison import (
     GroupSpec,
     aggregate_provider_cache,
@@ -13,6 +15,7 @@ from sdk.benchmark.generic.run_context_manager_comparison import (
     fetch_run_results,
     paired_outcomes,
     parse_args,
+    validate_manifest_parity,
     validate_runner_args,
 )
 
@@ -110,6 +113,121 @@ def test_paired_outcomes_builds_matrix_for_identical_item_ids():
 
     assert result["paired_item_count"] == 2
     assert result["outcome_matrix"] == {"PF": 2}
+
+
+def _write_comparison_manifest(
+    manifest_dir,
+    run_name,
+    *,
+    mode,
+    policy,
+    model_name="model-a",
+):
+    manifest = {
+        "context_processing_mode": mode,
+        "context_runtime": "context_items",
+        "context_manager": {"hard_input_budget_tokens": 20_000},
+        "context_policy_fingerprint": f"policy-{mode}",
+        "parity_snapshot_hash": f"snapshot-{mode}",
+        "parity_snapshot": {
+            "snapshot_schema_version": 2,
+            "prompt": {"component_hashes": {"duty": "same"}},
+            "context_items": [],
+            "resources": {},
+            "tools": {"schemas": []},
+            "model": {"model_name": model_name},
+            "capacity": {"context_window_tokens": 32_000},
+            "policy": policy,
+            "runtime_flags": {"max_steps": 15},
+        },
+    }
+    (manifest_dir / f"{run_name}.manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
+
+def _comparison_policy(mode, soft_input_budget=10_000):
+    return {
+        "effective_processing_mode": mode,
+        "policy_layers": {"platform": {"processing_mode": mode}},
+        "soft_input_budget_tokens": soft_input_budget,
+    }
+
+
+def test_validate_manifest_parity_allows_processing_mode_snapshot_difference(
+    tmp_path,
+    monkeypatch,
+):
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-p",
+        mode="passthrough",
+        policy=_comparison_policy("passthrough"),
+    )
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-c",
+        mode="adaptive_compact",
+        policy=_comparison_policy("adaptive_compact"),
+    )
+
+    result = validate_manifest_parity({"P": "run-p", "C": "run-c"})
+
+    assert result["status"] == "passed"
+    assert "parity_snapshot_except_processing_mode" in result["checked_fields"]
+
+
+def test_validate_manifest_parity_rejects_non_processing_mode_snapshot_difference(
+    tmp_path,
+    monkeypatch,
+):
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-p",
+        mode="passthrough",
+        policy=_comparison_policy("passthrough"),
+    )
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-c",
+        mode="adaptive_compact",
+        policy=_comparison_policy("adaptive_compact"),
+        model_name="model-b",
+    )
+
+    with pytest.raises(RuntimeError, match="parity_snapshot_except_processing_mode"):
+        validate_manifest_parity({"P": "run-p", "C": "run-c"})
+
+
+def test_validate_manifest_parity_rejects_other_policy_difference(
+    tmp_path,
+    monkeypatch,
+):
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    monkeypatch.setattr(comparison_module, "ARTIFACT_ROOT", tmp_path)
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-p",
+        mode="passthrough",
+        policy=_comparison_policy("passthrough"),
+    )
+    _write_comparison_manifest(
+        manifest_dir,
+        "run-c",
+        mode="adaptive_compact",
+        policy=_comparison_policy("adaptive_compact", soft_input_budget=11_000),
+    )
+
+    with pytest.raises(RuntimeError, match="parity_snapshot_except_processing_mode"):
+        validate_manifest_parity({"P": "run-p", "C": "run-c"})
 
 
 def test_fetch_run_results_waits_for_complete_dataset_run(mocker, monkeypatch):

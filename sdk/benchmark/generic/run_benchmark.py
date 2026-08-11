@@ -280,19 +280,22 @@ def run_experiment(dataset_name: str, task_fn, evaluator_fns: list,
                 "simulation_fidelity": "mechanism_only",
             }
             if expected_snapshot is not None:
-                from provenance.parity_snapshot import diff_parity_snapshots
+                from provenance.parity_snapshot import (
+                    diff_parity_snapshots,
+                    simulation_fidelity_for_snapshot,
+                )
                 parity_diff = diff_parity_snapshots(
                     expected_snapshot,
                     output.get("parity_snapshot", {}),
                 )
                 if not parity_diff["passed"]:
                     raise RuntimeError(
-                        "Production parity gate failed: "
+                        "Parity snapshot gate failed: "
                         + json.dumps(parity_diff, ensure_ascii=False, sort_keys=True)
                     )
                 parity_gate = {
                     "passed": True,
-                    "simulation_fidelity": "production_snapshot",
+                    "simulation_fidelity": simulation_fidelity_for_snapshot(expected_snapshot),
                     "diff": parity_diff,
                 }
             build_context = {
@@ -656,7 +659,10 @@ def main():
     parser.add_argument(
         "--production-parity-snapshot",
         type=str,
-        help="JSON/YAML snapshot used as a strict prompt/context/tool parity gate",
+        help=(
+            "JSON/YAML snapshot used as a strict parity gate; fidelity is derived "
+            "from its producer metadata"
+        ),
     )
     parser.add_argument(
         "--tenant-id",

@@ -512,8 +512,27 @@ def paired_outcomes(group_results: dict[str, dict[str, bool]]) -> dict[str, Any]
     }
 
 
+def _normalize_snapshot_processing_mode(snapshot: Any) -> Any:
+    """Replace only the P/C processing-mode variable before comparison."""
+    normalized = json.loads(json.dumps(snapshot))
+    if not isinstance(normalized, dict):
+        return normalized
+    policy = normalized.get("policy")
+    if not isinstance(policy, dict):
+        return normalized
+    if "effective_processing_mode" in policy:
+        policy["effective_processing_mode"] = "<processing_mode>"
+    policy_layers = policy.get("policy_layers")
+    if not isinstance(policy_layers, dict):
+        return normalized
+    platform_policy = policy_layers.get("platform")
+    if isinstance(platform_policy, dict) and "processing_mode" in platform_policy:
+        platform_policy["processing_mode"] = "<processing_mode>"
+    return normalized
+
+
 def validate_manifest_parity(run_names: dict[str, str]) -> dict[str, Any]:
-    """Ensure all non-policy resolved settings are identical across P/C."""
+    """Ensure settings other than the P/C processing mode are identical."""
     try:
         from .provenance.experiment_manifest import manifest_path
     except ImportError:
@@ -543,7 +562,6 @@ def validate_manifest_parity(run_names: dict[str, str]) -> dict[str, Any]:
         "tool_count",
         "tool_schema_hash",
         "system_prompt_hash",
-        "parity_snapshot_hash",
         "budget_profile",
         "evaluator_names",
         "evaluator_version",
@@ -553,6 +571,19 @@ def validate_manifest_parity(run_names: dict[str, str]) -> dict[str, Any]:
         for field in invariant_fields
         if len({json.dumps(manifest.get(field), sort_keys=True) for manifest in manifests.values()}) > 1
     }
+    normalized_snapshots = {
+        key: _normalize_snapshot_processing_mode(manifest.get("parity_snapshot") or {})
+        for key, manifest in manifests.items()
+    }
+    serialized_snapshots = {
+        json.dumps(snapshot, sort_keys=True)
+        for snapshot in normalized_snapshots.values()
+    }
+    if len(serialized_snapshots) > 1:
+        mismatches["parity_snapshot_except_processing_mode"] = {
+            key: manifest.get("parity_snapshot_hash")
+            for key, manifest in manifests.items()
+        }
     if mismatches:
         raise RuntimeError(
             "P/C resolved manifest parity failed: "
@@ -585,7 +616,7 @@ def validate_manifest_parity(run_names: dict[str, str]) -> dict[str, Any]:
             raise RuntimeError(f"{key} manifest is missing a context policy fingerprint")
     return {
         "status": "passed",
-        "checked_fields": list(invariant_fields),
+        "checked_fields": [*invariant_fields, "parity_snapshot_except_processing_mode"],
         "target_fields": [
             "context_processing_mode",
             "adaptive_compaction_enabled",

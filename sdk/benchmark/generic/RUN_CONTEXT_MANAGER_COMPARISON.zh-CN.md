@@ -172,10 +172,9 @@ stable-prefix 和 hard-budget 检查。P 超过 hard budget 而失败属于新�
 `--production-parity-snapshot` 是 strict drift gate，不是 Agent YAML 的替代品：
 
 - `--agent-config` 仍负责构造实际 duty/constraint、Agent version、显式工具和其他运行参数；
-- snapshot 负责比较实际装配结果与预先冻结的 Prompt/ContextItem/resource/tool contract；
+- snapshot v2 负责比较 Prompt/ContextItem/resource/tool/model/capacity/policy/runtime flags；
 - 未传 snapshot 仍能运行，但 manifest 标记为 `mechanism_only`；
-- 传入 snapshot 不代表完整复刻实时生产数据库，因为 snapshot 本身由导出的 YAML 和
-  Benchmark assembly 生成；
+- YAML 重建 snapshot 通过时标记 `benchmark_reconstructed_snapshot`，不代表完整复刻实时生产数据库；
 - snapshot 与 language 绑定，切换 `en/zh` 必须重新导出；
 - `zh` 时 Benchmark 会和生产一样自动使用中文默认 `APP_DESCRIPTION`，无需手动 export；
 - trace 中的 `system_prompt` 使用生产 renderer，`### Available Resources` 应展示实际工具
