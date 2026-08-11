@@ -452,7 +452,7 @@ class HybridSearchRequest(BaseModel):
         None,
         ge=0.0,
         le=1.0,
-        description="Optional override for the accurate-search score weight",
+        description="Optional caller-specified weight applied to accurate search scores",
     )
 
 

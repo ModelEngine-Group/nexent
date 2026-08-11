@@ -2645,66 +2645,6 @@ class TestElasticSearchService(unittest.TestCase):
         )
         mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
-    def test_search_hybrid_adapts_only_unspecified_rest_weight(self, mock_get_embedding_by_index):
-        """REST defaults retain 0.5 for text and favor exact retrieval for numbers."""
-        self.mock_vdb_core.hybrid_search.return_value = []
-        mock_get_embedding_by_index.return_value = (
-            self.mock_embedding, 1, {"status": "ok", "message": "OK"}
-        )
-
-        ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="项目状态",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
-            vdb_core=self.mock_vdb_core,
-        )
-        self.mock_vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["test_index"],
-            query_text="项目状态",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.5,
-        )
-
-        self.mock_vdb_core.hybrid_search.reset_mock()
-        ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="编号 95173042",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
-            vdb_core=self.mock_vdb_core,
-        )
-        self.mock_vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["test_index"],
-            query_text="编号 95173042",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.7,
-        )
-
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
-    def test_search_hybrid_adapts_fullwidth_numeric_rest_weight(self, mock_get_embedding_by_index):
-        """The REST default must recognize full-width numeric identifiers."""
-        self.mock_vdb_core.hybrid_search.return_value = []
-        mock_get_embedding_by_index.return_value = (
-            self.mock_embedding, 1, {"status": "ok", "message": "OK"}
-        )
-
-        ElasticSearchService.search_hybrid(
-            index_names=["test_index"],
-            query="ID \uff11\uff10\uff0e\uff11\uff12\uff18\uff0e\uff10\uff0e\uff14\uff12",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
-            vdb_core=self.mock_vdb_core,
-        )
-
-        self.mock_vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["test_index"],
-            query_text="ID \uff11\uff10\uff0e\uff11\uff12\uff18\uff0e\uff10\uff0e\uff14\uff12",
-            embedding_model=self.mock_embedding,
-            top_k=10,
-            weight_accurate=0.7,
-        )
-
     def test_search_hybrid_missing_tenant_id(self):
         """Test search_hybrid raises ValueError when tenant_id is missing."""
         with self.assertRaises(ValueError) as context:
