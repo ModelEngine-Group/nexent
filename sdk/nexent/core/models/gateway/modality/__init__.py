@@ -18,7 +18,6 @@ from .llm_adapter import (
     OpenAILLMAdapter,
     OpenAILongContextLLMAdapter,
 )
-from .realtime_adapter import RealtimeAdapter
 from .rerank_adapter import (
     CohereRerankAdapter,
     JinaRerankAdapter,
@@ -66,6 +65,4 @@ __all__ = [
     # Rerank
     "RerankAdapter", "RerankRequest", "OpenAICompatibleRerankAdapter",
     "JinaRerankAdapter", "CohereRerankAdapter",
-    # Realtime
-    "RealtimeAdapter",
 ]

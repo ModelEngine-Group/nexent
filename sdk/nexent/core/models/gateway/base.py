@@ -26,7 +26,7 @@ class MultimodalAdapter(ABC):
     """Root interface for every modality adapter.
 
     Subclasses set the class-level ``modality`` (``"llm"`` | ``"vlm"`` | ``"stt"``
-    | ``"tts"`` | ``"embedding"`` | ``"rerank"`` | ``"realtime"`` | ...) and
+    | ``"tts"`` | ``"embedding"`` | ``"rerank"`` | ...) and
     ``factory`` (``"openai"`` | ``"ali"`` | ``"volc"`` | ...), then implement
     :meth:`invoke`, :meth:`health_check`, :meth:`get_model_info`.
     """
