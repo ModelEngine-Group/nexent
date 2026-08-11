@@ -12,35 +12,6 @@ import type {
 } from "@/types/agentEvaluation";
 
 export const evaluationService = {
-  uploadEvaluationSetExcel: async (params: {
-    name: string;
-    description?: string;
-    files: File[];
-  }): Promise<EvaluationSet> => {
-    const formData = new FormData();
-    formData.append("name", params.name);
-    if (params.description) formData.append("description", params.description);
-    for (const file of params.files) {
-      formData.append("files", file);
-    }
-
-    const resp = await fetch(API_ENDPOINTS.evaluationSets.upload, {
-      method: "POST",
-      headers: {
-        "User-Agent": "AgentFrontEnd/1.0",
-      },
-      body: formData,
-    });
-
-    const result = await resp.json();
-    if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(
-        result.detail || result.message || "Upload evaluation set failed"
-      );
-    }
-    return result.data;
-  },
-
   downloadEvaluationSetTemplate: async (): Promise<Blob> => {
     const resp = await fetch(API_ENDPOINTS.evaluationSets.template, {
       headers: getAuthHeaders(),
@@ -56,26 +27,6 @@ export const evaluationService = {
       throw new Error(msg);
     }
     return await resp.blob();
-  },
-
-  createEvaluationSet: async (params: {
-    name: string;
-    description?: string;
-    source_filename?: string;
-    jsonl_text: string;
-  }): Promise<EvaluationSet> => {
-    const resp = await fetch(API_ENDPOINTS.evaluationSets.create, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(params),
-    });
-    const result = await resp.json();
-    if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(
-        result.detail || result.message || "Create evaluation set failed"
-      );
-    }
-    return result.data;
   },
 
   listEvaluationSets: async (params?: {

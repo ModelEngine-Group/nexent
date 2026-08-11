@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  Alert,
   Card,
   Typography,
   Table,
@@ -17,6 +18,7 @@ import {
   InputNumber,
   Input,
   App,
+  List,
   type TableProps,
 } from "antd";
 import { Download, Zap, RotateCw, Tags } from "lucide-react";
@@ -397,7 +399,8 @@ export default function EvaluationDetailPage() {
       tab: string,
       sortBy: string | null,
       sortOrder: string,
-      filters?: Record<number, string>
+      filters?: Record<number, string>,
+      sessionId?: string | null
     ) => {
       if (!id) return;
       // Always cancel the previous in-flight request to prevent race
@@ -414,6 +417,10 @@ export default function EvaluationDetailPage() {
       if (sortBy)
         url += `&sort_by=${encodeURIComponent(sortBy)}&sort_order=${sortOrder}`;
       if (tab !== "all") url += `&pass_filter=${tab}`;
+      // Session filter is server-side (same as pass_filter / annotations)
+      // so pagination total and page boundaries stay consistent with the
+      // visible rows.
+      if (sessionId) url += `&session_id=${encodeURIComponent(sessionId)}`;
       if (filters) {
         // Parallel arrays: i-th schema-id pairs with i-th value.  The
         // backend DB layer verifies lengths match and returns a 400 if
@@ -435,15 +442,22 @@ export default function EvaluationDetailPage() {
           //
           // Collect unique session_ids for the session filter dropdown,
           // capped at 50 entries to avoid rendering an unusably long SELECT.
-          const sessionIds = new Set<string>();
-          items.forEach((c: any) => {
-            if (c.session_id) sessionIds.add(c.session_id);
+          // We MERGE (union) with the existing options instead of replacing
+          // them so that filtering by one session does not permanently drop
+          // the other sessions from the dropdown.
+          setSessionIdOptions((prev) => {
+            const merged = new Map<string, { text: string; value: string }>();
+            (prev || []).forEach((o) => merged.set(o.value, o));
+            items.forEach((c: any) => {
+              if (c.session_id && !merged.has(c.session_id)) {
+                merged.set(c.session_id, {
+                  text: c.session_id,
+                  value: c.session_id,
+                });
+              }
+            });
+            return Array.from(merged.values()).slice(0, 50);
           });
-          setSessionIdOptions(
-            Array.from(sessionIds)
-              .map((sid) => ({ text: sid, value: sid }))
-              .slice(0, 50)
-          );
           setCases(items);
           setCaseTotal(data.total || 0);
         })
@@ -479,7 +493,8 @@ export default function EvaluationDetailPage() {
       caseTab,
       caseSortBy,
       caseSortOrder,
-      annoFilters
+      annoFilters,
+      sessionIdFilter
     );
     fetchStats();
   }, [
@@ -490,6 +505,7 @@ export default function EvaluationDetailPage() {
     caseSortBy,
     caseSortOrder,
     annoFilters,
+    sessionIdFilter,
     fetchCases,
     fetchStats,
   ]);
@@ -597,11 +613,9 @@ export default function EvaluationDetailPage() {
         filteredValue: sessionIdFilter ? [sessionIdFilter] : null,
         filterMultiple: false,
         filterSearch: true,
-        onFilter: (value: any, record: any) => {
-          const sid = record.session_id || "";
-          if (value === "__single__") return !sid;
-          return sid === value;
-        },
+        // NOTE: no `onFilter` here — session filtering is server-side
+        // (handleTableChange sends `session_id=` to the backend), matching
+        // how the annotation columns behave.
         render: (_: any, r: any) => {
           const sid = r.session_id;
           if (!sid)
@@ -624,6 +638,15 @@ export default function EvaluationDetailPage() {
             </Tag>
           );
         },
+      },
+      {
+        title: t("agentEvaluation.colHeader.turn"),
+        key: "turn",
+        width: 60,
+        render: (_: any, r: any) =>
+          r.turn_order !== undefined && r.turn_order !== null
+            ? r.turn_order
+            : "-",
       },
       {
         title: t("agentEvaluation.colHeader.question"),
@@ -882,15 +905,9 @@ export default function EvaluationDetailPage() {
     sessionIdOptions,
   ]);
 
-  // Client-side session_id filter
-  const displayCases = useMemo(() => {
-    if (!sessionIdFilter) return cases;
-    return cases.filter((c: any) => {
-      const sid = c.session_id || "";
-      if (sessionIdFilter === "__single__") return !sid;
-      return sid === sessionIdFilter;
-    });
-  }, [cases, sessionIdFilter]);
+  // NOTE: session filtering is server-side now (fetchCases sends
+  // `session_id=`), so the raw `cases` list is rendered directly — no
+  // client-side post-filtering is needed and pagination stays consistent.
 
   // Table change handler for server-side pagination + sorting
   const handleTableChange = useCallback(
@@ -899,6 +916,7 @@ export default function EvaluationDetailPage() {
       if (extra.action === "filter") {
         const newFilters = { ...annoFilters };
         let sessionFilterChanged = false;
+        let newSessionFilter: string | null = sessionIdFilter;
         for (const key of Object.keys(filters || {})) {
           if (key.startsWith("anno_")) {
             const sid = Number(key.replace("anno_", ""));
@@ -909,15 +927,18 @@ export default function EvaluationDetailPage() {
             }
           }
           if (key === "session_id") {
-            sessionFilterChanged = true;
-            setSessionIdFilter(filters[key]?.length ? filters[key][0] : null);
+            // Only treat this as a session-filter change when the value
+            // actually differs from the current one. The `filters` object
+            // always contains the session_id column (even with null), so
+            // unconditionally flagging it here would swallow anno filters.
+            const nextVal = filters[key]?.length ? filters[key][0] : null;
+            if (nextVal !== sessionIdFilter) {
+              sessionFilterChanged = true;
+              newSessionFilter = nextVal;
+            }
           }
         }
-        if (sessionFilterChanged) {
-          // Session filter is client-side, re-fetch with page=1 to reset
-          setCasePage(1);
-          return;
-        }
+        setSessionIdFilter(newSessionFilter);
         setAnnoFilters(newFilters);
         setCasePage(1);
         fetchCases(
@@ -926,7 +947,10 @@ export default function EvaluationDetailPage() {
           caseTab,
           caseSortBy,
           caseSortOrder,
-          newFilters
+          newFilters,
+          // Session filter is server-side now — send it with the fetch so
+          // the pagination total and page boundaries match the visible rows.
+          newSessionFilter
         );
         return;
       }
@@ -945,12 +969,21 @@ export default function EvaluationDetailPage() {
           caseTab,
           sortBy,
           sorter.order === "ascend" ? "asc" : "desc",
-          annoFilters
+          annoFilters,
+          sessionIdFilter
         );
       } else {
         setCaseSortBy(null);
         setCaseSortOrder("asc");
-        fetchCases(newPage, newPageSize, caseTab, null, "asc", annoFilters);
+        fetchCases(
+          newPage,
+          newPageSize,
+          caseTab,
+          null,
+          "asc",
+          annoFilters,
+          sessionIdFilter
+        );
       }
     },
     [
@@ -960,6 +993,7 @@ export default function EvaluationDetailPage() {
       scoreEvaluator,
       fetchCases,
       annoFilters,
+      sessionIdFilter,
     ]
   );
 
@@ -972,7 +1006,8 @@ export default function EvaluationDetailPage() {
       setCaseSortOrder("asc");
       setScoreEvaluator(null);
       setSessionIdFilter(null);
-      fetchCases(1, casePageSize, tab, null, "asc", annoFilters);
+      // Session filter resets with the tab, so fetch without session_id.
+      fetchCases(1, casePageSize, tab, null, "asc", annoFilters, null);
     },
     [casePageSize, fetchCases, annoFilters]
   );
@@ -1255,47 +1290,126 @@ export default function EvaluationDetailPage() {
               {t("agentEvaluation.aiAnalysisDisclaimer")}
             </Text>
           </Flex>
-          <Flex vertical gap={12}>
-            <Text strong style={{ fontSize: 18, color: "#1677ff" }}>
-              {analysisReport.pass_rate}
-            </Text>
+          <Flex vertical gap={16}>
+            {/* ── Top issues ── */}
             {analysisReport.top_issues?.length > 0 && (
-              <Flex vertical gap={6}>
-                <Text type="secondary" className="text-xs">
-                  {t("agentEvaluation.hotQuestions")}
-                </Text>
-                {analysisReport.top_issues.map((item: any, i: number) => (
-                  <Flex key={`${item.problem}_${i}`} gap={8} align="center">
-                    <Tag color={i === 0 ? "red" : "orange"}>
-                      {item.frequency}
-                    </Tag>
-                    <Text>{item.problem}</Text>
-                    <Text type="secondary" className="text-xs">
-                      → {item.fix}
-                    </Text>
-                  </Flex>
-                ))}
+              <Flex vertical gap={8}>
+                <Text strong>{t("agentEvaluation.hotQuestions")}</Text>
+                <List
+                  size="small"
+                  dataSource={analysisReport.top_issues}
+                  renderItem={(item: any, i: number) => (
+                    <List.Item
+                      key={`${item.problem}_${i}`}
+                      style={{
+                        padding: "10px 12px",
+                        background: "#fafafa",
+                        borderRadius: 8,
+                        borderLeft: `3px solid ${
+                          item.severity === "high"
+                            ? "#ff4d4f"
+                            : item.severity === "medium"
+                              ? "#faad14"
+                              : "#1677ff"
+                        }`,
+                      }}
+                    >
+                      <Flex vertical gap={4} style={{ width: "100%" }}>
+                        <Flex gap={8} align="center" wrap>
+                          <Tag
+                            color={
+                              item.severity === "high"
+                                ? "red"
+                                : item.severity === "medium"
+                                  ? "orange"
+                                  : "blue"
+                            }
+                          >
+                            {item.severity === "high"
+                              ? t("agentEvaluation.severity.high")
+                              : item.severity === "medium"
+                                ? t("agentEvaluation.severity.medium")
+                                : t("agentEvaluation.severity.low")}
+                          </Tag>
+                          <Text strong>{item.problem}</Text>
+                        </Flex>
+                        {item.detail ? (
+                          <Text type="secondary" className="text-xs">
+                            {item.detail}
+                          </Text>
+                        ) : null}
+                        {item.fix ? (
+                          <Text type="secondary" className="text-xs">
+                            → {item.fix}
+                          </Text>
+                        ) : null}
+                      </Flex>
+                    </List.Item>
+                  )}
+                />
               </Flex>
             )}
+
+            {/* ── Overall review ── */}
             {analysisReport.summary && (
-              <Text style={{ fontSize: 13, color: "#555" }}>
-                {analysisReport.summary}
-              </Text>
+              <Alert
+                type="info"
+                showIcon
+                message={t("agentEvaluation.overallReview")}
+                description={
+                  <Text style={{ fontSize: 13, color: "#555" }}>
+                    {analysisReport.summary}
+                  </Text>
+                }
+                style={{ background: "#f0f7ff", border: "1px solid #d6e8ff" }}
+              />
             )}
+
+            {/* ── Suggestions ── */}
             {analysisReport.suggestions?.length > 0 && (
-              <Flex vertical gap={4}>
-                <Text type="secondary" className="text-xs">
+              <Flex vertical gap={8}>
+                <Text strong>
                   {t("agentEvaluation.optimizationSuggestions")}
                 </Text>
-                {analysisReport.suggestions.map((s: any, i: number) => (
-                  <Text
-                    key={`${s.action}_${i}`}
-                    className="text-xs"
-                    style={{ paddingLeft: 8, borderLeft: "2px solid #1677ff" }}
-                  >
-                    {s.action}
-                  </Text>
-                ))}
+                <List
+                  size="small"
+                  dataSource={analysisReport.suggestions}
+                  renderItem={(s: any, i: number) => (
+                    <List.Item
+                      key={`${s.action}_${i}`}
+                      style={{ padding: "6px 0" }}
+                    >
+                      <Flex
+                        gap={8}
+                        align="flex-start"
+                        style={{ width: "100%" }}
+                      >
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            width: 18,
+                            height: 18,
+                            borderRadius: 9,
+                            background: "#e6f4ff",
+                            color: "#1677ff",
+                            fontSize: 11,
+                            lineHeight: "18px",
+                            textAlign: "center",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {i + 1}
+                        </span>
+                        <Text
+                          className="text-xs"
+                          style={{ lineHeight: "20px" }}
+                        >
+                          {s.action}
+                        </Text>
+                      </Flex>
+                    </List.Item>
+                  )}
+                />
               </Flex>
             )}
           </Flex>
@@ -1667,7 +1781,8 @@ export default function EvaluationDetailPage() {
                     caseTab,
                     v || null,
                     caseSortOrder,
-                    annoFilters
+                    annoFilters,
+                    sessionIdFilter
                   );
                 }}
                 options={evaluatorNames.map((n: string) => ({
@@ -1680,7 +1795,7 @@ export default function EvaluationDetailPage() {
         </Flex>
         <Table
           columns={caseCols}
-          dataSource={displayCases}
+          dataSource={cases}
           rowKey="agent_evaluation_case_id"
           size="small"
           loading={caseLoading}

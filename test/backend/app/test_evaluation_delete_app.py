@@ -86,7 +86,7 @@ for _parent, _children in (
 #  6  list_agent_evaluation_cases_impl
 #  7  list_agent_evaluations_by_agent_impl
 #  8  create_evaluation_set_from_cases
-#  9  create_evaluation_set_from_jsonl
+#  9  create_empty_evaluation_set
 # 10  get_evaluation_set_impl
 # 11  list_evaluation_set_cases_impl
 # 12  list_evaluation_sets_impl
@@ -101,7 +101,7 @@ _PATCH_TARGETS = [
     "services.agent_evaluation_service.list_agent_evaluation_cases_impl",
     "services.agent_evaluation_service.list_agent_evaluations_by_agent_impl",
     "services.evaluation_set_service.create_evaluation_set_from_cases",
-    "services.evaluation_set_service.create_evaluation_set_from_jsonl",
+    "services.evaluation_set_service.create_empty_evaluation_set",
     "services.evaluation_set_service.get_evaluation_set_impl",
     "services.evaluation_set_service.list_evaluation_set_cases_impl",
     "services.evaluation_set_service.list_evaluation_sets_impl",
@@ -333,9 +333,11 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         )
 
     def test_list_agent_evaluations_invalid_pagination_returns_422(self):
+        # ``limit`` is clamped to [0, 200]; 0 now means "full result set",
+        # so a genuinely out-of-range value is required to trigger 422.
         resp = self.client.get(
             "/agent-evaluations",
-            params={"agent_id": 7, "limit": 0},
+            params={"agent_id": 7, "limit": -1},
         )
         self.assertEqual(resp.status_code, 422)
 
@@ -386,6 +388,7 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
             pass_filter=None,
             anno_schema_ids=[],
             anno_values=[],
+            session_id=None,
         )
 
     def test_list_agent_evaluation_cases_invalid_pagination_returns_422(self):

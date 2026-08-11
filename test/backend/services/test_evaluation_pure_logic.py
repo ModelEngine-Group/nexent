@@ -2,9 +2,6 @@
 
 Targets
 -------
-* ``_coerce_score`` – JSONB string / dict / numeric normalisation (9 branches)
-* ``_coerce_reason`` – reason column coercion to ``{name: text}`` (6 branches)
-* ``_coerce_score_dict`` – numeric extraction with ``isfinite`` filter (5 branches)
 * ``_is_all_pass`` – threshold alignment, non-numeric skip, DEFAULT_PASS_THRESHOLD fallback (8 branches)
 * ``validate_code_evaluator`` – the 4-stage validator (syntax / AST / sandbox-exec / signature)
 
@@ -352,142 +349,7 @@ def service_module():
 
 
 # ---------------------------------------------------------------------------
-# 4. Unit tests – _coerce_score (9 branches)
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceScore:
-    def test_none_returns_none(self, service_module):
-        assert service_module._coerce_score(None) is None
-
-    def test_dict_passthrough(self, service_module):
-        d = {"accuracy": 0.9, "relevance": 0.8}
-        assert service_module._coerce_score(d) is d
-
-    def test_int_passthrough(self, service_module):
-        assert service_module._coerce_score(42) == 42
-
-    def test_float_passthrough(self, service_module):
-        assert service_module._coerce_score(0.75) == 0.75
-
-    def test_empty_string_returns_none(self, service_module):
-        assert service_module._coerce_score("") is None
-        assert service_module._coerce_score("   ") is None
-
-    def test_json_encoded_dict_string(self, service_module):
-        s = '{"accuracy": 0.9, "relevance": 0.8}'
-        result = service_module._coerce_score(s)
-        assert isinstance(result, dict)
-        assert result == {"accuracy": 0.9, "relevance": 0.8}
-
-    def test_json_encoded_number_string(self, service_module):
-        # JSON-decoded int
-        assert service_module._coerce_score("42") == 42
-        # JSON-decoded float
-        assert service_module._coerce_score("0.75") == 0.75
-
-    def test_numeric_string_not_json(self, service_module):
-        # "0.85" is NOT valid JSON by itself? Actually yes it IS valid JSON number.
-        # Let's use a case where JSON fails but float works: trailing + space.
-        assert service_module._coerce_score("0.85 ") == 0.85
-
-    def test_invalid_string_returns_none(self, service_module):
-        assert service_module._coerce_score("not-a-number") is None
-        assert service_module._coerce_score("{invalid json") is None
-
-    def test_unknown_type_returns_none(self, service_module):
-        # list falls through to the final `return None` branch
-        assert service_module._coerce_score([1, 2, 3]) is None
-        # object
-        assert service_module._coerce_score(object()) is None
-
-
-# ---------------------------------------------------------------------------
-# 5. Unit tests – _coerce_reason (6 branches)
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceReason:
-    def test_none_returns_empty(self, service_module):
-        assert service_module._coerce_reason(None) == {}
-
-    def test_empty_string_returns_empty(self, service_module):
-        assert service_module._coerce_reason("") == {}
-        assert service_module._coerce_reason("   ") == {}
-
-    def test_dict_passthrough_none_values_become_empty_string(self, service_module):
-        raw = {"grammar": None, "accuracy": "correct", 123: "numeric-keyed"}
-        out = service_module._coerce_reason(raw)
-        assert out == {"grammar": "", "accuracy": "correct", "123": "numeric-keyed"}
-
-    def test_json_encoded_dict_string(self, service_module):
-        s = '{"accuracy": "All facts correct", "grammar": "One typo"}'
-        out = service_module._coerce_reason(s)
-        assert out == {"accuracy": "All facts correct", "grammar": "One typo"}
-
-    def test_json_dict_with_none_value(self, service_module):
-        s = '{"accuracy": null}'
-        out = service_module._coerce_reason(s)
-        assert out == {"accuracy": ""}
-
-    def test_plain_string_falls_back_to_reason_key(self, service_module):
-        out = service_module._coerce_reason("a plain text reason")
-        assert out == {"reason": "a plain text reason"}
-
-    def test_invalid_json_string_uses_reason_key(self, service_module):
-        out = service_module._coerce_reason("{not valid json here")
-        assert out == {"reason": "{not valid json here"}
-
-    def test_non_string_non_dict_coerced_via_str(self, service_module):
-        out = service_module._coerce_reason(12345)
-        assert out == {"reason": "12345"}
-
-
-# ---------------------------------------------------------------------------
-# 6. Unit tests – _coerce_score_dict (5 branches)
-# ---------------------------------------------------------------------------
-
-
-class TestCoerceScoreDict:
-    def test_dict_of_numbers(self, service_module):
-        raw = {"a": 1, "b": 0.5, "c": 0.0}
-        out = service_module._coerce_score_dict(raw)
-        assert out == {"a": 1.0, "b": 0.5, "c": 0.0}
-
-    def test_dict_filters_non_finite_and_non_numeric(self, service_module):
-        raw = {
-            "good": 0.8,
-            "nan": float("nan"),
-            "inf": float("inf"),
-            "neg_inf": float("-inf"),
-            "str_val": "oops",
-            "none": None,
-        }
-        out = service_module._coerce_score_dict(raw)
-        # Only finite numeric entries survive
-        assert out == {"good": 0.8}
-
-    def test_standalone_numeric_becomes_score_key(self, service_module):
-        assert service_module._coerce_score_dict(0.8) == {"score": 0.8}
-        assert service_module._coerce_score_dict(1) == {"score": 1.0}
-
-    def test_non_finite_standalone_yields_empty(self, service_module):
-        assert service_module._coerce_score_dict(float("nan")) == {}
-        assert service_module._coerce_score_dict(float("inf")) == {}
-
-    def test_none_and_garbage_yield_empty(self, service_module):
-        assert service_module._coerce_score_dict(None) == {}
-        assert service_module._coerce_score_dict("not-a-score") == {}
-        assert service_module._coerce_score_dict(object()) == {}
-
-    def test_json_encoded_dict_string_flow_through(self, service_module):
-        raw = '{"accuracy": 0.9}'
-        out = service_module._coerce_score_dict(raw)
-        assert out == {"accuracy": 0.9}
-
-
-# ---------------------------------------------------------------------------
-# 7. Unit tests – _is_all_pass (8 branches)
+# 4. Unit tests – _is_all_pass (8 branches)
 # ---------------------------------------------------------------------------
 
 
@@ -561,7 +423,7 @@ class TestIsAllPass:
 
 
 # ---------------------------------------------------------------------------
-# 8. Unit tests – validate_code_evaluator (10+ branches: 4 stages, signature)
+# 5. Unit tests – validate_code_evaluator (10+ branches: 4 stages, signature)
 # ---------------------------------------------------------------------------
 
 _GOOD_EVAL_FULL_SIG = """
@@ -780,7 +642,7 @@ evaluate = _proxy
 
 
 # ---------------------------------------------------------------------------
-# 9. Sanity tests – ensure DEFAULT_PASS_THRESHOLD == 0.5 (contract anchor)
+# 6. Sanity tests – ensure DEFAULT_PASS_THRESHOLD == 0.5 (contract anchor)
 # ---------------------------------------------------------------------------
 
 

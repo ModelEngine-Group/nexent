@@ -21,6 +21,17 @@ _running = False
 _thread: threading.Thread | None = None
 
 
+def _run_tenant_task(tenants, task, log_template, warn_label):
+    """Run *task* for each tenant, logging results and swallowing per-tenant errors."""
+    for (tid,) in tenants:
+        try:
+            count = task(tid)
+            if count:
+                logger.info(log_template, count, tid)
+        except Exception as exc:
+            logger.warning("%s failed for tenant %s: %s", warn_label, tid, exc)
+
+
 def _run_loop():
     """Maintenance loop: periodically reap stale runs and cleanup aged data."""
     last_cleanup = 0.0
@@ -33,24 +44,23 @@ def _run_loop():
             # Find all distinct tenant_ids that have any evaluation data
             with get_db_session() as session:
                 tenants = session.query(AgentEvaluation.tenant_id).distinct().all()
-            for (tid,) in tenants:
-                try:
-                    count = reap_stale_runs(tid)
-                    if count:
-                        logger.info("Reaped %d stale RUNNING evaluations for tenant %s", count, tid)
-                except Exception as exc:
-                    logger.warning("reap_stale_runs failed for tenant %s: %s", tid, exc)
+
+            _run_tenant_task(
+                tenants,
+                reap_stale_runs,
+                "Reaped %d stale RUNNING evaluations for tenant %s",
+                "reap_stale_runs",
+            )
 
             # Run aged cleanup every AGED_CLEANUP_INTERVAL
             if now - last_cleanup >= AGED_CLEANUP_INTERVAL:
                 last_cleanup = now
-                for (tid,) in tenants:
-                    try:
-                        count = cleanup_aged_evaluations(tid)
-                        if count:
-                            logger.info("Cleaned up %d aged evaluations for tenant %s", count, tid)
-                    except Exception as exc:
-                        logger.warning("cleanup_aged_evaluations failed for tenant %s: %s", tid, exc)
+                _run_tenant_task(
+                    tenants,
+                    cleanup_aged_evaluations,
+                    "Cleaned up %d aged evaluations for tenant %s",
+                    "cleanup_aged_evaluations",
+                )
 
         except Exception as exc:
             logger.error("Evaluation maintenance loop error: %s", exc)

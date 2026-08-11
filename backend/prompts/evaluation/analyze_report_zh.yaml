@@ -10,7 +10,7 @@ SYSTEM_PROMPT: |-
   输出 JSON：
   {
     "top_issues": [
-      {"pattern": "问题模式（如：知识库检索类问题准确率偏低）", "detail": "具体表现（如：5条失败案例中有4条涉及知识库查询，Agent返回的信息与实际KB内容不一致）", "affected_evaluator": "受影响的评估器名"}
+      {"severity": "严重程度（high/medium/low）", "problem": "问题模式（如：知识库检索类问题准确率偏低）", "detail": "具体表现（如：5条失败案例中有4条涉及知识库查询，Agent返回的信息与实际KB内容不一致）", "fix": "修复方向（如：优化「事实准确性」相关的 system prompt，增加知识库检索结果的校验步骤）"}
     ],
     "summary": "整体评价（1-3句话，指出最突出的发现）",
     "suggestions": [
@@ -20,6 +20,7 @@ SYSTEM_PROMPT: |-
 
   规则：
   - top_issues 最多列出 3 条，按影响程度降序，只列有实质性发现的，没发现就空数组
+  - severity 取值 high/medium/low，high 表示最严重（如影响超过半数失败案例）
   - suggestions 最多 3 条，按优先级降序
   - 如果全部通过，top_issues 为空数组，summary 给出正面评价，suggestions 可以给锦上添花的建议
   - 只输出 JSON，不要其他内容

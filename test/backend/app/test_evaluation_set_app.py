@@ -1,9 +1,11 @@
 """Unit tests for ``backend.apps.evaluation_set_app``."""
 
 import io
+import json
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -163,7 +165,7 @@ def _mock_service_impl(service_module, **impl_overrides):
     # Default mocks for each public service function.
     defaults = {
         "list_evaluation_sets_impl": MagicMock(return_value=[{"id": 1}]),
-        "create_evaluation_set_from_jsonl": MagicMock(return_value={"id": 1}),
+        "create_empty_evaluation_set": MagicMock(return_value={"id": 1}),
         "create_evaluation_set_from_cases": MagicMock(return_value={"id": 2}),
         "delete_evaluation_set_impl": MagicMock(),
         "count_evaluation_sets_impl": MagicMock(return_value=0),
@@ -172,6 +174,14 @@ def _mock_service_impl(service_module, **impl_overrides):
         "list_evaluation_set_cases_impl": MagicMock(
             return_value={"data": [], "total": 0}
         ),
+        "add_evaluation_set_case_impl": MagicMock(return_value={"id": 10}),
+        "update_evaluation_set_case_impl": MagicMock(return_value=True),
+        "delete_evaluation_set_case_impl": MagicMock(return_value=True),
+        "batch_delete_evaluation_set_cases_impl": MagicMock(return_value=3),
+        "export_evaluation_set_impl": MagicMock(return_value=("cases.xlsx", b"xlsx")),
+        "count_active_runs_using_set": MagicMock(return_value=0),
+        "_update_generation_status": MagicMock(),
+        "_generate_cases_async": MagicMock(),
     }
     defaults.update(impl_overrides)
     for name, mock in defaults.items():
@@ -216,22 +226,26 @@ class TestListEvaluationSets:
 
 
 class TestCreateEvaluationSet:
-    def test_creates_from_jsonl(self, client):
+    def test_creates_empty_set(self, client):
+        """POST /evaluation-sets with just a name creates an empty set."""
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
 
         response = client.post(
             "/evaluation-sets",
-            json={"name": "set", "jsonl_text": '{"query":"q","answer":"a"}'},
+            json={"name": "my empty set"},
         )
         assert response.status_code == 200
         assert response.json()["data"] == {"id": 1}
+        evaluation_set_app.create_empty_evaluation_set.assert_called_once()
+        call_kwargs = evaluation_set_app.create_empty_evaluation_set.call_args.kwargs
+        assert call_kwargs["name"] == "my empty set"
 
     def test_400_on_value_error(self, client):
         # Service raises COMMON_VALIDATION_ERROR (→400) for bad input.
         evaluation_set_app = _mock_service_impl(
             None,
-            create_evaluation_set_from_jsonl=MagicMock(
+            create_empty_evaluation_set=MagicMock(
                 side_effect=_exc(_code("COMMON_VALIDATION_ERROR"), "bad input")
             ),
         )
@@ -239,7 +253,7 @@ class TestCreateEvaluationSet:
 
         response = client.post(
             "/evaluation-sets",
-            json={"name": "set", "jsonl_text": "{}"},
+            json={"name": "set"},
         )
         assert response.status_code == 400
         assert "bad input" in response.json()["message"]
@@ -247,7 +261,7 @@ class TestCreateEvaluationSet:
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(
             None,
-            create_evaluation_set_from_jsonl=MagicMock(
+            create_empty_evaluation_set=MagicMock(
                 side_effect=RuntimeError("db down")
             ),
         )
@@ -255,7 +269,7 @@ class TestCreateEvaluationSet:
 
         response = client.post(
             "/evaluation-sets",
-            json={"name": "set", "jsonl_text": "{}"},
+            json={"name": "set"},
         )
         assert response.status_code == 500
 
@@ -324,11 +338,13 @@ class TestUploadEvaluationSet:
         )
         assert response.status_code in (200, 400, 500), response.text
 
-    def test_upload_jsonl(self, client):
+    def test_upload_rejects_unsupported_file_type(self, client):
+        """Files that are not .xlsx / .xls are rejected with a 400."""
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
 
-        jsonl_content = '{"query":"q1","answer":"a1"}\n{"query":"q2","answer":"a2"}\n'
+        # A .jsonl file — previously accepted, now rejected.
+        jsonl_content = '{"query":"q1","answer":"a1"}\n'
         files = [
             (
                 "files",
@@ -345,53 +361,25 @@ class TestUploadEvaluationSet:
             data={"name": "test"},
             files=files,
         )
-        assert response.status_code == 200, response.text
+        assert response.status_code == 400, response.text
+        assert "Unsupported file type" in response.json()["message"]
+        # The create function must NOT have been called.
+        evaluation_set_app.create_evaluation_set_from_cases.assert_not_called()
 
-    def test_upload_jsonl_with_context_and_case_id(self, client):
+    def test_upload_rejects_csv_file(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
 
-        captured = {}
-
-        def _capture(**kwargs):
-            captured["cases"] = kwargs["cases"]
-            return {"id": 99}
-
-        evaluation_set_app.create_evaluation_set_from_cases.side_effect = _capture
-
-        jsonl = '{"query":"q","answer":"a","context":"ctx","case_id":"c1"}\n'
-        files = [("files", ("cases.jsonl", jsonl.encode(), "application/x-jsonlines"))]
-
-        response = client.post(
-            "/evaluation-sets/upload",
-            data={"name": "test"},
-            files=files,
-        )
-        assert response.status_code == 200, response.text
-        # Upload endpoint wraps each JSONL object into the nested
-        # {"inputs": {...}, "label": {...}, "case_id": ...} structure.
-        assert captured["cases"][0]["inputs"]["query"] == "q"
-        assert captured["cases"][0]["inputs"]["context"] == "ctx"
-        assert captured["cases"][0]["label"]["answer"] == "a"
-        assert captured["cases"][0]["case_id"] == "c1"
-
-    def test_upload_jsonl_with_invalid_utf8(self, client):
-        evaluation_set_app = _mock_service_impl(None)
-        _mock_auth(evaluation_set_app)
-
-        captured = {}
-
-        def _capture(**kwargs):
-            captured["cases"] = kwargs["cases"]
-            return {"id": 99}
-
-        evaluation_set_app.create_evaluation_set_from_cases.side_effect = _capture
-
-        # Invalid UTF-8 bytes — after ``errors="replace"`` decoding the
-        # single line is not valid JSON, so no cases are produced and the
-        # endpoint raises COMMON_VALIDATION_ERROR (→400).
-        bad = b'\xff\xfe{"query":"q","answer":"a"}'
-        files = [("files", ("cases.jsonl", bad, "application/x-jsonlines"))]
+        files = [
+            (
+                "files",
+                (
+                    "data.csv",
+                    b"query,answer\nq1,a1\n",
+                    "text/csv",
+                ),
+            )
+        ]
 
         response = client.post(
             "/evaluation-sets/upload",
@@ -399,37 +387,7 @@ class TestUploadEvaluationSet:
             files=files,
         )
         assert response.status_code == 400, response.text
-        assert "No valid cases" in response.json()["message"]
-
-    def test_upload_with_empty_cases_returns_400(self, client):
-        evaluation_set_app = _mock_service_impl(None)
-        _mock_auth(evaluation_set_app)
-
-        # Empty JSONL file (only whitespace) produces no cases.
-        files = [("files", ("empty.jsonl", b"\n\n\n", "application/x-jsonlines"))]
-
-        response = client.post(
-            "/evaluation-sets/upload",
-            data={"name": "test"},
-            files=files,
-        )
-        assert response.status_code == 400
-        assert "No valid cases" in response.json()["message"]
-
-    def test_upload_with_invalid_jsonl_returns_500(self, client):
-        evaluation_set_app = _mock_service_impl(None)
-        _mock_auth(evaluation_set_app)
-
-        files = [("files", ("bad.jsonl", b'{"this is not', "application/x-jsonlines"))]
-
-        response = client.post(
-            "/evaluation-sets/upload",
-            data={"name": "test"},
-            files=files,
-        )
-        # Bad JSON lines are skipped; with no valid cases the endpoint
-        # raises COMMON_VALIDATION_ERROR (→400).
-        assert response.status_code in (400, 422, 500)
+        assert "Unsupported file type" in response.json()["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -541,4 +499,579 @@ class TestDeleteEvaluationSet:
         _mock_auth(evaluation_set_app)
 
         response = client.delete("/evaluation-sets/1")
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /evaluation-sets — validation / auth error paths
+# ---------------------------------------------------------------------------
+
+
+class TestCreateValidation:
+    def test_rejects_short_name(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post("/evaluation-sets", json={"name": "x"})
+        assert response.status_code == 400
+        evaluation_set_app.create_empty_evaluation_set.assert_not_called()
+
+    def test_429_when_limit_reached(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None, count_evaluation_sets_impl=MagicMock(return_value=50)
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.post("/evaluation-sets", json={"name": "valid name"})
+        assert response.status_code == 429
+        evaluation_set_app.create_empty_evaluation_set.assert_not_called()
+
+    def test_401_on_unauthorized(self, client):
+        from consts.exceptions import UnauthorizedError
+
+        evaluation_set_app = _mock_service_impl(None)
+        evaluation_set_app.get_current_user_id = MagicMock(
+            side_effect=UnauthorizedError("000201", "no token")
+        )
+
+        response = client.post("/evaluation-sets", json={"name": "valid name"})
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /evaluation-sets/upload — empty / no-cases error paths
+# ---------------------------------------------------------------------------
+
+
+class TestUploadErrorPaths:
+    def test_rejects_empty_files(self):
+        # ``files: list[UploadFile] = File(...)`` means FastAPI rejects a body
+        # without the field, so the in-body ``if not files`` guard is reached
+        # only by calling the endpoint directly (no exception middleware, so
+        # the AppException propagates).
+        import asyncio
+
+        from consts.exceptions import AppException
+
+        from backend.apps.evaluation_set_app import upload_evaluation_set_api
+
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        async def _call():
+            return await upload_evaluation_set_api(
+                name="n", description=None, files=[], authorization="Bearer x"
+            )
+
+        with pytest.raises(AppException) as ei:
+            asyncio.run(_call())
+        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+
+    def test_400_when_no_valid_cases(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        # The real parser raises ValueError for empty workbooks (→500 via the
+        # generic handler), so stub it to return [] and reach the endpoint's
+        # own "no valid cases" guard.
+        evaluation_set_app.parse_evaluation_cases_from_excel = MagicMock(
+            return_value=[]
+        )
+
+        files = [
+            (
+                "files",
+                (
+                    "set.xlsx",
+                    b"fake-xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            )
+        ]
+        response = client.post(
+            "/evaluation-sets/upload",
+            data={"name": "test"},
+            files=files,
+        )
+        assert response.status_code == 400
+        assert "No valid cases" in response.json()["message"]
+        evaluation_set_app.create_evaluation_set_from_cases.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /evaluation-sets/{id}/export
+# ---------------------------------------------------------------------------
+
+
+class TestExportEvaluationSet:
+    def test_returns_streaming_file(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/1/export")
+        assert response.status_code == 200
+        assert "spreadsheetml" in response.headers["content-type"]
+        assert "filename*=UTF-8''cases.xlsx" in response.headers["content-disposition"]
+        evaluation_set_app.export_evaluation_set_impl.assert_called_once_with(
+            evaluation_set_id=1, tenant_id="t1"
+        )
+
+    def test_404_when_not_found(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            export_evaluation_set_impl=MagicMock(
+                side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "nope")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/99/export")
+        assert response.status_code == 404
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            export_evaluation_set_impl=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/1/export")
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /evaluation-sets/{id}/cases — add case
+# ---------------------------------------------------------------------------
+
+
+class TestAddCase:
+    def test_adds_case(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases",
+            json={
+                "inputs": {"query": "q"},
+                "label": {"answer": "a"},
+                "session_id": "s1",
+                "turn_order": 1,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == {"id": 10}
+        evaluation_set_app.add_evaluation_set_case_impl.assert_called_once_with(
+            1, "t1", {"query": "q"}, {"answer": "a"}, "u1", session_id="s1", turn_order=1
+        )
+
+    def test_400_query_too_long(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases", json={"inputs": {"query": "x" * 2001}}
+        )
+        assert response.status_code == 400
+        evaluation_set_app.add_evaluation_set_case_impl.assert_not_called()
+
+    def test_400_answer_too_long(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases", json={"label": {"answer": "x" * 5001}}
+        )
+        assert response.status_code == 400
+        evaluation_set_app.add_evaluation_set_case_impl.assert_not_called()
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            add_evaluation_set_case_impl=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases", json={"inputs": {"query": "q"}}
+        )
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# PUT /evaluation-sets/{id}/cases/{case_id} — update case
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateCase:
+    def test_updates_case(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.put(
+            "/evaluation-sets/1/cases/5",
+            json={"inputs": {"query": "q2"}, "session_id": "s2"},
+        )
+        assert response.status_code == 200
+        evaluation_set_app.update_evaluation_set_case_impl.assert_called_once_with(
+            1, 5, "t1", {"query": "q2"}, None, session_id="s2", turn_order=None
+        )
+
+    def test_404_when_not_found(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None, update_evaluation_set_case_impl=MagicMock(return_value=False)
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.put("/evaluation-sets/1/cases/5", json={})
+        assert response.status_code == 404
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            update_evaluation_set_case_impl=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.put("/evaluation-sets/1/cases/5", json={})
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# DELETE /evaluation-sets/{id}/cases/{case_id} — delete case
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteCase:
+    def test_deletes_case(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.delete("/evaluation-sets/1/cases/5")
+        assert response.status_code == 200
+        evaluation_set_app.delete_evaluation_set_case_impl.assert_called_once_with(
+            5, "t1"
+        )
+
+    def test_404_when_not_found(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None, delete_evaluation_set_case_impl=MagicMock(return_value=False)
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.delete("/evaluation-sets/1/cases/5")
+        assert response.status_code == 404
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            delete_evaluation_set_case_impl=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.delete("/evaluation-sets/1/cases/5")
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /evaluation-sets/{id}/cases/batch-delete
+# ---------------------------------------------------------------------------
+
+
+class TestBatchDeleteCases:
+    def test_batch_deletes(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases/batch-delete", json={"case_ids": [1, 2, 3]}
+        )
+        assert response.status_code == 200
+        assert response.json()["data"] == {"deleted": 3}
+        evaluation_set_app.batch_delete_evaluation_set_cases_impl.assert_called_once_with(
+            1, [1, 2, 3], "t1"
+        )
+
+    def test_404_propagates(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            batch_delete_evaluation_set_cases_impl=MagicMock(
+                side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "no cases")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases/batch-delete", json={"case_ids": [1]}
+        )
+        assert response.status_code == 404
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            batch_delete_evaluation_set_cases_impl=MagicMock(
+                side_effect=RuntimeError("boom")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/1/cases/batch-delete", json={"case_ids": [1]}
+        )
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# AppException propagation through list / get / cases endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAppExceptionPropagation:
+    def test_list_propagates(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            list_evaluation_sets_impl=MagicMock(
+                side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "x")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets")
+        assert response.status_code == 404
+
+    def test_get_propagates(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            get_evaluation_set_impl=MagicMock(
+                side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "x")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/9")
+        assert response.status_code == 404
+
+    def test_list_cases_propagates(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None,
+            list_evaluation_set_cases_impl=MagicMock(
+                side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "x")
+            ),
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/1/cases")
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Helpers — _parse_docx_to_text / _validate_and_parse_docx / _resolve_target_set
+# ---------------------------------------------------------------------------
+
+
+def _make_docx_bytes(*paragraphs):
+    from docx import Document
+
+    doc = Document()
+    for p in paragraphs:
+        doc.add_paragraph(p)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _app_mod():
+    from backend.apps import evaluation_set_app
+
+    return evaluation_set_app
+
+
+class TestParseDocxToText:
+    def test_returns_non_empty_paragraphs(self):
+        text = _app_mod()._parse_docx_to_text(_make_docx_bytes("line one", "  ", "line two"))
+        assert text == "line one\n\nline two"
+
+
+class TestValidateAndParseDocx:
+    def test_rejects_non_docx(self):
+        with pytest.raises(Exception) as ei:
+            _app_mod()._validate_and_parse_docx(b"x", "a.pdf")
+        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+
+    def test_rejects_oversized_file(self):
+        with pytest.raises(Exception) as ei:
+            _app_mod()._validate_and_parse_docx(b"x" * (20 * 1024 * 1024 + 1), "a.docx")
+        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+
+    def test_parse_failure(self):
+        with pytest.raises(Exception) as ei:
+            _app_mod()._validate_and_parse_docx(b"not a real docx", "a.docx")
+        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+
+    def test_success(self):
+        content, name = _app_mod()._validate_and_parse_docx(
+            _make_docx_bytes("hello world"), "a.docx"
+        )
+        assert "hello world" in content
+        assert name == "a.docx"
+
+
+class TestResolveTargetSet:
+    def test_existing_set_not_in_use(self):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        payload = SimpleNamespace(target_set_id=9, set_name=None, set_description=None)
+        set_id, is_new = evaluation_set_app._resolve_target_set(payload, "t1", "u1")
+        assert set_id == 9
+        assert is_new is False
+        evaluation_set_app.count_active_runs_using_set.assert_called_once_with(9, "t1")
+
+    def test_in_use_raises(self):
+        evaluation_set_app = _mock_service_impl(
+            None, count_active_runs_using_set=MagicMock(return_value=2)
+        )
+        payload = SimpleNamespace(target_set_id=9, set_name=None, set_description=None)
+        with pytest.raises(Exception) as ei:
+            evaluation_set_app._resolve_target_set(payload, "t1", "u1")
+        assert ei.value.error_code == _code("AGENT_EVALUATION_SET_IN_USE")
+
+    def test_missing_set_name_raises(self):
+        evaluation_set_app = _mock_service_impl(None)
+        payload = SimpleNamespace(target_set_id=None, set_name=None, set_description=None)
+        with pytest.raises(Exception) as ei:
+            evaluation_set_app._resolve_target_set(payload, "t1", "u1")
+        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+
+    def test_creates_new_set(self):
+        evaluation_set_app = _mock_service_impl(
+            None, create_empty_evaluation_set=MagicMock(return_value={"evaluation_set_id": 7})
+        )
+        payload = SimpleNamespace(target_set_id=None, set_name="n", set_description="d")
+        set_id, is_new = evaluation_set_app._resolve_target_set(payload, "t1", "u1")
+        assert set_id == 7
+        assert is_new is True
+        evaluation_set_app.create_empty_evaluation_set.assert_called_once_with(
+            tenant_id="t1",
+            name="n",
+            description="d",
+            source_filename=None,
+            created_by="u1",
+        )
+
+
+# ---------------------------------------------------------------------------
+# POST /evaluation-sets/generate-cases-async
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateCasesAsync:
+    def test_json_success_creates_new_set(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None, create_empty_evaluation_set=MagicMock(return_value={"evaluation_set_id": 5})
+        )
+        _mock_auth(evaluation_set_app)
+        evaluation_set_app.pool = MagicMock()
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "gen", "count": 5, "model_id": 3, "set_name": "new set"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["data"] == {"evaluation_set_id": 5}
+        evaluation_set_app._update_generation_status.assert_called_once_with(
+            5, "t1", "GENERATING", 0
+        )
+        evaluation_set_app.pool.submit.assert_called_once()
+        args = evaluation_set_app.pool.submit.call_args.args
+        assert args[0] is evaluation_set_app._generate_cases_async
+        assert args[1:] == (5, "t1", "u1", "gen", 5, 3, None, None, None, True, None)
+
+    def test_json_target_set_id(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        evaluation_set_app.pool = MagicMock()
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "gen", "count": 5, "model_id": 3, "target_set_id": 9},
+        )
+        assert response.status_code == 200
+        args = evaluation_set_app.pool.submit.call_args.args
+        assert args[1] == 9
+        assert args[10] is False  # is_new=False
+
+    def test_multipart_with_docx(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        evaluation_set_app.pool = MagicMock()
+        # fastapi 0.139 ships its own fastapi.datastructures.UploadFile while
+        # Request.form() returns starlette.datastructures.UploadFile, so the
+        # endpoint's isinstance guard is False in this environment.  Align the
+        # module-level UploadFile with the runtime class to exercise the DOCX
+        # parsing path.
+        from starlette.datastructures import UploadFile as StarletteUploadFile
+
+        evaluation_set_app.UploadFile = StarletteUploadFile
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            data={"payload": json.dumps(
+                {"description": "gen", "count": 5, "model_id": 3, "target_set_id": 9}
+            )},
+            files=[("file", ("cases.docx", _make_docx_bytes("hello"), "application/octet-stream"))],
+            headers={"Authorization": "Bearer x"},
+        )
+        assert response.status_code == 200, response.text
+        args = evaluation_set_app.pool.submit.call_args.args
+        assert args[1] == 9
+        assert args[7] == "hello"  # file_content extracted from docx
+        assert args[8] == "cases.docx"
+
+    def test_target_set_in_use_409(self, client):
+        evaluation_set_app = _mock_service_impl(
+            None, count_active_runs_using_set=MagicMock(return_value=2)
+        )
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "d", "count": 1, "model_id": 1, "target_set_id": 9},
+        )
+        assert response.status_code == 409
+
+    def test_missing_set_name_400(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "d", "count": 1, "model_id": 1},
+        )
+        assert response.status_code == 400
+
+    def test_unauthorized_becomes_500(self, client):
+        # The generate endpoint has no dedicated UnauthorizedError handler, so
+        # the legacy UnauthorizedError falls through to the generic handler and
+        # is wrapped as SYSTEM_INTERNAL_ERROR (500).
+        from consts.exceptions import UnauthorizedError
+
+        evaluation_set_app = _mock_service_impl(None)
+        evaluation_set_app.get_current_user_id = MagicMock(
+            side_effect=UnauthorizedError("no token")
+        )
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "d", "count": 1, "model_id": 1, "set_name": "s"},
+        )
+        assert response.status_code == 500
+
+    def test_500_on_exception(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.pool.submit.side_effect = RuntimeError("boom")
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            json={"description": "d", "count": 1, "model_id": 1, "set_name": "s"},
+        )
         assert response.status_code == 500

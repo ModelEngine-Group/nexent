@@ -1070,3 +1070,138 @@ class TestPublishEvaluator:
         assert result is not None
         # Already grouped → unchanged
         assert result["version_group_id"] == 50
+
+
+# ---------------------------------------------------------------------------
+# 8. list_evaluators / get_evaluator / create_evaluator / delete_evaluator /
+#    list_evaluator_versions tests
+# ---------------------------------------------------------------------------
+
+
+class TestListEvaluators:
+    def test_lists_current_rows_including_builtin(self, evaluator_mod):
+        """Builtin evaluators (tenant_id='') are always included."""
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(
+            1, tenant_id="t1", is_current=True, source="custom", evaluator_type="code", status="DRAFT"
+        )
+        h.add_evaluator_row(
+            2, tenant_id="", is_current=True, source="builtin", evaluator_type="llm", status="PUBLISHED"
+        )
+        h.add_evaluator_row(3, tenant_id="t1", is_current=False, status="DRAFT")
+        with h.patch_session():
+            out = evaluator_mod.list_evaluators("t1")
+        assert {r["evaluator_id"] for r in out} == {1, 2}
+
+    def test_source_filter(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", is_current=True, source="custom")
+        h.add_evaluator_row(2, tenant_id="t1", is_current=True, source="builtin")
+        with h.patch_session():
+            out = evaluator_mod.list_evaluators("t1", source="builtin")
+        assert [r["evaluator_id"] for r in out] == [2]
+
+    def test_type_filter(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", is_current=True, evaluator_type="code")
+        h.add_evaluator_row(2, tenant_id="t1", is_current=True, evaluator_type="llm")
+        with h.patch_session():
+            out = evaluator_mod.list_evaluators("t1", evaluator_type="llm")
+        assert [r["evaluator_id"] for r in out] == [2]
+
+    def test_status_filter(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", is_current=True, status="DRAFT")
+        h.add_evaluator_row(2, tenant_id="t1", is_current=True, status="PUBLISHED")
+        with h.patch_session():
+            out = evaluator_mod.list_evaluators("t1", status="PUBLISHED")
+        assert [r["evaluator_id"] for r in out] == [2]
+
+
+class TestGetEvaluator:
+    def test_returns_row(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", name="ev")
+        with h.patch_session():
+            out = evaluator_mod.get_evaluator(1, "t1")
+        assert out is not None
+        assert out["name"] == "ev"
+
+    def test_returns_none_when_missing(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        with h.patch_session():
+            assert evaluator_mod.get_evaluator(999, "t1") is None
+
+
+class TestCreateEvaluator:
+    def test_creates_draft_row(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        with h.patch_session():
+            out = evaluator_mod.create_evaluator(
+                tenant_id="t1",
+                user_id="u1",
+                name="my ev",
+                description="desc",
+                evaluator_type="code",
+                prompt=None,
+                code="print(1)",
+                model_id=7,
+            )
+        assert out["name"] == "my ev"
+        assert out["status"] == "DRAFT"
+        assert out["version_no"] == 1
+        assert out["is_current"] is True
+        assert out["created_by"] == "u1"
+        # model_id is stored on the row but not serialised by _to_dict.
+        assert h.evaluator_rows[out["evaluator_id"]].model_id == 7
+        assert h.commits >= 1
+        assert h.flushed is False  # create uses add/commit/refresh
+
+
+class TestDeleteEvaluator:
+    def test_in_use_raises(self, evaluator_mod):
+        AppExc = evaluator_mod.AppException
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", source="custom")
+        h.add_active_run(10, "t1", "RUNNING", evaluator_ids=[1])
+        with h.patch_session(), pytest.raises(AppExc) as ei:
+            evaluator_mod.delete_evaluator(1, "t1")
+        assert ei.value.code == "AGENT_EVALUATION_EVALUATOR_IN_USE"
+
+    def test_deletes_row(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", source="custom")
+        with h.patch_session():
+            assert evaluator_mod.delete_evaluator(1, "t1") is True
+        assert 1 in h.deleted_ids
+
+    def test_missing_returns_false(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        with h.patch_session():
+            assert evaluator_mod.delete_evaluator(999, "t1") is False
+
+
+class TestListEvaluatorVersions:
+    def test_missing_current_returns_empty(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        with h.patch_session():
+            assert evaluator_mod.list_evaluator_versions(999, "t1") == []
+
+    def test_unpublished_returns_single_row(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", version_group_id=None, version_no=1)
+        with h.patch_session():
+            out = evaluator_mod.list_evaluator_versions(1, "t1")
+        assert len(out) == 1
+        assert out[0]["evaluator_id"] == 1
+
+    def test_returns_group_versions(self, evaluator_mod):
+        h = _SessionHarness(evaluator_mod)
+        h.add_evaluator_row(1, tenant_id="t1", version_group_id=10, version_no=1)
+        h.add_evaluator_row(2, tenant_id="t1", version_group_id=10, version_no=2)
+        h.add_evaluator_row(3, tenant_id="t1", version_group_id=10, version_no=3)
+        h.add_evaluator_row(9, tenant_id="t1", version_group_id=99, version_no=1)
+        with h.patch_session():
+            out = evaluator_mod.list_evaluator_versions(1, "t1")
+        assert sorted(r["version_no"] for r in out) == [1, 2, 3]
+        assert all(r["version_group_id"] == 10 for r in out)

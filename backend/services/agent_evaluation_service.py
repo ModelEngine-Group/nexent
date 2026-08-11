@@ -67,92 +67,6 @@ from utils.prompt_template_utils import get_prompt_template
 from utils.thread_utils import pool
 
 
-# ── Helpers: coerce legacy "JSON wrapped in JSONB string" formats ─────
-
-
-def _coerce_score(raw: Any) -> Any:
-    """Normalize a per-case ``score`` column value.
-
-    The column is JSONB but older runs wrote ``json.dumps(dict)`` into it,
-    so SQLAlchemy deserialises that JSONB *string* back as a plain Python
-    string instead of a dict. Handle both shapes plus plain numeric scores
-    (no-evaluator / semantic-consistency fallback).
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, (dict, int, float)):
-        return raw
-    if isinstance(raw, str):
-        s = raw.strip()
-        if not s:
-            return None
-        # Try JSON decode first – covers legacy wrapped strings.
-        try:
-            parsed = json.loads(s)
-        except (ValueError, TypeError):
-            parsed = None
-        if isinstance(parsed, (dict, int, float)):
-            return parsed
-        # Numeric strings such as "0.85"
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    return None
-
-
-def _coerce_reason(raw: Any) -> dict[str, str]:
-    """Normalize a per-case ``reason`` column value to ``{name: reason_text}``.
-
-    The column is TEXT – in well-formed runs it is ``str(json.dumps({name: reason}))``,
-    but single-string legacy rows or empty values must degrade gracefully.
-    """
-    if not raw:
-        return {}
-    if isinstance(raw, dict):
-        return {str(k): "" if v is None else str(v) for k, v in raw.items()}
-    if isinstance(raw, str):
-        s = raw.strip()
-        if not s:
-            return {}
-        try:
-            parsed = json.loads(s)
-            if isinstance(parsed, dict):
-                return {str(k): "" if v is None else str(v) for k, v in parsed.items()}
-        except (ValueError, TypeError):
-            pass
-        return {"reason": s}
-    return {"reason": str(raw)}
-
-
-def _coerce_score_dict(raw: Any) -> dict[str, float]:
-    """Best-effort conversion of a per-case score into ``{name: float}``.
-
-    Numeric-only scores (legacy fallback / no-evaluator runs) are returned as
-    ``{"score": value}`` so the rest of the pipeline can treat them uniformly.
-    """
-    value = _coerce_score(raw)
-    if isinstance(value, dict):
-        out: dict[str, float] = {}
-        for k, v in value.items():
-            if isinstance(v, (int, float)) and isfinite(v):
-                out[str(k)] = float(v)
-        return out
-    if isinstance(value, (int, float)) and isfinite(value):
-        return {"score": float(value)}
-    return {}
-
-
-# ── Compiled regex objects ──────────────────────────────────────────
-_JSON_OBJECT_RE = re.compile(r"\{(?:[^{}]|\{[^{}]*\})*\}", re.DOTALL)
-_LOG_PREFIX_RE = re.compile(
-    r"(?:"
-    r"\[(\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\w+\s+[\w.]+\]"
-    r"|(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
-    r"(?:\s*\|\s*[\w.]+){1,3}\s*\|?"
-    r")\s*"
-)
-_MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?})\s*```", re.DOTALL)
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
 
 logger = logging.getLogger(__name__)
@@ -345,213 +259,6 @@ def validate_code_evaluator(code: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# SDK log-payload helpers (extract judge reason from polluted strings)
-# ══════════════════════════════════════════════════════════════════════
-
-
-def _extract_clean_reason(raw: Any) -> str:
-    """Best-effort extraction of judge reason from SDK log-polluted strings."""
-    if raw is None:
-        return ""
-    text = str(raw).strip()
-    if not text:
-        return ""
-    stripped = _LOG_PREFIX_RE.sub("", text).strip()
-    if not stripped:
-        return text
-    parsed: dict[str, Any] | None = None
-    try:
-        parsed = json.loads(stripped)
-    except (ValueError, TypeError):
-        match = _JSON_OBJECT_RE.search(stripped)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except (ValueError, TypeError):
-                parsed = None
-    if not isinstance(parsed, dict):
-        return stripped
-    response_content = parsed.get("response_content")
-    if isinstance(response_content, str):
-        fence_match = re.search(
-            r"```(?:json)?\s*(\{.*?\})\s*```", response_content, re.DOTALL
-        )
-        if fence_match:
-            try:
-                inner = json.loads(fence_match.group(1))
-                if isinstance(inner, dict) and isinstance(inner.get("reason"), str):
-                    return inner["reason"].strip()
-            except (ValueError, TypeError):
-                pass
-    reason_field = parsed.get("reason")
-    if isinstance(reason_field, str):
-        return reason_field.strip()
-    return stripped
-
-
-def _iter_log_envelopes(text: str):
-    """Yield (log_prefix, json_payload) for every log-envelope pair."""
-    cursor = 0
-    while cursor < len(text):
-        while cursor < len(text) and text[cursor] in " \t\r\n":
-            cursor += 1
-        if cursor >= len(text):
-            break
-        match = _LOG_PREFIX_RE.match(text, cursor)
-        if not match:
-            break
-        prefix_end = match.end()
-        depth = 0
-        payload_start = -1
-        payload_end = -1
-        in_string = False
-        escape = False
-        for idx in range(prefix_end, len(text)):
-            ch = text[idx]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-                continue
-            if ch == "{":
-                if depth == 0:
-                    payload_start = idx
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0 and payload_start != -1:
-                    payload_end = idx + 1
-                    break
-        if payload_start == -1 or payload_end == -1:
-            cursor = prefix_end
-            continue
-        yield text[cursor:prefix_end], text[payload_start:payload_end]
-        cursor = payload_end
-
-
-def _reason_from_json_envelope(payload: str) -> str | None:
-    try:
-        data = json.loads(payload)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    response_content = data.get("response_content")
-    if isinstance(response_content, str):
-        fence_match = _MARKDOWN_FENCE_RE.search(response_content)
-        if fence_match:
-            try:
-                inner = json.loads(fence_match.group(1))
-            except (ValueError, TypeError):
-                inner = None
-            if isinstance(inner, dict):
-                reason = inner.get("reason")
-                if isinstance(reason, str):
-                    return reason.strip()
-        try:
-            inner = json.loads(response_content)
-        except (ValueError, TypeError):
-            inner = None
-        if isinstance(inner, dict):
-            reason = inner.get("reason")
-            if isinstance(reason, str):
-                return reason.strip()
-    response = data.get("response")
-    if response is None:
-        metadata = data.get("metadata")
-        if isinstance(metadata, dict):
-            response = metadata.get("response")
-    if isinstance(response, str) and "ChatCompletion" in response:
-        content_match = re.search(
-            r"ChatCompletionMessage\(content='(.*?)', refusal=",
-            response,
-            re.DOTALL,
-        )
-        if content_match:
-            try:
-                content = (
-                    content_match.group(1).encode("utf-8").decode("unicode_escape")
-                )
-            except UnicodeDecodeError:
-                content = content_match.group(1)
-            if isinstance(content, str):
-                fence_match = _MARKDOWN_FENCE_RE.search(content)
-                if fence_match:
-                    try:
-                        inner = json.loads(fence_match.group(1))
-                    except (ValueError, TypeError):
-                        inner = None
-                    if isinstance(inner, dict):
-                        reason = inner.get("reason")
-                        if isinstance(reason, str):
-                            return reason.strip()
-                try:
-                    inner = json.loads(content)
-                except (ValueError, TypeError):
-                    inner = None
-                if isinstance(inner, dict):
-                    reason = inner.get("reason")
-                    if isinstance(reason, str):
-                        return reason.strip()
-    elif isinstance(response, str):
-        try:
-            response_obj = json.loads(response)
-        except (ValueError, TypeError):
-            response_obj = None
-        if isinstance(response_obj, dict):
-            choices = response_obj.get("choices")
-            if isinstance(choices, list) and choices:
-                first = choices[0]
-                if isinstance(first, dict):
-                    message = first.get("message")
-                    if isinstance(message, dict):
-                        content = message.get("content")
-                        if isinstance(content, str):
-                            fence_match = _MARKDOWN_FENCE_RE.search(content)
-                            if fence_match:
-                                try:
-                                    inner = json.loads(fence_match.group(1))
-                                except (ValueError, TypeError):
-                                    inner = None
-                                if isinstance(inner, dict):
-                                    reason = inner.get("reason")
-                                    if isinstance(reason, str):
-                                        return reason.strip()
-    top_reason = data.get("reason")
-    if isinstance(top_reason, str):
-        return top_reason.strip()
-    return None
-
-
-def _extract_clean_reason_v2(raw: Any) -> str:
-    if raw is None:
-        return ""
-    text = str(raw).strip()
-    if not text:
-        return ""
-    standalone = _reason_from_json_envelope(text)
-    if standalone is not None:
-        return standalone
-    for _, payload in _iter_log_envelopes(text):
-        reason = _reason_from_json_envelope(payload)
-        if reason is not None:
-            return reason
-    stripped = text
-    while True:
-        match = _LOG_PREFIX_RE.match(stripped)
-        if not match:
-            break
-        stripped = stripped[match.end() :].lstrip()
-    return stripped or text
-
-
-# ══════════════════════════════════════════════════════════════════════
 # Error handling helpers
 # ══════════════════════════════════════════════════════════════════════
 
@@ -665,14 +372,13 @@ async def _run_agent_to_final_answer(
     runtime_events: list[dict] = []
     async for chunk in agent_run(agent_run_info):
         try:
-            if isinstance(chunk, str):
-                data = json.loads(chunk)
-                if isinstance(data, dict):
-                    runtime_events.append(data)
-                    if data.get("type") == "final_answer":
-                        content = data.get("content")
-                        if isinstance(content, str):
-                            final_answer_parts.append(content)
+            data = json.loads(chunk)
+            if isinstance(data, dict):
+                runtime_events.append(data)
+                if data.get("type") == "final_answer":
+                    content = data.get("content")
+                    if isinstance(content, str):
+                        final_answer_parts.append(content)
         except Exception:
             logger.debug(
                 "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
@@ -680,7 +386,7 @@ async def _run_agent_to_final_answer(
     remaining = agent_run_info.observer.get_cached_message()
     for msg in remaining:
         try:
-            data = json.loads(msg) if isinstance(msg, str) else msg
+            data = json.loads(msg)
             if isinstance(data, dict):
                 runtime_events.append(data)
         except Exception:
@@ -763,8 +469,34 @@ def _format_runtime_context(
         return "## Agent Execution Log\n\n(No execution data)"
 
     stats = _extract_runtime_stats(runtime_events)
+    steps = _group_events_by_step(runtime_events)
+    actual_section = _truncate_actual_answer(actual)
 
-    # ── Step boundaries ───────────────────────────────────────────
+    STATIC_OVERHEAD_EST = 200
+    budget = max_tokens - STATIC_OVERHEAD_EST
+    total_steps = len(steps)
+    per_step = max(budget // total_steps, 15) if total_steps else budget
+    remaining = budget
+
+    step_outputs: list[str] = []
+    for step_idx, step_events in enumerate(steps):
+        available = min(per_step, remaining)
+        if available <= 0:
+            break
+        remaining -= available
+        step_text = _format_step_text(step_events, available)
+        if step_text.strip():
+            step_outputs.append(f"Step {step_idx + 1}:\n{step_text}")
+
+    parts = ["## Agent Execution Log"]
+    parts.extend(step_outputs)
+    parts.append(_format_stats_summary(stats))
+    parts.append(f"\n─ Final Answer ─\n{actual_section}")
+    return "\n".join(parts)
+
+
+def _group_events_by_step(runtime_events: list[dict]) -> list[list[dict]]:
+    """Split runtime events into per-step groups on ``step_count`` boundaries."""
     steps: list[list[dict]] = []
     current_step: list[dict] = []
     for e in runtime_events:
@@ -774,144 +506,167 @@ def _format_runtime_context(
         current_step.append(e)
     if current_step:
         steps.append(current_step)
+    return steps
 
-    total_steps = len(steps)
 
-    # ── Token budget ──────────────────────────────────────────────
-    # Reserve space for headers, stats summary, and actual
-    STATIC_OVERHEAD_EST = 200
-    ACTUAL_HEAD_TOKENS = 120
-    ACTUAL_TAIL_TOKENS = 200
+def _truncate_actual_answer(
+    actual: str, head: int = 120, tail: int = 200
+) -> str:
+    """Truncate the agent's final answer to a head+tail preview when too long."""
     actual_str = str(actual or "")
-    actual_len = len(actual_str)
-    if actual_len <= ACTUAL_HEAD_TOKENS + ACTUAL_TAIL_TOKENS:
-        actual_section = actual_str
-    else:
-        actual_section = (
-            actual_str[:ACTUAL_HEAD_TOKENS] + "\n…\n" + actual_str[-ACTUAL_TAIL_TOKENS:]
-        )
+    if len(actual_str) <= head + tail:
+        return actual_str
+    return actual_str[:head] + "\n…\n" + actual_str[-tail:]
 
-    budget = max_tokens - STATIC_OVERHEAD_EST
 
-    # Per-step initial allocation (even split)
-    per_step = max(budget // total_steps, 15) if total_steps else budget
-    remaining = budget
+# Map of event type → (label prefix, is_trimmable_content).
+# Tool events emit a fixed argument line first, then their content is trimmable.
+# Final-answer / token-count events are skipped entirely.
+_EVENT_LABELS: dict[str, str] = {
+    "tool": "  → ",
+    "kb": "  [KB] ",
+    "log": "    ",
+    "artifact": "  [Artifact] ",
+    "file": "  [File created] ",
+    "error": "  [ERROR] ",
+}
 
-    # ── Build per-step output ─────────────────────────────────────
-    step_outputs: list[str] = []
-    for step_idx, step_events in enumerate(steps):
-        available = min(per_step, remaining)
-        if available <= 0:
-            break
-        remaining -= available
+# Event types whose ``content`` field is subject to per-step budget trimming.
+# Maps raw event type → label key used in ``_EVENT_LABELS``.
+_TRIMMABLE_TYPES: dict[str, str] = {
+    "tool": "tool",
+    "execution_logs": "log",
+    "search_content": "kb",
+    "skill_artifact": "artifact",
+    "file_created": "file",
+    "error": "error",
+}
 
-        # Count how many events in this step have trimmable content
-        trimmable_events = []
-        fixed_lines: list[str] = []
-        for e in step_events:
-            t = e.get("type", "")
-            if t == "step_count":
-                continue
-            elif t == "tool":
-                name = e.get("tool_name", "")
-                args = e.get("tool_arguments") or {}
-                arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
-                fixed_lines.append(f"  → {name}({arg_str})")
-                content = e.get("content")
-                if content and str(content).strip():
-                    trimmable_events.append(("tool", e, len(fixed_lines) - 1))
-            elif t == "execution_logs":
-                content = str(e.get("content", ""))
-                if content.strip():
-                    trimmable_events.append(("log", e, len(fixed_lines)))
-                fixed_lines.append("")
-            elif t == "search_content":
-                content = str(e.get("content", ""))
-                if content.strip():
-                    trimmable_events.append(("kb", e, len(fixed_lines)))
-                fixed_lines.append("")
-            elif t == "skill_artifact":
-                content = str(e.get("content", ""))
-                if content.strip():
-                    trimmable_events.append(("artifact", e, len(fixed_lines)))
-                fixed_lines.append("")
-            elif t == "file_created":
-                content = str(e.get("content", ""))
-                if content.strip():
-                    trimmable_events.append(("file", e, len(fixed_lines)))
-                fixed_lines.append("")
-            elif t == "error":
-                content = str(e.get("content", ""))
-                if content.strip():
-                    trimmable_events.append(("error", e, len(fixed_lines)))
-                fixed_lines.append("")
-            elif t == "final_answer" or t == "token_count":
-                continue
+# Event types that are skipped entirely (no output line).
+_SKIP_TYPES = frozenset({"step_count", "final_answer", "token_count"})
 
-        # Distribute available budget across trimmable events
-        trimmable_count = len(trimmable_events)
-        if trimmable_count == 0:
-            step_text = "\n".join([line for line in fixed_lines if line])
-        else:
-            base_per_event = (available - trimmable_count * 2) // trimmable_count
-            carry = 0
-            trimmed_results: list[str] = []
-            for evt_type, evt, _ in trimmable_events:
-                event_budget = base_per_event + carry
-                carry = 0
-                raw = str(evt.get("content", ""))
-                rlen = len(raw)
-                if rlen <= event_budget or event_budget < 10:
-                    trimmed = raw
-                else:
-                    head = event_budget * 60 // 100
-                    tail = event_budget - head
-                    if head > 0:
-                        trimmed = (
-                            raw[:head] + "\n…\n" + (raw[-tail:] if tail > 0 else "")
-                        )
-                    else:
-                        trimmed = raw[:event_budget] + "…"
-                label = ""
-                if evt_type == "tool":
-                    label = "  → "
-                elif evt_type == "kb":
-                    label = "  [KB] "
-                elif evt_type == "log":
-                    label = "    "
-                elif evt_type == "artifact":
-                    label = "  [Artifact] "
-                elif evt_type == "file":
-                    label = "  [File created] "
-                elif evt_type == "error":
-                    label = "  [ERROR] "
-                result_line = f"{label}{trimmed}"
-                trimmed_results.append(result_line)
-                # If this event didn't use its full budget, carry forward
-                saved = max(0, event_budget - len(trimmed))
-                carry += saved
 
-            # Rebuild step with fixed lines + trimmed content in correct position
-            trim_idx = 0
-            step_lines = []
-            for idx, fl in enumerate(fixed_lines):
-                if fl:
-                    step_lines.append(fl)
-                elif trim_idx < len(trimmed_results):
-                    step_lines.append(trimmed_results[trim_idx])
-                    trim_idx += 1
-            step_text = "\n".join(step_lines)
+def _classify_step_event(e: dict) -> tuple[str, str, str] | None:
+    """Classify one runtime event within a step.
 
-        if step_text.strip():
-            step_outputs.append(f"Step {step_idx + 1}:\n{step_text}")
+    Returns ``(category, content_str, fixed_line)`` where:
 
-        remaining -= 0  # remaining already tracked above
+      * ``category``   — label key (used for trimming); empty string when
+                         the event has no trimmable content.
+      * ``content_str``— the raw ``content`` text (may be empty).
+      * ``fixed_line`` — a non-trimmable line to emit as-is (e.g. the tool
+                         call signature); empty when the event only has
+                         trimmable content.
 
-    parts = ["## Agent Execution Log"]
-    parts.extend(step_outputs)
+    Returns ``None`` for events that should be skipped entirely
+    (``step_count``, ``final_answer``, ``token_count``).
+    """
+    t = e.get("type", "")
+    if t in _SKIP_TYPES:
+        return None
 
-    # ── Stats summary ─────────────────────────────────────────────
-    parts.append(
+    # Tool events emit a fixed argument line first, then their content is trimmable.
+    if t == "tool":
+        name = e.get("tool_name", "")
+        args = e.get("tool_arguments") or {}
+        arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
+        fixed_line = f"  → {name}({arg_str})"
+        content = str(e.get("content") or "")
+        cat = "tool" if content.strip() else ""
+        return (cat, content, fixed_line)
+
+    # All other trimmable event types: content-only, no fixed line.
+    label_key = _TRIMMABLE_TYPES.get(t)
+    if label_key is not None:
+        content = str(e.get("content") or "")
+        cat = label_key if content.strip() else ""
+        return (cat, content, "") if cat else ("", content, "")
+
+    # Fallback for any other event type with content.
+    content = str(e.get("content") or "")
+    return ("", content, "") if content.strip() else ("", "", "")
+
+
+def _trim_content(raw: str, budget: int) -> str:
+    """Trim ``raw`` to ``budget`` characters, keeping head 60% + tail 40%."""
+    rlen = len(raw)
+    if rlen <= budget or budget < 10:
+        return raw
+    head = budget * 60 // 100
+    tail = budget - head
+    if head > 0:
+        return raw[:head] + "\n…\n" + (raw[-tail:] if tail > 0 else "")
+    return raw[:budget] + "…"
+
+
+def _distribute_budget_and_trim(
+    trimmable_events: list[tuple[str, dict]], available: int
+) -> list[str]:
+    """Distribute ``available`` chars across trimmable events and trim each.
+
+    Unused budget from one event carries forward to the next.  Returns one
+    labeled output line per input event.
+    """
+    count = len(trimmable_events)
+    if count == 0:
+        return []
+    base_per_event = (available - count * 2) // count
+    carry = 0
+    results: list[str] = []
+    for evt_type, evt in trimmable_events:
+        event_budget = base_per_event + carry
+        carry = 0
+        raw = str(evt.get("content", ""))
+        trimmed = _trim_content(raw, event_budget)
+        label = _EVENT_LABELS.get(evt_type, "")
+        results.append(f"{label}{trimmed}")
+        saved = max(0, event_budget - len(trimmed))
+        carry += saved
+    return results
+
+
+def _format_step_text(step_events: list[dict], available: int) -> str:
+    """Format one step's events into a text block within the budget.
+
+    Fixed lines (tool signatures) are emitted as-is; trimmable content
+    fields share the step's character budget with carry-forward.
+    """
+    fixed_lines: list[str] = []
+    trimmable_events: list[tuple[str, dict]] = []
+    for e in step_events:
+        classified = _classify_step_event(e)
+        if classified is None:
+            continue
+        cat, content, fixed_line = classified
+        if fixed_line:
+            fixed_lines.append(fixed_line)
+        if cat:
+            trimmable_events.append((cat, e))
+        elif content and not fixed_line:
+            # Non-trimmable content with no fixed line — emit as-is.
+            fixed_lines.append(content)
+
+    trimmed_results = _distribute_budget_and_trim(trimmable_events, available)
+    if not trimmed_results:
+        return "\n".join(fixed_lines)
+
+    # Rebuild step with fixed lines + trimmed content in correct position.
+    step_lines: list[str] = []
+    trim_idx = 0
+    for fl in fixed_lines:
+        if fl:
+            step_lines.append(fl)
+        elif trim_idx < len(trimmed_results):
+            step_lines.append(trimmed_results[trim_idx])
+            trim_idx += 1
+    # Append any remaining trimmed results that didn't get a placeholder slot.
+    step_lines.extend(trimmed_results[trim_idx:])
+    return "\n".join(step_lines)
+
+
+def _format_stats_summary(stats: dict) -> str:
+    """Format the runtime stats block appended after the step log."""
+    return (
         f"\n─ Stats ─\n"
         f"Steps: {stats['steps']} | Tool calls: {stats['tool_calls']} | "
         f"Output tokens: {stats['output_tokens']} | Errors: {stats['errors']}\n"
@@ -919,10 +674,29 @@ def _format_runtime_context(
         f"Has final answer: {stats['has_final_answer']}"
     )
 
-    # ── Agent final output ────────────────────────────────────────
-    parts.append(f"\n─ Final Answer ─\n{actual_section}")
 
-    return "\n".join(parts)
+def _extract_token_count(evt: dict) -> int | None:
+    """Extract ``total_output_tokens`` from a ``token_count`` runtime event.
+
+    Returns ``None`` when the content cannot be parsed or the token field is
+    absent.  The ``content`` field may arrive as a JSON string or a dict.
+    """
+    content = evt.get("content", {})
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except Exception:
+            logger.debug(
+                "Failed to parse token_count content: %r",
+                content[:100],
+                exc_info=True,
+            )
+            return None
+    if isinstance(content, dict):
+        tok = content.get("total_output_tokens")
+        if tok is not None and isinstance(tok, (int, float)):
+            return int(tok)
+    return None
 
 
 def _extract_runtime_stats(runtime_events: list[dict]) -> dict:
@@ -947,22 +721,175 @@ def _extract_runtime_stats(runtime_events: list[dict]) -> dict:
         elif t == "final_answer":
             stats["has_final_answer"] = True
         elif t == "token_count":
-            content = evt.get("content", {})
-            if isinstance(content, str):
-                try:
-                    content = json.loads(content)
-                except Exception:
-                    logger.debug(
-                        "Failed to parse token_count content: %r",
-                        content[:100],
-                        exc_info=True,
-                    )
-                    continue
-            if isinstance(content, dict):
-                tok = content.get("total_output_tokens")
-                if tok is not None and isinstance(tok, (int, float)):
-                    stats["output_tokens"] = max(stats["output_tokens"], int(tok))
+            tok = _extract_token_count(evt)
+            if tok is not None:
+                stats["output_tokens"] = max(stats["output_tokens"], tok)
     return stats
+
+
+def _format_conversation_history(
+    conversation_history: list[dict[str, Any]] | None,
+) -> str:
+    """Format multi-turn conversation history as a prompt prefix.
+
+    Returns an empty string when there is no history.
+    """
+    if not conversation_history:
+        return ""
+    lines = ["## Previous Conversation Turns"]
+    for msg in conversation_history:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "user":
+            lines.append(f"User: {content}")
+        elif role == "assistant":
+            lines.append(f"Agent: {content}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _build_evaluator_prompt(
+    ev: dict[str, Any],
+    language: str,
+    query: str,
+    expected: str,
+    actual: str,
+    runtime_events: list[dict] | None,
+    context_window: int,
+    conversation_history: list[dict[str, Any]] | None,
+) -> str:
+    """Build the final user prompt for an LLM evaluator.
+
+    Selects the language-appropriate prompt template, prepends multi-turn
+    conversation history, then substitutes ``{{query}}``, ``{{expected}}``,
+    ``{{actual}}`` and ``{{runtime_stats}}`` placeholders.
+    """
+    prompt = (
+        ev.get("prompt_en")
+        if language == "en" and ev.get("prompt_en")
+        else ev.get("prompt") or ""
+    )
+    history = _format_conversation_history(conversation_history)
+    if history:
+        prompt = history + prompt
+    prompt = prompt.replace("{{query}}", str(query))
+    prompt = prompt.replace("{{expected}}", str(expected))
+    prompt = prompt.replace("{{actual}}", str(actual))
+    if runtime_events and "{{runtime_stats}}" in prompt:
+        ctx = _format_runtime_context(
+            runtime_events, str(actual), max_tokens=context_window
+        )
+        prompt = prompt.replace("{{runtime_stats}}", ctx)
+    return prompt
+
+
+def _call_one_llm_evaluator(
+    eid: int,
+    ev: dict[str, Any],
+    judge_system_prompt: str,
+    tenant_id: str,
+    query: str,
+    expected: str,
+    actual: str,
+    judge_model_id: int,
+    runtime_events: list[dict] | None,
+    language: str,
+    context_window: int,
+    conversation_history: list[dict[str, Any]] | None,
+) -> tuple:
+    """Call a single LLM evaluator — submitted to the thread pool.
+
+    Returns ``(eid, name, score, reason)``.
+    """
+    prompt = _build_evaluator_prompt(
+        ev, language, query, expected, actual,
+        runtime_events, context_window, conversation_history,
+    )
+    response = call_llm_for_system_prompt(
+        model_id=judge_model_id,
+        user_prompt=prompt,
+        system_prompt=judge_system_prompt,
+        tenant_id=tenant_id,
+    )
+    # Defensive parsing: judge models occasionally return empty or non-JSON
+    # content (e.g. all output inside <think> tags is filtered out). Treat
+    # these as a 0-score evaluator result with an explicit reason instead of
+    # letting json.loads blow up the whole case run.
+    if not isinstance(response, str) or not response.strip():
+        return eid, ev["name"], 0.0, "Judge model returned empty response"
+    try:
+        data = json.loads(response)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return eid, ev["name"], 0.0, f"Judge model returned invalid JSON: {exc}"
+    if not isinstance(data, dict):
+        return eid, ev["name"], 0.0, "Judge model response was not a JSON object"
+    try:
+        score = float(data.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0.0
+    return eid, ev["name"], score, str(data.get("reason", ""))
+
+
+def _run_code_evaluators(
+    code_evals: dict[int, dict[str, Any]],
+    query: str,
+    expected: str,
+    actual: str,
+    runtime_events: list[dict] | None,
+) -> tuple[dict, dict]:
+    """Run code-type evaluators serially (pure Python, no I/O).
+
+    Each evaluator code snippet has already been validated at authoring
+    time by ``validate_code_evaluator()`` (4-stage pipeline: compile syntax →
+    AST shell-call scan → sandboxed trial exec → signature inspection).
+    The same ``ALLOWED_BUILTINS`` whitelist is re-applied here for runtime
+    parity with the authoring-validation environment.
+    """
+    scores: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    for eid, ev in code_evals.items():
+        name = ev["name"]
+        try:
+            local_vars = {}
+            # codeql[py/code-injection]
+            exec(  # nosec B102  NOSONAR
+                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
+            )
+            fn = local_vars.get("evaluate")
+            result = fn(
+                query=query,
+                expected=expected,
+                actual=actual,
+                runtime_events=runtime_events or [],
+            )
+            scores[name] = float(result.get("score", 0))
+            reasons[name] = str(result.get("reason", ""))
+        except Exception as exc:
+            scores[name] = 0.0
+            reasons[name] = f"Code evaluator error: {exc}"
+    return scores, reasons
+
+
+def _collect_llm_results(
+    futures: dict,
+    llm_evals: dict[int, dict[str, Any]],
+) -> tuple[dict, dict]:
+    """Collect LLM evaluator results from completed futures.
+
+    On per-future failure, records a zero score with the error message.
+    """
+    scores: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    for f in as_completed(futures):
+        try:
+            eid, name, score, reason = f.result()
+            scores[name] = score
+            reasons[name] = reason
+        except Exception as exc:
+            eid = futures[f]
+            name = llm_evals[eid]["name"]
+            scores[name] = 0.0
+            reasons[name] = f"LLM evaluator error: {exc}"
+    return scores, reasons
 
 
 def _score_with_evaluators(
@@ -980,8 +907,6 @@ def _score_with_evaluators(
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
     LLM evaluators run in parallel via ThreadPoolExecutor (I/O-bound)."""
-    scores = {}
-    reasons = {}
     code_evals = {
         eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"
     }
@@ -989,92 +914,25 @@ def _score_with_evaluators(
         eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") != "code"
     }
 
-    # ── Code evaluators: serial (pure Python, no I/O) ────────────
-    # Each evaluator code snippet has already been validated at authoring
-    # time by validate_code_evaluator() (4-stage pipeline: compile syntax →
-    # AST shell-call scan → sandboxed trial exec → signature inspection).
-    # Re-running the same ALLOWED_BUILTINS whitelist here ensures runtime
-    # parity with the authoring-validation environment and prevents any
-    # post-publish tampering with the stored `code` field.
-    for eid, ev in code_evals.items():
-        name = ev["name"]
-        try:
-            local_vars = {}
-            # Same ALLOWED_BUILTINS whitelist re-applied here for runtime
-            # parity with validate_code_evaluator(), which rejected any
-            # unsafe evaluator at authoring time.
-            # codeql[py/code-injection]
-            exec(  # nosec B102  NOSONAR
-                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
-            )
-            fn = local_vars.get("evaluate")
-            result = fn(
-                query=query,
-                expected=expected,
-                actual=actual,
-                runtime_events=runtime_events or [],
-            )
-            scores[name] = float(result.get("score", 0))
-            reasons[name] = str(result.get("reason", ""))
-        except Exception as exc:
-            scores[name] = 0.0
-            reasons[name] = f"Code evaluator error: {exc}"
+    scores, reasons = _run_code_evaluators(
+        code_evals, query, expected, actual, runtime_events
+    )
 
-    # ── LLM evaluators: parallel (I/O-bound) ─────────────────────
     if not llm_evals:
         return scores, reasons
 
-    def _call_one_llm(eid: int, ev: dict[str, Any]):
-        """Single LLM evaluator call — submitted to thread pool."""
-        prompt = (
-            ev.get("prompt_en")
-            if language == "en" and ev.get("prompt_en")
-            else ev.get("prompt") or ""
-        )
-        # Prepend multi-turn conversation history so the LLM evaluator
-        # understands the context when scoring a specific turn.
-        if conversation_history:
-            history_lines = ["## Previous Conversation Turns"]
-            for msg in conversation_history:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                if role == "user":
-                    history_lines.append(f"User: {content}")
-                elif role == "assistant":
-                    history_lines.append(f"Agent: {content}")
-            prompt = "\n".join(history_lines) + "\n\n" + prompt
-        prompt = prompt.replace("{{query}}", str(query))
-        prompt = prompt.replace("{{expected}}", str(expected))
-        prompt = prompt.replace("{{actual}}", str(actual))
-        if runtime_events and "{{runtime_stats}}" in prompt:
-            ctx = _format_runtime_context(
-                runtime_events, str(actual), max_tokens=context_window
-            )
-            prompt = prompt.replace("{{runtime_stats}}", ctx)
-        response = call_llm_for_system_prompt(
-            model_id=judge_model_id,
-            user_prompt=prompt,
-            system_prompt=judge_system_prompt,
-            tenant_id=tenant_id,
-        )
-        data = json.loads(response) if isinstance(response, str) else response
-        return eid, ev["name"], float(data.get("score", 0)), str(data.get("reason", ""))
-
     futures = {
-        _LLM_EVAL_EXECUTOR.submit(_call_one_llm, eid, ev): eid
+        _LLM_EVAL_EXECUTOR.submit(
+            _call_one_llm_evaluator,
+            eid, ev, judge_system_prompt, tenant_id,
+            query, expected, actual, judge_model_id,
+            runtime_events, language, context_window, conversation_history,
+        ): eid
         for eid, ev in llm_evals.items()
     }
-    for f in as_completed(futures):
-        try:
-            eid, name, score, reason = f.result()
-            scores[name] = score
-            reasons[name] = reason
-        except Exception as exc:
-            eid = futures[f]
-            name = llm_evals[eid]["name"]
-            scores[name] = 0.0
-            reasons[name] = f"LLM evaluator error: {exc}"
-
+    llm_scores, llm_reasons = _collect_llm_results(futures, llm_evals)
+    scores.update(llm_scores)
+    reasons.update(llm_reasons)
     return scores, reasons
 
 
@@ -1106,6 +964,97 @@ def _run_in_background(fn, *fn_args, tenant_id, user_id, agent_evaluation_id):
     )
 
 
+def _validate_and_freeze_evaluators(
+    evaluator_ids: list | None,
+    tenant_id: str,
+    field_mappings: dict | None,
+    language: str,
+) -> dict[str, Any] | None:
+    """Validate evaluators and freeze their config into an immutable snapshot.
+
+    Returns ``None`` when no evaluator_ids are provided.
+    Raises ``AppException`` when evaluators exceed the count limit, are not
+    found, or are not in PUBLISHED status.
+    """
+    if not evaluator_ids:
+        return None
+    if len(evaluator_ids) > MAX_EVALUATORS_PER_RUN:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT,
+            "Too many evaluators selected (max 5)",
+        )
+    for eid in evaluator_ids:
+        ev = get_evaluator(eid, tenant_id)
+        if not ev:
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND,
+                f"Evaluator not found: {eid}",
+            )
+        if ev.get("status") != "PUBLISHED":
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED,
+                f"Evaluator not published: {ev.get('name')}",
+            )
+    return {
+        "evaluator_ids": evaluator_ids,
+        "field_mappings": field_mappings or {},
+        "language": language,
+    }
+
+
+def _create_no_set_mode_run(
+    tenant_id: str,
+    user_id: str,
+    agent_id: int,
+    agent_version_no: int,
+    judge_model_id: int,
+    evaluator_ids: list | None,
+    field_mappings: dict | None,
+    query_count: int,
+    language: str,
+    evaluator_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Create a placeholder evaluation run with no pre-built case set.
+
+    AI query generation runs in the background via
+    :func:`_setup_no_set_and_execute`.
+    """
+    if query_count < 1 or query_count > 50:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE,
+            "Query count must be between 1 and 50",
+        )
+
+    evaluator_config = {**(evaluator_config or {}), "no_set_mode": True}  # type: ignore[dict-item]
+    run = create_agent_evaluation(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        agent_version_no=agent_version_no,
+        evaluation_set_id=0,
+        total=0,
+        judge_model_id=judge_model_id,
+        created_by=user_id,
+        evaluator_config=evaluator_config,
+    )
+    _run_in_background(
+        _setup_no_set_and_execute,
+        tenant_id,
+        user_id,
+        agent_id,
+        agent_version_no,
+        judge_model_id,
+        evaluator_ids,
+        field_mappings,
+        query_count,
+        language,
+        run["agent_evaluation_id"],
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_evaluation_id=run["agent_evaluation_id"],
+    )
+    return run
+
+
 def create_agent_evaluation_run_impl(
     tenant_id: str,
     user_id: str,
@@ -1120,71 +1069,20 @@ def create_agent_evaluation_run_impl(
 ) -> dict[str, Any]:
     _check_run_limits(tenant_id)
 
-    # Validate evaluators
-    if evaluator_ids:
-        if len(evaluator_ids) > MAX_EVALUATORS_PER_RUN:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT,
-                "Too many evaluators selected (max 5)",
-            )
-        for eid in evaluator_ids:
-            ev = get_evaluator(eid, tenant_id)
-            if not ev:
-                raise AppException(
-                    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND,
-                    f"Evaluator not found: {eid}",
-                )
-            if ev.get("status") != "PUBLISHED":
-                raise AppException(
-                    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED,
-                    f"Evaluator not published: {ev.get('name')}",
-                )
+    evaluator_config = _validate_and_freeze_evaluators(
+        evaluator_ids, tenant_id, field_mappings, language
+    )
 
-    evaluator_config: dict[str, Any] | None = None
-    if evaluator_ids:
-        evaluator_config = {
-            "evaluator_ids": evaluator_ids,
-            "field_mappings": field_mappings or {},
-            "language": language,
-        }
-
-    if evaluation_set_id:
-        set_cases = get_evaluation_set_cases_all(
-            evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
+    # Resolve the agent version once — both branches need it. Safe to hoist
+    # before the set_id branch: resolve_* only reads agent_id/tenant_id and
+    # surfaces a clearer error if the agent has no published version.
+    if agent_version_no is None:
+        agent_version_no = resolve_latest_published_version_no(
+            agent_id=agent_id, tenant_id=tenant_id
         )
-        if not set_cases:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_SET_EMPTY, "Evaluation set has no cases"
-            )
-        if agent_version_no is None:
-            agent_version_no = resolve_latest_published_version_no(
-                agent_id=agent_id, tenant_id=tenant_id
-            )
-    else:
-        if query_count < 1 or query_count > 50:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE,
-                "Query count must be between 1 and 50",
-            )
-        if agent_version_no is None:
-            agent_version_no = resolve_latest_published_version_no(
-                agent_id=agent_id, tenant_id=tenant_id
-            )
 
-        # Create a placeholder run immediately (AI query generation runs in background)
-        evaluator_config = {**(evaluator_config or {}), "no_set_mode": True}  # type: ignore[dict-item]
-        run = create_agent_evaluation(
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            agent_version_no=agent_version_no,
-            evaluation_set_id=0,
-            total=0,
-            judge_model_id=judge_model_id,
-            created_by=user_id,
-            evaluator_config=evaluator_config,
-        )
-        _run_in_background(
-            _setup_no_set_and_execute,
+    if not evaluation_set_id:
+        return _create_no_set_mode_run(
             tenant_id,
             user_id,
             agent_id,
@@ -1194,12 +1092,16 @@ def create_agent_evaluation_run_impl(
             field_mappings,
             query_count,
             language,
-            run["agent_evaluation_id"],
-            tenant_id=tenant_id,
-            user_id=user_id,
-            agent_evaluation_id=run["agent_evaluation_id"],
+            evaluator_config,
         )
-        return run
+
+    set_cases = get_evaluation_set_cases_all(
+        evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
+    )
+    if not set_cases:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_SET_EMPTY, "Evaluation set has no cases"
+        )
 
     run = create_agent_evaluation(
         tenant_id=tenant_id,
@@ -1526,8 +1428,7 @@ def _execute_single_case(
 
         # CRITICAL: do NOT json.dumps(score).  agent_evaluation_case_t.score
         # is JSONB and SQLAlchemy serialises Python dicts for us.  Pre-
-        # serialising would create a JSON-string-inside-JSONB double-wrap that
-        # every reader has to repair through ``_coerce_score_dict``.
+        # serialising would create a JSON-string-inside-JSONB double-wrap.
         pass_status = _determine_case_pass_status(score, thresholds)
         update_agent_evaluation_case_result(
             agent_evaluation_case_id=case_id,
@@ -1918,25 +1819,41 @@ def _load_evaluator_thresholds_from_config(raw_config: Any, tenant_id: str) -> d
     return thresholds
 
 
+def _parse_case_reason(reason_raw: str) -> dict:
+    """Parse a case ``reason`` field into a dict.
+
+    The field is TEXT storing a ``json.dumps`` string. When it cannot be
+    parsed, the raw text is wrapped under the ``"reason"`` key.
+    """
+    if not reason_raw:
+        return {}
+    try:
+        parsed = json.loads(reason_raw)
+        return parsed if isinstance(parsed, dict) else {"reason": reason_raw}
+    except (ValueError, TypeError):
+        return {"reason": reason_raw}
+
+
+def _extract_nested_str(c: dict, field: str, key: str) -> str:
+    """Extract a string from a nested dict field (``c[field][key]``)."""
+    nested = c.get(field) or {}
+    if isinstance(nested, dict):
+        return str(nested.get(key) or "")
+    return ""
+
+
 def _build_analysis_failure_example(c: dict) -> dict:
     """Build a compact failure-payload dict for the analysis LLM prompt.
 
-    Uses coerce helpers so historical rows (JSON stored inside a JSONB
-    string) are decoded consistently with new rows.  Each value is clamped
-    to 4000 chars to stay inside LLM context windows.
+    ``score`` is JSONB (already a dict); ``reason`` is TEXT storing a
+    ``json.dumps`` string, decoded here so per-evaluator reasons can be
+    joined.  Each value is clamped to 4000 chars for LLM context limits.
     """
-    score_dict = _coerce_score_dict(c.get("score"))
-    reason_dict = _coerce_reason(c.get("reason"))
-
-    predict_answer = ""
-    predict = c.get("predict") or {}
-    if isinstance(predict, dict):
-        predict_answer = str(predict.get("answer") or "")
-
-    query_text = ""
-    inputs = c.get("inputs") or {}
-    if isinstance(inputs, dict):
-        query_text = str(inputs.get("query") or "")
+    score = c.get("score")
+    score_dict = score if isinstance(score, dict) else {}
+    reason_dict = _parse_case_reason(c.get("reason") or "")
+    predict_answer = _extract_nested_str(c, "predict", "answer")
+    query_text = _extract_nested_str(c, "inputs", "query")
 
     # Compact score: single-evaluator score → scalar, multi-evaluator → keep dict
     if len(score_dict) == 1:
@@ -1945,10 +1862,10 @@ def _build_analysis_failure_example(c: dict) -> dict:
         _score_val = score_dict
 
     # Compact reason: multi-evaluator dict → joined string, scalar → keep string
-    if isinstance(reason_dict, dict) and reason_dict:
+    if reason_dict:
         _reason_str = " | ".join(f"{k}: {v}" for k, v in reason_dict.items())
     else:
-        _reason_str = str(reason_dict or "")
+        _reason_str = ""
 
     return {
         "case_id": c.get("agent_evaluation_case_id"),
@@ -2189,6 +2106,7 @@ def list_agent_evaluation_cases_impl(
     pass_filter: str | None = None,
     anno_schema_ids: list[int] | None = None,
     anno_values: list[str] | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     return list_agent_evaluation_cases(
         agent_evaluation_id=agent_evaluation_id,
@@ -2200,6 +2118,7 @@ def list_agent_evaluation_cases_impl(
         pass_filter=pass_filter,
         anno_schema_ids=anno_schema_ids,
         anno_values=anno_values,
+        session_id=session_id,
     )
 
 
@@ -2226,9 +2145,8 @@ def get_evaluation_stats_impl(
 
     Input is the full case corpus via ``get_evaluation_case_scores``
     (unpaginated, but stripped to only ``pass_status / score / reason``
-    columns so payload stays tight).  ``_coerce_score_dict`` repairs
-    historical legacy rows where the value was double-wrapped as a JSON
-    string nested in a JSONB column.
+    columns so payload stays tight).  ``score`` is JSONB and reads back
+    as a Python dict, so per-evaluator aggregation iterates it directly.
 
     No per-row logging; a single INFO summary is emitted after aggregation
     so operators can reconcile dashboards with DB state.
@@ -2253,26 +2171,18 @@ def get_evaluation_stats_impl(
     histogram_buckets = [0, 0, 0, 0, 0]
     pass_count = 0
     fail_count = 0
-    legacy_coerce_count = 0
-
     for cs in case_scores:
         if cs["pass_status"] == EvalPassStatus.PASS:
             pass_count += 1
         elif cs["pass_status"] == EvalPassStatus.FAIL:
             fail_count += 1
 
-        # Legacy-compatible coerce: if the score column actually holds a
-        # JSON string, decode it into a dict and increment the coerce
-        # counter so we can track cleanup progress on older tenants.
-        raw = cs.get("score")
-        score_dict_before = None
-        if isinstance(raw, str):
-            score_dict_before = raw
-        score_dict = _coerce_score_dict(raw)
-        if score_dict_before is not None:
-            legacy_coerce_count += 1
-
+        score_dict = cs.get("score")
+        if not isinstance(score_dict, dict):
+            continue
         for name, v in score_dict.items():
+            if not isinstance(v, (int, float)) or not isfinite(v):
+                continue
             eval_scores[name].append(v)
             # bucket = floor(value * 5), saturate at bucket index 4.
             # Scores > 1.0 (from custom ranges that are NOT yet normalised
@@ -2283,7 +2193,7 @@ def get_evaluation_stats_impl(
 
     per_evaluator = []
     for name, scores in sorted(eval_scores.items()):
-        avg = sum(scores) / len(scores) if scores else 0.0
+        avg = sum(scores) / len(scores)
         per_evaluator.append(
             {
                 "name": name,
@@ -2304,7 +2214,7 @@ def get_evaluation_stats_impl(
     total = len(case_scores)
     logger.info(
         "get_evaluation_stats_impl: run_id=%s tenant=%s total_cases=%s "
-        "pass_count=%s fail_count=%s evaluator_count=%s legacy_coerced=%s "
+        "pass_count=%s fail_count=%s evaluator_count=%s "
         "histogram_buckets=%s",
         agent_evaluation_id,
         tenant_id,
@@ -2312,7 +2222,6 @@ def get_evaluation_stats_impl(
         pass_count,
         fail_count,
         len(per_evaluator),
-        legacy_coerce_count,
         histogram_buckets,
     )
     return {
@@ -2343,7 +2252,7 @@ def delete_agent_evaluation_run_impl(
             from database.evaluation_set_db import hard_delete_evaluation_set
 
             hard_delete_evaluation_set(run["evaluation_set_id"], tenant_id)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to clean up virtual evaluation set %d for run %d: %s",
                 run["evaluation_set_id"],
@@ -2363,7 +2272,6 @@ async def trial_run_evaluator_impl(
     query: str,
     judge_model_id: int,
     evaluator_ids: list | None = None,
-    field_mappings: dict | None = None,
 ) -> dict:
     # Preload evaluators
     evaluators: dict[int, dict[str, Any]] = {}

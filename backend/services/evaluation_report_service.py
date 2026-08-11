@@ -1,7 +1,6 @@
 """Evaluation PDF report generation — matplotlib charts + reportlab layout."""
 
 import io
-import json
 import logging
 import os
 import tempfile
@@ -24,6 +23,11 @@ from reportlab.platypus import (
 
 from consts.evaluation_report_labels import get_report_labels
 from database.agent_evaluation_db import get_agent_evaluation
+from database.evaluation_annotation_db import (
+    list_annotation_schemas,
+    list_annotations_by_evaluation_id,
+)
+from database.evaluator_db import get_evaluator
 from services.agent_evaluation_service import (
     _load_all_evaluation_cases,
     get_evaluation_stats_impl,
@@ -411,20 +415,34 @@ def _build_report_charts_section(story, L, styles, avg_scores, chart_buf, hist_b
     return chart_path, hist_path
 
 
-def _coerce_case_score(scores):
-    """Coerce a case score from a JSON string to its native type.
+_STATUS_COLORS = {"pass": "#52c41a", "fail": "#ff4d4f"}
 
-    Returns ``(scores, failed)`` where ``failed`` is 1 if the legacy JSON
-    decode failed, else 0.  Failures are aggregated (not logged per row)
-    so a 10 000-case run doesn't spam 10 000 warning rows.
+
+def _format_multi_evaluator_scores(scores: dict, thmap: dict) -> str:
+    """Format per-evaluator scores as an HTML-colored string.
+
+    Each evaluator's colour is determined by its own ``pass_threshold``
+    from *thmap* (defaulting to 0.5).
     """
-    if not isinstance(scores, str):
-        return scores, 0
-    try:
-        return json.loads(scores), 0
-    except Exception:
-        # Aggregate failures, don't log per row — noisy on legacy tenants.
-        return scores, 1
+    score_parts: list[str] = []
+    for k, v in scores.items():
+        if isinstance(v, (int, float)):
+            th = float(thmap.get(str(k), 0.5))
+            sc = _STATUS_COLORS["pass"] if float(v) >= th else _STATUS_COLORS["fail"]
+            score_parts.append(f"<font color='{sc}'>{k}: <b>{v:.2f}</b></font>")
+    return "<br/>".join(score_parts)
+
+
+def _format_single_score(scores: float, status: str) -> str:
+    """Format a scalar score with status-based colour.
+
+    Falls back to 0.5-threshold colouring when *status* is not in the
+    colour map.
+    """
+    sc = _STATUS_COLORS.get(status)
+    if sc is None:
+        sc = _STATUS_COLORS["pass"] if scores >= 0.5 else _STATUS_COLORS["fail"]
+    return f"<font color='{sc}'><b>{scores:.2f}</b></font>"
 
 
 def _format_case_score_text(scores, status, thmap):
@@ -434,30 +452,18 @@ def _format_case_score_text(scores, status, thmap):
     0.5) so the PDF colours agree with what the analysis engine decided.
     """
     if isinstance(scores, dict):
-        score_parts = []
-        for k, v in scores.items():
-            if isinstance(v, (int, float)):
-                th = float(thmap.get(str(k), 0.5))
-                sc = "#52c41a" if float(v) >= th else "#ff4d4f"
-                score_parts.append(f"<font color='{sc}'>{k}: <b>{v:.2f}</b></font>")
-        return "<br/>".join(score_parts)
+        return _format_multi_evaluator_scores(scores, thmap)
     if isinstance(scores, (int, float)):
-        if status == "pass":
-            sc = "#52c41a"
-        elif status == "fail":
-            sc = "#ff4d4f"
-        else:
-            sc = "#52c41a" if scores >= 0.5 else "#ff4d4f"
-        return f"<font color='{sc}'><b>{scores:.2f}</b></font>"
+        return _format_single_score(scores, status)
     return str(scores or "-")
 
 
 def _format_status_tag(status, L):
     """Format a pass/fail status into a colored HTML tag string."""
-    if status == "pass":
-        return f"<font color='#52c41a'><b>{L['PASS_LABEL']}</b></font>"
-    if status == "fail":
-        return f"<font color='#ff4d4f'><b>{L['FAIL_LABEL']}</b></font>"
+    color = _STATUS_COLORS.get(status)
+    if color:
+        label = L["PASS_LABEL"] if status == "pass" else L["FAIL_LABEL"]
+        return f"<font color='{color}'><b>{label}</b></font>"
     return status
 
 
@@ -480,15 +486,8 @@ def _apply_zebra_striping(case_table, num_rows, light_gray):
 
 def _build_report_case_table(
     story, L, styles, all_cases, cn_font, evaluator_thresholds=None
-) -> int:
+):
     """Add the per-case detail table (one section, always on its own page).
-
-    Returns
-    -------
-    coerce_fails : int
-        Number of rows where ``score`` was still a raw JSON string AND the
-        legacy decode failed.  The caller batches this into a single
-        summary log so a 10 000-case run doesn't spam 10 000 warning rows.
 
     Columns
     -------
@@ -527,14 +526,11 @@ def _build_report_case_table(
     ]
     col_widths = [7 * mm, 76 * mm, 47 * mm, 16 * mm]
     case_data = [case_header]
-    coerce_fails = 0
     for i, c in enumerate(all_cases):
         inputs = c.get("inputs") or {}
         query = (inputs.get("query") or "")[:150]
         scores = c.get("score")
         status = c.get("pass_status") or ""
-        scores, failed = _coerce_case_score(scores)
-        coerce_fails += failed
         score_text = _format_case_score_text(scores, status, thmap)
         status_tag = _format_status_tag(status, L)
         case_data.append(
@@ -567,7 +563,6 @@ def _build_report_case_table(
 
     story.append(case_table)
     story.append(Spacer(1, 4 * mm))
-    return coerce_fails
 
 
 def _count_annotation_values(annotation_data, sid):
@@ -617,11 +612,8 @@ def _build_report_annotations(
 ):
     """Add the annotations distribution section (one sub-table per schema).
 
-    Import is lazy because annotation support is an optional feature of
-    evaluator runs; hosts that disable the feature shouldn't pay an import
-    cost in the default hot path (the PDF worker).  If the import fails the
-    section is **silently skipped** — operators can inspect the ``import_failed``
-    counter in the top-level summary log to detect broken installations.
+    Annotation support is an optional feature of evaluator runs; when no
+    schemas are enabled the section is skipped early.
 
     Table semantics
     ---------------
@@ -635,15 +627,6 @@ def _build_report_annotations(
     * The section sits on its own page because tables can be tall; a
       preceding ``PageBreak`` keeps pagination predictable.
     """
-    try:
-        from database.evaluation_annotation_db import (
-            list_annotation_schemas,
-            list_annotations_by_evaluation_id,
-        )
-    except Exception as exc:
-        logger.exception("Failed to import annotation DB: %s", exc)
-        return
-
     try:
         annotation_data = list_annotations_by_evaluation_id(
             tenant_id=tenant_id, agent_evaluation_id=agent_evaluation_id
@@ -713,68 +696,76 @@ def _load_evaluator_thresholds_for_report(run: dict, tenant_id: str):
     evaluator_thresholds: dict[str, float] = {}
     evaluator_ranges: dict[str, tuple[float, float]] = {}
     eval_meta_load_errors = 0
-    try:
-        from database.evaluator_db import get_evaluator
-
-        eids = (run.get("evaluator_config") or {}).get("evaluator_ids", []) or []
-        for eid in eids:
-            try:
-                ev = get_evaluator(int(eid), tenant_id)
-            except Exception:
-                eval_meta_load_errors += 1
-                ev = None
-            if not ev:
-                continue
-            name = str(ev.get("name") or "")
-            if not name:
-                continue
-            evaluator_thresholds[name] = float(ev.get("pass_threshold") or 0.5)
-            rmin = float(ev.get("score_range_min") or 0.0)
-            rmax = float(ev.get("score_range_max") or 1.0)
-            evaluator_ranges[name] = (rmin, rmax)
-    except Exception:
-        logger.warning(
-            "Failed to load evaluator metadata for PDF report", exc_info=True
-        )
+    eids = (run.get("evaluator_config") or {}).get("evaluator_ids", []) or []
+    for eid in eids:
+        try:
+            ev = get_evaluator(int(eid), tenant_id)
+        except Exception:
+            eval_meta_load_errors += 1
+            ev = None
+        if not ev:
+            continue
+        name = str(ev.get("name") or "")
+        if not name:
+            continue
+        evaluator_thresholds[name] = float(ev.get("pass_threshold") or 0.5)
+        rmin = float(ev.get("score_range_min") or 0.0)
+        rmax = float(ev.get("score_range_max") or 1.0)
+        evaluator_ranges[name] = (rmin, rmax)
     return evaluator_thresholds, evaluator_ranges, eval_meta_load_errors
 
 
-def _compute_normalized_avg_scores(all_cases: list, evaluator_ranges: dict) -> tuple:
+def _normalize_one_score(v, rng) -> float:
+    """Normalize a single evaluator score into ``[0, 1]``.
+
+    When *rng* is ``(rmin, rmax)`` with ``rmax > rmin``, the score is
+    linearly mapped.  When *rng* is absent, the raw value is assumed to
+    already be in ``[0, 1]``.
+    """
+    if rng:
+        rmin, rmax = rng
+        if rmax > rmin:
+            nv = (float(v) - rmin) / (rmax - rmin)
+        else:
+            nv = 0.0
+    else:
+        nv = float(v)
+    return max(0.0, min(1.0, nv))
+
+
+def _compute_case_avg_score(
+    scores: dict, evaluator_ranges: dict
+) -> float | None:
+    """Compute the normalized average score for one case.
+
+    Returns ``None`` when the case has no valid numeric scores.
+    """
+    normalized_vals: list[float] = []
+    for k, v in scores.items():
+        if not isinstance(v, (int, float)):
+            continue
+        rng = evaluator_ranges.get(str(k))
+        normalized_vals.append(_normalize_one_score(v, rng))
+    if not normalized_vals:
+        return None
+    return sum(normalized_vals) / len(normalized_vals)
+
+
+def _compute_normalized_avg_scores(all_cases: list, evaluator_ranges: dict) -> list:
     """Compute per-case normalized average scores for histogram.
 
     Each evaluator score is normalized into [0,1] using its own score_range
     so custom [0,100] ranges don't collapse everything into the top bucket.
-    Returns (all_avg_scores, histogram_coerce_fails).
     """
     all_avg_scores: list = []
-    histogram_coerce_fails = 0
     for c in all_cases:
         scores = c.get("score")
-        if isinstance(scores, str):
-            try:
-                scores = json.loads(scores)
-            except Exception:
-                histogram_coerce_fails += 1
-                scores = {}
-        if isinstance(scores, dict):
-            normalized_vals = []
-            for k, v in scores.items():
-                if not isinstance(v, (int, float)):
-                    continue
-                rng = evaluator_ranges.get(str(k))
-                if rng:
-                    rmin, rmax = rng
-                    if rmax > rmin:
-                        nv = (float(v) - rmin) / (rmax - rmin)
-                    else:
-                        nv = 0.0
-                else:
-                    nv = float(v)
-                nv = max(0.0, min(1.0, nv))
-                normalized_vals.append(nv)
-            if normalized_vals:
-                all_avg_scores.append(sum(normalized_vals) / len(normalized_vals))
-    return all_avg_scores, histogram_coerce_fails
+        if not isinstance(scores, dict):
+            continue
+        avg = _compute_case_avg_score(scores, evaluator_ranges)
+        if avg is not None:
+            all_avg_scores.append(avg)
+    return all_avg_scores
 
 
 def _build_report_styles(cn_font: str) -> dict:
@@ -928,10 +919,8 @@ def generate_agent_evaluation_report_impl(
 
     Logging
     -------
-    * No per-case / per-row prints — the section builders aggregate
-      counts of legacy-format rows into ``histogram_coerce_fails`` /
-      ``table_coerce_fails`` and we emit a single INFO log at the very
-      end.
+    * No per-case / per-row prints — the section builders are silent
+      and we emit a single INFO log at the very end.
     * If the DB layer fails to fetch evaluator metadata (e.g. broken FK
       after a hard delete) we use the default [0, 1] range with threshold
       0.5 and raise a single WARNING (repeated failures per evaluator
@@ -960,7 +949,7 @@ def generate_agent_evaluation_report_impl(
     )
 
     # ── Compute per-case average scores for histogram ─────────────────────
-    all_avg_scores, histogram_coerce_fails = _compute_normalized_avg_scores(
+    all_avg_scores = _compute_normalized_avg_scores(
         all_cases, evaluator_ranges
     )
 
@@ -1040,7 +1029,7 @@ def generate_agent_evaluation_report_impl(
     chart_path, hist_path = _build_report_charts_section(
         story, L, styles, avg_scores, chart_buf, hist_buf
     )
-    table_coerce_fails = _build_report_case_table(
+    _build_report_case_table(
         story, L, styles, all_cases, cn_font, evaluator_thresholds=evaluator_thresholds
     )
     _build_report_annotations(
@@ -1063,8 +1052,7 @@ def generate_agent_evaluation_report_impl(
         "generate_agent_evaluation_report_impl: run_id=%s tenant=%s language=%s "
         "total_cases=%s pass_count=%s fail_count=%s evaluators=%s pages_fetched=%s "
         "histogram_samples=%s top_0.8_count=%s eval_meta_load_errors=%s "
-        "histogram_coerce_fails=%s table_coerce_fails=%s cleanup_fails=%s "
-        "chart_gen_ok=%s pdf_kb=%s",
+        "cleanup_fails=%s chart_gen_ok=%s pdf_kb=%s",
         agent_evaluation_id,
         tenant_id,
         language,
@@ -1076,8 +1064,6 @@ def generate_agent_evaluation_report_impl(
         len(all_avg_scores),
         top_count,
         eval_meta_load_errors,
-        histogram_coerce_fails,
-        table_coerce_fails,
         cleanup_fails,
         chart_gen_ok,
         pdf_bytes_len_kb,

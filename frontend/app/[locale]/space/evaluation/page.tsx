@@ -184,7 +184,10 @@ function RunsTab() {
 
   const fetchRuns = useCallback(() => {
     if (!filterAgent) return;
-    fetch(`/api/agent-evaluations?agent_id=${filterAgent}&limit=100&offset=0`, {
+    // limit=0 requests the full set for this agent (the backend treats it
+    // as "no pagination window") — the page is already narrowed to one
+    // agent, so a hard limit would silently hide older runs.
+    fetch(`/api/agent-evaluations?agent_id=${filterAgent}&limit=0`, {
       headers: getAuthHeaders(),
     })
       .then((r) => r.json())
@@ -1474,7 +1477,7 @@ function EvaluatorsTab() {
                             type: d.data.evaluator_type || "llm",
                             prompt: d.data.prompt || "",
                             promptEn: "",
-                            code: "",
+                            code: d.data.code || "",
                             sMin: d.data.score_range_min ?? 0,
                             sMax: d.data.score_range_max ?? 1,
                             threshold: d.data.pass_threshold ?? 0.5,
@@ -1655,7 +1658,7 @@ function EvaluatorsTab() {
                   message.warning(t("agentEvaluation.validation.scoreMinMax"));
                   return;
                 }
-                if (f.threshold <= f.sMin || f.threshold >= f.sMax) {
+                if (f.threshold < f.sMin || f.threshold > f.sMax) {
                   message.warning(
                     t("agentEvaluation.validation.thresholdRange")
                   );
@@ -1701,7 +1704,18 @@ function EvaluatorsTab() {
                     refreshEval();
                   } else {
                     const d = await r.json();
-                    message.error(d?.detail || t("agentEvaluation.saveFailed"));
+                    const detail =
+                      typeof d?.detail === "string"
+                        ? d.detail
+                        : Array.isArray(d?.detail)
+                          ? d.detail
+                              .map(
+                                (e: any) =>
+                                  `${e.loc?.join(".") || ""}: ${e.msg}`
+                              )
+                              .join("; ")
+                          : t("agentEvaluation.saveFailed");
+                    message.error(detail);
                   }
                 } catch {
                 } finally {
@@ -2387,7 +2401,7 @@ function SetsTab() {
               size="small"
               value={newTurn}
               onChange={(v) => setNewTurn(v)}
-              min={0}
+              min={1}
               placeholder={t("agentEvaluation.inputTurnOrder")}
               style={{ width: "100%" }}
             />
@@ -2400,7 +2414,7 @@ function SetsTab() {
               onChange={(v) =>
                 setEditingCase({ ...editingCase, turn_order: v })
               }
-              min={0}
+              min={1}
               placeholder={t("agentEvaluation.inputTurnOrder")}
               style={{ width: "100%" }}
             />
@@ -3105,6 +3119,9 @@ function SetsTab() {
           setAdding(false);
           setEditingCase(null);
           setSelKeys([]);
+          // Refresh the main set table so case_count stays in sync after
+          // any add/edit/delete performed inside the detail drawer.
+          refreshSets();
         }}
         size="large"
         extra={

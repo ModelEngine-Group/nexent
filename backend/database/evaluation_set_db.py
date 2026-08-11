@@ -143,6 +143,7 @@ def list_evaluation_set_cases(
         q = session.query(EvaluationSetCase).filter(
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
             EvaluationSetCase.tenant_id == tenant_id,
+            EvaluationSetCase.delete_flag == "N",
         )
         if query:
             q = q.filter(EvaluationSetCase.inputs["query"].astext.ilike(f"%{query}%"))
@@ -169,6 +170,7 @@ def count_evaluation_set_cases(
         q = session.query(EvaluationSetCase).filter(
             EvaluationSetCase.evaluation_set_id == evaluation_set_id,
             EvaluationSetCase.tenant_id == tenant_id,
+            EvaluationSetCase.delete_flag == "N",
         )
         if query:
             q = q.filter(EvaluationSetCase.inputs["query"].astext.ilike(f"%{query}%"))
@@ -184,6 +186,7 @@ def get_evaluation_set_cases_all(
             .filter(
                 EvaluationSetCase.evaluation_set_id == evaluation_set_id,
                 EvaluationSetCase.tenant_id == tenant_id,
+                EvaluationSetCase.delete_flag == "N",
             )
             .order_by(
                 EvaluationSetCase.session_id.is_(None),

@@ -2,7 +2,7 @@
 
 # Concurrent tasks
 MAX_CONCURRENT_RUNS = 5
-MAX_TOTAL_RUNS = 50
+MAX_TOTAL_RUNS = 500
 
 # Per-run
 MAX_EVALUATORS_PER_RUN = 5

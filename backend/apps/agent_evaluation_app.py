@@ -165,7 +165,7 @@ async def create_agent_evaluation_api(
 @router.get("")
 async def list_agent_evaluations_by_agent_api(
     agent_id: int = Query(...),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=0, le=200),
     offset: int = Query(0, ge=0),
     authorization: str | None = Header(None),
 ):
@@ -176,8 +176,10 @@ async def list_agent_evaluations_by_agent_api(
     rows created by a different tenant even if they can guess the
     ``agent_id``.
 
-    ``limit`` is hard-clamped to [1, 200] at the FastAPI level (``le=200``)
-    so no second clamp is needed inside the handler.
+    ``limit == 0`` requests the FULL result set for the agent (the run
+    window is bounded by the tenant-level run cap, so this stays small);
+    any other value is hard-clamped to [1, 200] at the FastAPI level
+    (``le=200``) so no second clamp is needed inside the handler.
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -252,6 +254,7 @@ async def list_agent_evaluation_cases_api(
     pass_filter: str | None = Query(None),
     anno_schema_id: list[int] = Query([]),
     anno_value: list[str] = Query([]),
+    session_id: str | None = Query(None),
     authorization: str | None = Header(None),
 ):
     """Return a paginated window of cases for an evaluation run.
@@ -262,9 +265,11 @@ async def list_agent_evaluation_cases_api(
     * ``sort_by`` — a valid evaluator name OR the empty default (which
       triggers the session-aware default ordering for multi-turn agents).
     * ``pass_filter`` — "pass"/"fail"/``None``; ``None`` returns all rows.
+    * ``session_id`` — exact match on ``session_id``; ``"__single__"``
+      matches single-turn cases (no session).  Omit for all sessions.
     * ``anno_schema_id`` / ``anno_value`` — **parallel paired arrays**.
-      The i-th schema id is matched against the i-th value.  Length
-      mismatches are reported by the DB layer as an HTTP 400.
+      The i-th schema id is matched against the i-th value.  Callers must
+      ensure equal length; mismatches are silently ignored (see DB layer).
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -278,6 +283,7 @@ async def list_agent_evaluation_cases_api(
             pass_filter=pass_filter,
             anno_schema_ids=anno_schema_id,
             anno_values=anno_value,
+            session_id=session_id,
         )
         return _ok(data)
     except AppException:
@@ -472,7 +478,7 @@ async def update_annotation_schemas_api(
             "update_annotation_schemas_api ERROR: tenant=%s run_id=%s schema_count=%s err=%r",
             _safe_extract_tenant(authorization),
             agent_evaluation_id,
-            len(schema_ids) if schema_ids else 0,
+            len(schema_ids),
             exc,
         )
         raise AppException(
@@ -485,13 +491,14 @@ async def delete_agent_evaluation_api(
     agent_evaluation_id: int,
     authorization: str | None = Header(None),
 ):
-    """Soft-delete an evaluation run.  Only the creating user can delete.
+    """Hard-delete an evaluation run.  Only the creating user can delete.
 
-    ``delete_agent_evaluation_run_impl`` also cascades into the attached
-    one-shot evaluation set (when the run was created in ``no_set`` mode)
-    because that set is not user-visible anywhere else and would
-    otherwise be a permanent orphan.  Regular evaluation-set runs do NOT
-    cascade — only the run row itself is flipped to deleted.
+    ``delete_agent_evaluation_run_impl`` cascades into cases, annotations,
+    and the attached one-shot evaluation set (when the run was created in
+    ``no-set`` mode) because that set is not user-visible anywhere else
+    and would otherwise be a permanent orphan.  Regular evaluation-set
+    runs do NOT cascade to the set itself — only the run row and its
+    cases/annotations are deleted.
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -536,7 +543,7 @@ async def trial_run_api(
     trial run (1) executes the latest agent on ``payload.query``, (2)
     runs every named evaluator in ``evaluator_ids`` against the
     resulting answer, and (3) returns a compact payload with the agent
-    reply, per-evaluator score/reason, and an overall pass/fail flag.
+    reply, per-evaluator score/reason.
 
     No row is written to ``agent_evaluation_t``; callers that want a
     persistent record after trying should hit the regular
@@ -552,7 +559,6 @@ async def trial_run_api(
             query=payload.query,
             judge_model_id=payload.judge_model_id,
             evaluator_ids=payload.evaluator_ids,
-            field_mappings=payload.field_mappings,
         )
         logger.info(
             "trial_run_api OK: tenant=%s user=%s agent_id=%s version=%s "

@@ -1,9 +1,8 @@
-import hashlib
 import io
 import json
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, File, Form, Header, Query, Request, UploadFile
@@ -26,8 +25,8 @@ from services.evaluation_set_service import (
     batch_delete_evaluation_set_cases_impl,
     count_active_runs_using_set,
     count_evaluation_sets_impl,
+    create_empty_evaluation_set,
     create_evaluation_set_from_cases,
-    create_evaluation_set_from_jsonl,
     delete_evaluation_set_case_impl,
     delete_evaluation_set_impl,
     export_evaluation_set_impl,
@@ -54,32 +53,20 @@ def _ok(data=None):
     )
 
 
-def _safe_line_preview(line: str) -> str:
-    """Return a non-reconstructible preview of user-provided JSONL lines.
-
-    Sonar flags direct logging of user-controlled payloads because raw
-    queries / answers may contain PII.  We emit the byte length plus a
-    short SHA-256 prefix so production logs remain searchable by line
-    identity without exposing any verbatim content.
-    """
-    digest = hashlib.sha256(line.encode("utf-8")).hexdigest()
-    return f"len={len(line)} sha256_prefix={digest[:16]}"
-
-
 router = APIRouter(prefix="/evaluation-sets")
 
 # ── Pydantic models ─────────────────────────────────────────────────
 
 
 class UpdateCaseRequest(BaseModel):
-    inputs: Optional[dict] = None
-    label: Optional[dict] = None
-    session_id: Optional[str] = None
-    turn_order: Optional[int] = None
+    inputs: dict | None = None
+    label: dict | None = None
+    session_id: str | None = None
+    turn_order: int | None = None
 
 
 class BatchDeleteRequest(BaseModel):
-    case_ids: list
+    case_ids: list[int]
 
 
 MAX_DOCX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
@@ -89,12 +76,12 @@ class GenerateCasesRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=1000)
     count: int = Field(default=20, ge=1, le=200)
     model_id: int = Field(...)
-    knowledge_base_names: Optional[List[str]] = None
-    agent_id: Optional[int] = None
-    agent_version_no: Optional[int] = None
-    set_name: Optional[str] = None
-    set_description: Optional[str] = None
-    target_set_id: Optional[int] = None
+    knowledge_base_names: list[str] | None = None
+    agent_id: int | None = None
+    agent_version_no: int | None = None
+    set_name: str | None = None
+    set_description: str | None = None
+    target_set_id: int | None = None
 
 
 def _parse_docx_to_text(raw: bytes) -> str:
@@ -115,7 +102,7 @@ def _parse_docx_to_text(raw: bytes) -> str:
 async def list_evaluation_sets_api(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -135,13 +122,15 @@ async def list_evaluation_sets_api(
 @router.post("")
 async def create_evaluation_set_api(
     name: str = Body(...),
-    description: Optional[str] = Body(None),
-    source_filename: Optional[str] = Body(None),
-    jsonl_text: str = Body(
-        "", description="Raw JSONL content, empty to create empty set"
-    ),
-    authorization: Optional[str] = Header(None),
+    description: str | None = Body(None),
+    source_filename: str | None = Body(None),
+    authorization: str | None = Header(None),
 ):
+    """Create an empty evaluation set.
+
+    Cases are added later via the upload endpoint, the generate-cases-async
+    endpoint, or the per-case add/update endpoints.
+    """
     try:
         if (
             not name
@@ -159,12 +148,11 @@ async def create_evaluation_set_api(
                 ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,
                 f"Evaluation set limit reached: {MAX_EVALUATION_SETS}",
             )
-        meta = create_evaluation_set_from_jsonl(
+        meta = create_empty_evaluation_set(
             tenant_id=tenant_id,
             name=name.strip(),
             description=description,
             source_filename=source_filename,
-            jsonl_text=jsonl_text,
             created_by=user_id,
         )
         return _ok(meta)
@@ -182,10 +170,13 @@ async def create_evaluation_set_api(
 @router.post("/upload")
 async def upload_evaluation_set_api(
     name: str = Form(...),
-    description: Optional[str] = Form(None),
-    files: List[UploadFile] = File(...),
-    authorization: Optional[str] = Header(None),
+    description: str | None = Form(None),
+    files: list[UploadFile] = File(...),
+    authorization: str | None = Header(None),
 ):
+    """Upload one or more .xlsx / .xls files and create an evaluation set
+    from the parsed cases.  Other file types are rejected.
+    """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         if not files:
@@ -193,51 +184,21 @@ async def upload_evaluation_set_api(
                 ErrorCode.COMMON_VALIDATION_ERROR, "At least one file is required"
             )
 
-        all_cases: List[Dict[str, Any]] = []
-        source_filenames: List[str] = []
+        all_cases: list[dict[str, Any]] = []
+        source_filenames: list[str] = []
 
         for file in files:
             raw = await file.read()
             filename = file.filename or ""
-            source_filenames.append(filename)
             lower = filename.lower()
-
-            if lower.endswith(".xlsx") or lower.endswith(".xls"):
-                cases = parse_evaluation_cases_from_excel(filename=filename, raw=raw)
-                all_cases.extend(cases)
-            else:
-                try:
-                    jsonl_text = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    jsonl_text = raw.decode("utf-8", errors="replace")
-                    logger.warning(
-                        "Non-UTF-8 content in uploaded file %s, replaced invalid bytes",
-                        filename,
-                    )
-                for line in jsonl_text.strip().splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            "Skipping invalid JSONL line in upload: %s",
-                            _safe_line_preview(line),
-                        )
-                        continue
-                    all_cases.append(
-                        {
-                            "inputs": {
-                                "query": obj.get("query", ""),
-                                "context": obj.get("context"),
-                            }
-                            if obj.get("context")
-                            else {"query": obj.get("query", "")},
-                            "label": {"answer": obj.get("answer", "")},
-                            "case_id": obj.get("case_id"),
-                        }
-                    )
+            if not lower.endswith((".xlsx", ".xls")):
+                raise AppException(
+                    ErrorCode.COMMON_VALIDATION_ERROR,
+                    f"Unsupported file type: {filename}. Only .xlsx and .xls are accepted.",
+                )
+            source_filenames.append(filename)
+            cases = parse_evaluation_cases_from_excel(filename=filename, raw=raw)
+            all_cases.extend(cases)
 
         if not all_cases:
             raise AppException(
@@ -279,7 +240,7 @@ async def download_evaluation_set_template_api():
 @router.get("/{evaluation_set_id}")
 async def get_evaluation_set_api(
     evaluation_set_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -300,7 +261,7 @@ async def get_evaluation_set_api(
 @router.get("/{evaluation_set_id}/export")
 async def export_evaluation_set_api(
     evaluation_set_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     """Export an evaluation set as an Excel (.xlsx) file."""
     try:
@@ -332,8 +293,8 @@ async def list_evaluation_set_cases_api(
     evaluation_set_id: int,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    query: Optional[str] = Query(None, description="Fuzzy search on inputs.query"),
-    authorization: Optional[str] = Header(None),
+    query: str | None = Query(None, description="Fuzzy search on inputs.query"),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -366,7 +327,7 @@ async def list_evaluation_set_cases_api(
 async def add_evaluation_set_case_api(
     evaluation_set_id: int,
     payload: UpdateCaseRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -405,7 +366,7 @@ async def update_evaluation_set_case_api(
     evaluation_set_id: int,
     case_id: int,
     payload: UpdateCaseRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -433,7 +394,7 @@ async def update_evaluation_set_case_api(
 async def delete_evaluation_set_case_api(
     evaluation_set_id: int,
     case_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -453,7 +414,7 @@ async def delete_evaluation_set_case_api(
 async def batch_delete_cases_api(
     evaluation_set_id: int,
     payload: BatchDeleteRequest,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
@@ -473,7 +434,7 @@ async def batch_delete_cases_api(
 @router.delete("/{evaluation_set_id}")
 async def delete_evaluation_set_api(
     evaluation_set_id: int,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -489,73 +450,105 @@ async def delete_evaluation_set_api(
         )
 
 
+async def _parse_generate_cases_request(
+    request: Request,
+) -> tuple[GenerateCasesRequest, UploadFile | None]:
+    """Parse the request body as JSON or multipart form.
+
+    Returns ``(payload, file)`` where *file* is ``None`` for JSON bodies.
+    """
+    content_type = request.headers.get("content-type", "")
+    if "multipart" in content_type:
+        form = await request.form()
+        payload = GenerateCasesRequest(**json.loads(str(form["payload"])))
+        file = form.get("file")
+    else:
+        body = await request.json()
+        payload = GenerateCasesRequest(**body)
+        file = None
+    return payload, file
+
+
+def _validate_and_parse_docx(raw: bytes, filename: str | None) -> tuple[str, str]:
+    """Validate extension and size, then parse a DOCX upload.
+
+    Returns ``(file_content, file_name)``. Raises ``AppException`` when the
+    extension is invalid, the file is too large, or parsing fails.
+    """
+    if not filename or not filename.lower().endswith(".docx"):
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "Only .docx files are supported"
+        )
+    if len(raw) > MAX_DOCX_FILE_SIZE:
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            f"File size exceeds {MAX_DOCX_FILE_SIZE // (1024 * 1024)}MB limit",
+        )
+    try:
+        file_content = _parse_docx_to_text(raw)
+    except Exception as e:
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, f"Failed to parse DOCX file: {e}"
+        ) from e
+    return file_content, filename
+
+
+def _resolve_target_set(
+    payload: GenerateCasesRequest,
+    tenant_id: str,
+    user_id: str,
+) -> tuple[int, bool]:
+    """Resolve the target evaluation set ID.
+
+    When ``target_set_id`` is provided, validates the set is not in use.
+    Otherwise, creates a new empty set (requires ``set_name``).
+
+    Returns ``(set_id, is_new)``.
+    """
+    if payload.target_set_id:
+        set_id = payload.target_set_id
+        n = count_active_runs_using_set(set_id, tenant_id)
+        if n > 0:
+            raise AppException(
+                ErrorCode.AGENT_EVALUATION_SET_IN_USE,
+                f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified",
+            )
+        return set_id, False
+
+    if not payload.set_name:
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            "set_name is required when target_set_id is not provided",
+        )
+    meta = create_empty_evaluation_set(
+        tenant_id=tenant_id,
+        name=payload.set_name,
+        description=payload.set_description,
+        source_filename=None,
+        created_by=user_id,
+    )
+    return meta["evaluation_set_id"], True
+
+
 @router.post("/generate-cases-async")
 async def generate_cases_async_api(
     request: Request,
-    authorization: Optional[str] = Header(None),
+    authorization: str | None = Header(None),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
 
-        # Support both JSON body (no file) and multipart form (with .docx file)
-        content_type = request.headers.get("content-type", "")
-        if "multipart" in content_type:
-            form = await request.form()
-            payload = GenerateCasesRequest(**json.loads(str(form["payload"])))
-            file = form.get("file")
-        else:
-            body = await request.json()
-            payload = GenerateCasesRequest(**body)
-            file = None
+        payload, file = await _parse_generate_cases_request(request)
 
         file_content = None
         file_name = None
         if file and isinstance(file, UploadFile):
-            if not file.filename or not file.filename.lower().endswith(".docx"):
-                raise AppException(
-                    ErrorCode.COMMON_VALIDATION_ERROR, "Only .docx files are supported"
-                )
             raw = await file.read()
-            if len(raw) > MAX_DOCX_FILE_SIZE:
-                raise AppException(
-                    ErrorCode.COMMON_VALIDATION_ERROR,
-                    f"File size exceeds {MAX_DOCX_FILE_SIZE // (1024 * 1024)}MB limit",
-                )
-            try:
-                file_content = _parse_docx_to_text(raw)
-            except Exception as e:
-                raise AppException(
-                    ErrorCode.COMMON_VALIDATION_ERROR, f"Failed to parse DOCX file: {e}"
-                ) from e
-            file_name = file.filename
+            file_content, file_name = _validate_and_parse_docx(raw, file.filename)
 
-        if payload.target_set_id:
-            set_id = payload.target_set_id
-            n = count_active_runs_using_set(set_id, tenant_id)
-            if n > 0:
-                raise AppException(
-                    ErrorCode.AGENT_EVALUATION_SET_IN_USE,
-                    f"Evaluation set is referenced by {n} active evaluation run(s) and cannot be modified",
-                )
-            _update_generation_status(set_id, tenant_id, "GENERATING", 0)
-        else:
-            if not payload.set_name:
-                raise AppException(
-                    ErrorCode.COMMON_VALIDATION_ERROR,
-                    "set_name is required when target_set_id is not provided",
-                )
-            meta = create_evaluation_set_from_jsonl(
-                tenant_id=tenant_id,
-                name=payload.set_name,
-                description=payload.set_description,
-                source_filename=None,
-                jsonl_text="",
-                created_by=user_id,
-            )
-            set_id = meta["evaluation_set_id"]
-            _update_generation_status(set_id, tenant_id, "GENERATING", 0)
+        set_id, is_new = _resolve_target_set(payload, tenant_id, user_id)
+        _update_generation_status(set_id, tenant_id, "GENERATING", 0)
 
-        is_new = not bool(payload.target_set_id)
         pool.submit(
             _generate_cases_async,
             set_id,

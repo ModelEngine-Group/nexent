@@ -76,7 +76,7 @@ class EvaluatorFields(BaseModel):
                 raise ValueError(
                     f"score_range_min ({lo}) must be less than score_range_max ({hi})"
                 )
-            if th is not None and (th <= lo or th >= hi):
+            if th is not None and (th < lo or th > hi):
                 raise ValueError(
                     f"pass_threshold ({th}) must be between score_range_min ({lo}) and score_range_max ({hi})"
                 )

@@ -99,6 +99,16 @@ def create_evaluator(
         return _to_dict(row)
 
 
+def _apply_evaluator_updates(target, updatable: list[str], kwargs: dict) -> list[str]:
+    """Apply kwargs fields to *target* row, returning sorted touched field names."""
+    touched = []
+    for key in updatable:
+        if key in kwargs and kwargs[key] is not None:
+            setattr(target, key, kwargs[key])
+            touched.append(key)
+    return sorted(touched)
+
+
 def update_evaluator(
     evaluator_id: int,
     tenant_id: str,
@@ -186,9 +196,7 @@ def update_evaluator(
                 is_current=True,
                 model_id=row.model_id,
             )
-            for key in updatable:
-                if key in kwargs and kwargs[key] is not None:
-                    setattr(new_row, key, kwargs[key])
+            touched = _apply_evaluator_updates(new_row, updatable, kwargs)
 
             row.is_current = False
             session.add(new_row)
@@ -200,18 +208,13 @@ def update_evaluator(
                 tenant_id,
                 evaluator_id,
                 new_row.version_no,
-                sorted([k for k in updatable if k in kwargs and kwargs[k] is not None]),
+                touched,
             )
             return _to_dict(new_row)
 
         # DRAFT: mutate the row directly — no new snapshot required since
         # DRAFT rows are not yet frozen into any evaluation run plan.
-        touched = sorted(
-            [k for k in updatable if k in kwargs and kwargs[k] is not None]
-        )
-        for key in updatable:
-            if key in kwargs and kwargs[key] is not None:
-                setattr(row, key, kwargs[key])
+        touched = _apply_evaluator_updates(row, updatable, kwargs)
 
         session.commit()
         session.refresh(row)

@@ -1891,7 +1891,7 @@ class EvaluationSetCase(TableBase):
 
     order_no = Column(Integer, default=0, doc="Case order in the set")
     session_id = Column(String(128), nullable=True, doc="Multi-turn session identifier")
-    turn_order = Column(Integer, default=0, doc="Turn order within a session (0-indexed)")
+    turn_order = Column(Integer, default=0, doc="Turn order within a session (1-based)")
 
     __table_args__ = (
         Index("ix_eval_set_case_set_id", "evaluation_set_id"),

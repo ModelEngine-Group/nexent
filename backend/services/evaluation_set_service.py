@@ -4,7 +4,7 @@ import re
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import MAX_CASES_PER_SET
@@ -43,91 +43,14 @@ logger = logging.getLogger(__name__)
 MAX_TURNS_PER_SESSION = 100
 
 
-def _validate_single_turn_case(obj: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(obj, dict):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "case must be an object")
-
-    inputs = obj.get("inputs")
-    label = obj.get("label")
-
-    if not isinstance(inputs, dict):
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "inputs must be an object"
-        )
-    if not isinstance(label, dict):
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "label must be an object")
-
-    query = inputs.get("query")
-    if not isinstance(query, str) or not query.strip():
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "inputs.query must be a non-empty string"
-        )
-
-    context = inputs.get("context")
-    if context is not None and not isinstance(context, str):
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR,
-            "inputs.context must be a string when provided",
-        )
-
-    answer = label.get("answer")
-    if not isinstance(answer, str) or not answer.strip():
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "label.answer must be a non-empty string"
-        )
-
-    case_id = obj.get("case_id")
-    if case_id is not None and not isinstance(case_id, str):
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "case_id must be a string when provided"
-        )
-
-    result: Dict[str, Any] = {
-        "case_id": case_id,
-        "inputs": {
-            "query": query,
-            **({"context": context} if context is not None else {}),
-        },
-        "label": {"answer": answer},
-    }
-    sid = obj.get("session_id")
-    if sid:
-        result["session_id"] = sid
-        result["turn_order"] = obj.get("turn_order", 0)
-    return result
-
-
-def parse_jsonl_cases(jsonl_text: str) -> List[Dict[str, Any]]:
-    cases: List[Dict[str, Any]] = []
-    for idx, line in enumerate((jsonl_text or "").splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except Exception as exc:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_GENERATION_BAD_FORMAT,
-                f"Invalid JSON at line {idx}",
-            ) from exc
-
-        normalized = _validate_single_turn_case(obj)
-        normalized["order_no"] = len(cases)
-        cases.append(normalized)
-
-    if not cases:
-        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "JSONL contains no cases")
-    return cases
-
-
 def create_evaluation_set_from_cases(
     tenant_id: str,
     name: str,
-    description: Optional[str],
-    source_filename: Optional[str],
-    cases: List[Dict[str, Any]],
-    created_by: Optional[str],
-) -> Dict[str, Any]:
+    description: str | None,
+    source_filename: str | None,
+    cases: list[dict[str, Any]],
+    created_by: str | None,
+) -> dict[str, Any]:
     # ── Multi-turn / count validations ────────────────────────────
     if not cases:
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "cases is empty")
@@ -137,7 +60,7 @@ def create_evaluation_set_from_cases(
             f"Case count {len(cases)} exceeds limit {MAX_CASES_PER_SET}",
         )
 
-    sessions: Dict[str, List[int]] = defaultdict(list)
+    sessions: dict[str, list[int]] = defaultdict(list)
     for case in cases:
         sid = case.get("session_id")
         if sid:
@@ -182,32 +105,37 @@ def create_evaluation_set_from_cases(
     return meta
 
 
-def create_evaluation_set_from_jsonl(
+def create_empty_evaluation_set(
     tenant_id: str,
     name: str,
-    description: Optional[str],
-    source_filename: Optional[str],
-    jsonl_text: str,
-    created_by: Optional[str],
-) -> Dict[str, Any]:
-    cases = parse_jsonl_cases(jsonl_text)
-    return create_evaluation_set_from_cases(
+    description: str | None,
+    source_filename: str | None,
+    created_by: str | None,
+) -> dict[str, Any]:
+    """Create an evaluation set with no cases (``case_count = 0``).
+
+    Used by the generate-cases-async flow and the create endpoint when no
+    cases are provided up-front.  Cases are added later via
+    :func:`insert_evaluation_set_cases`.
+    """
+    meta = create_evaluation_set(
         tenant_id=tenant_id,
         name=name,
         description=description,
         source_filename=source_filename,
-        cases=cases,
         created_by=created_by,
     )
+    meta["case_count"] = 0
+    return meta
 
 
 def list_evaluation_sets_impl(
     tenant_id: str, limit: int = 50, offset: int = 0
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     return list_evaluation_sets(tenant_id=tenant_id, limit=limit, offset=offset)
 
 
-def get_evaluation_set_impl(evaluation_set_id: int, tenant_id: str) -> Dict[str, Any]:
+def get_evaluation_set_impl(evaluation_set_id: int, tenant_id: str) -> dict[str, Any]:
     data = get_evaluation_set(evaluation_set_id=evaluation_set_id, tenant_id=tenant_id)
     if not data:
         raise AppException(
@@ -225,7 +153,7 @@ def list_evaluation_set_cases_impl(
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
-    query: Optional[str] = None,
+    query: str | None = None,
 ) -> dict:
     cases = list_evaluation_set_cases(
         evaluation_set_id=evaluation_set_id,
@@ -307,9 +235,9 @@ def _check_set_not_in_use(evaluation_set_id: int, tenant_id: str) -> None:
 def delete_evaluation_set_impl(
     evaluation_set_id: int,
     tenant_id: str,
-    user_id: str,
+    user_id: str,  # reserved for future audit logging
 ) -> None:
-    """Soft-delete an evaluation set.
+    """Hard-delete an evaluation set.
 
     Blocked when any active evaluation run still references the set, so historical
     runs never lose their context. Use ``count_active_runs_using_set`` first if
@@ -374,6 +302,41 @@ def add_evaluation_set_case_impl(
     return n
 
 
+def _validate_turn_continuity(
+    evaluation_set_id: int,
+    case_id: int,
+    new_session_id: str | None,
+    new_turn_order: int | None,
+    session_changed: bool,
+    turn_changed: bool,
+) -> None:
+    """Validate multi-turn session continuity after a case update.
+
+    Skipped when *new_session_id* is empty or when neither session_id nor
+    turn_order changed (content-only edit).
+    """
+    if not new_session_id:
+        return
+    if not (session_changed or turn_changed):
+        return
+
+    other_turns = list_case_turn_orders_by_session(
+        evaluation_set_id, new_session_id, exclude_case_ids=[case_id]
+    )
+    other_max = max(other_turns) if other_turns else 0
+    expected = other_max + 1
+    if new_turn_order != expected:
+        raise AppException(
+            ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
+            f"Session {new_session_id}: expected turn_order {expected}, got {new_turn_order}",
+            details={
+                "session_id": new_session_id,
+                "expected": expected,
+                "actual": new_turn_order,
+            },
+        )
+
+
 def update_evaluation_set_case_impl(
     evaluation_set_id,
     case_id,
@@ -393,29 +356,15 @@ def update_evaluation_set_case_impl(
     new_session_id = session_id if session_id is not None else row.get("session_id")
     new_turn_order = turn_order if turn_order is not None else row.get("turn_order")
 
-    # Validate multi-turn session continuity after update (turn_order starts from 1).
-    # Skip validation when session_id and turn_order are unchanged (content-only edit).
     original_session_id = row.get("session_id")
     original_turn_order = row.get("turn_order")
     session_changed = (new_session_id or "") != (original_session_id or "")
     turn_changed = (new_turn_order or 0) != (original_turn_order or 0)
 
-    if new_session_id and (session_changed or turn_changed):
-        other_turns = list_case_turn_orders_by_session(
-            evaluation_set_id, new_session_id, exclude_case_ids=[case_id]
-        )
-        other_max = max(other_turns) if other_turns else 0
-        expected = other_max + 1
-        if new_turn_order != expected:
-            raise AppException(
-                ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH,
-                f"Session {new_session_id}: expected turn_order {expected}, got {new_turn_order}",
-                details={
-                    "session_id": new_session_id,
-                    "expected": expected,
-                    "actual": new_turn_order,
-                },
-            )
+    _validate_turn_continuity(
+        evaluation_set_id, case_id, new_session_id, new_turn_order,
+        session_changed, turn_changed,
+    )
 
     with get_db_session() as s:
         r = (
@@ -459,20 +408,10 @@ def delete_evaluation_set_case_impl(case_id, tenant_id):
                 },
             )
 
-    with get_db_session() as s:
-        r = (
-            s.query(EvaluationSetCase)
-            .filter(
-                EvaluationSetCase.evaluation_set_case_id == case_id,
-                EvaluationSetCase.tenant_id == tenant_id,
-                EvaluationSetCase.delete_flag == "N",
-            )
-            .first()
-        )
-        r.delete_flag = "Y"
-        s.commit()
-    _recount_set_cases(set_id)
-    return True
+    n = batch_delete_evaluation_set_cases([case_id], tenant_id, set_id)
+    if n > 0:
+        _recount_set_cases(set_id)
+    return n > 0
 
 
 def _recount_set_cases(evaluation_set_id):
@@ -591,83 +530,112 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id):
 
 
 def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
-    from services.vectordatabase_service import (
-        get_embedding_model_by_index_name,
-        get_vector_db_core,
-    )
+    from services.vectordatabase_service import get_vector_db_core
 
     if not kb_info or not queries:
         return ""
 
     logger.debug("[KB-ES-ENTER] kb_info=%s queries=%s", kb_info, queries)
     es_core = get_vector_db_core()
-    parts = []
+    parts: list[str] = []
     for kb in kb_info:
         parts.append(f"\n### {kb['display_name']}")
-        try:
-            embedding_model, _, _ = get_embedding_model_by_index_name(
-                tenant_id, kb["index_name"]
-            )
-            if embedding_model is None:
-                logger.warning("No embedding model for KB %s", kb["index_name"])
-                continue
-        except Exception as exc:
-            logger.warning("No embedding model for KB %s: %s", kb["index_name"], exc)
+        embedding_model = _get_kb_embedding_model(tenant_id, kb)
+        if embedding_model is None:
             continue
         for q in queries:
-            try:
-                logger.debug(
-                    "[KB-ES] Searching KB=%s query=%s model=%s",
-                    kb["display_name"],
-                    q,
-                    type(embedding_model).__name__,
-                )
-                query_vector = embedding_model.get_embeddings([q])[0]
-                logger.debug(
-                    "[KB-ES] encode returned type=%s", type(query_vector).__name__
-                )
-                search_body = {
-                    "size": top_k,
-                    "query": {
-                        "script_score": {
-                            "query": {"match_all": {}},
-                            "script": {
-                                "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
-                                "params": {"query_vector": query_vector},
-                            },
-                        }
-                    },
-                    "_source": ["content", "metadata"],
-                }
-                resp = es_core.search(index_name=kb["index_name"], query=search_body)
-                logger.debug(
-                    "[KB-ES] ES search returned %d hits",
-                    len(resp.get("hits", {}).get("hits", [])),
-                )
-                for hit in resp["hits"]["hits"]:
-                    src = hit.get("_source", {})
-                    if isinstance(src, str):
-                        try:
-                            src = json.loads(src)
-                        except Exception:
-                            logger.debug("Failed to parse KB hit source", exc_info=True)
-                            src = {}
-                    content = src.get("content", "") if isinstance(src, dict) else ""
-                    score = hit.get("_score", 0)
-                    normalized = max(0.0, min(1.0, (score + 1.0) / 2.0))
-                    if content.strip():
-                        parts.append(
-                            f"- [{q}] (score={normalized:.2f}) {content.strip()[:400]}"
-                        )
-            except Exception as exc:
-                logger.warning(
-                    "Search failed for KB %s query '%s': %s\n%s",
-                    kb["display_name"],
-                    q,
-                    exc,
-                    traceback.format_exc(),
-                )
+            hits = _search_kb_for_query(es_core, kb, q, embedding_model, top_k)
+            parts.extend(hits)
     return "\n".join(parts) if len(parts) > 1 else ""
+
+
+def _get_kb_embedding_model(tenant_id: str, kb: dict) -> Any:
+    """Resolve the embedding model for a knowledge base.
+
+    Returns ``None`` (with a warning log) when the model is unavailable.
+    """
+    from services.vectordatabase_service import get_embedding_model_by_index_name
+
+    try:
+        embedding_model, _, _ = get_embedding_model_by_index_name(
+            tenant_id, kb["index_name"]
+        )
+        if embedding_model is None:
+            logger.warning("No embedding model for KB %s", kb["index_name"])
+        return embedding_model
+    except Exception as exc:
+        logger.warning("No embedding model for KB %s: %s", kb["index_name"], exc)
+        return None
+
+
+def _search_kb_for_query(
+    es_core, kb: dict, query: str, embedding_model: Any, top_k: int
+) -> list[str]:
+    """Execute a single KB search and return formatted hit lines.
+
+    Returns an empty list on failure (logged as a warning).
+    """
+    try:
+        logger.debug(
+            "[KB-ES] Searching KB=%s query=%s model=%s",
+            kb["display_name"],
+            query,
+            type(embedding_model).__name__,
+        )
+        query_vector = embedding_model.get_embeddings([query])[0]
+        search_body = {
+            "size": top_k,
+            "query": {
+                "script_score": {
+                    "query": {"match_all": {}},
+                    "script": {
+                        "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                        "params": {"query_vector": query_vector},
+                    },
+                }
+            },
+            "_source": ["content", "metadata"],
+        }
+        resp = es_core.search(index_name=kb["index_name"], query=search_body)
+        logger.debug(
+            "[KB-ES] ES search returned %d hits",
+            len(resp.get("hits", {}).get("hits", [])),
+        )
+        return [
+            line
+            for hit in resp.get("hits", {}).get("hits", [])
+            for line in [_format_kb_hit(hit, query)]
+            if line
+        ]
+    except Exception as exc:
+        logger.warning(
+            "Search failed for KB %s query '%s': %s\n%s",
+            kb["display_name"],
+            query,
+            exc,
+            traceback.format_exc(),
+        )
+        return []
+
+
+def _format_kb_hit(hit: dict, query: str) -> str:
+    """Format one KB search hit as a bullet line.
+
+    Returns ``""`` when the hit has no content.
+    """
+    src = hit.get("_source", {})
+    if isinstance(src, str):
+        try:
+            src = json.loads(src)
+        except Exception:
+            logger.debug("Failed to parse KB hit source", exc_info=True)
+            src = {}
+    content = src.get("content", "") if isinstance(src, dict) else ""
+    if not content.strip():
+        return ""
+    score = hit.get("_score", 0)
+    normalized = max(0.0, min(1.0, (score + 1.0) / 2.0))
+    return f"- [{query}] (score={normalized:.2f}) {content.strip()[:400]}"
 
 
 def _update_generation_status(set_id, tenant_id, status, progress=0):
@@ -706,6 +674,50 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id) -> str
     return kb_context
 
 
+def _build_agent_context_block(agent_id, tenant_id) -> str:
+    """Fetch and format the agent profile block for case generation.
+
+    Returns ``""`` when *agent_id* is falsy or the profile cannot be loaded.
+    """
+    if not agent_id:
+        return ""
+    try:
+        from utils.agent_profile_utils import (
+            fetch_agent_profile,
+            format_agent_profile_context,
+        )
+
+        profile = fetch_agent_profile(agent_id, tenant_id)
+        ctx = format_agent_profile_context(profile)
+        return ctx or ""
+    except Exception as e:
+        logger.warning("Agent config failed: %s", e)
+        return ""
+
+
+def _format_kb_name(name: str, tenant_id: str) -> str:
+    """Format a single KB name with its description (truncated to 150 chars)."""
+    info = _resolve_kb_info([name], tenant_id)
+    if info and info[0].get("description"):
+        return f"{name}（{info[0]['description'][:150]}）"
+    return name
+
+
+def _build_kb_context_block(kb_context, knowledge_base_names, tenant_id) -> str:
+    """Build the knowledge-base block for the prompt.
+
+    When *kb_context* has search results, they are included directly.
+    Otherwise, the KB names are listed with descriptions and a "no results"
+    note.  Returns ``""`` when neither is available.
+    """
+    if kb_context:
+        return f"## 知识库检索到的真实内容\n{kb_context}"
+    if not knowledge_base_names:
+        return ""
+    kb_desc_parts = [_format_kb_name(name, tenant_id) for name in knowledge_base_names]
+    return f"## 关联知识库: {'; '.join(kb_desc_parts)}\n(未检索到内容)"
+
+
 def _build_case_gen_context_blocks(
     agent_id,
     tenant_id,
@@ -716,34 +728,18 @@ def _build_case_gen_context_blocks(
     file_name,
 ):
     """Build prompt context blocks for case generation.  Order: Agent → Scene → KB → File."""
-    context_blocks = []
-    if agent_id:
-        try:
-            from utils.agent_profile_utils import (
-                fetch_agent_profile,
-                format_agent_profile_context,
-            )
+    context_blocks: list[str] = []
 
-            profile = fetch_agent_profile(agent_id, tenant_id)
-            ctx = format_agent_profile_context(profile)
-            if ctx:
-                context_blocks.append(ctx)
-        except Exception as e:
-            logger.warning("Agent config failed: %s", e)
+    agent_block = _build_agent_context_block(agent_id, tenant_id)
+    if agent_block:
+        context_blocks.append(agent_block)
+
     context_blocks.append(f"## 场景描述\n{description}")
-    if kb_context:
-        context_blocks.append(f"## 知识库检索到的真实内容\n{kb_context}")
-    elif knowledge_base_names:
-        kb_desc_parts = []
-        for name in knowledge_base_names:
-            info = _resolve_kb_info([name], tenant_id)
-            if info and info[0].get("description"):
-                kb_desc_parts.append(f"{name}（{info[0]['description'][:150]}）")
-            else:
-                kb_desc_parts.append(name)
-        context_blocks.append(
-            f"## 关联知识库: {'; '.join(kb_desc_parts)}\n(未检索到内容)"
-        )
+
+    kb_block = _build_kb_context_block(kb_context, knowledge_base_names, tenant_id)
+    if kb_block:
+        context_blocks.append(kb_block)
+
     if file_content and file_name:
         context_blocks.append(f"## 上传文档: {file_name}\n{file_content[:3000]}")
     return context_blocks
@@ -773,17 +769,8 @@ def _build_case_gen_user_prompt(
     return user_prompt + "\n\n" + instruction if instruction else user_prompt
 
 
-def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
-    """Call LLM for case generation, parse JSON response, return normalized case list."""
-    resp = call_llm_for_system_prompt(
-        model_id=model_id,
-        user_prompt=user_prompt,
-        system_prompt=get_prompt_template("evaluation_generate_cases_system", "zh")[
-            "SYSTEM_PROMPT"
-        ].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
-        tenant_id=tenant_id,
-    )
-    data = None
+def _parse_llm_cases_response(resp) -> list:
+    """Parse the LLM response into a list, with markdown-fence fallback."""
     try:
         data = json.loads(resp) if isinstance(resp, str) else resp
     except json.JSONDecodeError:
@@ -794,31 +781,57 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
             raise AppException(ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FORMAT)
     if not isinstance(data, list):
         raise AppException(ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FORMAT)
+    return data
+
+
+def _normalize_one_generated_case(d) -> dict | None:
+    """Validate and normalize one LLM-generated case dict.
+
+    Returns ``None`` when the case is missing required ``inputs.query`` or
+    ``label.answer``.  Multi-turn fields (``session_id``, ``turn_order``)
+    are preserved when present.
+    """
+    if not (
+        isinstance(d, dict)
+        and "inputs" in d
+        and "label" in d
+        and d["inputs"].get("query")
+        and d["label"].get("answer")
+    ):
+        return None
+    case = {
+        "inputs": {"query": str(d["inputs"]["query"]).strip()},
+        "label": {"answer": str(d["label"]["answer"]).strip()},
+    }
+    # Preserve multi-turn fields if LLM provided them
+    sid = d.get("session_id")
+    if isinstance(sid, str) and sid.strip():
+        case["session_id"] = sid.strip()
+    to = d.get("turn_order")
+    if isinstance(to, int) or (
+        isinstance(to, str) and to.strip().lstrip("-").isdigit()
+    ):
+        case["turn_order"] = int(to)
+    return case
+
+
+def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
+    """Call LLM for case generation, parse JSON response, return normalized case list."""
+    resp = call_llm_for_system_prompt(
+        model_id=model_id,
+        user_prompt=user_prompt,
+        system_prompt=get_prompt_template("evaluation_generate_cases_system", "zh")[
+            "SYSTEM_PROMPT"
+        ].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
+        tenant_id=tenant_id,
+    )
+    data = _parse_llm_cases_response(resp)
 
     cases = []
     for d in data:
-        if not (
-            isinstance(d, dict)
-            and "inputs" in d
-            and "label" in d
-            and d["inputs"].get("query")
-            and d["label"].get("answer")
-        ):
-            continue
-        case = {
-            "inputs": {"query": str(d["inputs"]["query"]).strip()},
-            "label": {"answer": str(d["label"]["answer"]).strip()},
-        }
-        # Preserve multi-turn fields if LLM provided them
-        sid = d.get("session_id")
-        if isinstance(sid, str) and sid.strip():
-            case["session_id"] = sid.strip()
-        to = d.get("turn_order")
-        if isinstance(to, int) or (
-            isinstance(to, str) and to.strip().lstrip("-").isdigit()
-        ):
-            case["turn_order"] = int(to)
-        cases.append(case)
+        case = _normalize_one_generated_case(d)
+        if case:
+            cases.append(case)
     logger.info(
         "Extracted %d valid cases from LLM response (raw=%d)", len(cases), len(data)
     )
@@ -987,12 +1000,12 @@ def _generate_cases_async(
             file_content,
         )
         logger.info(
-            "Case gen prompt length=%d, has_agent=%s, has_kb=%s, has_file=%s, preview=%s",
+            "Case gen prompt length=%d, has_agent=%s, has_kb=%s, has_file=%s, head=%s",
             len(user_prompt),
             bool(agent_id),
             bool(kb_context),
             bool(file_content),
-            user_prompt[-500:],
+            user_prompt[:200],
         )
         _report_progress(set_id, tenant_id, 10)
 

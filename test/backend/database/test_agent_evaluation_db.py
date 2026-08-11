@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import select
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND = str(_REPO_ROOT / "backend")
@@ -547,6 +548,23 @@ class TestUpdateAgentEvaluationCaseResult:
         # Failure case should NOT clear ``label``.
         assert "label" not in updates
 
+    def test_zero_rows_only_logs_warning(self, session_factory):
+        """rows == 0 must not raise; it only emits a warning log."""
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.filter.return_value = q
+        q.update.return_value = 0  # no matching row
+        session.query.return_value = q
+
+        agent_evaluation_db.update_agent_evaluation_case_result(
+            agent_evaluation_case_id=999,
+            tenant_id="t1",
+            status="COMPLETED",
+        )
+        assert q.update.called
+
 
 # ---------------------------------------------------------------------------
 # list_agent_evaluation_cases / get_agent_evaluation_case
@@ -605,50 +623,463 @@ class TestGetAgentEvaluationCase:
 
 
 # ---------------------------------------------------------------------------
-# hard_delete_agent_evaluation (no soft_delete function exists; production
-# uses hard_delete which cascades case + annotation rows)
+# hard_delete_agent_evaluation (production has no soft delete; it hard-deletes
+# the run plus its case rows and annotations, then commits)
 # ---------------------------------------------------------------------------
 
-class TestSoftDeleteAgentEvaluation:
-    def test_marks_record_as_deleted(self, session_factory):
+def _wire_hard_delete(session, all_results, n_queries):
+    """Queue ``n_queries`` independent query mocks for a hard_delete call.
+
+    ``all_results`` is fed to the FIRST query (the case-id SELECT).  The
+    remaining queries mock the cascade DELETE statements.  Any extra
+    ``session.query`` call raises ``StopIteration`` so a drift in the
+    production SQL (more/fewer statements) fails the test loudly.
+    """
+    queries = [MagicMock(name=f"q{i}") for i in range(n_queries)]
+    for q in queries:
+        q.filter.return_value = q
+    queries[0].all.return_value = all_results
+    it = iter(queries)
+    session.query.side_effect = lambda *a, **k: next(it)
+    return queries
+
+
+class TestHardDeleteAgentEvaluation:
+    def test_cascades_cases_and_annotations(self, session_factory):
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
-
-        # hard_delete first does a SELECT ... .first() to resolve the
-        # evaluation_set_id + evaluator_config before deleting, then does
-        # two DELETE statements + one UPDATE cascade.  We mock the SELECT
-        # to return a valid row and assert delete() is executed.
-        select_q = MagicMock(name="select_q")
-        select_q.filter.return_value = select_q
-        select_q.first.return_value = (None, {})
-        delete_q = MagicMock(name="delete_q")
-        delete_q.filter.return_value = delete_q
-        delete_q.delete.return_value = 1
-
-        def _query(*args, **kwargs):
-            return select_q if select_q.first.called is False else delete_q
-        session.query.side_effect = _query
+        # 1) case-id SELECT → 2) annotations by case_id → 3) annotations by
+        # agent_evaluation_id → 4) case DELETE → 5) run DELETE
+        queries = _wire_hard_delete(session, [(11,), (12,)], n_queries=5)
+        queries[1].delete.return_value = 2
+        queries[2].delete.return_value = 1
+        queries[3].delete.return_value = 2
+        queries[4].delete.return_value = 1
 
         agent_evaluation_db.hard_delete_agent_evaluation(
             agent_evaluation_id=1,
             tenant_id="t1",
         )
 
-        assert delete_q.delete.called
+        for q in queries[1:]:
+            assert q.delete.called
+        session.commit.assert_called_once_with()
 
-    def test_raises_when_no_row_updated(self, session_factory):
+    def test_no_cases_skips_case_annotation_delete(self, session_factory):
         from backend.database import agent_evaluation_db
-        from consts.exceptions import AppException
+
+        session, _ = session_factory
+        # 1) case-id SELECT returns nothing (case_id branch skipped entirely) →
+        # 2) annotations by agent_evaluation_id → 3) case DELETE → 4) run DELETE
+        queries = _wire_hard_delete(session, [], n_queries=4)
+        for q in queries[1:]:
+            q.delete.return_value = 0
+
+        agent_evaluation_db.hard_delete_agent_evaluation(
+            agent_evaluation_id=999,
+            tenant_id="t1",
+        )
+
+        # Only 4 statements ran — the case_id annotation DELETE never materialised
+        # as a query (an extra ``session.query`` call would raise StopIteration).
+        for q in queries[1:]:
+            assert q.delete.called
+        session.commit.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# update_agent_evaluation_analysis_report
+# ---------------------------------------------------------------------------
+
+class TestUpdateAnalysisReport:
+    def test_updates_and_commits(self, session_factory):
+        from backend.database import agent_evaluation_db
 
         session, _ = session_factory
         q = MagicMock(name="q")
         q.filter.return_value = q
-        q.first.return_value = None  # zero rows → AppException NOT_FOUND
         session.query.return_value = q
 
-        with pytest.raises(AppException, match="Agent evaluation not found"):
-            agent_evaluation_db.hard_delete_agent_evaluation(
-                agent_evaluation_id=999,
-                tenant_id="t1",
-            )
+        agent_evaluation_db.update_agent_evaluation_analysis_report(
+            agent_evaluation_id=1, tenant_id="t1", report={"analysis": "ok"},
+        )
+
+        updates = q.update.call_args[0][0]
+        assert updates["analysis_report"] == {"analysis": "ok"}
+        session.commit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _apply_annotation_filters / _apply_case_sorting (internal helpers)
+# ---------------------------------------------------------------------------
+
+class TestApplyAnnotationFilters:
+    def test_ignores_missing_or_mismatched_lists(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        base = MagicMock(name="base")
+
+        result, pairs = agent_evaluation_db._apply_annotation_filters(
+            base, session, None, None, "t1",
+        )
+        assert result is base
+        assert pairs == 0
+
+        result, pairs = agent_evaluation_db._apply_annotation_filters(
+            base, session, [1, 2], ["v"], "t1",
+        )
+        assert result is base
+        assert pairs == 0
+
+    def test_applies_pairs_including_empty_value(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        base = MagicMock(name="base")
+        base.filter.return_value = base
+
+        q = MagicMock(name="anno")
+        q.filter.return_value = q
+        q.subquery.return_value = select(1).subquery()
+        session.query.return_value = q
+
+        # Pair 1: val="v" → adds equality filter; pair 2: val="" → no equality.
+        result, pairs = agent_evaluation_db._apply_annotation_filters(
+            base, session, [1, 2], ["v", ""], "t1",
+        )
+        assert result is base
+        assert pairs == 2
+        assert base.filter.call_count == 2
+        assert session.query.call_count == 2
+
+
+class TestApplyCaseSorting:
+    def test_desc_score_sort(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.order_by.return_value = q
+
+        agent_evaluation_db._apply_case_sorting(q, "accuracy", "desc")
+        assert q.order_by.called
+
+    def test_asc_score_sort(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.order_by.return_value = q
+
+        agent_evaluation_db._apply_case_sorting(q, "accuracy", "asc")
+        assert q.order_by.called
+
+    def test_default_session_preserving_sort(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.order_by.return_value = q
+
+        agent_evaluation_db._apply_case_sorting(q, None, "asc")
+        assert q.order_by.called
+
+
+# ---------------------------------------------------------------------------
+# list_agent_evaluation_cases — filter branches
+# ---------------------------------------------------------------------------
+
+def _query_cases(session, rows):
+    def _query(*_args, **kwargs):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.offset.return_value = query
+        query.limit.return_value = query
+        query.order_by.return_value = query
+        query.all.return_value = rows
+        query.count.return_value = len(rows)
+        query.subquery.return_value = select(1).subquery()
+        return query
+
+    session.query.side_effect = _query
+    return _query
+
+
+class TestListCasesFilters:
+    def test_pass_filter_and_single_session_filter(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        _query_cases(session, [MagicMock(name="r1")])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict",
+                            lambda r: {"id": id(r)})
+
+        result = agent_evaluation_db.list_agent_evaluation_cases(
+            agent_evaluation_id=1, tenant_id="t1",
+            pass_filter="pass", session_id="__single__",
+        )
+        assert result["total"] == 1
+        assert len(result["items"]) == 1
+
+    def test_specific_session_filter(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        _query_cases(session, [])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict",
+                            lambda r: {"id": id(r)})
+
+        result = agent_evaluation_db.list_agent_evaluation_cases(
+            agent_evaluation_id=1, tenant_id="t1", session_id="s1",
+        )
+        assert result["total"] == 0
+
+    def test_annotation_pairs_filter(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        _query_cases(session, [MagicMock(name="r1")])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict",
+                            lambda r: {"id": id(r)})
+
+        result = agent_evaluation_db.list_agent_evaluation_cases(
+            agent_evaluation_id=1, tenant_id="t1",
+            anno_schema_ids=[3], anno_values=["good"],
+        )
+        assert result["total"] == 1
+
+    def test_score_sort_by(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        _query_cases(session, [MagicMock(name="r1")])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict",
+                            lambda r: {"id": id(r)})
+
+        result = agent_evaluation_db.list_agent_evaluation_cases(
+            agent_evaluation_id=1, tenant_id="t1",
+            sort_by="accuracy", sort_order="desc",
+        )
+        assert result["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# get_evaluation_case_scores / get_agent_evaluation_case success path
+# ---------------------------------------------------------------------------
+
+class TestGetEvaluationCaseScores:
+    def test_returns_pass_score_reason(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        r1 = MagicMock(name="r1")
+        r1.pass_status = "pass"
+        r1.score = 1.0
+        r1.reason = "ok"
+        r2 = MagicMock(name="r2")
+        r2.pass_status = "fail"
+        r2.score = 0.0
+        r2.reason = "bad"
+        _make_query_chain(session, [r1, r2])
+
+        rows = agent_evaluation_db.get_evaluation_case_scores(
+            agent_evaluation_id=1, tenant_id="t1",
+        )
+        assert rows == [
+            {"pass_status": "pass", "score": 1.0, "reason": "ok"},
+            {"pass_status": "fail", "score": 0.0, "reason": "bad"},
+        ]
+
+
+class TestGetAgentEvaluationCaseSuccess:
+    def test_returns_dict(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        rec = MagicMock(name="rec")
+        _make_query_chain(session, [rec])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict",
+                            lambda r: {"agent_evaluation_case_id": 1})
+
+        result = agent_evaluation_db.get_agent_evaluation_case(1, "t1")
+        assert result == {"agent_evaluation_case_id": 1}
+
+
+# ---------------------------------------------------------------------------
+# update_annotation_schema_ids
+# ---------------------------------------------------------------------------
+
+class TestUpdateAnnotationSchemaIds:
+    def test_deletes_removed_schema_data(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name=f"q{i}") for i in range(3)]
+        for q in queries:
+            q.filter.return_value = q
+        queries[0].scalar.return_value = [1, 2, 3]  # old ids
+        queries[1].delete.return_value = 1          # cascade annotation delete
+        queries[2].update.return_value = 1          # affected run rows
+        it = iter(queries)
+        session.query.side_effect = lambda *a, **k: next(it)
+
+        affected = agent_evaluation_db.update_annotation_schema_ids(
+            agent_evaluation_id=1, tenant_id="t1", schema_ids=[2, 3],
+        )
+        assert affected == 1
+        assert queries[1].delete.called
+        session.commit.assert_called_once()
+
+    def test_no_removals_skips_delete(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name=f"q{i}") for i in range(2)]
+        for q in queries:
+            q.filter.return_value = q
+        queries[0].scalar.return_value = [1, 2]  # same as new list
+        queries[1].update.return_value = 1
+        it = iter(queries)
+        session.query.side_effect = lambda *a, **k: next(it)
+
+        affected = agent_evaluation_db.update_annotation_schema_ids(
+            agent_evaluation_id=1, tenant_id="t1", schema_ids=[1, 2],
+        )
+        assert affected == 1
+        session.commit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# count helpers
+# ---------------------------------------------------------------------------
+
+class TestCountRuns:
+    def test_count_active_runs_using_schema(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.filter.return_value = q
+        q.count.return_value = 2
+        session.query.return_value = q
+
+        n = agent_evaluation_db.count_active_runs_using_schema(5, "t1")
+        assert n == 2
+
+    def test_count_active_runs_with_lock(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.filter.return_value = q
+        q.count.return_value = 3
+        session.query.return_value = q
+
+        n = agent_evaluation_db.count_active_runs("t1")
+        assert n == 3
+        assert session.execute.called
+
+    def test_count_total_runs(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        q = MagicMock(name="q")
+        q.filter.return_value = q
+        q.count.return_value = 5
+        session.query.return_value = q
+
+        n = agent_evaluation_db.count_total_runs("t1")
+        assert n == 5
+
+
+# ---------------------------------------------------------------------------
+# cleanup_aged_evaluations / reap_stale_runs
+# ---------------------------------------------------------------------------
+
+class TestCleanupAgedEvaluations:
+    def test_deletes_aged_runs_and_virtual_sets(self, session_factory, monkeypatch):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        # q0: aged SELECT → [(eid1, set1, {no_set_mode}), (eid2, set2, None)]
+        # eid1: q1 case_ids, q2 anno-by-case, q3 anno-by-run, q4 case DEL,
+        #       q5 run DEL
+        # eid2: q6 case_ids (empty), q7 anno-by-run, q8 case DEL, q9 run DEL
+        queries = [MagicMock(name=f"q{i}") for i in range(10)]
+        for q in queries:
+            q.filter.return_value = q
+        queries[0].all.return_value = [
+            (1, 10, {"no_set_mode": True}),
+            (2, 20, None),
+        ]
+        queries[1].all.return_value = [(100,)]
+        queries[6].all.return_value = []
+        it = iter(queries)
+        session.query.side_effect = lambda *a, **k: next(it)
+
+        hard_delete = MagicMock()
+        monkeypatch.setattr(
+            "database.evaluation_set_db.hard_delete_evaluation_set", hard_delete,
+        )
+
+        deleted = agent_evaluation_db.cleanup_aged_evaluations("t1", retention_days=30)
+        assert deleted == 2
+        hard_delete.assert_called_once_with(10, "t1")
+        session.commit.assert_called_once()
+
+    def test_virtual_set_delete_failure_is_swallowed(self, session_factory, monkeypatch):
+        """A failing cascade hard_delete of a virtual set must not abort cleanup."""
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name=f"q{i}") for i in range(6)]
+        for q in queries:
+            q.filter.return_value = q
+        queries[0].all.return_value = [(1, 10, {"no_set_mode": True})]
+        queries[1].all.return_value = [(100,)]
+        it = iter(queries)
+        session.query.side_effect = lambda *a, **k: next(it)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(
+            "database.evaluation_set_db.hard_delete_evaluation_set", _boom,
+        )
+
+        deleted = agent_evaluation_db.cleanup_aged_evaluations("t1", retention_days=30)
+        assert deleted == 1
+        session.commit.assert_called_once()
+
+
+class TestReapStaleRuns:
+    def test_reaps_stale_runs(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name=f"q{i}") for i in range(3)]
+        for q in queries:
+            q.filter.return_value = q
+        queries[0].all.return_value = [(1,), (2,)]
+        it = iter(queries)
+        session.query.side_effect = lambda *a, **k: next(it)
+
+        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10)
+        assert n == 2
+        assert queries[1].update.called
+        assert queries[2].update.called
+        session.commit.assert_called_once()
+
+    def test_no_stale_runs(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name="q")]
+        queries[0].filter.return_value = queries[0]
+        queries[0].all.return_value = []
+        session.query.side_effect = lambda *a, **k: next(iter(queries))
+
+        n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10)
+        assert n == 0

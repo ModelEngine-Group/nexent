@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
@@ -82,7 +82,7 @@ def create_evaluator_impl(
     input_fields: list[dict[str, Any]] | None = None,
     model_id: int | None = None,
 ) -> dict[str, Any]:
-    if evaluator_type == "code" and code:
+    if code:
         from services.agent_evaluation_service import validate_code_evaluator
 
         validate_code_evaluator(code)
@@ -149,60 +149,37 @@ def delete_evaluator_version_impl(version_id: int, tenant_id: str) -> bool:
     return delete_evaluator_version(version_id=version_id, tenant_id=tenant_id)
 
 
-def generate_evaluator_by_llm_impl(
-    description: str,
-    tenant_id: str,
-    model_id: int,
-    agent_id: int | None = None,
-) -> dict[str, Any]:
-    """Generate evaluator config via LLM from a natural language description.
+def _build_evaluator_gen_prompt(
+    description: str, agent_id: int | None, tenant_id: str
+) -> str:
+    """Build the user prompt for evaluator generation.
 
-    If agent_id is provided, the agent's full profile (name, description,
-    duty/constraint prompts, tools, skills, sub-agents) is included so the
-    LLM can generate a more targeted evaluator.
+    When *agent_id* is provided and the agent profile is available, it is
+    prepended so the LLM can generate a more targeted evaluator.
     """
-    logger.info(
-        "Generating evaluator from description: %s (agent_id=%s)",
-        description[:100],
-        agent_id,
+    if not agent_id:
+        return f"Generate an evaluator based on the following requirements:\n\n{description}"
+
+    profile = fetch_agent_profile(agent_id, tenant_id)
+    agent_profile = format_agent_profile_context(profile)
+    if not agent_profile:
+        return f"Generate an evaluator based on the following requirements:\n\n{description}"
+
+    return (
+        f"{agent_profile}\n\n"
+        f"## Evaluation Request\n"
+        f"Generate an evaluator for the above agent. Requirements:\n\n{description}"
     )
 
-    template = get_prompt_template("evaluation_generate_evaluator", "zh")
 
-    if agent_id:
-        profile = fetch_agent_profile(agent_id, tenant_id)
-        agent_profile = format_agent_profile_context(profile)
-        if agent_profile:
-            user_prompt = (
-                f"{agent_profile}\n\n"
-                f"## Evaluation Request\n"
-                f"Generate an evaluator for the above agent. Requirements:\n\n{description}"
-            )
-        else:
-            user_prompt = f"Generate an evaluator based on the following requirements:\n\n{description}"
-    else:
-        user_prompt = f"Generate an evaluator based on the following requirements:\n\n{description}"
-
+def _parse_llm_evaluator_response(response) -> dict[str, Any]:
+    """Parse the LLM response into a dict, stripping markdown fences."""
+    raw = response
+    m = re.search(r"```(?:json)?\s*(\{.*?})\s*```", raw, re.DOTALL)
+    if m:
+        raw = m.group(1)
     try:
-        response = call_llm_for_system_prompt(
-            model_id=model_id,
-            user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"],
-            tenant_id=tenant_id,
-        )
-    except Exception as exc:
-        logger.exception("LLM call failed for evaluator generation")
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "Evaluator generation failed"
-        ) from exc
-
-    try:
-        raw = response if isinstance(response, str) else str(response)
-        # Strip markdown code fences if present
-        m = re.search(r"```(?:json)?\s*(\{.*?})\s*```", raw, re.DOTALL)
-        if m:
-            raw = m.group(1)
-        data = json.loads(raw)
+        return json.loads(raw)
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logger.error("Failed to parse LLM response as JSON: %s", str(response)[:500])
         raise AppException(
@@ -210,6 +187,12 @@ def generate_evaluator_by_llm_impl(
             "LLM returned invalid format, please retry",
         ) from exc
 
+
+def _validate_evaluator_fields(data: dict[str, Any]) -> str:
+    """Validate the parsed evaluator dict and return the evaluator type.
+
+    Raises ``AppException`` when required fields are missing or invalid.
+    """
     if "name" not in data:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR, "Missing required field: name"
@@ -230,6 +213,45 @@ def generate_evaluator_by_llm_impl(
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR, "code evaluator requires code"
         )
+    return eval_type
+
+
+def generate_evaluator_by_llm_impl(
+    description: str,
+    tenant_id: str,
+    model_id: int,
+    agent_id: int | None = None,
+) -> dict[str, Any]:
+    """Generate evaluator config via LLM from a natural language description.
+
+    If agent_id is provided, the agent's full profile (name, description,
+    duty/constraint prompts, tools, skills, sub-agents) is included so the
+    LLM can generate a more targeted evaluator.
+    """
+    logger.info(
+        "Generating evaluator from description: %s (agent_id=%s)",
+        description[:100],
+        agent_id,
+    )
+
+    template = get_prompt_template("evaluation_generate_evaluator", "zh")
+    user_prompt = _build_evaluator_gen_prompt(description, agent_id, tenant_id)
+
+    try:
+        response = call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=user_prompt,
+            system_prompt=template["SYSTEM_PROMPT"],
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.exception("LLM call failed for evaluator generation")
+        raise AppException(
+            ErrorCode.COMMON_VALIDATION_ERROR, "Evaluator generation failed"
+        ) from exc
+
+    data = _parse_llm_evaluator_response(response)
+    eval_type = _validate_evaluator_fields(data)
 
     return {
         "name": data.get("name", ""),
@@ -286,6 +308,60 @@ def export_evaluators_impl(tenant_id: str, evaluator_ids: list[int]) -> dict:
     }
 
 
+def _validate_evaluator_item(
+    item: Any, idx: int
+) -> tuple[Optional[str], Optional[str], Optional[float], Optional[float], Optional[float], Optional[dict]]:
+    """Validate one evaluator entry from the import payload.
+
+    Returns ``(name, etype, lo, hi, th, error)``.  When validation fails,
+    ``error`` is a dict describing the problem and the other fields are
+    ``None``.  When validation passes, ``error`` is ``None``.
+    """
+    if not isinstance(item, dict):
+        return None, None, None, None, None, {
+            "index": idx, "reason": "evaluator entry must be an object",
+        }
+
+    name = (item.get("name") or "").strip()
+    etype = item.get("evaluator_type") or "llm"
+
+    if not name:
+        return None, None, None, None, None, {
+            "index": idx, "reason": "name is required",
+        }
+    if etype not in ("llm", "code"):
+        return None, None, None, None, None, {
+            "index": idx, "name": name,
+            "reason": f"unsupported evaluator_type: {etype}",
+        }
+    if etype == "llm" and not item.get("prompt"):
+        return None, None, None, None, None, {
+            "index": idx, "name": name,
+            "reason": "llm evaluator requires prompt",
+        }
+    if etype == "code" and not item.get("code"):
+        return None, None, None, None, None, {
+            "index": idx, "name": name,
+            "reason": "code evaluator requires code",
+        }
+
+    lo = float(item.get("score_range_min", 0.0))
+    hi = float(item.get("score_range_max", 1.0))
+    th = float(item.get("pass_threshold", 0.5))
+    if lo >= hi:
+        return None, None, None, None, None, {
+            "index": idx, "name": name,
+            "reason": f"score_range_min({lo}) >= score_range_max({hi})",
+        }
+    if th <= lo or th >= hi:
+        return None, None, None, None, None, {
+            "index": idx, "name": name,
+            "reason": f"pass_threshold({th}) not in ({lo}, {hi})",
+        }
+
+    return name, etype, lo, hi, th, None
+
+
 def import_evaluators_impl(
     tenant_id: str,
     user_id: str,
@@ -303,13 +379,10 @@ def import_evaluators_impl(
 
     version = export_data.get("version")
     etype = export_data.get("type")
-    if version != _EXPORT_VERSION:
+    if version != _EXPORT_VERSION or etype != _EXPORT_TYPE:
         raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, f"Unsupported export version: {version}"
-        )
-    if etype != _EXPORT_TYPE:
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, f"Unknown export type: {etype}"
+            ErrorCode.COMMON_VALIDATION_ERROR,
+            f"Unsupported export (version={version}, type={etype})",
         )
 
     evaluators = export_data.get("evaluators")
@@ -331,57 +404,9 @@ def import_evaluators_impl(
     errors: list[dict[str, Any]] = []
 
     for idx, item in enumerate(evaluators):
-        if not isinstance(item, dict):
-            errors.append({"index": idx, "reason": "evaluator entry must be an object"})
-            continue
-
-        name = (item.get("name") or "").strip()
-        etype = item.get("evaluator_type") or "llm"
-
-        # ── Validation ──────────────────────────────────────────────
-        if not name:
-            errors.append({"index": idx, "reason": "name is required"})
-            continue
-        if etype not in ("llm", "code"):
-            errors.append(
-                {
-                    "index": idx,
-                    "name": name,
-                    "reason": f"unsupported evaluator_type: {etype}",
-                }
-            )
-            continue
-        if etype == "llm" and not item.get("prompt"):
-            errors.append(
-                {"index": idx, "name": name, "reason": "llm evaluator requires prompt"}
-            )
-            continue
-        if etype == "code" and not item.get("code"):
-            errors.append(
-                {"index": idx, "name": name, "reason": "code evaluator requires code"}
-            )
-            continue
-
-        lo = float(item.get("score_range_min", 0.0))
-        hi = float(item.get("score_range_max", 1.0))
-        th = float(item.get("pass_threshold", 0.5))
-        if lo >= hi:
-            errors.append(
-                {
-                    "index": idx,
-                    "name": name,
-                    "reason": f"score_range_min({lo}) >= score_range_max({hi})",
-                }
-            )
-            continue
-        if th <= lo or th >= hi:
-            errors.append(
-                {
-                    "index": idx,
-                    "name": name,
-                    "reason": f"pass_threshold({th}) not in ({lo}, {hi})",
-                }
-            )
+        name, etype, lo, hi, th, error = _validate_evaluator_item(item, idx)
+        if error is not None:
+            errors.append(error)
             continue
 
         # ── Dedup ───────────────────────────────────────────────────
@@ -393,31 +418,56 @@ def import_evaluators_impl(
             continue
 
         # ── Create ──────────────────────────────────────────────────
-        try:
-            created = create_evaluator_impl(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                name=name,
-                description=item.get("description") or "",
-                evaluator_type=etype,
-                prompt=item.get("prompt"),
-                prompt_en=item.get("prompt_en"),
-                code=item.get("code"),
-                score_range_min=lo,
-                score_range_max=hi,
-                pass_threshold=th,
-                input_fields=item.get("input_fields") or [],
-                model_id=item.get("model_id"),
-            )
-            if created:
-                imported += 1
-                existing_keys.add((name, etype))
-        except Exception as exc:
-            errors.append(
-                {"index": idx, "name": name, "reason": "Invalid evaluator data"}
-            )
-            logger.warning(
-                "Import failed for evaluator '%s': %s", name, exc, exc_info=True
-            )
+        created, create_error = _try_create_evaluator(
+            tenant_id, user_id, item, name, etype, lo, hi, th, existing_keys, idx,
+        )
+        if created:
+            imported += 1
+        elif create_error:
+            errors.append(create_error)
 
     return {"imported": imported, "skipped": skipped, "errors": errors}
+
+
+def _try_create_evaluator(
+    tenant_id: str,
+    user_id: str,
+    item: dict[str, Any],
+    name: str,
+    etype: str,
+    lo: float,
+    hi: float,
+    th: float,
+    existing_keys: set,
+    idx: int,
+) -> tuple[bool, Optional[dict]]:
+    """Attempt to create one evaluator from import data.
+
+    Returns ``(created, error)``.  On success, ``created`` is ``True`` and
+    the (name, type) pair is added to ``existing_keys``.  On failure,
+    ``error`` is a dict for the import error report.
+    """
+    try:
+        created = create_evaluator_impl(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            description=item.get("description") or "",
+            evaluator_type=etype,
+            prompt=item.get("prompt"),
+            prompt_en=item.get("prompt_en"),
+            code=item.get("code"),
+            score_range_min=lo,
+            score_range_max=hi,
+            pass_threshold=th,
+            input_fields=item.get("input_fields") or [],
+            model_id=item.get("model_id"),
+        )
+        if created:
+            existing_keys.add((name, etype))
+        return created, None
+    except Exception as exc:
+        logger.warning(
+            "Import failed for evaluator '%s': %s", name, exc, exc_info=True
+        )
+        return False, {"index": idx, "name": name, "reason": "Invalid evaluator data"}
