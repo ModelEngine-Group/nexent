@@ -473,6 +473,17 @@ const HomeContent: FC<{
     onBack();
   }, [onBack]);
 
+  const handlePrepareNewConversation = useCallback(() => {
+    // Do not restore the agent from the thread that is being left.
+    shouldRestoreAgentRef.current = false;
+    onBack();
+  }, [onBack]);
+
+  const handleNewConversation = useCallback(async () => {
+    handlePrepareNewConversation();
+    await runtime.threads.switchToNewThread();
+  }, [handlePrepareNewConversation, runtime]);
+
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
@@ -495,7 +506,11 @@ const HomeContent: FC<{
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
-          <ThreadListSidebar generatedTitles={generatedTitles} />
+          <ThreadListSidebar
+            generatedTitles={generatedTitles}
+            onPrepareNewConversation={handlePrepareNewConversation}
+            onNewConversation={handleNewConversation}
+          />
         </SidebarProvider>
       </div>
 

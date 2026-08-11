@@ -2,6 +2,7 @@
 import copy
 import json
 import logging
+import os
 import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
@@ -27,6 +28,7 @@ from nexent.core.models.capacity_budget import (
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -75,7 +77,6 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
-
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
@@ -1206,6 +1207,15 @@ async def create_agent_config(
         else input_budget
     )
 
+    sandbox_policy = agent_info.get("sandbox_policy")
+    configured_sandbox_level = (
+        sandbox_policy.get("level") if isinstance(sandbox_policy, dict) else None
+    )
+    is_local_python_executor = (
+        str(configured_sandbox_level or os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local"))
+        .strip().lower() == "local"
+    )
+
     context_items = build_context_inputs(
         duty=duty_prompt,
         constraint=constraint_prompt,
@@ -1229,6 +1239,9 @@ async def create_agent_config(
         kb_ids=kb_ids,
         knowledge_scope_policy=(runtime_knowledge_context or {}).get("policy"),
         knowledge_scope_resources=(runtime_knowledge_context or {}).get("resources"),
+        restricted_python_authorized_imports=(
+            get_local_python_authorized_imports() if is_local_python_executor else None
+        ),
     )
 
     logger.debug(

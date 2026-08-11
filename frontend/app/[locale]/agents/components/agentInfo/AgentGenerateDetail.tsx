@@ -40,6 +40,7 @@ import { canManageModels } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
+import { buildGroupSelectOptions } from "@/hooks/group/buildGroupSelectOptions";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
 import { Can } from "@/components/permission/Can";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
@@ -193,12 +194,29 @@ export default function AgentGenerateDetail({}) {
     ).sort((a, b) => a - b);
   };
 
-  const groupSelectOptions = useMemo(() => {
-    return filteredGroups.map((g) => ({
-      label: g.group_name,
-      value: g.group_id,
-    }));
-  }, [filteredGroups]);
+  const selectedAdvancedGroupIds = Form.useWatch(
+    "group_ids",
+    advancedSettingsForm
+  );
+
+  const groupSelectOptions = useMemo(
+    () =>
+      buildGroupSelectOptions({
+        groups: filteredGroups,
+        allGroups,
+        selectedGroupIds:
+          selectedAdvancedGroupIds ??
+          normalizeNumberArray(editedAgent.group_ids || []),
+        deletedGroupLabel: t("group.deleted"),
+      }),
+    [
+      filteredGroups,
+      allGroups,
+      selectedAdvancedGroupIds,
+      editedAgent.group_ids,
+      t,
+    ]
+  );
 
   const selectedMainAgentModel = useMemo(() => {
     const primaryModelId = editedAgent.model_ids?.[0];

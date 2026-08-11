@@ -978,7 +978,10 @@ export const conversationService = {
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
       knowledge_scope?: ConversationKnowledgeScope;
-      runtime_mode?: "nl2agent";
+      runtime_mode?: "nl2agent" | "nl2skill";
+      draft_snapshot?: Record<string, unknown>;
+      complexity?: "simple" | "complicated";
+      language?: "zh" | "en";
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void
@@ -995,6 +998,11 @@ export const conversationService = {
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
       };
+      if (params.runtime_mode === "nl2skill") {
+        requestParams.draft_snapshot = params.draft_snapshot;
+        requestParams.complexity = params.complexity || "complicated";
+        requestParams.language = params.language;
+      }
 
       // Only include conversation_id if it has a value
       if (
@@ -1019,10 +1027,12 @@ export const conversationService = {
       }
 
       // Build URL with query parameters for resume mode
-      let url =
-        params.runtime_mode === "nl2agent"
-          ? API_ENDPOINTS.agent.nl2agentRun
-          : API_ENDPOINTS.agent.run;
+      let url = API_ENDPOINTS.agent.run;
+      if (params.runtime_mode === "nl2agent") {
+        url = API_ENDPOINTS.agent.nl2agentRun;
+      } else if (params.runtime_mode === "nl2skill") {
+        url = API_ENDPOINTS.skills.nl2skillRun;
+      }
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
         queryParams.append("resume", "true");

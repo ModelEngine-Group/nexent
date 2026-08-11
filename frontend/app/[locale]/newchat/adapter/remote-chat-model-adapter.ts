@@ -50,6 +50,22 @@ interface SseChunk {
   // frontend can route streaming content to the matching card even when
   // sibling sub-agents execute in parallel.
   invocation_id?: string;
+  path?: string;
+  block_id?: string;
+  origin_type?: string;
+  sequence?: number;
+  is_new_file?: boolean;
+  paths?: string[];
+}
+
+export type Nl2SkillStreamEvent = SseChunk;
+
+export interface Nl2SkillFileCardData {
+  path: string;
+  content: string;
+  kind: "markdown" | "code" | "generic";
+  language?: "python" | "bash";
+  isStreaming: boolean;
 }
 
 export interface Nl2aToolRecommendation {
@@ -122,11 +138,16 @@ interface NexentRunConfig {
   resume?: boolean;
   agentId?: number | string;
   enablePlan?: boolean;
-  runtimeMode?: "nl2agent";
+  runtimeMode?: "nl2agent" | "nl2skill";
   knowledgeScope?: import("@/types/knowledgeScope").ConversationKnowledgeScope;
   onKnowledgeScopeResolved?: (
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
+  draftSnapshot?: Record<string, unknown>;
+  complexity?: "simple" | "complicated";
+  language?: "zh" | "en";
+  onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
+  modelId?: number;
 }
 
 function notifyKnowledgeScopeResolved(
@@ -543,6 +564,7 @@ export function isReasoningChunkType(type: string): boolean {
   return (
     type === "reasoning" ||
     type === "model_output_thinking" ||
+    type === "model_thinking_output" ||
     type === "model_output_deep_thinking" ||
     type === "model_output_code"
   );
@@ -556,6 +578,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "tool":
       return "tool-call";
     case "final_answer":
+    case "model_output":
     case "agent_run_info":
     case "user_input":
     case "agent_finish":
@@ -1109,9 +1132,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // when this is the first message in a brand-new thread.
     const custom = runConfig?.custom as NexentRunConfig | undefined;
     const isNl2Agent = custom?.runtimeMode === "nl2agent";
+    const isNl2Skill = custom?.runtimeMode === "nl2skill";
+    const isEphemeralRuntime = isNl2Agent || isNl2Skill;
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
-    const isResume = !isNl2Agent && custom?.resume === true;
+    const isResume = !isEphemeralRuntime && custom?.resume === true;
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -1174,13 +1199,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (!isNl2Agent && hasServerConversationId) {
+    if (!isEphemeralRuntime && hasServerConversationId) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
-      !isNl2Agent &&
+      !isEphemeralRuntime &&
       custom?.agentId !== undefined &&
       custom.agentId !== null
     ) {
@@ -1193,13 +1218,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
     }
     requestBody.enable_plan = custom?.enablePlan === true;
-    if (!isResume && !isNl2Agent && custom?.knowledgeScope) {
+    if (!isResume && !isEphemeralRuntime && custom?.knowledgeScope) {
       requestBody.knowledge_scope = custom.knowledgeScope;
     }
 
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     const modelName = context.config?.modelName;
-    if (!isNl2Agent && modelName) {
+    if (!isEphemeralRuntime && modelName) {
       requestBody.model_id = Number(modelName);
     }
 
@@ -1222,14 +1247,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
           agent_id: requestBody.agent_id as number | undefined,
-          model_id: requestBody.model_id as number | undefined,
           is_debug: false,
           is_resume: isResume,
           enable_plan: custom?.enablePlan === true,
           knowledge_scope: requestBody.knowledge_scope as
             | import("@/types/knowledgeScope").ConversationKnowledgeScope
             | undefined,
-          runtime_mode: isNl2Agent ? "nl2agent" : undefined,
+          runtime_mode: isNl2Agent
+            ? "nl2agent"
+            : isNl2Skill
+              ? "nl2skill"
+              : undefined,
+          draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
+          complexity: isNl2Skill ? custom?.complexity : undefined,
+          language: isNl2Skill ? custom?.language : undefined,
+          model_id: isNl2Skill
+            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
+            : (requestBody.model_id as number | undefined),
         },
         abortSignal,
         (conversationId) => {
@@ -1283,6 +1317,82 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const nl2SkillFilePartIndices = new Map<string, number>();
+    let nl2SkillSummaryPartIndex: number | null = null;
+    const classifyNl2SkillFile = (
+      path: string
+    ): Pick<Nl2SkillFileCardData, "kind" | "language"> => {
+      const extension = path.split(".").pop()?.toLowerCase();
+      if (extension === "md" || extension === "markdown") {
+        return { kind: "markdown" };
+      }
+      if (extension === "py") {
+        return { kind: "code", language: "python" };
+      }
+      if (extension === "sh" || extension === "bash") {
+        return { kind: "code", language: "bash" };
+      }
+      return { kind: "generic" };
+    };
+    const upsertNl2SkillFile = (chunk: SseChunk) => {
+      const path =
+        chunk.type === "skill_body" ? "SKILL.md" : chunk.path || "file.txt";
+      let partIndex = nl2SkillFilePartIndices.get(path);
+      if (partIndex === undefined) {
+        partIndex = contentParts.length;
+        contentParts.push({
+          type: "data",
+          name: "nl2skill-file",
+          data: {
+            path,
+            content: "",
+            ...classifyNl2SkillFile(path),
+            isStreaming: true,
+          },
+        });
+        nl2SkillFilePartIndices.set(path, partIndex);
+      }
+      const currentPart = contentParts[partIndex] as {
+        type: "data";
+        name: "nl2skill-file";
+        data: Nl2SkillFileCardData;
+      };
+      contentParts[partIndex] = {
+        ...currentPart,
+        data: {
+          ...currentPart.data,
+          content: currentPart.data.content + (chunk.content || ""),
+        },
+      };
+    };
+    const finishNl2SkillFiles = () => {
+      for (const partIndex of nl2SkillFilePartIndices.values()) {
+        const currentPart = contentParts[partIndex] as {
+          type: "data";
+          name: "nl2skill-file";
+          data: Nl2SkillFileCardData;
+        };
+        contentParts[partIndex] = {
+          ...currentPart,
+          data: { ...currentPart.data, isStreaming: false },
+        };
+      }
+    };
+    const appendNl2SkillSummary = (content: string) => {
+      if (nl2SkillSummaryPartIndex === null) {
+        nl2SkillSummaryPartIndex = contentParts.length;
+        contentParts.push({ type: "text", text: content });
+        return;
+      }
+      const currentPart = contentParts[nl2SkillSummaryPartIndex] as {
+        type: "text";
+        text: string;
+      };
+      contentParts[nl2SkillSummaryPartIndex] = {
+        ...currentPart,
+        text: currentPart.text + content,
+      };
+    };
     const slotForInvocation = (invocationId: string): InvocationSlot | null =>
       invocationSlots.get(invocationId) ?? null;
     const ensureSlot = (invocationId: string): InvocationSlot => {
@@ -1519,6 +1629,28 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               custom?.onKnowledgeScopeResolved
             );
             continue;
+          }
+
+          if (isNl2Skill) {
+            custom?.onNl2SkillEvent?.(chunk);
+            if (chunk.type === "skill_body" || chunk.type === "file_content") {
+              flushOpenReasoning();
+              upsertNl2SkillFile(chunk);
+              yield buildStreamResult(contentParts);
+              continue;
+            }
+            if (chunk.type === "summary") {
+              flushOpenReasoning();
+              appendNl2SkillSummary(chunk.content);
+              yield buildStreamResult(contentParts);
+              continue;
+            }
+            if (chunk.type === "done") {
+              flushOpenReasoning();
+              finishNl2SkillFiles();
+              yield buildStreamResult(contentParts);
+              continue;
+            }
           }
 
           // Handle token_count - store timing for final yield
@@ -1932,11 +2064,27 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (buffer.trim()) {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
+          if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
           if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
               custom?.onKnowledgeScopeResolved
             );
+          } else if (
+            isNl2Skill &&
+            (chunk.type === "skill_body" || chunk.type === "file_content")
+          ) {
+            flushOpenReasoning();
+            upsertNl2SkillFile(chunk);
+            yield buildStreamResult(contentParts);
+          } else if (isNl2Skill && chunk.type === "summary") {
+            flushOpenReasoning();
+            appendNl2SkillSummary(chunk.content);
+            yield buildStreamResult(contentParts);
+          } else if (isNl2Skill && chunk.type === "done") {
+            flushOpenReasoning();
+            finishNl2SkillFiles();
+            yield buildStreamResult(contentParts);
           } else if (chunk.type === "plan") {
             const plan = parsePlan(chunk.content);
             if (plan) planRegistry.set(plan);
@@ -2151,6 +2299,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
       // Finalize any remaining reasoning content at the end
       flushAllOpenReasoning();
+      finishNl2SkillFiles();
       // Defensive: mark any still-open sub-agent instances as no longer
       // running. The streaming adapter expects balanced starts/ends; if
       // upstream failed mid-flight we surface the partial output instead of
@@ -2289,6 +2438,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
       } as any;
     } finally {
+      if (isNl2Skill) {
+        custom?.onNl2SkillEvent?.({
+          type: "stream_closed",
+          content: "",
+        });
+      }
       reader.releaseLock();
     }
   },

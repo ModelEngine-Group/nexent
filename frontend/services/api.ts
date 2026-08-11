@@ -449,8 +449,7 @@ export const API_ENDPOINTS = {
     instanceUpdate: `${API_BASE_URL}/skills/instance/update`,
     scan: `${API_BASE_URL}/skills/scan_skill`,
     create: `${API_BASE_URL}/skills`,
-    createStream: `${API_BASE_URL}/skills/create`,
-    stopCreate: (taskId: string) => `${API_BASE_URL}/skills/stop/${taskId}`,
+    nl2skillRun: `${API_BASE_URL}/skills/nl2skill/run`,
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {

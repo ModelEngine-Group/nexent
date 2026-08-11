@@ -11,6 +11,7 @@ import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
 } from "@/types/knowledgeScope";
+import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
@@ -28,6 +29,9 @@ export interface ChatProps {
   onKnowledgeScopeChange?: (
     scope: ConversationKnowledgeScope | null
   ) => Promise<void> | void;
+  variant?: "default" | "embedded";
+  skillFiles?: readonly SkillFileContent[];
+  onSkillFileSelect?: (path: string) => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -59,6 +63,9 @@ export const Chat: FC<ChatProps> = ({
   knowledgeScope = null,
   knowledgeCapabilities = null,
   onKnowledgeScopeChange,
+  variant = "default",
+  skillFiles,
+  onSkillFileSelect,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -91,6 +98,9 @@ export const Chat: FC<ChatProps> = ({
       knowledgeScope={knowledgeScope}
       knowledgeCapabilities={knowledgeCapabilities}
       onKnowledgeScopeChange={onKnowledgeScopeChange}
+      variant={variant}
+      skillFiles={skillFiles}
+      onSkillFileSelect={onSkillFileSelect}
     />
   );
 };

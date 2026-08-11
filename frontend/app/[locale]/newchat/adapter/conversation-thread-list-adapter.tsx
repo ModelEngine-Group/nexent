@@ -1120,8 +1120,8 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize()
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize()
         ),
       [aui]
     );
@@ -1146,8 +1146,8 @@ const createShareHistoryProvider = (
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize(),
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize(),
           async () => snapshot
         ),
       [aui]
@@ -1271,17 +1271,20 @@ const waitForServerConversationId = async (
   const { idsRef, getActiveThreadId } = state;
   const startedAt = Date.now();
 
-  // Fast path: the ref is already populated (subsequent runs in a thread
-  // that already has a server-side conversation, or an existing thread
-  // opened from the sidebar).
+  const isValidConversationId = (value: string | undefined): value is string =>
+    Boolean(value) && Number.isInteger(Number(value)) && Number(value) > 0;
+
+  // Existing threads already have a server id in `remoteId`, which is more
+  // reliable than the active-thread registry while the sidebar is switching.
+  if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
+
+  // Fast path: the ref is already populated for a new thread after its first
+  // agent run has returned the server-side conversation ID.
   const readNow = (): string | undefined => {
     const activeThreadId = getActiveThreadId();
     if (!activeThreadId) return undefined;
     const fromRef = idsRef.current.get(activeThreadId);
-    if (fromRef && Number.isInteger(Number(fromRef)) && Number(fromRef) > 0) {
-      return fromRef;
-    }
-    return undefined;
+    return isValidConversationId(fromRef) ? fromRef : undefined;
   };
 
   const immediate = readNow();

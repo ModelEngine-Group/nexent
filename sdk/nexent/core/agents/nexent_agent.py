@@ -37,6 +37,14 @@ SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "uuid", "pprint", "operator", "typing",
 ]
 
+
+def get_local_python_authorized_imports() -> List[str]:
+    """Return the imports permitted by Nexent's default local code executor."""
+    from smolagents.local_python_executor import BASE_BUILTIN_MODULES
+
+    return sorted(set(BASE_BUILTIN_MODULES) | set(SAFE_PYTHON_INTERPRETER_IMPORTS))
+
+
 logger = logging.getLogger(__name__)
 
 

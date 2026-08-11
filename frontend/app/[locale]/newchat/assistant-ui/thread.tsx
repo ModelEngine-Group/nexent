@@ -69,7 +69,7 @@ import {
   AssistantMessageAttachments,
   UserMessageAttachments,
 } from "../ui/attachment";
-import { DirectiveText } from "../ui/directive-text";
+import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
 import { DotMatrix } from "../ui/dot-matrix";
@@ -89,6 +89,7 @@ import {
   conversationSourcesRegistry,
   skillFileUploadsRegistry,
   type Nl2aMessage,
+  type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
 import { VerificationPanel } from "../ui/verification-panel";
@@ -101,6 +102,8 @@ import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
 } from "@/types/knowledgeScope";
+import { SkillFileCard } from "../ui/skill-file-card";
+import type { SkillFileContent } from "@/types/skill";
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -118,6 +121,9 @@ export interface ThreadProps {
   onKnowledgeScopeChange?: (
     scope: ConversationKnowledgeScope | null
   ) => Promise<void> | void;
+  variant?: "default" | "embedded";
+  skillFiles?: readonly SkillFileContent[];
+  onSkillFileSelect?: (path: string) => void;
 }
 
 /**
@@ -168,6 +174,9 @@ export const Thread: FC<ThreadProps> = ({
   knowledgeScope = null,
   knowledgeCapabilities = null,
   onKnowledgeScopeChange,
+  variant = "default",
+  skillFiles,
+  onSkillFileSelect,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -378,6 +387,9 @@ export const Thread: FC<ThreadProps> = ({
         knowledgeScope={knowledgeScope}
         knowledgeCapabilities={knowledgeCapabilities}
         onKnowledgeScopeChange={onKnowledgeScopeChange}
+        variant={variant}
+        skillFiles={skillFiles}
+        onSkillFileSelect={onSkillFileSelect}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -482,6 +494,9 @@ interface ThreadViewProps {
   onCreateShare: () => void;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
+  variant: "default" | "embedded";
+  skillFiles?: readonly SkillFileContent[];
+  onSkillFileSelect?: (path: string) => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -513,11 +528,20 @@ const ThreadView: FC<ThreadViewProps> = ({
   onCreateShare,
   selection,
   onPanelClose,
+  variant,
+  skillFiles,
+  onSkillFileSelect,
 }) => {
   const { t } = useTranslation();
 
   return (
-    <ThreadPrimitive.Root className="flex h-full flex-row bg-background">
+    <ThreadPrimitive.Root
+      className={cn(
+        "flex h-full flex-row bg-background",
+        variant === "embedded" &&
+          "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
+      )}
+    >
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-3 py-2">
           {isShareMode ? (
@@ -545,7 +569,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 <span className="text-sm font-medium text-foreground">
                   {hasMessages ? conversationTitle : displayName}
                 </span>
-                {hasMessages && (
+                {hasMessages && variant !== "embedded" && (
                   <span className="text-xs text-muted-foreground">
                     {t("chat.thread.conversation")}
                   </span>
@@ -608,10 +632,17 @@ const ThreadView: FC<ThreadViewProps> = ({
           </div>
         )}
 
-        <ThreadPrimitive.Viewport className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 max-w-4xl mx-auto w-full px-8">
+        <ThreadPrimitive.Viewport
+          className={cn(
+            "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
+            variant === "embedded" ? "px-4 py-4" : "px-8 py-6"
+          )}
+        >
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              enableSkillDirectives={Boolean(skillFiles)}
+              onSkillFileSelect={onSkillFileSelect}
               shareMode={isShareMode}
               selectedShareMessageIds={selectedShareMessageIds}
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
@@ -622,7 +653,12 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col gap-4 pb-8 px-8">
+        <ThreadPrimitive.ViewportFooter
+          className={cn(
+            "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
+            variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+          )}
+        >
           <ThreadScrollToBottom />
           <Composer
             models={models}
@@ -635,6 +671,8 @@ const ThreadView: FC<ThreadViewProps> = ({
             knowledgeScope={knowledgeScope}
             knowledgeCapabilities={knowledgeCapabilities}
             onKnowledgeScopeChange={onKnowledgeScopeChange}
+            compact={variant === "embedded"}
+            skillFiles={skillFiles}
           />
         </ThreadPrimitive.ViewportFooter>
       </div>
@@ -771,6 +809,8 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
   onToggleShareMessage?: (messageId: number) => void;
+  enableSkillDirectives?: boolean;
+  onSkillFileSelect?: (path: string) => void;
 }> = ({
   agent,
   readOnly = false,
@@ -778,6 +818,8 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
   onToggleShareMessage,
+  enableSkillDirectives = false,
+  onSkillFileSelect,
 }) => {
   const { t } = useTranslation();
   const messages = useAuiState((s) => s.thread.messages);
@@ -808,12 +850,21 @@ export const ThreadMessages: FC<{
 
   const messageComponents = useMemo(
     () => ({
-      UserMessage: () => <UserMessage readOnly={readOnly} />,
+      UserMessage: () => (
+        <UserMessage
+          readOnly={readOnly}
+          enableSkillDirectives={enableSkillDirectives}
+        />
+      ),
       AssistantMessage: () => (
-        <AssistantMessage agent={agent} readOnly={readOnly} />
+        <AssistantMessage
+          agent={agent}
+          readOnly={readOnly}
+          onSkillFileSelect={onSkillFileSelect}
+        />
       ),
     }),
-    [agent, readOnly]
+    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
   );
 
   if (shareMode) {
@@ -868,6 +919,7 @@ export const ThreadMessages: FC<{
           return (
             <UserMessage
               readOnly={readOnly}
+              enableSkillDirectives={enableSkillDirectives}
               shareMode={shareMode}
               selectedShareMessageIds={selectedShareMessageIds}
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
@@ -875,7 +927,13 @@ export const ThreadMessages: FC<{
             />
           );
         }
-        return <AssistantMessage agent={agent} readOnly={readOnly} />;
+        return (
+          <AssistantMessage
+            agent={agent}
+            readOnly={readOnly}
+            onSkillFileSelect={onSkillFileSelect}
+          />
+        );
       }}
     </ThreadPrimitive.Messages>
   );
@@ -952,7 +1010,8 @@ const AssistantCompletionIndicator: FC = () => {
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
-}> = ({ agent, readOnly = false }) => {
+  onSkillFileSelect?: (path: string) => void;
+}> = ({ agent, readOnly = false, onSkillFileSelect }) => {
   const { t } = useTranslation();
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
@@ -1184,6 +1243,20 @@ const AssistantMessage: FC<{
               case "data":
                 if (
                   (part as typeof part & { name?: string }).name ===
+                  "nl2skill-file"
+                ) {
+                  return (
+                    <SkillFileCard
+                      data={
+                        (part as typeof part & { data?: unknown })
+                          .data as Nl2SkillFileCardData
+                      }
+                      onSkillFileSelect={onSkillFileSelect}
+                    />
+                  );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
                   "automation-proposal"
                 ) {
                   return (
@@ -1289,12 +1362,14 @@ const UserMessage: FC<{
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
   onToggleShareMessage?: (messageId: number) => void;
+  enableSkillDirectives?: boolean;
 }> = ({
   readOnly = false,
   shareMode = false,
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
   onToggleShareMessage,
+  enableSkillDirectives = false,
 }) => {
   const { t } = useTranslation();
   const auiMessageId = useAuiState((s) => String(s.message.id));
@@ -1326,7 +1401,13 @@ const UserMessage: FC<{
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>
-            <MessagePrimitive.Parts components={{ Text: DirectiveText }} />
+            <MessagePrimitive.Parts
+              components={{
+                Text: enableSkillDirectives
+                  ? SkillDirectiveText
+                  : DirectiveText,
+              }}
+            />
           </div>
           {!readOnly && (
             <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">

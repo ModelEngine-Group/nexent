@@ -57,7 +57,10 @@ const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
 const PORT = 3000;
 
 function withoutBasePath(pathname) {
-  if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {
+  if (
+    !BASE_PATH ||
+    (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))
+  ) {
     return pathname;
   }
 
@@ -73,7 +76,10 @@ function parseTimeout(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const PROXY_TIMEOUT_MS = parseTimeout(process.env.PROXY_TIMEOUT_MS, 10 * 60 * 1000);
+const PROXY_TIMEOUT_MS = parseTimeout(
+  process.env.PROXY_TIMEOUT_MS,
+  10 * 60 * 1000
+);
 const PROXY_WS_TIMEOUT_MS = parseTimeout(
   process.env.PROXY_WS_TIMEOUT_MS,
   PROXY_TIMEOUT_MS
@@ -203,14 +209,14 @@ function parseCookies(req) {
 
 function decodeJwtPayload(token) {
   try {
-    const parts = token.split('.');
-    if (parts.length !==3 ) {
+    const parts = token.split(".");
+    if (parts.length !== 3) {
       return null;
     }
-      const payload = parts[1];
-      const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
-      const decoded = Buffer.from(padded, "base64").toString("utf-8");
-      return JSON.parse(decoded)
+    const payload = parts[1];
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    const decoded = Buffer.from(padded, "base64").toString("utf-8");
+    return JSON.parse(decoded);
   } catch (error) {
     console.error("decodeJwtPayload error:", error.message);
     return null;
@@ -227,7 +233,9 @@ function isSuperAdminRequest(req) {
   if (!payload) {
     return false;
   }
-  return payload.role === 'authenticated' && payload.email === 'suadmin@nexent.com';
+  return (
+    payload.role === "authenticated" && payload.email === "suadmin@nexent.com"
+  );
 }
 
 function renameFile(oldPath, newFileName) {
@@ -240,7 +248,7 @@ function updateLocalConfig(oldData, newData) {
     return oldData;
   }
   return Object.keys(oldData).reduce((acc, key) => {
-    acc[key] = newData[key] ? newData[key] : oldData[key]
+    acc[key] = newData[key] ? newData[key] : oldData[key];
     return acc;
   }, {});
 }
@@ -537,7 +545,8 @@ app.prepare().then(() => {
 
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
-      (internalPathname.includes("/attachments/") && !internalPathname.startsWith("/api/"));
+      (internalPathname.includes("/attachments/") &&
+        !internalPathname.startsWith("/api/"));
     if (isProxyRequest && BASE_PATH) {
       req.url = req.url.slice(BASE_PATH.length) || "/";
     }
@@ -551,7 +560,7 @@ app.prepare().then(() => {
     // Fallback: let Next.js render pages and framework resources with basePath intact.
     handle(req, res, parsedUrl);
   });
-    // Proxy WebSocket upgrade requests
+  // Proxy WebSocket upgrade requests
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
     const internalPathname = withoutBasePath(pathname);
@@ -668,6 +677,7 @@ function handleAllApiProxy(pathname, req, res) {
   const runtimePathPrefixes = [
     "/api/agent/run",
     "/api/agent/nl2agent/run",
+    "/api/skills/nl2skill/run",
     "/api/agent/stop",
     "/api/agent/automations",
     "/api/conversation/",
@@ -678,20 +688,15 @@ function handleAllApiProxy(pathname, req, res) {
   const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
 
   // 4. skills 特殊接口
-  const skillsPathsStartWith = ["/api/skills/stop/"];
-  const skillsPathsEquals = ["/api/skills/create"];
-  const isSkillApi = skillsPathsStartWith.some(path => pathname.startsWith(path)) || skillsPathsEquals.some(path => pathname === path);
-
   // 分发代理目标
   if (isRuntime) {
     const runtimeProxyTimeout =
       pathname.startsWith("/api/agent/run") ||
-      pathname.startsWith("/api/agent/nl2agent/run")
+      pathname.startsWith("/api/agent/nl2agent/run") ||
+      pathname.startsWith("/api/skills/nl2skill/run")
         ? SSE_PROXY_TIMEOUT_MS
         : PROXY_TIMEOUT_MS;
     proxy.web(req, res, getRuntimeProxyConfig(runtimeProxyTimeout));
-  } else if (isSkillApi) {
-    proxy.web(req, res, getRuntimeProxyConfig(PROXY_TIMEOUT_MS));
   } else {
     proxy.web(req, res, {
       target: HTTP_BACKEND,

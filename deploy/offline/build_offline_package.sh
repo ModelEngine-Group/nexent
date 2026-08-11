@@ -23,6 +23,7 @@ INCLUDE_SOURCE=""
 INCLUDE_SANDBOX=""
 TARGET=""
 COMPRESS=""
+PACKAGE_NAME=""
 DRY_RUN="false"
 COMMON_ARGS=()
 
@@ -60,6 +61,8 @@ show_help() {
     echo "                           默认：$DEFAULT_TARGET"
     echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
     echo "                           默认：$DEFAULT_COMPRESS"
+    echo "  --package-name NAME     最终 zip 包名称（可省略 .zip 后缀）"
+    echo "                           默认：根据目标、平台和版本自动生成"
     echo "  --components LIST       用于镜像选择的部署组件"
     echo "  --image-source SOURCE   general、mainland 或 local-latest"
     echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
@@ -96,6 +99,8 @@ show_help() {
   echo "                           Default: $DEFAULT_TARGET"
   echo "  --compress BOOL        Create zip archive after package build (true or false)"
   echo "                           Default: $DEFAULT_COMPRESS"
+  echo "  --package-name NAME     Final zip package name (.zip suffix is optional)"
+  echo "                           Default: generated from target, platform, and version"
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
@@ -145,6 +150,10 @@ parse_args() {
         COMPRESS="$2"
         shift 2
         ;;
+      --package-name)
+        PACKAGE_NAME="$2"
+        shift 2
+        ;;
       --dry-run)
         DRY_RUN="true"
         shift
@@ -184,6 +193,7 @@ parse_args() {
   INCLUDE_SANDBOX="${INCLUDE_SANDBOX:-$DEFAULT_INCLUDE_SANDBOX}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
+  PACKAGE_NAME="${PACKAGE_NAME%.zip}"
 
   if [[ "$PLATFORM" != "amd64" && "$PLATFORM" != "arm64" ]]; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -217,6 +227,14 @@ parse_args() {
     fi
     exit 1
   fi
+  if [[ -n "$PACKAGE_NAME" && ! "$PACKAGE_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Package name 只能包含字母、数字、点、下划线和连字符，且必须以字母或数字开头"
+    else
+      echo "Error: Package name may contain only letters, numbers, dots, underscores, and hyphens, and must start with a letter or number"
+    fi
+    exit 1
+  fi
 }
 
 prepare_deployment_image_config() {
@@ -245,6 +263,7 @@ show_dry_run_plan() {
     echo "包含 Sandbox 镜像：$INCLUDE_SANDBOX"
     echo "目标：$TARGET"
     echo "压缩：$COMPRESS"
+    echo "最终包名称：$(offline_package_name).zip"
     echo "组件：$DEPLOYMENT_COMPONENTS"
     echo "镜像源：$DEPLOYMENT_IMAGE_SOURCE"
     [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "镜像仓库前缀：$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
@@ -265,6 +284,7 @@ show_dry_run_plan() {
     echo "Include Sandbox image: $INCLUDE_SANDBOX"
     echo "Target: $TARGET"
     echo "Compress: $COMPRESS"
+    echo "Package name: $(offline_package_name).zip"
     echo "Components: $DEPLOYMENT_COMPONENTS"
     echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
     [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
@@ -713,6 +733,11 @@ create_checksums() {
 }
 
 offline_package_name() {
+  if [[ -n "$PACKAGE_NAME" ]]; then
+    echo "$PACKAGE_NAME"
+    return
+  fi
+
   local safe_version="${VERSION//\//-}"
   echo "nexent-offline-${TARGET}-${PLATFORM}-${safe_version}"
 }
@@ -764,6 +789,7 @@ main() {
   echo "Include source: $INCLUDE_SOURCE"
   echo "Target: $TARGET"
   echo "Compress: $COMPRESS"
+  echo "Package name: $(offline_package_name).zip"
   echo "Components: $DEPLOYMENT_COMPONENTS"
   echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
   [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
