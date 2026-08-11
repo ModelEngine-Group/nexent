@@ -277,6 +277,15 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     return minio_client.get_file_size(object_name, bucket)
 
 
+def get_file_size_from_minio_strict(
+    object_name: str,
+    bucket: Optional[str] = None,
+) -> Optional[int]:
+    """Return authoritative size, ``None`` only when MinIO confirms the object is missing."""
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    return minio_client.get_file_size_strict(object_name, bucket)
+
+
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
     """
     Check if a file exists in the bucket.

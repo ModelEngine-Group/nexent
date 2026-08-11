@@ -1309,6 +1309,72 @@ class ElasticSearchCore(VectorDatabaseCore):
             logger.error(f"Error getting file list: {str(e)}")
             return []
 
+    def get_documents_detail_strict(
+        self,
+        index_name: str,
+        page_size: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """Return every unique source reference, raising on Elasticsearch failures.
+
+        This maintenance-oriented variant uses a paginated composite aggregation
+        so callers never mistake an Elasticsearch outage or a 1000-item terms
+        limit for a complete, empty scan.
+        """
+        if page_size <= 0:
+            raise ValueError("page_size must be positive")
+
+        file_list: List[Dict[str, Any]] = []
+        after_key: Optional[Dict[str, Any]] = None
+        while True:
+            composite: Dict[str, Any] = {
+                "size": page_size,
+                "sources": [
+                    {"path_or_url": {"terms": {"field": "path_or_url"}}},
+                ],
+            }
+            if after_key:
+                composite["after"] = after_key
+            query = {
+                "size": 0,
+                "aggs": {
+                    "unique_sources": {
+                        "composite": composite,
+                        "aggs": {
+                            "file_sample": {
+                                "top_hits": {
+                                    "size": 1,
+                                    "_source": [
+                                        "path_or_url",
+                                        "file_size",
+                                        "create_time",
+                                        "filename",
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+            result = self.client.search(index=index_name, body=query)
+            aggregation = result["aggregations"]["unique_sources"]
+            buckets = aggregation.get("buckets", [])
+            for bucket in buckets:
+                source = bucket["file_sample"]["hits"]["hits"][0]["_source"]
+                file_list.append({
+                    "path_or_url": source["path_or_url"],
+                    "filename": source.get("filename", ""),
+                    "file_size": source.get("file_size", 0),
+                    "create_time": source.get("create_time"),
+                    "chunk_count": bucket.get("doc_count", 0),
+                })
+
+            next_after_key = aggregation.get("after_key")
+            if not buckets or not next_after_key or next_after_key == after_key:
+                break
+            after_key = next_after_key
+
+        return file_list
+
     def get_indices_detail(
         self, index_names: List[str], embedding_dim: Optional[int] = None
     ) -> Dict[str, Dict[str, Dict[str, Any]]]:

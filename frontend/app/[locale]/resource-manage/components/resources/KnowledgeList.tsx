@@ -110,10 +110,8 @@ export default function KnowledgeList({
   }, []);
 
   useEffect(() => {
-    if (canManageQuota) {
-      fetchQuotaUsage();
-    }
-  }, [fetchQuotaUsage, canManageQuota]);
+    fetchQuotaUsage();
+  }, [fetchQuotaUsage]);
 
   useEffect(() => {
     window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchQuotaUsage);
@@ -328,15 +326,16 @@ export default function KnowledgeList({
       key: "store_size",
       width: 140,
       render: (_: any, record: KnowledgeBase) => {
-        const displaySize = record.store_size || "0 B";
+        const indexName = record.index_name || record.id;
+        const quotaData = indexName ? quotaMap.get(indexName) : undefined;
+        const displaySize =
+          quotaData?.actual_readable ??
+          (isExternalSource(record) ? record.store_size || "0 B" : "—");
 
-        // Non-admin (SU or other roles): plain text only, no per-KB quota controls
+        // Non-admin roles have read-only composite usage.
         if (!isAdmin) {
           return <span style={{ color: "#666" }}>{displaySize}</span>;
         }
-
-        const indexName = record.index_name || record.id;
-        const quotaData = indexName ? quotaMap.get(indexName) : undefined;
 
         // Inline editing mode
         if (editingQuotaKb === indexName) {

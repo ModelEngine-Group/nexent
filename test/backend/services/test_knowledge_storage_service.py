@@ -1,0 +1,252 @@
+"""Unit tests for knowledge-base source-object accounting helpers."""
+
+from unittest.mock import patch
+
+import pytest
+
+import backend.services.knowledge_storage_service as storage_service
+
+KnowledgeStorageContext = storage_service.KnowledgeStorageContext
+commit_uploaded_object = storage_service.commit_uploaded_object
+compensate_uploaded_objects = storage_service.compensate_uploaded_objects
+get_committed_bytes_by_kb = storage_service.get_committed_bytes_by_kb
+get_tenant_committed_source_bytes = storage_service.get_tenant_committed_source_bytes
+resolve_storage_context = storage_service.resolve_storage_context
+
+
+@pytest.fixture
+def storage_context():
+    return KnowledgeStorageContext(
+        tenant_id="tenant-a",
+        knowledge_id=7,
+        index_name="kb-a",
+        bucket_name="test-bucket",
+    )
+
+
+def test_resolve_storage_context_requires_tenant_owned_kb():
+    with patch.object(
+        storage_service,
+        "get_knowledge_record",
+        return_value={
+            "tenant_id": "tenant-a",
+            "knowledge_id": 7,
+            "index_name": "kb-a",
+        },
+    ) as get_record:
+        result = resolve_storage_context("kb-a", "tenant-a")
+
+    assert result == KnowledgeStorageContext(
+        tenant_id="tenant-a",
+        knowledge_id=7,
+        index_name="kb-a",
+        bucket_name="test-bucket",
+    )
+    get_record.assert_called_once_with({
+        "index_name": "kb-a",
+        "tenant_id": "tenant-a",
+    })
+
+
+@pytest.mark.parametrize(
+    ("index_name", "tenant_id", "record"),
+    [
+        (None, "tenant-a", None),
+        ("kb-a", None, None),
+        ("kb-a", "tenant-a", {}),
+        ("kb-a", "tenant-a", {"tenant_id": "tenant-b", "knowledge_id": 7}),
+        ("kb-a", "tenant-a", {"tenant_id": "tenant-a", "knowledge_id": None}),
+    ],
+)
+def test_resolve_storage_context_excludes_non_kb_and_cross_tenant(
+    index_name,
+    tenant_id,
+    record,
+):
+    with patch.object(
+        storage_service,
+        "get_knowledge_record",
+        return_value=record,
+    ) as get_record:
+        assert resolve_storage_context(index_name, tenant_id) is None
+
+    if not index_name or not tenant_id:
+        get_record.assert_not_called()
+
+
+def test_resolve_storage_context_requires_configured_bucket(monkeypatch):
+    monkeypatch.setattr(storage_service, "MINIO_DEFAULT_BUCKET", None)
+    with patch.object(
+        storage_service,
+        "get_knowledge_record",
+        return_value={"tenant_id": "tenant-a", "knowledge_id": 7},
+    ):
+        with pytest.raises(RuntimeError, match="default bucket"):
+            resolve_storage_context("kb-a", "tenant-a")
+
+
+def test_storage_usage_wrappers_normalize_values():
+    with patch.object(
+        storage_service,
+        "aggregate_committed_bytes_by_kb",
+        return_value={"7": 300, 8: None},
+    ) as aggregate, patch.object(
+        storage_service,
+        "get_tenant_committed_bytes",
+        return_value=500,
+    ) as tenant_total:
+        assert get_committed_bytes_by_kb("tenant-a", [7, 8]) == {7: 300, 8: 0}
+        assert get_tenant_committed_source_bytes("tenant-a") == 500
+
+    aggregate.assert_called_once_with(tenant_id="tenant-a", knowledge_ids=[7, 8])
+    tenant_total.assert_called_once_with(tenant_id="tenant-a")
+
+
+def test_commit_uploaded_object_uses_authoritative_size(storage_context):
+    with patch.object(
+        storage_service,
+        "get_file_size_from_minio_strict",
+        return_value=321,
+    ) as get_size, patch.object(
+        storage_service,
+        "commit_storage_object",
+        return_value={
+            "object_name": "knowledge_base/object-a",
+            "status": "COMMITTED",
+            "delete_flag": "N",
+        },
+    ) as commit:
+        result = commit_uploaded_object(
+            context=storage_context,
+            object_name="knowledge_base/object-a",
+            created_by="user-a",
+        )
+
+    assert result == {
+        "object_name": "knowledge_base/object-a",
+        "status": "COMMITTED",
+        "delete_flag": "N",
+    }
+    get_size.assert_called_once_with(
+        object_name="knowledge_base/object-a",
+        bucket="test-bucket",
+    )
+    commit.assert_called_once_with(
+        tenant_id="tenant-a",
+        knowledge_id=7,
+        index_name="kb-a",
+        bucket_name="test-bucket",
+        object_name="knowledge_base/object-a",
+        raw_bytes=321,
+        created_by="user-a",
+        updated_by="user-a",
+    )
+
+
+@pytest.mark.parametrize("raw_size", [-1, True, "321"])
+def test_commit_uploaded_object_rejects_invalid_authoritative_size(
+    storage_context,
+    raw_size,
+):
+    with patch.object(
+        storage_service,
+        "get_file_size_from_minio_strict",
+        return_value=raw_size,
+    ), patch.object(
+        storage_service,
+        "commit_storage_object",
+    ) as commit:
+        with pytest.raises(ValueError, match="Invalid authoritative"):
+            commit_uploaded_object(storage_context, "object-a")
+    commit.assert_not_called()
+
+
+def test_commit_uploaded_object_rejects_confirmed_missing_object(storage_context):
+    with patch.object(
+        storage_service,
+        "get_file_size_from_minio_strict",
+        return_value=None,
+    ), patch.object(storage_service, "commit_storage_object") as commit:
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            commit_uploaded_object(storage_context, "missing-object")
+    commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "ledger_result",
+    [
+        {},
+        {"status": "DELETED", "delete_flag": "Y"},
+        {"status": "COMMITTED", "delete_flag": "Y"},
+    ],
+)
+def test_commit_uploaded_object_rejects_non_active_ledger_result(
+    storage_context,
+    ledger_result,
+):
+    with patch.object(
+        storage_service,
+        "get_file_size_from_minio_strict",
+        return_value=0,
+    ), patch.object(
+        storage_service,
+        "commit_storage_object",
+        return_value=ledger_result,
+    ):
+        with pytest.raises(RuntimeError, match="Failed to commit"):
+            commit_uploaded_object(storage_context, "empty-object")
+
+
+def test_compensation_releases_only_successfully_deleted_objects(storage_context):
+    with patch.object(
+        storage_service,
+        "delete_file",
+        side_effect=[
+            {"success": True},
+            {"success": False, "error": "still present"},
+        ],
+    ) as delete, patch.object(
+        storage_service,
+        "mark_storage_object_deleted",
+        return_value=True,
+    ) as mark_deleted, patch.object(
+        storage_service,
+        "commit_uploaded_object",
+        return_value={"status": "COMMITTED", "delete_flag": "N"},
+    ) as retry_commit:
+        compensate_uploaded_objects(
+            context=storage_context,
+            object_names=["new-a", "new-b"],
+            updated_by="user-a",
+        )
+
+    assert delete.call_count == 2
+    mark_deleted.assert_called_once_with(
+        tenant_id="tenant-a",
+        bucket_name="test-bucket",
+        object_name="new-a",
+        updated_by="user-a",
+    )
+    retry_commit.assert_called_once_with(
+        context=storage_context,
+        object_name="new-b",
+        created_by="user-a",
+    )
+
+
+def test_compensation_tolerates_missing_row_and_cleanup_exception(storage_context):
+    with patch.object(
+        storage_service,
+        "delete_file",
+        side_effect=[{"success": True}, RuntimeError("storage unavailable")],
+    ), patch.object(
+        storage_service,
+        "mark_storage_object_deleted",
+        return_value=False,
+    ) as mark_deleted:
+        compensate_uploaded_objects(
+            context=storage_context,
+            object_names=["uncommitted", "failed-delete"],
+        )
+
+    mark_deleted.assert_called_once()
