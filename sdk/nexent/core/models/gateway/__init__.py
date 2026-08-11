@@ -1,9 +1,10 @@
 """Multimodal model unified adaptation gateway.
 
 Provides a protocol-agnostic adapter layer that *composes* the existing,
-stable model classes (``OpenAIModel`` / ``OpenAIVLModel`` / ``AliSTTModel`` /
-``AliTTSModel`` / embedding / rerank …) behind a single
-:class:`MultimodalGateway` entry point. Adding a vendor becomes one
+stable model classes (``OpenAIModel`` / ``OpenAIVLModel`` / embedding /
+rerank …) behind a single :class:`MultimodalGateway` entry point. For STT/TTS
+the WS protocol lives directly in the adapter (no wrapped model class);
+LLM/VLM stay as thin ``has-a`` delegation. Adding a vendor becomes one
 ``@register_adapter(factory, modality)`` decorator — backend services no
 longer hardcode ``if model_factory == ...`` dispatch.
 

@@ -2,10 +2,10 @@
 
 Inspired by Pipecat's ``WebsocketService`` mixin design: transport concerns
 (HTTP base_url/api_key vs WebSocket ws_url/auth_headers) live in mixins that
-are multiply-inherited alongside a modality ABC, decoupling
-``BaseSTTModel``/``BaseTTSModel`` from their hardcoded WebSocket assumption.
-An HTTP-only vendor (e.g. ModelEngine STT/TTS) can therefore take
-:class:`HttpTransportMixin` instead of ``WebSocketTransportMixin``.
+are multiply-inherited alongside a modality ABC, decoupling the STT/TTS
+adapters from a hardcoded WebSocket assumption. An HTTP-only vendor (e.g.
+ModelEngine STT/TTS) can therefore take :class:`HttpTransportMixin` instead of
+``WebSocketTransportMixin``.
 """
 
 from abc import ABC, abstractmethod
@@ -67,8 +67,8 @@ class WebSocketTransportMixin:
     """WebSocket transport capability.
 
     WS-specific parameters (ws_url, auth_headers) are managed here rather than
-    on the modality ABC, so ``BaseSTTModel``/``BaseTTSModel`` no longer need to
-    hardcode WebSocket assumptions. The session is created lazily.
+    on the modality ABC, so STT/TTS adapters no longer need to hardcode
+    WebSocket assumptions. The session is created lazily.
     """
 
     transport_type = "websocket"

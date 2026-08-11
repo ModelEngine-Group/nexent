@@ -2,9 +2,6 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
-from nexent.core.models.stt_model import BaseSTTModel
-from nexent.core.models.tts_model import BaseTTSModel
-
 from consts.exceptions import (
     VoiceServiceException,
     STTConnectionException,
