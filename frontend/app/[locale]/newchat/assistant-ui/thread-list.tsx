@@ -285,19 +285,20 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
-  const thread = aui.threadListItem.getState();
+  const threadListItem = aui.threadListItem;
+  const thread = threadListItem.getState();
   const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
   const handleRename = useCallback(async (newTitle: string) => {
     try {
-      await aui.threadListItem.rename(newTitle);
+      await threadListItem.rename(newTitle);
       log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
       setIsEditing(false);
     } catch (error) {
       log.error("[ThreadList] Failed to rename thread:", error);
       message.error(t("chat.threadList.renameFailed"));
     }
-  }, [aui, t]);
+  }, [threadListItem, t]);
 
   const handleRenameClick = useCallback(() => {
     setIsEditing(true);
@@ -307,18 +308,34 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     setIsEditing(false);
   }, []);
 
+  const handleDelete = useCallback(() => {
+    confirm({
+      title: t("chat.threadList.delete"),
+      content: t("chat.threadList.confirmDeletionDescription"),
+      onOk: async () => {
+        try {
+          await threadListItem.delete();
+        } catch (error) {
+          log.error("[ThreadList] Failed to delete thread:", error);
+          message.error(t("chatInterface.deleteFailed"));
+          throw error;
+        }
+      },
+    });
+  }, [confirm, t, threadListItem]);
+
   return (
     <>
-      <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
-        <div className="flex min-w-0 flex-1 items-center text-left">
-          {isEditing ? (
-            <InlineRenameEditor
-              currentTitle={title}
-              onRename={handleRename}
-              onCancel={handleCancelRename}
-            />
-          ) : (
-            <>
+      {isEditing ? (
+        <InlineRenameEditor
+          currentTitle={title}
+          onRename={handleRename}
+          onCancel={handleCancelRename}
+        />
+      ) : (
+        <>
+          <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
+            <div className="flex min-w-0 flex-1 items-center text-left">
               <ConversationStatusIndicatorWrapper
                 completedConversations={completedConversations}
               />
@@ -332,10 +349,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
                   {title}
                 </TooltipContent>
               </Tooltip>
-            </>
-          )}
-        </div>
-      </ThreadListItemPrimitive.Trigger>
+            </div>
+          </ThreadListItemPrimitive.Trigger>
+        </>
+      )}
       {!isEditing && (
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger className="mr-2 size-7 rounded-md opacity-0 group-hover/item:opacity-100">
@@ -343,8 +360,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
             <ThreadListItemMorePrimitive.Item
-              onSelect={(e) => {
-                e.preventDefault();
+              onSelect={() => {
                 handleRenameClick();
               }}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
@@ -353,13 +369,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
-              onSelect={(e) => {
-                e.preventDefault();
-                confirm({
-                  title: t("chat.threadList.delete"),
-                  content: t("chat.threadList.confirmDeletionDescription"),
-                  onOk: () => aui.threadListItem.delete(),
-                });
+              onSelect={() => {
+                setTimeout(handleDelete, 0);
               }}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
             >
@@ -419,7 +430,10 @@ const InlineRenameEditor: FC<{
   );
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-1 items-center gap-1">
+    <form
+      onSubmit={handleSubmit}
+      className="flex min-w-0 flex-1 items-center gap-1 px-3"
+    >
       <input
         type="text"
         value={title}

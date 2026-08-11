@@ -297,6 +297,14 @@ sandbox_module = _create_stub_module(
 )
 nexent_agents_module.sandbox = sandbox_module
 
+nexent_agent_module = _create_stub_module(
+    "nexent.core.agents.nexent_agent",
+    get_local_python_authorized_imports=MagicMock(
+        return_value=["sdk_default_import"]
+    ),
+)
+nexent_agents_module.nexent_agent = nexent_agent_module
+
 
 class MockProviderCapabilityUnknown(Exception):
     pass
@@ -2044,6 +2052,39 @@ class TestCreateAgentConfig:
         assert "search_memory" not in policy
         assert "store_memory" in policy
         assert "instructions" not in mocks["agent_config"].call_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("sandbox_default_level", ["local", "docker"])
+    async def test_create_agent_config_injects_import_policy_only_for_local_executor(
+        self,
+        sandbox_default_level,
+    ):
+        sdk_authorized_imports = ["sdk_default_import", "sdk_extra_import"]
+        with patch(
+            "backend.agents.create_agent_info.os.getenv",
+            return_value=sandbox_default_level,
+        ), patch(
+            "backend.agents.create_agent_info.get_local_python_authorized_imports",
+            return_value=sdk_authorized_imports,
+        ) as get_authorized_imports:
+            mocks = await self._run_context_manager_case(
+                enable_context_manager=True,
+                prepared_prompt="",
+            )
+
+        expected_authorized_imports = (
+            sdk_authorized_imports if sandbox_default_level == "local" else None
+        )
+        assert (
+            mocks["build_components"].call_args.kwargs[
+                "restricted_python_authorized_imports"
+            ]
+            == expected_authorized_imports
+        )
+        if sandbox_default_level == "local":
+            get_authorized_imports.assert_called_once_with()
+        else:
+            get_authorized_imports.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_runs_fixed_search_once_without_exposing_tool(self):

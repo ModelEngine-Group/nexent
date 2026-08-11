@@ -362,6 +362,20 @@ class NL2AgentRunRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
 
 
+class NL2SkillRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Skill conversation turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    draft_snapshot: Optional[Dict[str, Any]] = None
+    complexity: Literal["simple", "complicated"] = "complicated"
+    language: Optional[Literal["zh", "en"]] = None
+    model_id: Optional[int] = Field(
+        default=None,
+        description="Optional model ID override. When not specified, uses the tenant's configured LLM model.",
+    )
+
+
 class MessageUnit(BaseModel):
     type: str
     content: str
@@ -1435,14 +1449,6 @@ class SkillResponse(BaseModel):
     create_time: Optional[str] = None
     updated_by: Optional[str] = None
     update_time: Optional[str] = None
-
-
-class SkillCreateInteractiveRequest(BaseModel):
-    """Request model for interactive skill creation via LLM agent."""
-    user_request: str
-    existing_skill: Optional[Dict[str, Any]] = None
-    complexity: Optional[str] = "simple"
-    language: Optional[str] = "zh"
 
 
 # ---------------------------------------------------------------------------

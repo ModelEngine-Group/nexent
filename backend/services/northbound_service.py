@@ -450,9 +450,10 @@ async def start_streaming_chat(
         except Exception as e:
             logger.warning(f"Failed to log token usage: {str(e)}")
 
-    # Attach request id header and conversation_id (internal id)
+    # Attach northbound response headers used by streaming clients and proxies.
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
+    response.headers["X-Accel-Buffering"] = "no"
     return response
 
 
