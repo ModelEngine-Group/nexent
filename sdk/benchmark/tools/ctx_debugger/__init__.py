@@ -16,7 +16,7 @@ Or rely on the environment variable:
     attach_debugger(cm)  # path auto-resolved from env
 """
 
-from .debugger import ContextDebugger, attach_debugger
+from .debugger import ContextDebugger, attach_debugger, resolve_trace_path
 
 
-__all__ = ["ContextDebugger", "attach_debugger"]
+__all__ = ["ContextDebugger", "attach_debugger", "resolve_trace_path"]

@@ -42,9 +42,10 @@ for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-TRACE_PATH = os.environ.get(
-    "NEXENT_CONTEXT_DEBUG", "/tmp/nexent_longmemeval_trace.jsonl"
-)
+from ctx_debugger import resolve_trace_path  # noqa: E402
+
+
+TRACE_PATH = resolve_trace_path("nexent_longmemeval_trace_")
 os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 

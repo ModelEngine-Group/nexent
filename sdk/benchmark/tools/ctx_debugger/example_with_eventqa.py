@@ -10,7 +10,7 @@ Run from this directory (sdk/benchmark/tools/ctx_debugger):
       ../../../../backend/.venv/bin/python example_with_eventqa.py \\
       --book_index 0 --limit 1 --max_ingest_chars 200000
 
-The trace lands at $NEXENT_CONTEXT_DEBUG (default /tmp/nexent_eventqa_trace.jsonl).
+The trace lands at $NEXENT_CONTEXT_DEBUG or a private temporary file.
 Export it to Langfuse with:
     python -m ctx_debugger.langfuse_export <trace.jsonl>
 """
@@ -30,9 +30,10 @@ for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, EVENTQA_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-TRACE_PATH = os.environ.get(
-    "NEXENT_CONTEXT_DEBUG", "/tmp/nexent_eventqa_trace.jsonl"
-)
+from ctx_debugger import resolve_trace_path  # noqa: E402
+
+
+TRACE_PATH = resolve_trace_path("nexent_eventqa_trace_")
 os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 # Reuse the CoreAgent auto-attach monkey-patch from the sibling example.

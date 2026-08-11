@@ -9,7 +9,7 @@ example because attaching to the agent picks up the cm anyway.
 Run from this directory (sdk/benchmark/tools/ctx_debugger):
     ../../../../backend/.venv/bin/python example_with_benchmark.py [run_benchmark args]
 
-Trace lands at $NEXENT_CONTEXT_DEBUG or /tmp/nexent_ctx_trace.jsonl by default.
+Trace lands at $NEXENT_CONTEXT_DEBUG or a private temporary file by default.
 """
 
 import os
@@ -26,9 +26,10 @@ for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, GENERIC_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-TRACE_PATH = os.environ.get(
-    "NEXENT_CONTEXT_DEBUG", "/tmp/nexent_ctx_trace.jsonl"
-)
+from ctx_debugger import resolve_trace_path  # noqa: E402
+
+
+TRACE_PATH = resolve_trace_path("nexent_ctx_trace_")
 os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 

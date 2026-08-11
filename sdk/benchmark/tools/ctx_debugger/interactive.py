@@ -68,10 +68,10 @@ from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.agent_model import AgentHistory
 from nexent.core.utils.token_estimation import estimate_tokens_text
 
-from ctx_debugger import ContextDebugger, attach_debugger
+from ctx_debugger import ContextDebugger, attach_debugger, resolve_trace_path
 
 
-TRACE_PATH = os.environ.get("NEXENT_CONTEXT_DEBUG", "/tmp/nexent_ctx_interactive.jsonl")
+TRACE_PATH = resolve_trace_path("nexent_ctx_interactive_")
 # Shell-style persistent command history, kept across sessions like ~/.bash_history.
 HISTORY_FILE = os.path.expanduser("~/.nexent_ctx_debugger_history")
 # readline needs non-printing escape sequences wrapped in \001..\002 so it

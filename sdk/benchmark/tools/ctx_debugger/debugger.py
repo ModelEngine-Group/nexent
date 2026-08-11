@@ -18,6 +18,7 @@ import contextvars
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -34,6 +35,17 @@ _compression_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 
 DEFAULT_LAYERS: Set[str] = {"compression", "model", "observer", "tools", "executor"}
+
+
+def resolve_trace_path(prefix: str) -> str:
+    """Resolve an explicit trace path or create a private temporary file."""
+    configured_path = os.environ.get("NEXENT_CONTEXT_DEBUG")
+    if configured_path:
+        return configured_path
+
+    file_descriptor, trace_path = tempfile.mkstemp(prefix=prefix, suffix=".jsonl")
+    os.close(file_descriptor)
+    return trace_path
 
 
 # ============================================================
@@ -121,8 +133,14 @@ class ContextDebugger:
         parent = os.path.dirname(self.trace_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        if not append:
-            open(self.trace_path, "w", encoding="utf-8").close()
+        flags = os.O_WRONLY | os.O_CREAT
+        flags |= os.O_APPEND if append else os.O_TRUNC
+        flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        file_descriptor = os.open(self.trace_path, flags, 0o600)
+        try:
+            os.fchmod(file_descriptor, 0o600)
+        finally:
+            os.close(file_descriptor)
 
         self._emit(
             "run_begin",
