@@ -1098,8 +1098,8 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize()
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize()
         ),
       [aui]
     );
@@ -1124,8 +1124,8 @@ const createShareHistoryProvider = (
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize(),
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize(),
           async () => snapshot
         ),
       [aui]
