@@ -367,13 +367,13 @@ export default function InvitationList({
 
           const icon =
             status === "IN_USE" ? (
-              <CheckCircle className="w-3 h-3 mr-1" />
+              <CheckCircle className="w-3 h-3" />
             ) : status === "EXPIRE" ? (
-              <Clock className="w-3 h-3 mr-1" />
+              <Clock className="w-3 h-3" />
             ) : status === "RUN_OUT" ? (
-              <CircleSlash className="w-3.5 h-3 mr-1" />
+              <CircleSlash className="w-3.5 h-3" />
             ) : (
-              <XCircle className="w-3 h-3 mr-1" />
+              <XCircle className="w-3 h-3" />
             );
 
           return (
@@ -382,15 +382,13 @@ export default function InvitationList({
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                padding: "2px 8px",
-                lineHeight: "20px",
-                height: "auto",
                 whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
               variant="solid"
             >
-              {icon}
-              <span>{t(`tenantResources.invitation.status.${status}`)}</span>
+              <span className="inline-flex items-center mr-1">{icon}</span>
+              {t(`tenantResources.invitation.status.${status}`)}
             </Tag>
           );
         },
