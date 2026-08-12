@@ -506,8 +506,8 @@ export function MemoryManager() {
 
   const renderBaseSettings = () => (
     <div className="memory-config-content">
-      <Title level={4}>基础设置</Title>
-      <Text type="secondary">配置记忆能力及智能体间的记忆共享策略</Text>
+      <Title level={4}>{t("memoryManageModal.baseSettings")}</Title>
+      <Text type="secondary">{t("memoryManageModal.baseSettingsDescription")}</Text>
       <Card className="memory-config-card" loading={configLoading}>
         <Flex align="center" justify="space-between" gap={24}>
           <Flex align="center" gap={12}>
@@ -515,7 +515,7 @@ export function MemoryManager() {
             <div>
               <Text strong>{t("memoryManageModal.memoryAbility")}</Text>
               <Text type="secondary" className="memory-setting-description">
-                关闭后，智能体将不再使用记忆能力
+                {t("memoryManageModal.memoryAbilityDescription")}
               </Text>
             </div>
           </Flex>
@@ -692,7 +692,7 @@ export function MemoryManager() {
             label: (
               <span className="tab-label">
                 <Settings size={17} />
-                基础设置
+                {t("memoryManageModal.baseSettings")}
               </span>
             ),
           },

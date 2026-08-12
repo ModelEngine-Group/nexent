@@ -1836,6 +1836,8 @@
   "memoryManageModal.deleteMemory": "删除记忆",
   "memoryManageModal.noMemory": "暂无记忆",
   "memoryManageModal.baseSettings": "基础设置",
+  "memoryManageModal.baseSettingsDescription": "配置记忆能力及智能体间的记忆共享策略",
+  "memoryManageModal.memoryAbilityDescription": "关闭后，智能体将不再使用记忆能力",
   "memoryManageModal.tenantShareTab": "租户共享",
   "memoryManageModal.agentShareTab": "智能体共享",
   "memoryManageModal.userPersonalTab": "用户个性化",

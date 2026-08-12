@@ -1868,6 +1868,8 @@
   "memoryManageModal.deleteMemory": "Delete Memory",
   "memoryManageModal.noMemory": "No memories",
   "memoryManageModal.baseSettings": "Base Settings",
+  "memoryManageModal.baseSettingsDescription": "Configure memory capabilities and memory sharing policies between agents",
+  "memoryManageModal.memoryAbilityDescription": "When disabled, agents will no longer use memory capabilities",
   "memoryManageModal.tenantShareTab": "Tenant Shared",
   "memoryManageModal.agentShareTab": "Agent Shared",
   "memoryManageModal.userPersonalTab": "User Personal",
