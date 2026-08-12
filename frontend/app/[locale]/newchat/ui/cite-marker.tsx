@@ -13,6 +13,7 @@ export interface CiteMarkerProps {
   /** The raw citekey from the markdown, e.g. "b1", "a1", "1" */
   citekey: string;
   citeIndex: number;
+  label: string;
   url?: string;
   title: string;
   text?: string;
@@ -98,6 +99,7 @@ function CitationPreview({ text }: { text: string }) {
 const CiteMarkerImpl = ({
   citekey,
   citeIndex,
+  label,
   url,
   title,
   text,
@@ -115,8 +117,8 @@ const CiteMarkerImpl = ({
             disabled={!onClick}
             aria-label={
               loading
-                ? `Source ${citeIndex} is loading`
-                : `Open source ${citeIndex}: ${title}`
+                ? `${label} is loading`
+                : `Open ${label}: ${title}`
             }
             className={cn(
               "mx-0.5 inline-flex items-center justify-center rounded bg-primary/10 px-1 align-baseline font-normal leading-normal text-primary transition-colors",
@@ -126,7 +128,7 @@ const CiteMarkerImpl = ({
               className,
             )}
           >
-            [{citeIndex}]
+            [{label}]
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-sm px-3 py-2">

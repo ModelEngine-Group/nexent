@@ -945,6 +945,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 citeIndex,
+                toolSign: item.tool_sign as string | undefined,
                 messageId,
               });
             }

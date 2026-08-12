@@ -24,7 +24,7 @@ import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
 import { useSourcesPanel } from "./sources-panel-context";
-import type { PanelSourceItem } from "./sources-panel";
+import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
 import {
   searchSourcesRegistry,
   searchImagesRegistry,
@@ -47,6 +47,7 @@ interface MessageSourcePart {
   downloadUrl?: string;
   objectName?: string;
   citeIndex?: number | string;
+  toolSign?: string;
   isImage?: boolean;
   imageKey?: string;
 }
@@ -75,6 +76,7 @@ function resolveCiteSources(
       filename: part.filename,
       downloadUrl: part.downloadUrl,
       objectName: part.objectName,
+      toolSign: part.toolSign,
       isImage: part.isImage,
       imageKey: part.imageKey,
     }];
@@ -96,6 +98,21 @@ function getCiteIndex(citekey: string): number | undefined {
   return Number.isNaN(citeIndex) ? undefined : citeIndex;
 }
 
+function findCiteSource(sources: SearchSource[], citekey: string): SearchSource | undefined {
+  const normalizedKey = citekey.trim().toLowerCase();
+  const exactMatch = sources.find((source) =>
+    getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign }) === normalizedKey,
+  );
+  if (exactMatch) return exactMatch;
+
+  // Older persisted messages can contain numeric-only markers without a
+  // tool sign. Keep those conversations readable without weakening new
+  // `a1` / `b1` matching.
+  return /^\d+$/.test(normalizedKey)
+    ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
+    : undefined;
+}
+
 function toPanelSource(source: SearchSource): PanelSourceItem {
   return {
     sourceType:
@@ -109,6 +126,7 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     downloadUrl: source.downloadUrl,
     objectName: source.objectName,
     citeIndex: source.citeIndex,
+    toolSign: source.toolSign,
     isImage: source.isImage,
   };
 }
@@ -125,13 +143,17 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
     (s) => s.message.content as readonly MessageSourcePart[],
   );
   const { open } = useSourcesPanel();
+  const { t } = useTranslation();
 
   if (!citekey) return null;
 
-  const citeIndex = getCiteIndex(citekey);
   const messageSources = resolveCiteSources(messageId, content);
-  const source = messageSources.find((item) => item.citeIndex === citeIndex);
+  const source = findCiteSource(messageSources, citekey);
+  const citeIndex = getCiteIndex(citekey);
   const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const citationKey = source
+    ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
+    : citekey.trim().toLowerCase();
   const panelItems = messageSources.map(toPanelSource);
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
@@ -140,6 +162,11 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
     <CiteMarker
       citekey={citekey}
       citeIndex={resolvedCiteIndex}
+      label={source ? getCitationLabel(toPanelSource(source), {
+        knowledgeBase: t("chat.sources.knowledgeBase"),
+        web: t("chat.sources.web"),
+        source: t("chat.sources.source"),
+      }) : `${t("chat.sources.source")} ${resolvedCiteIndex}`}
       url={source?.url}
       title={source?.title ?? `Source ${resolvedCiteIndex}`}
       text={source?.text}
@@ -152,7 +179,7 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
                 groupId: "citations",
                 sources,
                 images,
-                selectedCiteIndex: source.citeIndex,
+                selectedCitationKey: citationKey,
               })
           : undefined
       }

@@ -2303,6 +2303,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             downloadUrl: source.downloadUrl,
             objectName: source.objectName,
             citeIndex: source.citeIndex,
+            toolSign: source.toolSign,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -2316,6 +2317,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           title: image.title,
           text: image.text,
           citeIndex: image.citeIndex,
+          toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
           messageId,

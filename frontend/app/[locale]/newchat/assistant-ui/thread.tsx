@@ -655,7 +655,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
         open={selection !== null}
-        selectedCiteIndex={selection?.selectedCiteIndex}
+        selectedCitationKey={selection?.selectedCitationKey}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -707,7 +707,7 @@ export const ReadOnlyConversation: FC<{
           sources={selection?.sources ?? []}
           images={selection?.images ?? []}
           open={selection !== null}
-          selectedCiteIndex={selection?.selectedCiteIndex}
+          selectedCitationKey={selection?.selectedCitationKey}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -1424,6 +1424,7 @@ interface SourcePartLike {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  toolSign?: string;
   messageId?: string;
 }
 
@@ -1665,6 +1666,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           objectName: source.objectName,
           isImage: source.isImage,
           citeIndex: source.citeIndex,
+          toolSign: source.toolSign,
         }))
       : groupedSources;
     for (const item of displaySources) {

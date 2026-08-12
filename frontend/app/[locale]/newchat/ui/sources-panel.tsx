@@ -35,6 +35,28 @@ export interface PanelSourceItem {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  toolSign?: string;
+}
+
+export function getCitationKey(item: Pick<PanelSourceItem, "citeIndex" | "toolSign">): string | undefined {
+  if (!Number.isFinite(item.citeIndex)) return undefined;
+  const index = item.citeIndex as number;
+  const toolSign = item.toolSign?.trim().toLowerCase();
+  return toolSign ? `${toolSign}${index}` : String(index);
+}
+
+export function getCitationLabel(
+  item: Pick<PanelSourceItem, "citeIndex" | "toolSign" | "sourceType">,
+  labels: { knowledgeBase: string; web: string; source: string },
+): string {
+  const index = item.citeIndex ?? 0;
+  if (item.toolSign === "a" || item.sourceType === "document") {
+    return `${labels.knowledgeBase} ${index}`;
+  }
+  if (["b", "c", "d", "e"].includes(item.toolSign ?? "")) {
+    return `${labels.web} ${index}`;
+  }
+  return `${labels.source} ${index}`;
 }
 
 export interface SourcesPanelProps {
@@ -44,7 +66,7 @@ export interface SourcesPanelProps {
   images: PanelSourceItem[];
   /** Whether the panel is currently open. Allows mount/unmount transitions. */
   open: boolean;
-  selectedCiteIndex?: number;
+  selectedCitationKey?: string;
   className?: string;
   onClose: () => void;
 }
@@ -60,7 +82,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   sources,
   images,
   open,
-  selectedCiteIndex,
+  selectedCitationKey,
   className,
   onClose,
 }) => {
@@ -73,16 +95,16 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     if (!open) return;
 
     const selectedIsImage =
-      selectedCiteIndex !== undefined &&
-      images.some((item) => item.citeIndex === selectedCiteIndex);
+      selectedCitationKey !== undefined &&
+      images.some((item) => getCitationKey(item) === selectedCitationKey);
     if (selectedIsImage) {
       setActiveTab("images");
-    } else if (selectedCiteIndex !== undefined || sources.length > 0) {
+    } else if (selectedCitationKey !== undefined || sources.length > 0) {
       setActiveTab("sources");
     } else if (images.length > 0) {
       setActiveTab("images");
     }
-  }, [open, selectedCiteIndex, sources.length, images.length]);
+  }, [open, selectedCitationKey, sources.length, images.length]);
 
   if (!open) return null;
 
@@ -142,7 +164,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
               <SourceListItem
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
-                selected={item.citeIndex === selectedCiteIndex}
+                selected={getCitationKey(item) === selectedCitationKey}
               />
             ))}
           </ul>
@@ -204,11 +226,20 @@ const extractDomain = (url: string): string => {
   }
 };
 
-const SourceSummary: FC<{ text?: string }> = ({ text }) => {
+const SourceSummary: FC<{ text?: string; highlighted?: boolean; hitChunkLabel: string }> = ({ text, highlighted = false, hitChunkLabel }) => {
   if (!text?.trim()) return null;
 
+  if (highlighted) {
+    return (
+      <div className="mt-2 rounded-md border border-amber-300/60 bg-amber-50/80 px-2.5 py-2 dark:border-amber-700/60 dark:bg-amber-950/30">
+        <div className="mb-1 text-[11px] font-semibold text-amber-900 dark:text-amber-200">{hitChunkLabel}</div>
+        <p className="max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word text-xs leading-5 text-foreground">{text}</p>
+      </div>
+    );
+  }
+
   return (
-    <p className="mt-1 line-clamp-4 wrap-break-word text-xs leading-5 text-muted-foreground">
+    <p className="mt-1 line-clamp-2 wrap-break-word text-xs leading-5 text-muted-foreground">
       {text}
     </p>
   );
@@ -269,6 +300,12 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   const selectedClassName = selected
     ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
     : undefined;
+  const citationLabel = getCitationLabel(item, {
+    knowledgeBase: t("chat.sources.knowledgeBase"),
+    web: t("chat.sources.web"),
+    source: t("chat.sources.source"),
+  });
+  const hitChunkLabel = t("chat.sources.matchedChunk");
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
@@ -290,13 +327,14 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
           >
             <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <span className="block wrap-break-word font-medium text-foreground">
-                {item.title || item.filename || t("chat.sources.document")}
-              </span>
+              <div className="flex items-start gap-1.5">
+                <span className="block min-w-0 flex-1 wrap-break-word font-medium text-foreground">{item.title || item.filename || t("chat.sources.document")}</span>
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+              </div>
               <span className="block truncate text-xs text-muted-foreground">
                 {t("chat.sources.knowledgeBase")}
               </span>
-              <SourceSummary text={item.text} />
+              <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
             </div>
           </button>
           <button
@@ -335,13 +373,14 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
         >
           <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <span className="block truncate font-medium text-foreground">
-              {displayTitle}
-            </span>
+            <div className="flex items-start gap-1.5">
+              <span className="block min-w-0 flex-1 truncate font-medium text-foreground">{displayTitle}</span>
+              <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+            </div>
             <span className="block truncate text-xs text-muted-foreground">
               {domain}
             </span>
-            <SourceSummary text={item.text} />
+            <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
           </div>
         </a>
       </li>
@@ -356,8 +395,11 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
         selectedClassName,
       )}
     >
-      <span className="font-medium">{item.title || t("chat.sources.untitled")}</span>
-      <SourceSummary text={item.text} />
+      <div className="flex items-start gap-1.5">
+        <span className="min-w-0 flex-1 font-medium">{item.title || t("chat.sources.untitled")}</span>
+        <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+      </div>
+      <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
     </li>
   );
 };

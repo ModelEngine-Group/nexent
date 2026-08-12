@@ -225,6 +225,7 @@ function ToolFallbackSearchContent({
     filename: item.filename || item.sourceFile,
     objectName: item.objectName,
     citeIndex: item.citeIndex ?? index,
+    toolSign: item.toolSign,
   }));
   const hasContent = imageSources.length > 0 || regularSources.length > 0;
   if (!hasContent) return null;
@@ -267,7 +268,7 @@ function ToolFallbackSearchContent({
                     groupId: `tool-search-${index}`,
                     sources: panelSources,
                     images: [],
-                    selectedCiteIndex: item.citeIndex ?? index,
+                    selectedCitationKey: `${item.toolSign ?? ""}${item.citeIndex ?? index}`,
                   })
                 }
               >

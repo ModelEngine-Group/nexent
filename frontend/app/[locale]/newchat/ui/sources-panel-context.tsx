@@ -20,7 +20,8 @@ export interface SourcesPanelSelection {
   groupId: string;
   sources: PanelSourceItem[];
   images: PanelSourceItem[];
-  selectedCiteIndex?: number;
+  /** Stable key built from tool_sign + cite_index, for example "a1". */
+  selectedCitationKey?: string;
 }
 
 export interface SourcesPanelContextValue {
