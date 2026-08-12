@@ -131,6 +131,8 @@ def test_make_nexent_task_maps_agent_run_to_benchmark_output(
     system_prompt,
     item,
 ):
+    monkeypatch.setenv("MINIO_DEFAULT_BUCKET", "benchmark-bucket")
+    monkeypatch.setenv("GAIA_FILE_PREFIX", "gaia")
     run_info = _agent_run_info()
     builder_calls = []
 
@@ -225,7 +227,7 @@ def test_make_nexent_task_maps_agent_run_to_benchmark_output(
     assert output["agent_config"]["user_id"] == "benchmark-user"
     assert output["token_saving"]["net_token_saving"] == 38
     if system_prompt:
-        assert "S3 URL: s3:/nexent/gaia/input.pdf" in builder_calls[0]["query"]
+        assert "S3 URL: s3:/benchmark-bucket/gaia/input.pdf" in builder_calls[0]["query"]
         assert builder_calls[0]["system_prompt"] == system_prompt
     else:
         assert builder_calls[0]["query"] == "plain question"
