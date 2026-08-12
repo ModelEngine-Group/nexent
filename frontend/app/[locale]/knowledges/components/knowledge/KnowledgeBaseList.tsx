@@ -27,6 +27,7 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { formatDate as formatDateUtil } from "@/lib/date";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -187,19 +188,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     else setSelectedModels(values);
   };
 
-  // Format date function, only keep date part
+  // Format date function, only keep date part.
+  // Uses the unified dayjs-based util for correct local-timezone display,
+  // fixing the previous toISOString() bug that returned UTC dates.
   const formatDate = (dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
-    } catch (e) {
-      return String(dateValue ?? ""); // If parsing fails, return original string
-    }
+    return formatDateUtil(dateValue) ?? String(dateValue ?? "");
   };
 
   // Helper to safely extract timestamp for sorting

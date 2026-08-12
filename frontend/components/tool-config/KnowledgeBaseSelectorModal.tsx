@@ -30,6 +30,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
+import { formatDate as formatDateUtil } from "@/lib/date";
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -203,19 +204,10 @@ export default function KnowledgeBaseSelectorModal({
       .sort();
   }, [knowledgeBases]);
 
-  // Format date function, only keep date part
+  // Format date function, only keep date part.
+  // Uses the unified dayjs-based util for correct local-timezone display.
   const formatDate = useCallback((dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0];
-    } catch (e) {
-      return String(dateValue ?? "");
-    }
+    return formatDateUtil(dateValue) ?? String(dateValue ?? "");
   }, []);
 
   const isMultimodalConstraintMismatch = useCallback(

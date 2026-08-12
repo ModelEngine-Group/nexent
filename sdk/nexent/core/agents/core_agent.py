@@ -1015,8 +1015,15 @@ Additional Args:
         # Prepend current time to the user task instead of baking it into the
         # system prompt. This keeps the system prefix stable so prompt/KV caches
         # can hit across requests; only the trailing user message varies.
-        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.task = f"[Current time: {time_str}]\n\n{task}"
+        # If the caller (e.g. backend run_agent_stream) already injected a
+        # user-timezone-aware [Current time: ...] prefix, skip to avoid double
+        # injection. Otherwise fall back to the server's local timezone.
+        if task.startswith("[Current time:"):
+            self.task = task
+        else:
+            now = datetime.now().astimezone()
+            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            self.task = f"[Current time: {time_str}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""

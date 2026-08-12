@@ -3184,6 +3184,23 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    # Inject current time in the user's timezone so the LLM can answer
+    # time-related questions correctly. The timezone comes from the
+    # X-User-Timezone header set by the frontend (browser IANA timezone).
+    # The SDK strips this prefix before sending AGENT_NEW_RUN to the
+    # frontend, so the user message display does not show the time marker.
+    user_timezone = http_request.headers.get("x-user-timezone") if http_request else None
+    if user_timezone and agent_request.query and not agent_request.query.startswith("[Current time:"):
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_timezone)
+            now = datetime.now(tz)
+            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            agent_request.query = f"[Current time: {time_str}]\n\n{agent_request.query}"
+        except Exception:
+            pass  # Fall back to SDK's default time injection
+
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
     # conversations, titles, or messages to the user's history.
