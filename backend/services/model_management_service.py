@@ -2,6 +2,8 @@ import logging
 import threading
 from typing import List, Dict, Any, Optional
 
+from fastapi import HTTPException
+
 from consts.const import (
     CAPACITY_SUGGESTION_ENABLED,
     CAPACITY_VISIBILITY_ENABLED,
@@ -9,7 +11,7 @@ from consts.const import (
     LOCALHOST_NAME,
     DOCKER_INTERNAL_HOST,
 )
-from consts.model import ModelConnectStatusEnum
+from consts.model import ModelConnectStatusEnum, _infer_model_type_from_name
 from consts.provider import (
     ProviderEnum,
     SILICON_BASE_URL,
@@ -399,14 +401,44 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
     """Create/refresh provider models in memory and merge existing attributes.
 
     Returns content dict with list data. Does not persist new records.
+
+    v2.6.0: When model_type is None/empty, the provider returns all models
+    and each model's type is inferred from its name via
+    _infer_model_type_from_name. merge_existing_model_attributes is skipped
+    in this case because it filters by a single model_type.
     """
     try:
         # Get provider model list
         model_list = await get_provider_models(provider_request)
 
-        # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
-        model_list = merge_existing_model_attributes(
-            model_list, tenant_id, provider_request["provider"], provider_request["model_type"])
+        # Detect provider error entries (e.g. authentication_failed, access_forbidden)
+        # returned by _classify_provider_error. These must surface as HTTP errors
+        # instead of being embedded in the response data as fake "models".
+        if model_list and isinstance(model_list[0], dict) and "_error" in model_list[0]:
+            err = model_list[0]
+            error_code = err.get("_error", "provider_error")
+            error_message = err.get("_message", "Provider API error")
+            http_code = err.get("_http_code")
+            status_code = http_code if http_code and 400 <= http_code < 600 else 502
+            raise HTTPException(
+                status_code=status_code,
+                detail=f"{error_code}: {error_message}"
+            )
+
+        model_type = provider_request.get("model_type")
+
+        # v2.6.0: When model_type is not specified, infer each model's type
+        # from its name so the frontend can display/edit it per-row.
+        if not model_type:
+            for model in model_list:
+                if not model.get("model_type"):
+                    model_id = model.get("id", "")
+                    model["model_type"] = _infer_model_type_from_name(model_id)
+        else:
+            # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
+            # Only merge when model_type is specified; skip for multi-type discovery
+            model_list = merge_existing_model_attributes(
+                model_list, tenant_id, provider_request["provider"], model_type)
 
         # Sort model list by ID
         model_list = sort_models_by_id(model_list)

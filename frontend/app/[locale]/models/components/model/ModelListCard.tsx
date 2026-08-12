@@ -185,14 +185,18 @@ export const ModelListCard = ({
 
   const filteredModels = getFilteredModels();
 
-  // Group models by source for display
+  // Group models by source for display.
+  // The "custom" group is a catch-all for any source not covered by the 5
+  // preset providers (e.g. "OpenAI-API-Compatible", "openai", "deepseek",
+  // "__custom__"), so newly imported models always appear in the dropdown.
+  const PRESET_SOURCES = ["modelengine", "silicon", "dashscope", "tokenpony", "volcengine"];
   const groupedModels = {
     modelengine: filteredModels.filter((m) => m.source === "modelengine"),
     silicon: filteredModels.filter((m) => m.source === "silicon"),
     dashscope: filteredModels.filter((m) => m.source === "dashscope"),
     tokenpony: filteredModels.filter((m) => m.source === "tokenpony"),
     volcengine: filteredModels.filter((m) => m.source === "volcengine"),
-    custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
+    custom: filteredModels.filter((m) => !PRESET_SOURCES.includes(m.source)),
   };
 
   // When parent component's model list updates, update local state

@@ -54,7 +54,7 @@ const SHARE_BASE_URL =
 
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
 const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
-const PORT = 3000;
+const PORT = 30001;
 
 function withoutBasePath(pathname) {
   if (!BASE_PATH || (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`))) {

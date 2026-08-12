@@ -415,6 +415,13 @@ class ModelRecord(TableBase):
         String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature = Column(
+        Float, doc="Default sampling temperature for LLM/VLM models. NULL means provider default. Nullable.")
+    top_p = Column(
+        Float, doc="Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.")
+    extra_params = Column(
+        JSONB, doc="Fixed inference params without dedicated columns (key-value pairs constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -632,6 +639,9 @@ class AgentInfo(TableBase):
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    # v2.6.0 per-agent model inference param overrides.
+    # Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}.
+    model_params_override = Column(JSONB, doc="Per-agent overrides for model inference params. NULL means inherit model defaults.")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 

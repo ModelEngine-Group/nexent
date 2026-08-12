@@ -241,6 +241,9 @@ export const useSaveGuard = () => {
         is_main_agent: currentEditedAgent.is_main_agent ?? true,
         requested_output_tokens:
           currentEditedAgent.requested_output_tokens ?? null,
+        // v2.6.0: per-agent model inference param overrides
+        model_params_override:
+          currentEditedAgent.model_params_override ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,

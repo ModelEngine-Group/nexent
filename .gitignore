@@ -88,3 +88,5 @@ agent_repository_frontend
 .omo/
 .tokensave
 .playwright-mcp/
+*.md
+*.txt

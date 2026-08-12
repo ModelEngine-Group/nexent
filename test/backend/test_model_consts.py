@@ -127,3 +127,64 @@ def test_capacity_suggestion_response_has_required_fields():
         f"ModelCapacitySuggestionResponse missing W11 fields: {missing}"
     )
 
+
+def test_filter_extra_params_passes_through_custom_object():
+    """__custom__ sub-object is preserved regardless of model_type, alongside
+    the existing allow-listed keys like enable_thinking."""
+    result = model_consts.filter_extra_params(
+        "llm",
+        {"enable_thinking": True, "__custom__": {"my_key": "my_value"}},
+    )
+    assert result is not None
+    assert result["enable_thinking"] is True
+    assert result["__custom__"] == {"my_key": "my_value"}
+
+
+def test_filter_extra_params_passes_through_custom_for_all_types():
+    """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
+    for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
+        result = model_consts.filter_extra_params(
+            model_type,
+            {"__custom__": {"k1": "v1", "k2": "0.5"}},
+        )
+        assert result == {"__custom__": {"k1": "v1", "k2": "0.5"}}, (
+            f"__custom__ should pass through for model_type={model_type}"
+        )
+
+
+def test_filter_extra_params_drops_invalid_custom_shape():
+    """__custom__ must be a dict; non-dict values are dropped entirely."""
+    result = model_consts.filter_extra_params("llm", {"__custom__": "not-a-dict"})
+    assert result is None
+
+    result = model_consts.filter_extra_params("llm", {"__custom__": ["list", "not", "dict"]})
+    assert result is None
+
+
+def test_filter_extra_params_drops_invalid_custom_entries():
+    """Inside __custom__: non-string keys and non-primitive values are dropped
+    individually; valid siblings survive."""
+    result = model_consts.filter_extra_params(
+        "llm",
+        {"__custom__": {1: "int-key-dropped", "ok": "ok-value", "bad": {"nested": "dict"}}},
+    )
+    assert result == {"__custom__": {"ok": "ok-value"}}
+
+
+def test_filter_extra_params_keeps_custom_alongside_allowed_keys():
+    """__custom__ coexists with the type's allow-listed extra_params keys."""
+    # LLM allows enable_thinking in extra_params; __custom__ rides alongside.
+    result = model_consts.filter_extra_params(
+        "llm",
+        {"enable_thinking": False, "unknown_key": "dropped", "__custom__": {"x": "1"}},
+    )
+    assert result == {"enable_thinking": False, "__custom__": {"x": "1"}}
+
+
+def test_filter_extra_params_drops_empty_custom():
+    """An empty __custom__ dict (or all-invalid entries) yields no __custom__ key."""
+    assert model_consts.filter_extra_params("llm", {"__custom__": {}}) is None
+    assert model_consts.filter_extra_params(
+        "llm", {"__custom__": {"bad": {"nested": "dict"}}}
+    ) is None
+

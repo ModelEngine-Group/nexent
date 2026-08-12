@@ -32,6 +32,7 @@ export type AgentConfigUpdate = Partial<
     | "ingroup_permission"
     | "greeting_message"
     | "example_questions"
+    | "model_params_override"
   >
 >;
 
@@ -144,6 +145,19 @@ export interface Agent {
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  /**
+   * v2.6.0: Per-agent overrides for model inference params.
+   * Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
+   * NULL/undefined means inherit the model's default values.
+   */
+  model_params_override?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  > | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;

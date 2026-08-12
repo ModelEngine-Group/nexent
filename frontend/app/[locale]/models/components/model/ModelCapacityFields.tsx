@@ -365,6 +365,7 @@ export const ModelCapacityFields = ({
       </AutoComplete>
     ) : (
       <Input
+        className="w-full"
         type="number"
         min="1"
         value={value[field]}

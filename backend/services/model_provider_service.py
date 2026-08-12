@@ -14,6 +14,7 @@ from services.providers.silicon_provider import SiliconModelProvider
 from services.providers.tokenpony_provider import TokenPonyModelProvider
 from services.providers.dashscope_provider import DashScopeModelProvider
 from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
+from services.providers.openai_provider import OpenAICompatibleProvider
 from utils.model_name_utils import split_repo_name, add_repo_to_name
 
 logger = logging.getLogger("model_provider")
@@ -28,26 +29,17 @@ async def get_provider_models(model_data: dict) -> List[dict]:
     """
     Get model list based on provider.
 
+    All providers are queried via the standard OpenAI-compatible
+    GET {base_url}/models endpoint.
+
     Args:
         model_data: Model data containing provider information
 
     Returns:
         List of models from the specified provider
     """
-    model_list = []
-
-    if model_data["provider"] == ProviderEnum.SILICON.value:
-        provider = SiliconModelProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
-        provider = ModelEngineProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.DASHSCOPE.value:
-        provider = DashScopeModelProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.TOKENPONY.value:
-        provider = TokenPonyModelProvider()
-        model_list = await provider.get_models(model_data)
+    provider = OpenAICompatibleProvider()
+    model_list = await provider.get_models(model_data)
 
     return model_list
 
@@ -223,6 +215,11 @@ def merge_existing_model_attributes(
     """
     if fields is None:
         fields = ["max_tokens", "api_key", "timeout_seconds", "concurrency_limit"]
+
+    # v2.6.0: When model_type is None/empty (multi-type discovery), skip merge
+    # because get_models_by_tenant_factory_type filters by a single model_type.
+    if not model_type:
+        return model_list
 
     if model_type == "embedding" or model_type == "multi_embedding":
         return model_list

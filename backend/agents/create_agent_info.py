@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import copy
 import json
 import logging
@@ -129,6 +129,22 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "default_output_reserve_tokens",
     "tokenizer_family",
 )
+
+
+def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Build extra_body for ModelConfig from model_record_t.extra_params.
+
+    Merges __custom__ user-defined params into the top level so they flow
+    into OpenAI chat.completions.create request body. Returns None when
+    there is nothing to pass through so production behaviour is unchanged.
+    """
+    if not extra_params or not isinstance(extra_params, dict):
+        return None
+    extra_body = dict(extra_params)
+    custom = extra_body.pop("__custom__", None)
+    if custom and isinstance(custom, dict):
+        extra_body.update(custom)
+    return extra_body if extra_body else None
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -698,7 +714,12 @@ async def create_model_config_list(tenant_id):
                         default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
-                        capability_profile_version=record.get("capability_profile_version")))
+                        capability_profile_version=record.get("capability_profile_version"),
+                        # v2.6.0: pass inference params so model-level
+                        # temperature/top_p/extra_params flow into SDK.
+                        temperature=record.get("temperature"),
+                        top_p=record.get("top_p"),
+                        extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -1900,6 +1921,45 @@ async def create_agent_run_info(
         create_config_kwargs["request_context_policy"] = context_policy
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
+
+    # v2.6.0: Apply per-agent model params override to model_config_list.
+    # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
+    # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig
+    # by display_name (the cite_name used in model_config_list) and merge the
+    # override values on top of the model-level defaults.
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "__custom__" and isinstance(v, dict):
+                                merged.update(v)
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    break
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

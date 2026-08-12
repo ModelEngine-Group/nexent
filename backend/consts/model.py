@@ -165,6 +165,12 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    # v2.6.0 fixed inference params without dedicated columns (key-value pairs
+    # constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.
+    extra_params: Optional[Dict[str, Any]] = None
     # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
     # the frontend when the operator clicks "Use suggestion" and saves; the
     # app layer pops them before the dict reaches the service/DB layer and
@@ -217,7 +223,11 @@ class CapacityCoverageResponse(BaseModel):
 
 class ProviderModelRequest(BaseModel):
     provider: str
-    model_type: str
+    # v2.6.0: model_type is now optional. When omitted, the backend fetches all
+    # models from the OpenAI-compatible /v1/models endpoint and infers each
+    # model's type from its name via _infer_model_type_from_name. When provided,
+    # behavior is unchanged (filter by type).
+    model_type: Optional[str] = None
     api_key: Optional[str] = ''
     base_url: Optional[str] = ''
 
@@ -617,6 +627,10 @@ class AgentInfoRequest(BaseModel):
     enable_context_manager: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    # v2.6.0 per-agent model inference param overrides.
+    # Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}.
+    # NULL means inherit model defaults.
+    model_params_override: Optional[Dict[str, Any]] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -724,6 +738,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    # v2.6.0 per-agent model inference param overrides (mirrors AgentInfo column).
+    model_params_override: Optional[Dict[str, Any]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -1190,6 +1206,10 @@ class ManageTenantModelCreateRequest(BaseModel):
     tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
     capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
     capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature: Optional[float] = Field(None, description="Default sampling temperature for LLM/VLM models")
+    top_p: Optional[float] = Field(None, description="Default nucleus sampling probability for LLM/VLM models")
+    extra_params: Optional[Dict[str, Any]] = Field(None, description="Fixed inference params without dedicated columns (constrained by FIXED_INFERENCE_FIELDS_BY_TYPE)")
     # W11 accept-signal fields. Same audit-only contract as ModelRequest:
     # the app layer pops them off model_data before the dict reaches the
     # service/DB layer and forwards them to
@@ -1229,6 +1249,10 @@ class ManageTenantModelUpdateRequest(BaseModel):
     tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
     capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
     capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature: Optional[float] = Field(None, description="Default sampling temperature for LLM/VLM models")
+    top_p: Optional[float] = Field(None, description="Default nucleus sampling probability for LLM/VLM models")
+    extra_params: Optional[Dict[str, Any]] = Field(None, description="Fixed inference params without dedicated columns (constrained by FIXED_INFERENCE_FIELDS_BY_TYPE)")
     # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
     # contract. The app layer pops them before calling the service so
     # update_model_record never sees them.
@@ -1272,7 +1296,9 @@ class ManageProviderModelCreateRequest(BaseModel):
     """Request model for creating provider models in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create provider models for")
     provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
-    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+    # v2.6.0: model_type is now optional. When omitted, returns all models and
+    # infers type from model name. When provided, behavior is unchanged.
+    model_type: Optional[str] = Field(None, description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.")
     api_key: Optional[str] = Field('', description="API key for the provider")
     base_url: Optional[str] = Field('', description="Base URL for the provider API")
 
@@ -1734,3 +1760,233 @@ class ModelCatalogProviderInfo(BaseModel):
     base_url: str = Field(..., description="Provider-level default base_url")
     supported_types: List[str] = Field(default_factory=list, description="Model types the catalog provides for this provider (llm/vlm/embedding/...)")
     model_count: int = Field(0, description="Number of models in catalog for this provider")
+
+
+# =============================================================================
+# v2.6.0: 按类型固定字段规格 (前后端共用)
+# =============================================================================
+
+
+class FieldSpec(BaseModel):
+    """Specification of a single fixed inference field for advanced settings UI.
+
+    Shared by backend validation and frontend dynamic rendering so the field
+    set is defined in exactly one place.
+    """
+
+    key: str = Field(..., description="Field key (snake_case), e.g. 'temperature', 'top_p'")
+    label: str = Field(..., description="Human-readable label shown in UI")
+    type: str = Field(
+        ...,
+        description="Field type: 'str' | 'int' | 'float' | 'bool' | 'select' | 'array_str'",
+    )
+    range: Optional[List[float]] = Field(
+        None, description="For numeric fields: [min, max]. None means no range constraint."
+    )
+    default: Optional[Any] = Field(None, description="Default value when user does not set it")
+    options: Optional[List[str]] = Field(
+        None, description="For 'select' type: allowed option values"
+    )
+    max_items: Optional[int] = Field(
+        None, description="For 'array_str' type: maximum number of items"
+    )
+
+
+# Fixed inference field specs by model type. Each model type has its own set of
+# fixed advanced-settings fields. Fields with dedicated DB columns
+# (see _FIELDS_WITH_DEDICATED_COLUMN) are persisted as top-level columns; the
+# rest are persisted to the extra_params JSONB column. enable_thinking is
+# stored in extra_params to avoid a DB migration — the runtime adapter is
+# responsible for translating it to the provider-specific request shape
+# (e.g. Qwen3 chat_template_kwargs={"enable_thinking": ...}).
+FIXED_INFERENCE_FIELDS_BY_TYPE: Dict[str, List[FieldSpec]] = {
+    "llm": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+        FieldSpec(key="temperature", label="温度", type="float", range=[0.0, 2.0]),
+        FieldSpec(key="top_p", label="Top P", type="float", range=[0.0, 1.0]),
+        FieldSpec(key="enable_thinking", label="深度思考", type="bool"),
+    ],
+    "vlm": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+    ],
+    "vlm2": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+    ],
+    "vlm3": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+    ],
+    "embedding": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="dimension", label="向量维度", type="int"),
+        FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
+        FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
+        FieldSpec(key="chunk_batch", label="块批大小", type="int"),
+    ],
+    "multi_embedding": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="dimension", label="向量维度", type="int"),
+        FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
+        FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
+        FieldSpec(key="chunk_batch", label="块批大小", type="int"),
+    ],
+    "rerank": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="max_tokens", label="最大Token数", type="int"),
+    ],
+    "stt": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="model_factory", label="STT服务商", type="select", options=["dashscope", "volcengine"]),
+        FieldSpec(key="model_appid", label="AppID", type="str"),
+        FieldSpec(key="access_token", label="Access Token", type="str"),
+    ],
+    "tts": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="model_factory", label="TTS服务商", type="select", options=["dashscope", "volcengine"]),
+        FieldSpec(key="model_appid", label="AppID", type="str"),
+        FieldSpec(key="access_token", label="Access Token", type="str"),
+        FieldSpec(key="max_tokens", label="最大Token数", type="int"),
+    ],
+}
+
+
+# Fields with dedicated DB columns. The remaining fields in
+# FIXED_INFERENCE_FIELDS_BY_TYPE are persisted to extra_params JSONB.
+_FIELDS_WITH_DEDICATED_COLUMN = frozenset({
+    "display_name", "temperature", "top_p",
+    "context_window_tokens", "max_input_tokens", "max_output_tokens",
+    "default_output_reserve_tokens", "tokenizer_family",
+    "dimension", "expected_chunk_size", "maximum_chunk_size", "chunk_batch",
+    "model_factory", "model_appid", "access_token", "max_tokens",
+})
+
+
+def get_extra_param_keys_for_type(model_type: str) -> List[str]:
+    """Return the list of field keys that should be stored in extra_params JSONB
+    for the given model type (i.e., fields without a dedicated DB column).
+    """
+    specs = FIXED_INFERENCE_FIELDS_BY_TYPE.get(model_type, [])
+    return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+
+
+def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Filter extra_params to only keep keys allowed for the given model type.
+
+    Logs a warning for any disallowed keys. Returns None if the result is empty.
+
+    The reserved key ``__custom__`` is always allowed through: it carries
+    user-defined key/value pairs edited in the advanced-settings UI. It is
+    validated to be a dict of string -> primitive (str/int/float/bool);
+    anything else is dropped with a warning so a malformed payload cannot
+    corrupt the JSONB column.
+    """
+    if not extra_params:
+        return None
+    import logging
+    logger = logging.getLogger(__name__)
+
+    allowed = set(get_extra_param_keys_for_type(model_type))
+    filtered = {}
+    dropped = []
+    for key, value in extra_params.items():
+        if key == "__custom__":
+            if not isinstance(value, dict):
+                logger.warning(
+                    "__custom__ must be a dict, got %s; dropping",
+                    type(value).__name__,
+                )
+                dropped.append(key)
+                continue
+            clean_custom: Dict[str, Any] = {}
+            for ck, cv in value.items():
+                if not isinstance(ck, str) or not isinstance(cv, (str, int, float, bool)):
+                    logger.warning(
+                        "__custom__ entry %r must be string -> primitive, dropping",
+                        ck,
+                    )
+                    continue
+                clean_custom[ck] = cv
+            if clean_custom:
+                filtered["__custom__"] = clean_custom
+            continue
+        if key in allowed:
+            filtered[key] = value
+        else:
+            dropped.append(key)
+    if dropped:
+        logger.warning(
+            "Dropped extra_params keys not in fixed field set for model_type=%s: %s",
+            model_type, dropped,
+        )
+    return filtered if filtered else None
+
+
+# =============================================================================
+# v2.6.0: Model type inference from model name (for custom provider discovery)
+# =============================================================================
+
+
+def _infer_model_type_from_name(model_name: str) -> str:
+    """Infer a model's type from its name prefix.
+
+    Used when ProviderModelRequest.model_type is None (custom provider discovery
+    via OpenAI-compatible /v1/models). Preset providers do not need this because
+    their types come from the catalog.
+
+    Mapping rules (see design doc Phase 2.6):
+    - gpt-* / o1-* / o3-* / o4-* / claude-* / glm-* / qwen-* (non-vl) /
+      deepseek-* / llama-* / mistral-* / yi-* / moonshot-* / gemini-* → llm
+    - qwen-vl-* / glm-v* / internvl-* / llava-* → vlm
+    - text-embedding-* / embedding-* / bge-* (non-reranker) → embedding
+    - rerank-* / bge-reranker-* / jina-reranker-* → rerank
+    - whisper-* / paraformer-* / sensevoice-* → stt
+    - tts-* / cosyvoice-* / speech-* → tts
+    - other unmatched → llm (default; user can manually correct in UI)
+    """
+    if not model_name:
+        return "llm"
+    name = model_name.lower()
+
+    # Embedding (check before generic patterns)
+    if name.startswith(("text-embedding-", "embedding-", "bge-")) and "reranker" not in name:
+        return "embedding"
+    # Rerank
+    if name.startswith(("rerank-", "bge-reranker-", "jina-reranker-")) or "reranker" in name:
+        return "rerank"
+    # STT
+    if name.startswith(("whisper-", "paraformer-", "sensevoice-")):
+        return "stt"
+    # TTS
+    if name.startswith(("tts-", "cosyvoice-", "speech-")):
+        return "tts"
+    # VLM (check before LLM because qwen-vl-* starts with qwen-)
+    if name.startswith(("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")):
+        return "vlm"
+    # LLM
+    if name.startswith((
+        "gpt-", "o1-", "o3-", "o4-", "claude-", "glm-", "qwen-",
+        "deepseek-", "llama-", "mistral-", "yi-", "moonshot-", "gemini-",
+        "kimi-", "doubao-", "ernie-", "spark-",
+    )):
+        return "llm"
+    # Default fallback
+    return "llm"

@@ -30,6 +30,7 @@ from consts.model import (
     ManageBatchCreateModelsRequest,
     ManageProviderModelListRequest,
     ManageProviderModelCreateRequest,
+    FIXED_INFERENCE_FIELDS_BY_TYPE,
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
@@ -255,6 +256,8 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
             "message": "Provider model created successfully",
             "data": model_list
         })
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -857,6 +860,8 @@ async def manage_create_provider_models(
             "message": "Successfully created provider models",
             "data": jsonable_encoder(model_list)
         })
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -950,6 +955,44 @@ async def list_model_catalog_providers(
                 "message": f"catalog unavailable: {e}",
                 "catalog_available": False,
                 "data": [],
+            },
+        )
+
+
+@router.get("/catalog/inference_field_specs")
+async def get_inference_field_specs(
+    authorization: Optional[str] = Header(None),
+):
+    """Return fixed inference field specifications grouped by model type.
+
+    v2.6.0: The frontend uses this to dynamically render the advanced-settings
+    form for each model type (LLM/Embedding/STT/TTS/...). Defining the field
+    set in one place (backend consts.model) avoids hardcoding two copies.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = {
+            model_type: [spec.model_dump(mode="json") for spec in specs]
+            for model_type, specs in FIXED_INFERENCE_FIELDS_BY_TYPE.items()
+        }
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Returning inference field specs failed: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={
+                "message": f"failed to load inference field specs: {e}",
+                "data": {},
             },
         )
 

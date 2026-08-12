@@ -14,6 +14,7 @@ import {
   ModelCatalogModelEntry,
   ModelCatalogProfile,
   ModelCatalogFullPayload,
+  InferenceFieldSpecsByType,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -80,6 +81,49 @@ const buildCapacityRequestBody = (model: {
           model.acceptedCapabilityProfileVersion,
       }
     : {}),
+});
+
+/**
+ * Build snake_case request body fragments for v2.6.0 inference params
+ * (temperature / top_p / extra_params). Used by add/update/batch paths
+ * so the new advanced-settings fields flow through consistently.
+ *
+ * Accepts both camelCase (topP / extraParams, from ModelOption-style input)
+ * and snake_case (top_p / extra_params, from buildInferenceParamsPayload output)
+ * so callers don't need to convert between the two.
+ */
+const buildInferenceParamsRequestBody = (model: {
+  temperature?: number;
+  topP?: number;
+  top_p?: number;
+  extraParams?: Record<string, unknown>;
+  extra_params?: Record<string, unknown>;
+}) => ({
+  ...(model.temperature !== undefined
+    ? { temperature: model.temperature }
+    : {}),
+  ...(model.topP !== undefined
+    ? { top_p: model.topP }
+    : model.top_p !== undefined
+    ? { top_p: model.top_p }
+    : {}),
+  ...(model.extraParams !== undefined
+    ? { extra_params: model.extraParams }
+    : model.extra_params !== undefined
+    ? { extra_params: model.extra_params }
+    : {}),
+});
+
+/**
+ * Map v2.6.0 inference params (temperature / top_p / extra_params) from
+ * the snake_case API response into the camelCase ModelOption shape.
+ * Returns an empty object when the underlying fields are absent so it
+ * can be spread safely into any model mapper.
+ */
+const mapInferenceParamsFromApi = (model: any) => ({
+  temperature: model.temperature,
+  topP: model.top_p,
+  extraParams: model.extra_params,
 });
 
 const mapCapacitySuggestionFromApi = (
@@ -174,6 +218,8 @@ export const modelService = {
           maximumChunkSize: model.maximum_chunk_size,
           chunkingBatchSize: model.chunk_batch,
           ...mapCapacityFieldsFromApi(model),
+          // v2.6.0 inference params (model-level defaults)
+          ...mapInferenceParamsFromApi(model),
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
@@ -224,6 +270,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -240,6 +290,7 @@ export const modelService = {
         timeout_seconds: model.timeoutSeconds,
         concurrency_limit: model.concurrencyLimit,
         ...buildCapacityRequestBody(model),
+        ...buildInferenceParamsRequestBody(model),
       };
 
       // Add STT specific fields
@@ -275,7 +326,7 @@ export const modelService = {
 
   addProviderModel: async (model: {
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, backend returns all types and infers per-model
     apiKey: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -287,7 +338,7 @@ export const modelService = {
           headers: getAuthHeaders(),
           body: JSON.stringify({
             provider: model.provider,
-            model_type: model.type,
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
             api_key: model.apiKey,
             ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
@@ -312,7 +363,7 @@ export const modelService = {
   addBatchCustomModel: async (model: {
     api_key: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — per-model type is carried in each model entry
     models: any[];
   }): Promise<number> => {
     try {
@@ -322,7 +373,7 @@ export const modelService = {
         body: JSON.stringify({
           api_key: model.api_key,
           models: model.models,
-          type: model.type,
+          ...(model.type !== undefined ? { type: model.type } : {}),
           provider: model.provider,
         }),
       });
@@ -343,7 +394,7 @@ export const modelService = {
 
   getProviderSelectedModalList: async (model: {
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
     api_key: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -355,7 +406,7 @@ export const modelService = {
           headers: getAuthHeaders(),
           body: JSON.stringify({
             provider: model.provider,
-            model_type: model.type,
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
             api_key: model.api_key,
             ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
@@ -448,6 +499,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -491,6 +546,7 @@ export const modelService = {
               ? { concurrency_limit: model.concurrencyLimit }
               : {}),
             ...buildCapacityRequestBody(model),
+            ...buildInferenceParamsRequestBody(model),
           }),
         }
       );
@@ -522,6 +578,10 @@ export const modelService = {
       defaultOutputReserveTokens?: number;
       tokenizerFamily?: string;
       capacitySource?: string;
+      // v2.6.0 inference params
+      temperature?: number;
+      topP?: number;
+      extraParams?: Record<string, unknown>;
     }[],
     provider?: string
   ): Promise<any> => {
@@ -557,6 +617,13 @@ export const modelService = {
               : {}),
             ...(m.capacitySource !== undefined
               ? { capacity_source: m.capacitySource }
+              : {}),
+            ...(m.temperature !== undefined
+              ? { temperature: m.temperature }
+              : {}),
+            ...(m.topP !== undefined ? { top_p: m.topP } : {}),
+            ...(m.extraParams !== undefined
+              ? { extra_params: m.extraParams }
               : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
@@ -730,6 +797,10 @@ export const modelService = {
       modelFactory?: string;
       modelAppid?: string;
       accessToken?: string;
+      // v2.6.0 inference params (passed through; do not affect connectivity)
+      temperature?: number;
+      topP?: number;
+      extraParams?: Record<string, unknown>;
     },
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
@@ -743,6 +814,7 @@ export const modelService = {
           ? { max_tokens: config.maxTokens }
           : {}),
         embedding_dim: config.embeddingDim || 1024,
+        ...buildInferenceParamsRequestBody(config),
       };
 
       // Add STT specific fields if provided
@@ -936,6 +1008,8 @@ export const modelService = {
             maximumChunkSize: model.maximum_chunk_size,
             chunkingBatchSize: model.chunk_batch,
             ...mapCapacityFieldsFromApi(model),
+            // v2.6.0 inference params (model-level defaults)
+            ...mapInferenceParamsFromApi(model),
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
@@ -997,6 +1071,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -1017,6 +1095,7 @@ export const modelService = {
         timeout_seconds: params.timeoutSeconds,
         concurrency_limit: params.concurrencyLimit,
         ...buildCapacityRequestBody(params),
+        ...buildInferenceParamsRequestBody(params),
       };
 
       // Add STT specific fields
@@ -1081,6 +1160,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -1128,6 +1211,7 @@ export const modelService = {
               ? { concurrency_limit: params.concurrencyLimit }
               : {}),
             ...buildCapacityRequestBody(params),
+            ...buildInferenceParamsRequestBody(params),
           }),
         }
       );
@@ -1189,7 +1273,7 @@ export const modelService = {
   batchCreateManageTenantModels: async (params: {
     tenantId: string;
     provider: string;
-    type: string;
+    type?: string; // v2.6.0: optional — per-model type is carried in each model entry
     apiKey: string;
     models: Array<{
       id: string;
@@ -1197,6 +1281,10 @@ export const modelService = {
       created?: number;
       owned_by?: string;
       max_tokens?: number;
+      model_type?: string;
+      model_name?: string;
+      display_name?: string;
+      [key: string]: unknown;
     }>;
   }): Promise<{
     tenantId: string;
@@ -1214,7 +1302,7 @@ export const modelService = {
         body: JSON.stringify({
           tenant_id: params.tenantId,
           provider: params.provider,
-          type: params.type,
+          ...(params.type !== undefined ? { type: params.type } : {}),
           api_key: params.apiKey,
           models: params.models,
         }),
@@ -1246,7 +1334,7 @@ export const modelService = {
   addManageProviderModel: async (params: {
     tenantId: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
     apiKey: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -1262,7 +1350,7 @@ export const modelService = {
           body: JSON.stringify({
             tenant_id: params.tenantId,
             provider: params.provider,
-            model_type: params.type,
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
             api_key: params.apiKey,
             ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
           }),
@@ -1290,7 +1378,7 @@ export const modelService = {
   getManageProviderSelectedModalList: async (params: {
     tenantId: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
   }): Promise<any[]> => {
     try {
       const response = await fetch(
@@ -1304,7 +1392,7 @@ export const modelService = {
           body: JSON.stringify({
             tenant_id: params.tenantId,
             provider: params.provider,
-            model_type: params.type,
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
           }),
         }
       );
@@ -1446,6 +1534,33 @@ export const modelService = {
         error
       );
       return { profile: null, catalogAvailable: false };
+    }
+  },
+
+  // ================================================================
+  // v2.6.0: Fixed inference field specs by model type.
+  // Returned by GET /model/catalog/inference_field_specs and used by
+  // ModelAdvancedSettings.tsx to dynamically render the per-type
+  // advanced settings form. Falls back to an empty object on failure
+  // so the caller can render a no-fields form instead of crashing.
+  // ================================================================
+  async getInferenceFieldSpecs(): Promise<InferenceFieldSpecsByType> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.catalogInferenceFieldSpecs,
+        {
+          method: "GET",
+          headers: { ...getAuthHeaders() },
+        }
+      );
+      const result = await response.json();
+      if (response.status === STATUS_CODES.SUCCESS && result.data) {
+        return result.data as InferenceFieldSpecsByType;
+      }
+      return {};
+    } catch (error) {
+      log.warn("Failed to load inference field specs:", error);
+      return {};
     }
   },
 };

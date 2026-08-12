@@ -49,6 +49,14 @@ import PromptOptimizeModal from "./PromptOptimizeModal";
 import GuardrailConfigContent from "./GuardrailConfigContent";
 import type { GuardrailConfigContentRef } from "./GuardrailConfigContent";
 import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../../models/components/model/ModelAdvancedSettings";
+import type { ModelOverrideMap } from "../../../models/components/model/ModelOverrideModal";
 
 const { TextArea } = Input;
 
@@ -144,6 +152,8 @@ export default function AgentGenerateDetail({}) {
   const [optimizeModalType, setOptimizeModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [advancedSettingsTab, setAdvancedSettingsTab] = useState<"basic" | "guardrail">("basic");
+  // v2.6.0: tracks which model's param-override popup is open (null = closed)
+  const [configuringModelId, setConfiguringModelId] = useState<number | null>(null);
   const guardrailContentRef = useRef<GuardrailConfigContentRef>(null);
 
   // Cleanup invalid cache on mount to prevent stuck "generating" state
@@ -221,6 +231,86 @@ export default function AgentGenerateDetail({}) {
       .filter((t): t is number => t != null && t > 0);
     return tokens.length > 0 ? Math.min(...tokens) : undefined;
   }, [availableLlmModels, editedAgent.model_ids]);
+
+  // v2.6.0: inference field specs for per-model override forms
+  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
+
+  // v2.6.0: per-model override handlers (triggered by gear icon in dropdown option)
+  const modelParamsOverride = (editedAgent.model_params_override ?? {}) as ModelOverrideMap;
+
+  const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
+    const entry = buildModelOverrideEntry(next);
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    if (Object.keys(entry).length === 0) {
+      delete updated[String(modelId)];
+    } else {
+      updated[String(modelId)] = entry;
+    }
+    updateAgentConfig({
+      model_params_override:
+        Object.keys(updated).length > 0 ? updated : null,
+    });
+  };
+
+  const handleClearModelParamsOverride = (modelId: number) => {
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    delete updated[String(modelId)];
+    updateAgentConfig({
+      model_params_override:
+        Object.keys(updated).length > 0 ? updated : null,
+    });
+  };
+
+  // v2.6.0: the model currently being configured in the popup (resolved from availableLlmModels)
+  const configuringModel = useMemo(
+    () => availableLlmModels.find((m) => m.id === configuringModelId) ?? null,
+    [availableLlmModels, configuringModelId]
+  );
+
+  // Local editing state for the per-model override modal.
+  // We keep the editing value here (including empty/duplicate __custom__ rows
+  // and other in-progress edits) and only commit to modelParamsOverride when
+  // the user clicks "OK". This avoids buildModelOverrideEntry filtering out
+  // empty rows on every keystroke and resetting the UI.
+  const [editingOverrideValue, setEditingOverrideValue] = useState<ModelAdvancedSettingsValue | null>(null);
+  useEffect(() => {
+    if (!configuringModel) {
+      setEditingOverrideValue(null);
+      return;
+    }
+    // Always use model-level defaults as the base so all fields are visible.
+    // If a per-agent override exists, merge it on top (override takes
+    // precedence). This ensures the user sees the currently effective values
+    // for every field, while the onOk diff logic ensures only genuinely
+    // modified fields are persisted to the override entry.
+    const modelDefaults: Record<string, unknown> = {
+      temperature: configuringModel.temperature,
+      top_p: configuringModel.topP,
+      extra_params: configuringModel.extraParams,
+      context_window_tokens: configuringModel.contextWindowTokens,
+      max_input_tokens: configuringModel.maxInputTokens,
+      max_output_tokens: configuringModel.maxOutputTokens,
+      default_output_reserve_tokens: configuringModel.defaultOutputReserveTokens,
+      tokenizer_family: configuringModel.tokenizerFamily,
+    };
+    const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
+    const formRecord: Record<string, unknown> = { ...modelDefaults, ...overrideEntry };
+    // Deep merge extra_params so model-level keys (e.g. __custom__) are
+    // preserved when the override only specifies a subset.
+    if (overrideEntry.extra_params && modelDefaults.extra_params) {
+      formRecord.extra_params = {
+        ...(modelDefaults.extra_params as Record<string, unknown>),
+        ...(overrideEntry.extra_params as Record<string, unknown>),
+      };
+    }
+    setEditingOverrideValue(
+      advancedSettingsValueFromRecord(formRecord as any, inferenceSpecs, configuringModel.type ?? "llm")
+    );
+    // Only re-init when the modal opens for a different model id. Avoid
+    // depending on modelParamsOverride/configuringModel to prevent clobbering
+    // in-progress edits on re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuringModelId]);
 
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
@@ -1064,22 +1154,48 @@ export default function AgentGenerateDetail({}) {
                             >
                               {availableLlmModels.map((model) => {
                                 const isBare = bareCapacityModelIds.has(model.id);
+                                const hasOverride = Object.keys(
+                                  modelParamsOverride[String(model.id)] ?? {}
+                                ).length > 0;
                                 return (
                                   <Select.Option
                                     key={model.id}
                                     value={model.displayName}
                                     disabled={model.connect_status !== "available"}
                                   >
-                                    {isBare ? (
+                                    <Flex align="center" justify="space-between">
                                       <Flex align="center" gap={6}>
                                         <span>{model.displayName}</span>
-                                        <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
-                                          <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
-                                        </Tooltip>
+                                        {isBare && (
+                                          <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
+                                            <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+                                          </Tooltip>
+                                        )}
+                                        {hasOverride && (
+                                          <span className="text-xs text-orange-500">
+                                            {t("model.advanced.overrideBadge", { defaultValue: "已覆盖" })}
+                                          </span>
+                                        )}
                                       </Flex>
-                                    ) : (
-                                      model.displayName
-                                    )}
+                                      <Tooltip
+                                        title={t("agent.modelParamsOverride.button", {
+                                          defaultValue: "模型参数覆盖",
+                                        })}
+                                      >
+                                        <Settings2
+                                          size={14}
+                                          className={
+                                            hasOverride
+                                              ? "text-blue-500 hover:text-blue-600 shrink-0"
+                                              : "text-gray-400 hover:text-blue-500 shrink-0"
+                                          }
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setConfiguringModelId(model.id);
+                                          }}
+                                        />
+                                      </Tooltip>
+                                    </Flex>
                                   </Select.Option>
                                 );
                               })}
@@ -1457,6 +1573,94 @@ export default function AgentGenerateDetail({}) {
           onReplace={handleReplaceOptimizedContent}
         />
       ) : null}
+
+      {/* v2.6.0: per-model parameter override popup (triggered by gear icon in dropdown option) */}
+      <Modal
+        open={configuringModelId !== null}
+        onCancel={() => setConfiguringModelId(null)}
+        onOk={() => {
+          // Commit the local editing value to modelParamsOverride on confirm.
+          // To avoid固化 (field pinning), only save fields that differ from the
+          // model-level defaults. Fields identical to the model-level config are
+          // dropped so the agent continues to inherit future model-level updates.
+          if (editingOverrideValue && configuringModel) {
+            const modelDefaults = advancedSettingsValueFromRecord(
+              {
+                temperature: configuringModel.temperature,
+                top_p: configuringModel.topP,
+                extra_params: configuringModel.extraParams,
+                context_window_tokens: configuringModel.contextWindowTokens,
+                max_input_tokens: configuringModel.maxInputTokens,
+                max_output_tokens: configuringModel.maxOutputTokens,
+                default_output_reserve_tokens: configuringModel.defaultOutputReserveTokens,
+                tokenizer_family: configuringModel.tokenizerFamily,
+              },
+              inferenceSpecs,
+              configuringModel.type ?? "llm"
+            );
+            const diffValue: ModelAdvancedSettingsValue = {};
+            for (const [key, val] of Object.entries(editingOverrideValue)) {
+              const modelVal = modelDefaults[key];
+              if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
+                diffValue[key] = val;
+              }
+            }
+            handleModelParamsOverrideChange(configuringModel.id, diffValue);
+          }
+          setConfiguringModelId(null);
+        }}
+        title={
+          configuringModel
+            ? `${configuringModel.displayName || configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
+            : t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })
+        }
+        okText={t("common.confirm", { defaultValue: "确定" })}
+        cancelText={t("common.cancel", { defaultValue: "取消" })}
+        okButtonProps={{ disabled: !editable || isGenerating }}
+        cancelButtonProps={{ disabled: !editable || isGenerating }}
+        width={600}
+        centered
+        destroyOnClose={false}
+        styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      >
+        {configuringModel && (
+          <div className="space-y-3">
+            <div className="text-xs text-gray-500 pb-2 border-b border-gray-100">
+              {t("model.advanced.overrideHint", {
+                defaultValue: "留空表示继承模型默认值。",
+              })}
+            </div>
+            <ModelAdvancedSettings
+              modelType={configuringModel.type ?? "llm"}
+              specs={inferenceSpecs}
+              value={
+                editingOverrideValue ??
+                advancedSettingsValueFromRecord({}, inferenceSpecs, configuringModel.type ?? "llm")
+              }
+              onChange={(next) => setEditingOverrideValue(next)}
+              mode="override"
+              disabled={!editable || isGenerating}
+            />
+            {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleClearModelParamsOverride(configuringModel.id);
+                    setEditingOverrideValue(
+                      advancedSettingsValueFromRecord({}, inferenceSpecs, configuringModel.type ?? "llm")
+                    );
+                  }}
+                  disabled={!editable || isGenerating}
+                  className="text-xs text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {t("model.advanced.clearOverride", { defaultValue: "清空该模型的覆盖" })}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </Flex>
   );
 }

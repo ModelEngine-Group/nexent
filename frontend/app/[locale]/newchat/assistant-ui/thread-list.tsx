@@ -285,12 +285,12 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
-  const thread = aui.threadListItem.getState();
+  const thread = aui.threadListItem().getState();
   const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
   const handleRename = useCallback(async (newTitle: string) => {
     try {
-      await aui.threadListItem.rename(newTitle);
+      await aui.threadListItem().rename(newTitle);
       log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
       setIsEditing(false);
     } catch (error) {
@@ -358,7 +358,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
                 confirm({
                   title: t("chat.threadList.delete"),
                   content: t("chat.threadList.confirmDeletionDescription"),
-                  onOk: () => aui.threadListItem.delete(),
+                  onOk: () => aui.threadListItem().delete(),
                 });
               }}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
@@ -378,7 +378,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem.getState().status as string;
+  const status = aui.threadListItem().getState().status as string;
   const isRunning = status === "running" || status === "streaming";
 
   return (

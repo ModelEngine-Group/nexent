@@ -284,6 +284,8 @@ export const API_ENDPOINTS = {
     },
     catalogModelProfile: (provider: string, modelName: string) =>
       `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
+    // v2.6.0: fixed inference field specs by model type (advanced settings)
+    catalogInferenceFieldSpecs: `${API_BASE_URL}/model/catalog/inference_field_specs`,
   },
   knowledgeBase: {
     // Elasticsearch service

@@ -235,6 +235,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     useState<boolean>(true);
   const [newKbQuotaBytes, setNewKbQuotaBytes] = useState<number | null>(null);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
+  // v2.6.0: per-KB embedding model params override
+  const [newKbEmbeddingParamsOverride, setNewKbEmbeddingParamsOverride] =
+    useState<Record<string, { temperature?: number | null; top_p?: number | null; extra_params?: Record<string, unknown> | null }>>({});
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -756,6 +759,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           )
         : "");
     setNewKbEmbeddingModel(defaultModel);
+    // v2.6.0: reset embedding model params override when entering create mode
+    setNewKbEmbeddingParamsOverride({});
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
     setUploadFiles([]); // Reset upload files array, clear all pending upload files
@@ -1130,6 +1135,9 @@ function DataConfig({ isActive }: DataConfigProps) {
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}
                 onEmbeddingModelChange={setNewKbEmbeddingModel}
+                // v2.6.0: embedding model params override
+                embeddingModelParamsOverride={newKbEmbeddingParamsOverride}
+                onEmbeddingModelParamsOverrideChange={setNewKbEmbeddingParamsOverride}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}

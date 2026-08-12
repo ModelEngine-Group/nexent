@@ -62,6 +62,10 @@ export interface ModelOption {
   accessToken?: string;
   timeoutSeconds?: number;
   concurrencyLimit?: number;
+  // v2.6.0 inference params (model-level defaults)
+  temperature?: number;
+  topP?: number;
+  extraParams?: Record<string, unknown>;
 }
 
 // Application configuration interface
@@ -275,3 +279,43 @@ export interface ModelCatalogEnvelope<T> {
   catalog_available: boolean;
   data: T;
 }
+
+// =============================================================================
+// v2.6.0: Fixed inference field specs (advanced settings)
+// =============================================================================
+
+/** Field type for fixed inference params, mirrors backend FieldSpec.type */
+export type InferenceFieldType =
+  | "str"
+  | "int"
+  | "float"
+  | "bool"
+  | "select"
+  | "array_str";
+
+/** Single field specification, mirrors backend FieldSpec Pydantic model. */
+export interface InferenceFieldSpec {
+  key: string;
+  label: string;
+  type: InferenceFieldType;
+  range?: number[] | null; // [min, max] for numeric fields
+  default?: unknown;
+  options?: string[] | null; // for "select" type
+  max_items?: number | null; // for "array_str" type
+}
+
+/** Field specs grouped by model type, returned by GET /model/catalog/inference_field_specs */
+export type InferenceFieldSpecsByType = Record<string, InferenceFieldSpec[]>;
+
+/**
+ * Per-agent model params override.
+ * Shape: { "<model_id>": { temperature?: number, topP?: number, extraParams?: Record<string, unknown> } }
+ */
+export type ModelParamsOverride = Record<
+  string,
+  {
+    temperature?: number | null;
+    top_p?: number | null;
+    extra_params?: Record<string, unknown> | null;
+  }
+>;

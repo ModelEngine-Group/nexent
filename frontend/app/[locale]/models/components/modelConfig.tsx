@@ -18,10 +18,11 @@ import {
   App,
   Input,
   Select,
-  Pagination,
   Empty,
   Tooltip,
   Tag,
+  Table,
+  Space,
 } from "antd";
 import {
   Plus,
@@ -29,6 +30,8 @@ import {
   RefreshCw,
   PenLine,
   SlidersHorizontal,
+  Trash2,
+  Edit3,
 } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
@@ -36,7 +39,6 @@ import {
   MODEL_TYPES,
   MODEL_STATUS,
   LAYOUT_CONFIG,
-  CARD_THEMES,
   MODEL_SOURCES,
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
@@ -49,12 +51,13 @@ import {
   ModelSource,
   ModelConnectStatus,
 } from "@/types/modelConfig";
+import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
 import { ModelAddDialog } from "./model/ModelAddDialog";
+import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
-import { ModelEditDialog } from "./model/ModelEditDialog";
-import { ModelItemCard } from "./model/ModelItemCard";
+import { ModelEditDialogV2 } from "./model/ModelEditDialogV2";
 import { DefaultModelDialog } from "./model/DefaultModelDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
@@ -95,6 +98,8 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  // v2.6.0: new ModelAddDialogV2 (Tabs: batch import / custom access)
+  const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] =
     useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -197,6 +202,273 @@ export const ModelConfigSection = forwardRef<
     return result;
   }, [selectedModels]);
 
+  /* ------------------ v2.6.0: Table columns (replaces ModelItemCard grid) ------------------ */
+  const modelTypeColors: Record<string, string> = {
+    [MODEL_TYPES.LLM]: "blue",
+    [MODEL_TYPES.EMBEDDING]: "geekblue",
+    [MODEL_TYPES.MULTI_EMBEDDING]: "cyan",
+    [MODEL_TYPES.RERANK]: "purple",
+    [MODEL_TYPES.STT]: "orange",
+    [MODEL_TYPES.TTS]: "magenta",
+    [MODEL_TYPES.VLM]: "green",
+    [MODEL_TYPES.VLM2]: "green",
+    [MODEL_TYPES.VLM3]: "green",
+  };
+
+  /* ------------------ Card-level edit / delete ------------------ */
+  const handleCardEdit = useCallback(
+    (model: ModelOption) => {
+      setEditingCardModel(model);
+    },
+    []
+  );
+
+  const handleCardDelete = useCallback(
+    async (model: ModelOption) => {
+      modal.confirm({
+        title: t("model.deleteConfirm.title", {
+          defaultValue: "确认删除该模型？",
+        }),
+        icon: <ExclamationCircleFilled />,
+        content: (
+          <div>
+            <div style={{ marginBottom: 4 }}>
+              {t("model.deleteConfirm.content", {
+                name: model.displayName || model.name,
+                defaultValue: `删除后，如该模型被作为默认模型使用将一并被清空。`,
+              })}
+            </div>
+          </div>
+        ),
+        okText: t("common.confirm", { defaultValue: "删除" }),
+        cancelText: t("common.cancel", { defaultValue: "取消" }),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            await modelService.deleteCustomModel(
+              model.displayName,
+              model.source
+            );
+          } catch (e: any) {
+            log.error("delete custom model failed", e);
+            const msg =
+              e instanceof ModelError
+                ? e.message
+                : t("modelConfig.error.deleteModelFailed", {
+                    defaultValue: "删除模型失败",
+                  });
+            message.error(msg);
+            throw e;
+          }
+          // Clear default selections if they reference this model
+          const disp = model.displayName;
+          let configUpdates: any = {};
+          const selectedPairs: [string, string, string][] = [
+            ["llm", "main", "llm"],
+            ["embedding", "embedding", "embedding"],
+            ["embedding", "multi_embedding", "multiEmbedding"],
+            ["reranker", "reranker", "rerank"],
+            ["multimodal", "vlm", "vlm"],
+            ["multimodal", "vlm2", "vlm2"],
+            ["multimodal", "vlm3", "vlm3"],
+            ["voice", "stt", "stt"],
+            ["voice", "tts", "tts"],
+          ];
+          const blank = (voice: boolean) => {
+            const base = {
+              modelName: "",
+              displayName: "",
+              apiConfig: { apiKey: "", modelUrl: "" },
+            };
+            if (voice) {
+              return {
+                ...base,
+                modelFactory: "",
+                modelAppid: "",
+                accessToken: "",
+              };
+            }
+            return base;
+          };
+          selectedPairs.forEach(([cat, opt, cfgKey]) => {
+            if (selectedModels[cat]?.[opt] === disp) {
+              setSelectedModels((p) => ({
+                ...p,
+                [cat]: { ...p[cat], [opt]: "" },
+              }));
+              if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
+                configUpdates[cfgKey] = {
+                  ...blank(false),
+                  dimension: 0,
+                };
+              } else if (cfgKey === "stt" || cfgKey === "tts") {
+                configUpdates[cfgKey] = blank(true);
+              } else {
+                configUpdates[cfgKey] = blank(false);
+              }
+            }
+          });
+          if (Object.keys(configUpdates).length > 0) {
+            updateModelConfig(configUpdates);
+            scheduleAutoSave();
+          }
+          message.success(
+            t("model.message.deleteSuccess", {
+              name: disp,
+              defaultValue: `已删除：${disp}`,
+            })
+          );
+          await loadModelLists(true);
+        },
+      });
+    },
+    [message, modal, modelConfig, selectedModels, t, updateModelConfig]
+  );
+
+  const modelTableColumns = useMemo(
+    () => [
+      {
+        title: t("modelConfig.table.col.model", { defaultValue: "模型" }),
+        key: "model",
+        width: 240,
+        render: (_: any, m: ModelOption) => (
+          <div className="flex flex-col">
+            <span className="font-medium text-sm">
+              {m.displayName || m.name}
+            </span>
+            <span className="text-xs text-gray-500">{m.name}</span>
+          </div>
+        ),
+      },
+      {
+        title: t("modelConfig.table.col.type", { defaultValue: "类型" }),
+        dataIndex: "type",
+        key: "type",
+        width: 110,
+        render: (type: ModelType) => (
+          <Tag color={modelTypeColors[type] || "default"}>
+            {t(`model.type.${type === "multi_embedding" ? "multiEmbedding" : type}`, {
+              defaultValue: type,
+            })}
+          </Tag>
+        ),
+      },
+      {
+        title: t("modelConfig.table.col.source", { defaultValue: "来源" }),
+        dataIndex: "source",
+        key: "source",
+        width: 130,
+        render: (source: ModelSource) => (
+          <Tag>{source}</Tag>
+        ),
+      },
+      {
+        title: t("modelConfig.table.col.connectStatus", {
+          defaultValue: "连通状态",
+        }),
+        dataIndex: "connect_status",
+        key: "connect_status",
+        width: 110,
+        render: (status: ModelConnectStatus, m: ModelOption) => {
+          if (!status) return <span className="text-gray-400">—</span>;
+          const meta = getConnectivityMeta(status as ConnectivityStatusType);
+          const text = t(`model.connectivity.${status}`, {
+            defaultValue:
+              status === "available"
+                ? "可用"
+                : status === "unavailable"
+                  ? "不可用"
+                  : status === "detecting"
+                    ? "检测中"
+                    : status === "not_detected"
+                      ? "未检测"
+                      : status,
+          });
+          return (
+            <Tooltip title={text}>
+              <Tag
+                color={meta.color}
+                style={{ cursor: "pointer" }}
+                onClick={() => verifyOneModel(m.displayName, m.type)}
+              >
+                {text}
+              </Tag>
+            </Tooltip>
+          );
+        },
+      },
+      {
+        title: t("modelConfig.table.col.context", { defaultValue: "上下文" }),
+        key: "context",
+        width: 100,
+        render: (_: any, m: ModelOption) => {
+          const v = m.contextWindowTokens || m.maxTokens;
+          if (!v) return <span className="text-gray-400">—</span>;
+          return <span>{v.toLocaleString()}</span>;
+        },
+      },
+      {
+        title: t("modelConfig.table.col.maxOutput", {
+          defaultValue: "最大输出",
+        }),
+        key: "maxOutput",
+        width: 100,
+        render: (_: any, m: ModelOption) => {
+          if (!m.maxOutputTokens) return <span className="text-gray-400">—</span>;
+          return <span>{m.maxOutputTokens.toLocaleString()}</span>;
+        },
+      },
+      {
+        title: t("modelConfig.table.col.defaultUsage", {
+          defaultValue: "默认用途",
+        }),
+        key: "defaultUsage",
+        width: 160,
+        render: (_: any, m: ModelOption) => {
+          const slots = defaultSlotMap[m.displayName] || [];
+          if (slots.length === 0)
+            return <span className="text-gray-400">—</span>;
+          return (
+            <Space size={4} wrap>
+              {slots.map((s) => (
+                <Tag key={s} color="geekblue">
+                  {s}
+                </Tag>
+              ))}
+            </Space>
+          );
+        },
+      },
+      {
+        title: t("modelConfig.table.col.actions", { defaultValue: "操作" }),
+        key: "actions",
+        width: 110,
+        render: (_: any, m: ModelOption) => (
+          <Space size={4}>
+            <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
+              <Button
+                size="small"
+                type="text"
+                icon={<Edit3 size={14} />}
+                onClick={() => handleCardEdit(m)}
+              />
+            </Tooltip>
+            <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
+              <Button
+                size="small"
+                type="text"
+                danger
+                icon={<Trash2 size={14} />}
+                onClick={() => handleCardDelete(m)}
+              />
+            </Tooltip>
+          </Space>
+        ),
+      },
+    ],
+    [t, defaultSlotMap, modelTypeColors, handleCardEdit, handleCardDelete]
+  );
+
   /* ------------------ Derived: filter & pagination ------------------ */
   const filteredModels = useMemo<ModelOption[]>(() => {
     const kw = searchKeyword.trim().toLowerCase();
@@ -215,11 +487,6 @@ export const ModelConfigSection = forwardRef<
       return true;
     });
   }, [models, searchKeyword, filterType, filterSource, filterStatus]);
-
-  const pagedModels = useMemo<ModelOption[]>(() => {
-    const start = (page - 1) * pageSize;
-    return filteredModels.slice(start, start + pageSize);
-  }, [filteredModels, page, pageSize]);
 
   // Auto jump to page 1 when filters change
   useEffect(() => {
@@ -393,7 +660,7 @@ export const ModelConfigSection = forwardRef<
   ) => {
     if (isVerifying) return;
     if (allModels.length === 0) return;
-    const currentSelectedModels =
+    const currentSelectedModels: Record<string, Record<string, string>> =
       modelsToCheck || JSON.parse(JSON.stringify(selectedModels));
 
     let hasSelectedModels = false;
@@ -727,116 +994,6 @@ export const ModelConfigSection = forwardRef<
     });
   };
 
-  /* ------------------ Card-level edit / delete ------------------ */
-  const handleCardEdit = useCallback(
-    (model: ModelOption) => {
-      setEditingCardModel(model);
-    },
-    []
-  );
-
-  const handleCardDelete = useCallback(
-    async (model: ModelOption) => {
-      modal.confirm({
-        title: t("model.deleteConfirm.title", {
-          defaultValue: "确认删除该模型？",
-        }),
-        icon: <ExclamationCircleFilled />,
-        content: (
-          <div>
-            <div style={{ marginBottom: 4 }}>
-              {t("model.deleteConfirm.content", {
-                name: model.displayName || model.name,
-                defaultValue: `删除后，如该模型被作为默认模型使用将一并被清空。`,
-              })}
-            </div>
-          </div>
-        ),
-        okText: t("common.confirm", { defaultValue: "删除" }),
-        cancelText: t("common.cancel", { defaultValue: "取消" }),
-        okButtonProps: { danger: true },
-        onOk: async () => {
-          try {
-            await modelService.deleteCustomModel(
-              model.displayName,
-              model.source
-            );
-          } catch (e: any) {
-            log.error("delete custom model failed", e);
-            const msg =
-              e instanceof ModelError
-                ? e.message
-                : t("modelConfig.error.deleteModelFailed", {
-                    defaultValue: "删除模型失败",
-                  });
-            message.error(msg);
-            throw e;
-          }
-          // Clear default selections if they reference this model
-          const disp = model.displayName;
-          let configUpdates: any = {};
-          const selectedPairs: [string, string, string][] = [
-            ["llm", "main", "llm"],
-            ["embedding", "embedding", "embedding"],
-            ["embedding", "multi_embedding", "multiEmbedding"],
-            ["reranker", "reranker", "rerank"],
-            ["multimodal", "vlm", "vlm"],
-            ["multimodal", "vlm2", "vlm2"],
-            ["multimodal", "vlm3", "vlm3"],
-            ["voice", "stt", "stt"],
-            ["voice", "tts", "tts"],
-          ];
-          const blank = (voice: boolean) => {
-            const base = {
-              modelName: "",
-              displayName: "",
-              apiConfig: { apiKey: "", modelUrl: "" },
-            };
-            if (voice) {
-              return {
-                ...base,
-                modelFactory: "",
-                modelAppid: "",
-                accessToken: "",
-              };
-            }
-            return base;
-          };
-          selectedPairs.forEach(([cat, opt, cfgKey]) => {
-            if (selectedModels[cat]?.[opt] === disp) {
-              setSelectedModels((p) => ({
-                ...p,
-                [cat]: { ...p[cat], [opt]: "" },
-              }));
-              if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
-                configUpdates[cfgKey] = {
-                  ...blank(false),
-                  dimension: 0,
-                };
-              } else if (cfgKey === "stt" || cfgKey === "tts") {
-                configUpdates[cfgKey] = blank(true);
-              } else {
-                configUpdates[cfgKey] = blank(false);
-              }
-            }
-          });
-          if (Object.keys(configUpdates).length > 0) {
-            updateModelConfig(configUpdates);
-            scheduleAutoSave();
-          }
-          message.success(
-            t("model.message.deleteSuccess", {
-              name: disp,
-              defaultValue: `已删除：${disp}`,
-            })
-          );
-          await loadModelLists(true);
-        },
-      });
-    },
-    [message, modal, modelConfig, selectedModels, t, updateModelConfig]
-  );
-
   /* ------------------ Select options ------------------ */
   const modelTypeOptions = useMemo(() => {
     const list: { value: ModelType | "all"; label: string }[] = [
@@ -973,6 +1130,21 @@ export const ModelConfigSection = forwardRef<
               </span>
             </Button>
           </Can>
+          {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
+          <Can permission="model:create">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<Plus size={16} />}
+              onClick={() => setIsAddModalV2Open(true)}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.addModel", {
+                  defaultValue: "添加模型",
+                })}
+              </span>
+            </Button>
+          </Can>
           <Can permission="model:update">
             <Button
               type="primary"
@@ -1080,7 +1252,7 @@ export const ModelConfigSection = forwardRef<
           </Col>
         </Row>
 
-        {/* -------------------- Model grid -------------------- */}
+        {/* -------------------- Model table (v2.6.0: replaces card grid) -------------------- */}
         <div
           style={{
             width: "100%",
@@ -1107,57 +1279,31 @@ export const ModelConfigSection = forwardRef<
               />
             </div>
           ) : (
-            <>
-              <Row gutter={[12, 12]} style={{ flex: 1 }}>
-                {pagedModels.map((m) => (
-                  <Col
-                    key={`${m.id}-${m.displayName}-${m.type}`}
-                    xs={24}
-                    sm={12}
-                    md={8}
-                    lg={6}
-                    xl={6}
-                  >
-                    <ModelItemCard
-                      model={m}
-                      isDefaultFor={defaultSlotMap[m.displayName] || []}
-                      onVerify={verifyOneModel}
-                      onEdit={handleCardEdit}
-                      onDelete={handleCardDelete}
-                      canUpdate={true}
-                    />
-                  </Col>
-                ))}
-              </Row>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  padding: "16px 0 8px 0",
-                }}
-              >
-                <Pagination
-                  current={page}
-                  pageSize={pageSize}
-                  total={filteredModels.length}
-                  showSizeChanger
-                  pageSizeOptions={["8", "12", "24", "48"]}
-                  showTotal={(total, range) =>
-                    t("modelConfig.pagination.showTotal", {
-                      range0: range[0],
-                      range1: range[1],
-                      total,
-                      defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
-                    })
-                  }
-                  onChange={(p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  }}
-                />
-              </div>
-            </>
+            <Table
+              size="small"
+              rowKey={(r) => `${r.id}-${r.displayName}-${r.type}`}
+              columns={modelTableColumns}
+              dataSource={filteredModels}
+              pagination={{
+                current: page,
+                pageSize,
+                total: filteredModels.length,
+                showSizeChanger: true,
+                pageSizeOptions: ["8", "12", "24", "48"],
+                showTotal: (total, range) =>
+                  t("modelConfig.pagination.showTotal", {
+                    range0: range[0],
+                    range1: range[1],
+                    total,
+                    defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
+                  }),
+                onChange: (p, ps) => {
+                  setPage(p);
+                  setPageSize(ps);
+                },
+              }}
+              scroll={{ x: 980 }}
+            />
           )}
         </div>
 
@@ -1188,6 +1334,21 @@ export const ModelConfigSection = forwardRef<
           defaultIsBatchImport={addModalDefaultIsBatch}
         />
 
+        {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
+        <ModelAddDialogV2
+          isOpen={isAddModalV2Open}
+          onClose={() => setIsAddModalV2Open(false)}
+          onSuccess={async (newModel) => {
+            await loadModelLists(true);
+            message.success(t("modelConfig.message.addSuccess"));
+            if (newModel && newModel.name && newModel.type) {
+              setTimeout(() => {
+                verifyOneModel(newModel.name, newModel.type);
+              }, 100);
+            }
+          }}
+        />
+
         <ModelDeleteDialog
           isOpen={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
@@ -1198,7 +1359,7 @@ export const ModelConfigSection = forwardRef<
           capacityCoverage={capacityCoverage}
         />
 
-        <ModelEditDialog
+        <ModelEditDialogV2
           isOpen={!!editingCardModel}
           model={editingCardModel}
           onClose={() => setEditingCardModel(null)}
