@@ -3,8 +3,8 @@
 The VLM protocol (image / audio / video understanding via OpenAI-compatible
 multimodal chat completions) lives directly in this adapter — no separate
 ``OpenAIVLModel`` class. The adapter composes an :class:`OpenAIModel` (LLM
-base, kept per §3.16) as ``_inner`` and forwards ``analyze_*`` calls through
-``self._inner(messages=...)``; transport / sampling / connectivity are owned
+base, kept per §3.16) as ``_model`` and forwards ``analyze_*`` calls through
+``self._model(messages=...)``; transport / sampling / connectivity are owned
 here. Using composition instead of inheriting ``OpenAIServerModel`` avoids the
 MRO risk that originally kept VLM out of the sink-and-delete tier.
 """
@@ -65,8 +65,9 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             ssl_verify=context.ssl_verify,
             timeout=context.extra.get("timeout_seconds", 30.0),
         )
+        self._model: Any = None  # wrapped OpenAIModel, built lazily
 
-    def _build_inner(self) -> None:
+    def _build_model(self) -> None:
         from ...openai_llm import OpenAIModel
 
         extras = self._context.extra
@@ -80,8 +81,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         # ``frequency_penalty=0.5`` to the VLM API on every analyze_* call.
         # The original OpenAIVLModel set it only as a dead instance attribute
         # (never forwarded to super, never read); keep that wire behaviour and
-        # set the attr post-construction purely for getattr parity.
-        self._inner = OpenAIModel(
+        # set the attr post-construction purely for parity with the old class.
+        self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
@@ -93,7 +94,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             top_p=extras.get("top_p", 0.7),
             max_tokens=extras.get("max_tokens", 512),
         )
-        self._inner.frequency_penalty = extras.get("frequency_penalty", 0.5)
+        self._model.frequency_penalty = extras.get("frequency_penalty", 0.5)
 
     # ---- VLM protocol (moved from openai_vlm.py) --------------------------
 
@@ -151,29 +152,29 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
                       system_prompt: str = "Please describe this picture concisely and carefully, within 200 words.",
                       stream: bool = True, **kwargs) -> Any:
         """Analyze image content. Returns a smolagents ChatMessage."""
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         messages = self.prepare_image_message(image_input, system_prompt)
-        # Call _inner.__call__ explicitly so instance-level mocks work in tests.
-        return self._inner(messages=messages, **kwargs)
+        # Call _model.__call__ explicitly so instance-level mocks work in tests.
+        return self._model(messages=messages, **kwargs)
 
     def analyze_audio(self, audio_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this audio carefully.",
                       content_type: str = "audio/mpeg", **kwargs) -> Any:
         """Analyze audio content using the configured multimodal model."""
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         messages = self.prepare_media_message(audio_input, "audio", content_type, system_prompt)
-        return self._inner(messages=messages, **kwargs)
+        return self._model(messages=messages, **kwargs)
 
     def analyze_video(self, video_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this video carefully.",
                       content_type: str = "video/mp4", **kwargs) -> Any:
         """Analyze video content using the configured multimodal model."""
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         messages = self.prepare_media_message(video_input, "video", content_type, system_prompt)
-        return self._inner(messages=messages, **kwargs)
+        return self._model(messages=messages, **kwargs)
 
     async def check_connectivity(self) -> bool:
         """VLM connectivity check: send a test image+text prompt.
@@ -181,8 +182,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         VLM APIs (especially DashScope qwen-vl) require content as a list with
         'image_url' and 'text' objects.
         """
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
@@ -204,8 +205,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
         try:
             await asyncio.to_thread(
-                self._inner.client.chat.completions.create,
-                model=self._inner.model_id,
+                self._model.client.chat.completions.create,
+                model=self._model.model_id,
                 messages=[{"role": "user", "content": content_parts}],
                 max_tokens=5,
                 stream=False,
@@ -268,7 +269,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 class ModelEngineVLMAdapter(OpenAIVLMAdapter):
     """ModelEngine VLM — protocol identical to OpenAI; only ``factory`` differs.
 
-    Reuses :class:`OpenAIVLMAdapter`'s protocol / ``_build_inner`` /
+    Reuses :class:`OpenAIVLMAdapter`'s protocol / ``_build_model`` /
     ``invoke`` / ``health_check`` / ``get_model_info`` unchanged.
     """
 

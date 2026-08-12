@@ -6,7 +6,7 @@ Volc SAUC binary-gzip frames) live directly in the adapters. The old
 classes are deleted; the adapters ARE the implementation.
 
 ModelEngine STT is different: it is HTTP REST, turning audio into base64 and
-reusing the OpenAI Chat Completions protocol, so its ``_inner`` is
+reusing the OpenAI Chat Completions protocol, so its ``_model`` is
 :class:`OpenAIModel` (kept — see §3.16 LLM exception), not a dedicated STT
 class. The audio↔base64 conversion lives in the adapter's ``invoke``. This
 proves the transport Mixin is orthogonal: an HTTP-only STT vendor needs no
@@ -1324,7 +1324,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
 # ============================================================================
 # ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
-# _inner is OpenAIModel (kept per §3.16 LLM exception); audio↔base64 conversion
+# _model is OpenAIModel (kept per §3.16 LLM exception); audio↔base64 conversion
 # lives in the adapter's invoke.
 # ============================================================================
 
@@ -1333,7 +1333,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
     """ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
 
     Unlike Ali/Volc: inherits :class:`HttpTransportMixin` (not WS) and reuses
-    :class:`OpenAIModel` as ``_inner`` (no dedicated STT class). The audio↔base64
+    :class:`OpenAIModel` as ``_model`` (no dedicated STT class). The audio↔base64
     protocol conversion is the adapter's responsibility.
     """
 
@@ -1348,11 +1348,12 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
             ssl_verify=context.ssl_verify,
             timeout=context.extra.get("timeout_seconds", 30.0),
         )
+        self._model: Any = None  # wrapped OpenAIModel, built lazily
 
-    def _build_inner(self) -> None:
+    def _build_model(self) -> None:
         from ...openai_llm import OpenAIModel
 
-        self._inner = OpenAIModel(
+        self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
@@ -1364,8 +1365,8 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         audio_bytes = open(request.audio_path, "rb").read()
         b64 = base64.b64encode(audio_bytes).decode()
         mime = mimetypes.guess_type(request.audio_path)[0] or "audio/wav"
@@ -1379,7 +1380,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
                 ],
             }
         ]
-        result = await asyncio.to_thread(self._inner, messages)
+        result = await asyncio.to_thread(self._model, messages)
         return {"text": getattr(result, "content", str(result)), "raw": result}
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
@@ -1388,9 +1389,9 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         raise NotImplementedError("ModelEngine STT streaming is a Phase 2 deliverable")
 
     async def health_check(self) -> bool:
-        if self._inner is None:
-            self._build_inner()
-        return await asyncio.to_thread(self._inner.check_connectivity)
+        if self._model is None:
+            self._build_model()
+        return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
         return ModelInfo(

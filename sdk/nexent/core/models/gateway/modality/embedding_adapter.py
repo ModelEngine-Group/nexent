@@ -82,7 +82,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
         }
 
     @property
-    def _model(self) -> str:
+    def _model_name(self) -> str:
         return self._context.model_name
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -111,8 +111,6 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
         return []
 
     async def health_check(self) -> bool:
-        if self._inner is None:
-            self._build_inner()
         try:
             await self.dimension_check(timeout=5.0)
             return True
@@ -142,7 +140,7 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         return self.get_multimodal_embeddings(mm, with_metadata, timeout, retries, retry_timeout_step)
 
     def get_multimodal_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        with record_model_call("multi_embedding", self._model, display_name=self._model):
+        with record_model_call("multi_embedding", self._model_name, display_name=self._model_name):
             data = self._prepare_multimodal_input(inputs)
             base_timeout = timeout if timeout is not None else retry_timeout_step
             attempts = retries + 1
@@ -201,7 +199,7 @@ class JinaEmbeddingAdapter(_MultimodalEmbeddingAdapter):
                 prepared.append({"image": img})
             else:
                 prepared.append(item)
-        return {"model": self._model, "input": prepared, "truncate": True}
+        return {"model": self._model_name, "input": prepared, "truncate": True}
 
     def _extract_embeddings(self, response):
         return [item["embedding"] for item in response["data"]]
@@ -233,7 +231,7 @@ class DashScopeEmbeddingAdapter(_MultimodalEmbeddingAdapter):
                 normalized.append({"image": img})
             else:
                 normalized.append(item)
-        return {"model": self._model, "input": {"contents": normalized}}
+        return {"model": self._model_name, "input": {"contents": normalized}}
 
     def _extract_embeddings(self, response):
         return [item["embedding"] for item in response["output"]["embeddings"]]
@@ -268,7 +266,7 @@ class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
                 prepared.append({"image": img})
             else:
                 prepared.append(item)
-        return {"model": self._model, "input": prepared}
+        return {"model": self._model_name, "input": prepared}
 
     def _extract_embeddings(self, response):
         return [item["embedding"] for item in response["data"]]
@@ -295,10 +293,10 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
     def _prepare_input(self, inputs):
         if isinstance(inputs, str):
             inputs = [inputs]
-        return {"model": self._model, "input": inputs}
+        return {"model": self._model_name, "input": inputs}
 
     def get_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        with record_model_call("embedding", self._model, display_name=self._model):
+        with record_model_call("embedding", self._model_name, display_name=self._model_name):
             data = self._prepare_input(inputs)
             base_timeout = timeout if timeout is not None else retry_timeout_step
             attempts = retries + 1

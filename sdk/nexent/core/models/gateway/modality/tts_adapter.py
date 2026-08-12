@@ -6,7 +6,7 @@ WS, and Volc proprietary binary frames) live directly in the adapters. The old
 classes are deleted; the adapters ARE the implementation.
 
 ModelEngine TTS is different: it is HTTP REST (text → Chat Completions →
-base64 audio in the response content array → decode to bytes). Its ``_inner``
+base64 audio in the response content array → decode to bytes). Its ``_model``
 is :class:`OpenAIModel` (kept — see §3.16 LLM exception); the audio↔base64
 conversion lives in the adapter.
 """
@@ -882,7 +882,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
 # ============================================================================
 # ModelEngine TTS — HTTP REST, text → Chat Completions → base64 audio in the
-# response content array → decoded to bytes. _inner is OpenAIModel (kept per
+# response content array → decoded to bytes. _model is OpenAIModel (kept per
 # §3.16 LLM exception); audio↔base64 conversion lives in the adapter.
 # ============================================================================
 
@@ -903,11 +903,12 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
             ssl_verify=context.ssl_verify,
             timeout=context.extra.get("timeout_seconds", 30.0),
         )
+        self._model: Any = None  # wrapped OpenAIModel, built lazily
 
-    def _build_inner(self) -> None:
+    def _build_model(self) -> None:
         from ...openai_llm import OpenAIModel
 
-        self._inner = OpenAIModel(
+        self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
@@ -919,15 +920,15 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: TTSRequest) -> bytes:
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         messages = [
             {
                 "role": "user",
                 "content": [{"type": "text", "text": f"请将以下文字合成语音：{request.text}"}],
             }
         ]
-        result = await asyncio.to_thread(self._inner, messages)
+        result = await asyncio.to_thread(self._model, messages)
         content = getattr(result, "content", result)
         for part in content if isinstance(content, list) else []:
             if isinstance(part, dict) and part.get("type") == "audio_url":
@@ -936,14 +937,14 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         raise ValueError("ModelEngine TTS response missing audio_url in content")
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
-        if self._inner is None:
-            self._build_inner()
+        if self._model is None:
+            self._build_model()
         completion_kwargs = {
-            "model": self._inner.model_id,
+            "model": self._model.model_id,
             "messages": [{"role": "user", "content": request.text}],
             "stream": True,
         }
-        async for chunk in await self._inner.client.chat.completions.create(
+        async for chunk in await self._model.client.chat.completions.create(
             **completion_kwargs
         ):
             delta = chunk.choices[0].delta if chunk.choices else None
@@ -951,9 +952,9 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
                 yield base64.b64decode(delta.content)
 
     async def health_check(self) -> bool:
-        if self._inner is None:
-            self._build_inner()
-        return await asyncio.to_thread(self._inner.check_connectivity)
+        if self._model is None:
+            self._build_model()
+        return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
         return ModelInfo(

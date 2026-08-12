@@ -1,8 +1,17 @@
 """Adapter root ABC and model capability declaration.
 
-Adapters *compose* (do not inherit) the existing, stable model classes — they
-hold a reference to a wrapped instance (``_inner``) and forward calls. This
-keeps ``OpenAIModel`` etc. untouched and test-covered.
+The root is a *pure interface*: it declares the uniform entry points
+(:meth:`invoke` / :meth:`stream` / :meth:`health_check` / :meth:`get_model_info`)
+that every caller uses. It holds no wrapped-model state and forwards no
+attributes — only :class:`LLMAdapter` needs transparent ``__getattr__``
+forwarding (CoreAgent hands the adapter to smolagents as its ``model``, and
+smolagents reaches for ``model.client`` / ``model.model_id`` / ``model.temperature``
+as part of the Model contract), and it owns that itself.
+
+Delegating adapters (:class:`OpenAIVLMAdapter`, ModelEngine STT/TTS) hold their
+wrapped :class:`OpenAIModel` as ``_model`` and call it explicitly — no
+transparent proxy. Native adapters (Ali/Volc STT/TTS, Embedding, Rerank) are the
+implementation themselves and have no ``_model``.
 """
 
 from abc import ABC, abstractmethod
@@ -29,6 +38,10 @@ class MultimodalAdapter(ABC):
     | ``"tts"`` | ``"embedding"`` | ``"rerank"`` | ...) and
     ``factory`` (``"openai"`` | ``"ali"`` | ``"volc"`` | ...), then implement
     :meth:`invoke`, :meth:`health_check`, :meth:`get_model_info`.
+
+    The root carries no wrapped-model state. Callers reach the model only
+    through the uniform interface above — never by tunnelling into a wrapped
+    instance's attributes.
     """
 
     modality: str
@@ -36,7 +49,6 @@ class MultimodalAdapter(ABC):
 
     def __init__(self, context: ModelContext) -> None:
         self._context = context
-        self._inner: Any = None  # wrapped existing model instance (lazy)
 
     @abstractmethod
     async def invoke(self, request: Any) -> Any:
@@ -48,7 +60,7 @@ class MultimodalAdapter(ABC):
         raise NotImplementedError
 
     async def stream(self, request: Any) -> AsyncIterator[Any]:
-        """Streaming entry point. STT/TTS/Realtime override as AsyncGenerator."""
+        """Streaming entry point. STT/TTS override as AsyncGenerator."""
         raise NotImplementedError(
             f"{self.modality} adapter does not support streaming"
         )
@@ -72,31 +84,3 @@ class MultimodalAdapter(ABC):
             "factory": self.factory,
             "model_name": self._context.model_name,
         }
-
-    def __getattr__(self, name: str) -> Any:
-        """Fallback: forward unknown attributes to the wrapped ``_inner`` model.
-
-        ``_inner`` and ``_context`` are real instance attributes set in
-        ``__init__``, so accessing them never recurses. This makes every adapter
-        a transparent proxy for the wrapped model — callers that reach for
-        ``model.client`` / ``model.model_id`` / ``model.check_connectivity`` /
-        ``model.analyze_image`` / ``model.generate`` / ``model.client_kwargs``
-        keep working unchanged. LLMAdapter additionally defines ``__call__``
-        explicitly (Python special methods bypass ``__getattr__``).
-        """
-        if name.startswith("__") and name.endswith("__"):
-            raise AttributeError(name)
-        inner = self.__dict__.get("_inner")
-        if inner is not None:
-            return getattr(inner, name)
-        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
-
-    def _build_inner(self) -> None:
-        """Construct the wrapped existing-model instance on first use.
-
-        Subclasses override to instantiate their vendor/model class per its
-        real constructor signature, reading from :attr:`_context`.
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement _build_inner"
-        )

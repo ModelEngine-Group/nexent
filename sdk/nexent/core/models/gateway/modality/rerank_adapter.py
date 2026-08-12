@@ -70,7 +70,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     # ---- protocol (moved from OpenAICompatibleRerank) ----
 
     @property
-    def _model(self) -> str:
+    def _model_name(self) -> str:
         return self._context.model_name
 
     def _prepare_request(
@@ -78,12 +78,12 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     ) -> Dict[str, Any]:
         if "dashscope" in (self._base_url or "").lower():
             return {
-                "model": self._model,
+                "model": self._model_name,
                 "input": {"query": query, "documents": documents},
                 "parameters": {"top_n": top_n or len(documents)},
             }
         return {
-            "model": self._model,
+            "model": self._model_name,
             "query": query,
             "documents": documents,
             "top_n": top_n or len(documents),

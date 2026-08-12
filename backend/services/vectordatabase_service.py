@@ -357,9 +357,8 @@ def _create_embedding_model(model: dict) -> Any:
 
     # Vendor dispatch (DashScope/Siliconflow/Jina/OpenAI) is resolved by the
     # adapter registry; per-vendor request-body formatting lives in the
-    # embedding adapters. Built fresh (no gateway cache). Returns the adapter
-    # (transparent _inner proxy via __getattr__): callers use
-    # adapter.get_embeddings / adapter.dimension_check unchanged.
+    # embedding adapters. Built fresh (no gateway cache). Returns the adapter;
+    # callers use adapter.get_embeddings / adapter.dimension_check unchanged.
     return build_adapter_fresh(model_config, modality, slot, None)
 
 def get_embedding_model(
@@ -459,12 +458,12 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
             for model in models:
                 model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
                 if model_display_name == model_name:
-                    # Found the model; vendor dispatch via the adapter registry
-                    # (wraps OpenAICompatibleRerank subclasses; URL-sniff request
-                    # formatting is preserved inside the wrapped class).
+                    # Found the model; vendor dispatch via the adapter registry.
+                    # The adapter IS the rerank implementation (protocol sunk in
+                    # 67a628cad) — return it directly, not a wrapped _inner.
                     return build_adapter_fresh(
                         model, "rerank", "rerank", tenant_id
-                    )._inner
+                    )
         except Exception as e:
             logger.warning(f"Failed to get rerank model by name {model_name}: {e}")
 
@@ -477,7 +476,7 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
     if model_type == "rerank":
         return build_adapter_fresh(
             model_config, "rerank", "rerank", tenant_id
-        )._inner
+        )
     else:
         return None
 

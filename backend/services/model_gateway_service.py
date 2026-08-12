@@ -6,7 +6,7 @@ delegate construction to the gateway via :func:`get_adapter_from_config`::
 
     cfg = tenant_config_manager.get_model_config(...)
     model = get_adapter_from_config(cfg, "llm", "llm", tenant_id,
-                                    temperature=0.3, top_p=0.95)._inner
+                                    temperature=0.3, top_p=0.95)
 
 The vendor ``if model_factory == ...`` dispatch is replaced by registry
 resolution keyed on the normalized factory, so adding a vendor becomes one
