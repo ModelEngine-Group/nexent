@@ -39,7 +39,7 @@ class DreamingRunRequest(BaseModel):
 
 
 class DreamingVersionSwitchRequest(BaseModel):
-    expected_active_version_id: int = Field(..., ge=1)
+    expected_active_version_id: Optional[int] = Field(default=None, ge=1)
     target_user_id: Optional[str] = None
 
 

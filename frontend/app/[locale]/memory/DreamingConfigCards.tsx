@@ -241,11 +241,8 @@ export function DreamingConfigCards() {
               min={0}
               max={1}
               step={0.01}
-              value={minScore ?? undefined}
+              value={minScore ?? DEFAULT_VALUES.min_score}
               onChange={(val) => setMinScore(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.min_score,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
@@ -260,11 +257,8 @@ export function DreamingConfigCards() {
               min={0}
               max={100}
               step={1}
-              value={minRecallCount ?? undefined}
+              value={minRecallCount ?? DEFAULT_VALUES.min_recall_count}
               onChange={(val) => setMinRecallCount(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.min_recall_count,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
@@ -279,11 +273,8 @@ export function DreamingConfigCards() {
               min={0}
               max={50}
               step={1}
-              value={minUniqueQueries ?? undefined}
+              value={minUniqueQueries ?? DEFAULT_VALUES.min_unique_queries}
               onChange={(val) => setMinUniqueQueries(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.min_unique_queries,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
@@ -298,11 +289,8 @@ export function DreamingConfigCards() {
               min={1}
               max={100}
               step={1}
-              value={sourceLimit ?? undefined}
+              value={sourceLimit ?? DEFAULT_VALUES.source_limit}
               onChange={(val) => setSourceLimit(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.source_limit,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
@@ -317,11 +305,8 @@ export function DreamingConfigCards() {
               min={100}
               max={1000000}
               step={100}
-              value={longTermMaxChars ?? undefined}
+              value={longTermMaxChars ?? DEFAULT_VALUES.long_term_max_chars}
               onChange={(val) => setLongTermMaxChars(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.long_term_max_chars,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
@@ -336,11 +321,8 @@ export function DreamingConfigCards() {
               min={0}
               max={10}
               step={1}
-              value={compressionMaxAttempts ?? undefined}
+              value={compressionMaxAttempts ?? DEFAULT_VALUES.compression_max_attempts}
               onChange={(val) => setCompressionMaxAttempts(val)}
-              placeholder={t("dreaming.thresholds.default", {
-                value: DEFAULT_VALUES.compression_max_attempts,
-              })}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">

@@ -617,14 +617,14 @@ export async function fetchDreamingVersions(
 export async function activateDreamingVersion(
   agentId: string,
   versionId: number,
-  expectedActiveVersionId: number,
+  expectedActiveVersionId?: number,
   targetUserId?: string
 ): Promise<DreamingVersion> {
   return requestJson(API_ENDPOINTS.memory.dreaming.activate(versionId), {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
-      expected_active_version_id: expectedActiveVersionId,
+      ...(expectedActiveVersionId != null ? { expected_active_version_id: expectedActiveVersionId } : {}),
       ...(targetUserId ? { target_user_id: targetUserId } : {}),
     }),
   });

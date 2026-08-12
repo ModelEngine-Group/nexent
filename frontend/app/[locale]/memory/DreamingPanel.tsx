@@ -28,11 +28,9 @@ import {
   DreamingAudit,
   DreamingVersion,
   fetchDreamingAudits,
-  fetchDreamingParameters,
   fetchDreamingVersions,
   runDreaming,
 } from "@/services/memoryService";
-import type { DreamingParameters } from "@/services/memoryService";
 
 const phases = ["light", "rem", "deep", "compression"] as const;
 export function DreamingPanel() {
@@ -49,11 +47,11 @@ export function DreamingPanel() {
   const [targetUserId, setTargetUserId] = useState<string>();
   const [audits, setAudits] = useState<DreamingAudit[]>([]);
   const [versions, setVersions] = useState<DreamingVersion[]>([]);
-  const [parameters, setParameters] = useState<DreamingParameters>();
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearedVersionId, setClearedVersionId] = useState<number | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [memoryContents, setMemoryContents] = useState<Record<number, string>>(
     {}
   );
@@ -72,15 +70,6 @@ export function DreamingPanel() {
   useEffect(() => {
     if (user?.id && !targetUserId) setTargetUserId(user.id);
   }, [targetUserId, user?.id]);
-
-  useEffect(() => {
-    fetchDreamingParameters()
-      .then((effectiveParameters) => {
-        setParameters(effectiveParameters);
-      })
-      .catch(() => message.error(t("dreaming.error.loadAgents")))
-      .finally(() => setLoading(false));
-  }, [message, t]);
 
   useEffect(() => {
     if (!agentId) return;
@@ -155,12 +144,11 @@ export function DreamingPanel() {
   const activate = async (version: DreamingVersion) => {
     if (!agentId) return;
     const activeVersion = versions.find((candidate) => candidate.is_active);
-    if (!activeVersion) return;
     try {
       await activateDreamingVersion(
         agentId,
         version.version_id,
-        activeVersion.version_id,
+        activeVersion?.version_id,
         selectedIsSelf ? undefined : targetUserId
       );
       message.success(
@@ -242,27 +230,6 @@ export function DreamingPanel() {
             <Typography.Text type="secondary">
               {t("dreaming.description")}
             </Typography.Text>
-            <div className="mt-2">
-              {parameters && (
-                <Space wrap>
-                  <Tag>
-                    {t("dreaming.parameter.sourceLimit", {
-                      count: parameters.source_limit,
-                    })}
-                  </Tag>
-                  <Tag>
-                    {t("dreaming.parameter.maxChars", {
-                      count: parameters.long_term_max_chars,
-                    })}
-                  </Tag>
-                  <Tag>
-                    {t("dreaming.parameter.compressionRetries", {
-                      count: parameters.compression_max_attempts,
-                    })}
-                  </Tag>
-                </Space>
-              )}
-            </div>
           </div>
           <div className="flex flex-col items-end gap-2">
             <Button
@@ -457,6 +424,25 @@ export function DreamingPanel() {
                         <Tag color="blue">
                           {t("dreaming.compression.not_needed")}
                         </Tag>
+                        {versions.length > 1 && (
+                          <Select
+                            size="small"
+                            style={{ width: 200 }}
+                            value={cleared.version_id}
+                            onChange={(versionId) => {
+                              const version = versions.find(
+                                (v) => v.version_id === versionId
+                              );
+                              if (version && !version.is_active) {
+                                activate(version);
+                              }
+                            }}
+                            options={versions.map((v) => ({
+                              value: v.version_id,
+                              label: `V${v.version_no}${v.version_id === cleared.version_id ? ` (${t("dreaming.version.current")})` : ""}`,
+                            }))}
+                          />
+                        )}
                       </Space>
                       {canEditTarget && (
                         <Button
@@ -475,14 +461,89 @@ export function DreamingPanel() {
                 );
               })()
             ) : (
-              <Empty
-                description={
-                  latestRun?.status === "completed" &&
-                  latestRun.promoted_count === 0
-                    ? t("dreaming.active.noEligible")
-                    : t("dreaming.active.empty")
-                }
-              />
+              <div>
+                {versions.length > 0 ? (
+                  (() => {
+                    const selected = versions.find(
+                      (v) => v.version_id === (selectedVersionId ?? versions[0].version_id)
+                    ) ?? versions[0];
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <Space>
+                            <Tag color="default">
+                              V{selected.version_no}
+                            </Tag>
+                            <Tag>
+                              {t("dreaming.characters", {
+                                count: selected.published_char_count,
+                              })}
+                            </Tag>
+                            <Tag color={selected.mechanical_truncation ? "orange" : "blue"}>
+                              {t(`dreaming.compression.${selected.compression_status}`)}
+                            </Tag>
+                            {versions.length > 1 && (
+                              <Select
+                                size="small"
+                                style={{ width: 200 }}
+                                value={selected.version_id}
+                                onChange={(versionId) => {
+                                  setSelectedVersionId(versionId);
+                                }}
+                                options={versions.map((v) => ({
+                                  value: v.version_id,
+                                  label: `V${v.version_no} (${t("dreaming.characters", { count: v.published_char_count })})`,
+                                }))}
+                              />
+                            )}
+                          </Space>
+                          {canEditTarget && (
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={clearing}
+                              onClick={() => activate(selected)}
+                            >
+                              {t("dreaming.version.activate")}
+                            </Button>
+                          )}
+                        </div>
+                        {selected.mechanical_truncation && (
+                          <Alert
+                            className="mb-3"
+                            type="warning"
+                            showIcon
+                            message={t("dreaming.fallback.title")}
+                            description={t("dreaming.fallback.description", {
+                              count: selected.omitted_evidence_ids.length,
+                            })}
+                          />
+                        )}
+                        <Typography.Paragraph
+                          className="whitespace-pre-wrap rounded-md bg-gray-50 p-4"
+                          ellipsis={{
+                            rows: 12,
+                            expandable: "collapsible" as const,
+                            symbol: (expanded: boolean) =>
+                              expanded ? t("dreaming.collapse") : t("dreaming.expand"),
+                          }}
+                        >
+                          {selected.published_content}
+                        </Typography.Paragraph>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <Empty
+                    description={
+                      latestRun?.status === "completed" &&
+                      latestRun.promoted_count === 0
+                        ? t("dreaming.active.noEligible")
+                        : t("dreaming.active.empty")
+                    }
+                  />
+                )}
+              </div>
             )}
           </div>
         )}
