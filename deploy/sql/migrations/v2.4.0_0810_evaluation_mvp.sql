@@ -355,18 +355,4 @@ ALTER TABLE nexent.agent_evaluation_case_t
   ADD COLUMN IF NOT EXISTS session_id VARCHAR(128),
   ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
 
--- ============================================================
--- 13. Fix builtin Format Validation code evaluator
--- ============================================================
--- The original code started with 'import json', but the sandbox
--- injects json via local_vars and does not allow __import__.
--- Remove the redundant import so the evaluator doesn't fail with
--- "ImportError: __import__ not found".
-UPDATE nexent.evaluator_t
-  SET code = regexp_replace(code, '^import json\n+', '')
-WHERE tenant_id = ''
-  AND name = '格式规范性'
-  AND source = 'builtin'
-  AND code LIKE 'import json%';
-
 COMMIT;

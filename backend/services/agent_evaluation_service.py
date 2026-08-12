@@ -150,6 +150,11 @@ def _scan_evaluator_introspection(code: str) -> list[str]:
     return violations
 
 
+# Filename shown in syntax errors / tracebacks for evaluator code. Kept in one
+# constant so SonarCloud S1192 does not flag the literal as duplicated.
+_EVALUATOR_FILENAME = "<evaluator>"
+
+
 # Thread pool for parallel LLM evaluator calls (one case, multiple evaluators)
 _LLM_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
@@ -186,7 +191,7 @@ def validate_code_evaluator(code: str) -> None:
     # Stage 1: pure-syntax check.  The error line number reported by the
     # exception is preserved verbatim so the user can jump to the problem.
     try:
-        compile(code, "<evaluator>", "exec")
+        compile(code, _EVALUATOR_FILENAME, "exec")
     except SyntaxError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -235,7 +240,7 @@ def validate_code_evaluator(code: str) -> None:
         # as stage 1); runtime execution stays inside the ALLOWED_BUILTINS
         # sandbox.
         exec(  # nosec B102  # NOSONAR
-            compile(code, "<evaluator>", "exec"),
+            compile(code, _EVALUATOR_FILENAME, "exec"),
             {"__builtins__": ALLOWED_BUILTINS, "json": json},
             local_vars,
         )
@@ -638,9 +643,9 @@ def _trim_content(raw: str, budget: int) -> str:
         return raw
     head = budget * 60 // 100
     tail = budget - head
-    if head > 0:
-        return raw[:head] + "\n…\n" + (raw[-tail:] if tail > 0 else "")
-    return raw[:budget] + "…"
+    # budget >= 10 is guaranteed here, so head >= 6 and tail >= 4 are always
+    # positive — the dead `if head > 0` branch is intentionally omitted.
+    return raw[:head] + "\n…\n" + raw[-tail:]
 
 
 def _distribute_budget_and_trim(
@@ -892,7 +897,7 @@ def _run_code_evaluators(
             # Compile first so ``exec`` never receives the raw stored string
             # directly; authoring-time validation already gated the same source.
             exec(  # nosec B102  # NOSONAR
-                compile(ev["code"], "<evaluator>", "exec"),
+                compile(ev["code"], _EVALUATOR_FILENAME, "exec"),
                 {"__builtins__": ALLOWED_BUILTINS, "json": json},
                 local_vars,
             )
