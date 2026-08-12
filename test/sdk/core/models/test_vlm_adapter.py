@@ -326,3 +326,71 @@ def test_build_inner_does_not_send_frequency_penalty():
     assert inner.temperature == 0.7
     assert inner.top_p == 0.7
     assert inner.max_tokens == 512
+
+
+# ---------------------------------------------------------------------------
+# get_model_info: the adapter owns the (provider, model) → capability mapping,
+# replacing analyze_audio_tool's getattr + URL sniffing on the wrapped model.
+# ---------------------------------------------------------------------------
+
+
+def _make_vlm(model_name, base_url, **ctx_overrides):
+    from nexent.core.models.gateway.context import ModelContext
+
+    return OpenAIVLMAdapter(ModelContext(
+        modality="vlm",
+        factory="openai",
+        model_name=model_name,
+        display_name="vlm-test",
+        base_url=base_url,
+        api_key="sk-fake",
+        ssl_verify=True,
+        **ctx_overrides,
+    ))
+
+
+def test_model_info_siliconflow_non_omni_disables_audio():
+    """SiliconFlow non-omni VLMs report audio=False — callers read
+    get_model_info() instead of sniffing client_kwargs / model_id."""
+    adapter = _make_vlm(
+        "Qwen/Qwen3-VL-32B-Instruct",
+        "https://api.siliconflow.cn/v1",
+    )
+    info = adapter.get_model_info()
+    assert info.capabilities["audio"] is False
+    assert info.capabilities["image"] is True
+    assert info.capabilities["video"] is True
+
+
+def test_model_info_siliconflow_omni_keeps_audio():
+    adapter = _make_vlm(
+        "Qwen/Qwen3-Omni-7B",
+        "https://api.siliconflow.cn/v1",
+    )
+    assert adapter.get_model_info().capabilities["audio"] is True
+
+
+def test_model_info_non_siliconflow_keeps_audio():
+    adapter = _make_vlm(
+        "qwen-vl-max",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    assert adapter.get_model_info().capabilities["audio"] is True
+
+
+def test_model_info_explicit_capability_overrides_heuristic():
+    """An explicit audio=True in context.capabilities wins over the
+    SiliconFlow heuristic — the config author declared the capability."""
+    from nexent.core.models.gateway.context import ModelContext
+
+    adapter = OpenAIVLMAdapter(ModelContext(
+        modality="vlm",
+        factory="openai",
+        model_name="Qwen/Qwen3-VL-32B-Instruct",
+        display_name="vlm-test",
+        base_url="https://api.siliconflow.cn/v1",
+        api_key="sk-fake",
+        ssl_verify=True,
+        capabilities={"audio": True},
+    ))
+    assert adapter.get_model_info().capabilities["audio"] is True
