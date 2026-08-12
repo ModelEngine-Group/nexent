@@ -2,7 +2,11 @@ import React, { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Pagination, Upload, message, Tooltip } from "antd";
-import { UploadOutlined, InboxOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  UploadOutlined,
+  InboxOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
@@ -41,7 +45,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   onDocsUploaded,
   onRefresh,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
   // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
   // The `fileList` array may-or-may-not be the same reference across the N
@@ -64,19 +68,27 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           fileList
         );
 
-        if (result.failed > 0 && result.success === 0) {
-          message.error(t("aidpKnowledge.uploadFailed"));
-        } else if (result.failed > 0) {
+        const failureDetails = result.failed_list.map((item) => {
+          const reason = i18n.language.startsWith("zh")
+            ? item.reason_zh || item.reason_en
+            : item.reason_en || item.reason_zh;
+          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
+        });
+        const failureMessage = failureDetails.join("；");
+
+        if (result.summary.failed > 0 && result.summary.success === 0) {
+          message.error(failureMessage || t("aidpKnowledge.uploadFailed"));
+        } else if (result.summary.failed > 0) {
           message.warning(
             t("aidpKnowledge.uploadPartial", {
-              success: result.success,
-              failed: result.failed,
-            })
+              success: result.summary.success,
+              failed: result.summary.failed,
+            }) + (failureMessage ? `：${failureMessage}` : "")
           );
           onDocsUploaded();
         } else {
           message.success(
-            t("aidpKnowledge.uploadSuccess", { count: result.success })
+            t("aidpKnowledge.uploadSuccess", { count: result.summary.success })
           );
           onDocsUploaded();
         }
@@ -86,7 +98,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         setUploading(false);
       }
     },
-    [activeKb, onDocsUploaded, t]
+    [activeKb, i18n.language, onDocsUploaded, t]
   );
 
   // Format file size for display
@@ -157,10 +169,15 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                 {documents.map((doc) => (
                   <tr key={doc.file_ino_no} className="hover:bg-gray-50">
                     <td className="px-4 py-2">
-                      <div className="text-sm font-medium text-gray-800 truncate max-w-[250px]" title={doc.file_name}>
+                      <div
+                        className="text-sm font-medium text-gray-800 truncate max-w-[250px]"
+                        title={doc.file_name}
+                      >
                         {doc.file_name}
                       </div>
-                      <div className="text-xs text-gray-400">{doc.file_ino_no}</div>
+                      <div className="text-xs text-gray-400">
+                        {doc.file_ino_no}
+                      </div>
                     </td>
                     <td className="px-4 py-2 text-sm text-gray-600">
                       {doc.file_type || "-"}
@@ -193,34 +210,35 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           available on a particular AIDP instance), `totalReliable` is false
           and we fall back to simple prev/next mode without a total, using
           `has_more` to decide whether the next-page button should enable. */}
-      {documents.length > 0 && (() => {
-        // When total is unreliable we still need antd to know when to
-        // enable "next": set total just past the current page if there is
-        // a next page, otherwise clamp to the current page end.
-        const effectiveTotal = totalReliable
-          ? totalDocs
-          : (hasMore
+      {documents.length > 0 &&
+        (() => {
+          // When total is unreliable we still need antd to know when to
+          // enable "next": set total just past the current page if there is
+          // a next page, otherwise clamp to the current page end.
+          const effectiveTotal = totalReliable
+            ? totalDocs
+            : hasMore
               ? currentPage * pageSize + 1
-              : currentPage * pageSize);
-        return (
-          <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
-            <Pagination
-              current={currentPage}
-              pageSize={pageSize}
-              total={effectiveTotal || 1}
-              onChange={onPageChange}
-              showSizeChanger={false}
-              simple={!totalReliable}
-              showTotal={
-                totalReliable
-                  ? (total) => t("aidpKnowledge.showTotal", { count: total })
-                  : undefined
-              }
-              size="small"
-            />
-          </div>
-        );
-      })()}
+              : currentPage * pageSize;
+          return (
+            <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
+              <Pagination
+                current={currentPage}
+                pageSize={pageSize}
+                total={effectiveTotal || 1}
+                onChange={onPageChange}
+                showSizeChanger={false}
+                simple={!totalReliable}
+                showTotal={
+                  totalReliable
+                    ? (total) => t("aidpKnowledge.showTotal", { count: total })
+                    : undefined
+                }
+                size="small"
+              />
+            </div>
+          );
+        })()}
 
       {/* Upload area — gated by ``activeKb.permission`` and ``resource_status``.
 
@@ -236,20 +254,16 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             activeKb?.resource_status === "UNAVAILABLE" ||
             activeKb?.resource_status === "ORPHANED";
           const canUpload =
-            !!activeKb &&
-            !isUnavailable &&
-            activeKb.permission === "EDIT";
+            !!activeKb && !isUnavailable && activeKb.permission === "EDIT";
           if (!canUpload) {
             const reasonKey = !activeKb
               ? "aidpKnowledge.uploadNoKb"
               : isUnavailable
-              ? "aidpKnowledge.uploadKbUnavailable"
-              : "aidpKnowledge.uploadReadOnly";
+                ? "aidpKnowledge.uploadKbUnavailable"
+                : "aidpKnowledge.uploadReadOnly";
             return (
               <div className="ant-upload ant-upload-drag p-6 text-center border border-dashed border-gray-200 rounded">
-                <p className="ant-upload-text text-gray-500">
-                  {t(reasonKey)}
-                </p>
+                <p className="ant-upload-text text-gray-500">{t(reasonKey)}</p>
               </div>
             );
           }
@@ -287,9 +301,13 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                   ? t("aidpKnowledge.uploading")
                   : t("aidpKnowledge.uploadHint")}
               </p>
-              <p className="ant-upload-hint">
-                {t("aidpKnowledge.uploadHintDetail")}
-              </p>
+              <div className="ant-upload-hint mt-2 w-full min-w-0 max-w-full space-y-1 overflow-hidden px-4 whitespace-normal">
+                <div>{t("aidpKnowledge.uploadHintCount")}</div>
+                <div>{t("aidpKnowledge.uploadHintSize")}</div>
+                <div className="w-full min-w-0 break-all leading-5 whitespace-normal">
+                  {t("aidpKnowledge.uploadHintFormats")}
+                </div>
+              </div>
             </Dragger>
           );
         })()}

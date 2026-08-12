@@ -55,6 +55,58 @@ from utils import auth_utils as auth_utils_module
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
 
+AIDP_MAX_UPLOAD_FILE_COUNT = 50
+AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
+AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
+AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
+
+
+def _upload_failure(file_name: str, reason_zh: str, reason_en: str) -> dict:
+    return {
+        "file_name": file_name,
+        "reason_zh": reason_zh,
+        "reason_en": reason_en,
+    }
+
+
+def _validate_upload_files(files: List[UploadFile]) -> tuple[List[UploadFile], list[dict]]:
+    """Validate AIDP upload count and per-file size without loading files into memory."""
+    if len(files) > AIDP_MAX_UPLOAD_FILE_COUNT:
+        reason_zh = f"单次最多上传 {AIDP_MAX_UPLOAD_FILE_COUNT} 个文件"
+        reason_en = f"You can upload up to {AIDP_MAX_UPLOAD_FILE_COUNT} files at a time"
+        return [], [
+            _upload_failure(file.filename or "unknown", reason_zh, reason_en)
+            for file in files
+        ]
+
+    valid_files: List[UploadFile] = []
+    failed_files: list[dict] = []
+    for file in files:
+        file_name = file.filename or "unknown"
+        extension = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        max_size_bytes = (
+            AIDP_SMALL_FILE_MAX_SIZE_BYTES
+            if extension in AIDP_SMALL_FILE_EXTENSIONS
+            else AIDP_OTHER_FILE_MAX_SIZE_BYTES
+        )
+        max_size_mb = max_size_bytes // (1024 * 1024)
+
+        original_position = file.file.tell()
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(original_position)
+
+        if file_size > max_size_bytes:
+            failed_files.append(_upload_failure(
+                file_name,
+                f"文件大小不能超过 {max_size_mb} MB",
+                f"File size must not exceed {max_size_mb} MB",
+            ))
+        else:
+            valid_files.append(file)
+
+    return valid_files, failed_files
+
 
 # ---------------------------------------------------------------------------
 # Request Models
@@ -477,8 +529,29 @@ async def upload_documents(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
+    valid_files, validation_failures = _validate_upload_files(files)
     server_url, api_key = _credentials()
-    result = upload_aidp_docs_impl(server_url, api_key, kds_id, files)
+    if valid_files:
+        result = upload_aidp_docs_impl(server_url, api_key, kds_id, valid_files)
+    else:
+        result = {
+            "summary": {"total": 0, "success": 0, "failed": 0},
+            "success_list": [],
+            "failed_list": [],
+        }
+
+    success_list = result.get("success_list", []) if isinstance(result, dict) else []
+    aidp_failed_list = result.get("failed_list", []) if isinstance(result, dict) else []
+    failed_list = [*aidp_failed_list, *validation_failures]
+    result = {
+        "summary": {
+            "total": len(files),
+            "success": len(success_list),
+            "failed": len(failed_list),
+        },
+        "success_list": success_list,
+        "failed_list": failed_list,
+    }
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 

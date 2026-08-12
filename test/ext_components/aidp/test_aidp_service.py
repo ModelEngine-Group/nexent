@@ -1510,7 +1510,16 @@ class TestUploadAidpDocsImpl:
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
     def test_success(self, aidp_service_module, mock_file):
-        mock_resp = _make_success_response({"uploaded": 1, "file_ids": ["f1"]})
+        upload_response = {
+            "summary": {"total": 1, "success": 0, "failed": 1},
+            "success_list": [],
+            "failed_list": [{
+                "file_name": "test.pdf",
+                "reason_zh": "文件内容为空",
+                "reason_en": "File content is empty",
+            }],
+        }
+        mock_resp = _make_success_response(upload_response)
         _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
 
         result = aidp_service_module.upload_aidp_docs_impl(
@@ -1519,7 +1528,7 @@ class TestUploadAidpDocsImpl:
             kds_id="kb-1",
             files=[mock_file],
         )
-        assert result["uploaded"] == 1
+        assert result == upload_response
 
     def test_file_with_no_content_type_uses_octet_stream(self, aidp_service_module, mock_file_no_ct):
         mock_resp = _make_success_response({"uploaded": 1})

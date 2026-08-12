@@ -649,7 +649,7 @@ class KnowledgeBaseService {
       id: String(item.kds_id),
       name: item.kds_name || String(item.kds_id),
       display_name: item.kds_name || String(item.kds_id),
-      description: item.description || "AIDP knowledge base",
+      description: item.description || null,
       documentCount: item.document_count || 0,
       chunkCount: item.chunk_count || 0,
       createdAt: item.created_at || null,

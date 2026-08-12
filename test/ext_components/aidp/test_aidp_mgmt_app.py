@@ -511,14 +511,78 @@ class TestUploadDocuments:
         ]
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
-             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl", return_value={"uploaded": 1}) as mock_upload:
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl", return_value={
+                 "summary": {"total": 1, "success": 0, "failed": 1},
+                 "success_list": [],
+                 "failed_list": [{
+                     "file_name": "doc.txt",
+                     "reason_zh": "文件内容为空",
+                     "reason_en": "File content is empty",
+                 }],
+             }) as mock_upload:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
                 files=files,
             )
         assert response.status_code == HTTPStatus.OK
+        assert response.json()["failed_list"][0]["reason_en"] == "File content is empty"
         mock_upload.assert_called_once()
+
+    def test_upload_rejects_more_than_fifty_files_without_calling_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", (f"doc-{index}.txt", io.BytesIO(b"hello"), "text/plain"))
+            for index in range(51)
+        ]
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl") as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 51, "success": 0, "failed": 51}
+        assert body["failed_list"][0]["reason_zh"] == "单次最多上传 50 个文件"
+        mock_upload.assert_not_called()
+
+    def test_upload_merges_oversized_file_with_aidp_result(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", ("valid.pdf", io.BytesIO(b"ok"), "application/pdf")),
+            ("files", ("large.txt", io.BytesIO(b"x"), "text/plain")),
+        ]
+        aidp_result = {
+            "summary": {"total": 1, "success": 1, "failed": 0},
+            "success_list": [{"file_name": "valid.pdf"}],
+            "failed_list": [],
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "AIDP_SMALL_FILE_MAX_SIZE_BYTES", 0), \
+             patch.object(aidp_mgmt_app, "upload_aidp_docs_impl",
+                          return_value=aidp_result) as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 2, "success": 1, "failed": 1}
+        assert body["failed_list"][0]["file_name"] == "large.txt"
+        assert mock_upload.call_args.args[3][0].filename == "valid.pdf"
 
 
 # --- List documents ------------------------------------------------------

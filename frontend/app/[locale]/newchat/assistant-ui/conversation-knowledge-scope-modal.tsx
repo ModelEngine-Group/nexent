@@ -498,41 +498,71 @@ export const ConversationKnowledgeScopeModal: FC<
                     >
                       {name}
                     </div>
-                    <div
-                      className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                    >
-                      <span
-                        className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                      >
-                        {t("knowledgeBase.tag.documents", {
-                          count: knowledgeBase.documentCount || 0,
-                        })}
-                      </span>
-                      <span
-                        className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                      >
-                        {t("knowledgeBase.tag.chunks", {
-                          count: knowledgeBase.chunkCount || 0,
-                        })}
-                      </span>
-                      {knowledgeBase.embeddingModel &&
-                        knowledgeBase.embeddingModel !== "unknown" && (
+                    {source === "aidp" ? (
+                      <>
+                        <div
+                          className="mt-1 truncate text-xs text-muted-foreground"
+                          title={
+                            knowledgeBase.description ||
+                            t("aidpKnowledge.noDescription")
+                          }
+                        >
+                          {knowledgeBase.description ||
+                            t("aidpKnowledge.noDescription")}
+                        </div>
+                        <div
+                          className={`flex items-center ${KB_LAYOUT.TAG_MARGIN}`}
+                        >
                           <span
-                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model}`}
+                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
                           >
-                            {t("knowledgeBase.tag.model", {
-                              model: knowledgeBase.embeddingModel,
-                            })}
+                            {knowledgeBase.createdAt
+                              ? t("aidpKnowledge.createdAt", {
+                                  date: new Date(
+                                    knowledgeBase.createdAt
+                                  ).toLocaleDateString(),
+                                })
+                              : t("aidpKnowledge.createdAtUnknown")}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                      >
+                        <span
+                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                        >
+                          {t("knowledgeBase.tag.documents", {
+                            count: knowledgeBase.documentCount || 0,
+                          })}
+                        </span>
+                        <span
+                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                        >
+                          {t("knowledgeBase.tag.chunks", {
+                            count: knowledgeBase.chunkCount || 0,
+                          })}
+                        </span>
+                        {knowledgeBase.embeddingModel &&
+                          knowledgeBase.embeddingModel !== "unknown" && (
+                            <span
+                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model}`}
+                            >
+                              {t("knowledgeBase.tag.model", {
+                                model: knowledgeBase.embeddingModel,
+                              })}
+                            </span>
+                          )}
+                        {knowledgeBase.is_multimodal && (
+                          <span
+                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red}`}
+                          >
+                            multimodal
                           </span>
                         )}
-                      {knowledgeBase.is_multimodal && (
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red}`}
-                        >
-                          multimodal
-                        </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
