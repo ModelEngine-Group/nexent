@@ -3040,3 +3040,52 @@ def test_wrap_visible_tool_events_skips_tools_without_forward():
     agent._wrap_visible_tool_events()
 
     assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
+
+
+def test_run_preserves_existing_current_time_prefix():
+    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.model.model_id = "test-model"
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter([]))
+
+    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    list(agent.run(task=prefixed_task, stream=True))
+
+    assert agent.task == prefixed_task
+
+
+def test_run_injects_current_time_when_missing():
+    """When task has no [Current time: ...] prefix, run() should inject server time."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.model.model_id = "test-model"
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter([]))
+
+    list(agent.run(task="What time is it?", stream=True))
+
+    assert agent.task.startswith("[Current time:")
+    assert "What time is it?" in agent.task
+

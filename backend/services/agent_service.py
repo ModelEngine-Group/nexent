@@ -368,6 +368,27 @@ def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
         return ""
 
 
+def _inject_user_timezone_time(query: str, http_request) -> str:
+    """Inject [Current time: ...] prefix in the user's timezone.
+
+    Reads the X-User-Timezone header (set by the frontend) and prepends
+    the current time in that timezone. If the header is absent, invalid,
+    or the query already has the prefix, the query is returned unchanged.
+    """
+    user_timezone = http_request.headers.get("x-user-timezone") if http_request else None
+    if user_timezone and query and not query.startswith("[Current time:"):
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_timezone)
+            now = datetime.now(tz)
+            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            return f"[Current time: {time_str}]\n\n{query}"
+        except Exception:
+            pass
+    return query
+
+
 def _resolve_model_ids_with_fallback(
     model_ids: List[int] | None,
     model_display_names: List[str] | None,
@@ -3185,21 +3206,10 @@ async def run_agent_stream(
     )
 
     # Inject current time in the user's timezone so the LLM can answer
-    # time-related questions correctly. The timezone comes from the
-    # X-User-Timezone header set by the frontend (browser IANA timezone).
-    # The SDK strips this prefix before sending AGENT_NEW_RUN to the
-    # frontend, so the user message display does not show the time marker.
-    user_timezone = http_request.headers.get("x-user-timezone") if http_request else None
-    if user_timezone and agent_request.query and not agent_request.query.startswith("[Current time:"):
-        try:
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
-            tz = ZoneInfo(user_timezone)
-            now = datetime.now(tz)
-            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            agent_request.query = f"[Current time: {time_str}]\n\n{agent_request.query}"
-        except Exception:
-            pass  # Fall back to SDK's default time injection
+    # time-related questions correctly. The SDK strips this prefix before
+    # sending AGENT_NEW_RUN to the frontend, so the user message display
+    # does not show the time marker.
+    agent_request.query = _inject_user_timezone_time(agent_request.query, http_request)
 
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
