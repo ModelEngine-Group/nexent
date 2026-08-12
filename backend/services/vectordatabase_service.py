@@ -2279,7 +2279,7 @@ class ElasticSearchService:
                 raise ValueError("At least one index name is required")
             if top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
-            if weight_accurate is not None and (
+            if weight_accurate and (
                 weight_accurate < 0 or weight_accurate > 1
             ):
                 raise ValueError("weight_accurate must be between 0 and 1")
