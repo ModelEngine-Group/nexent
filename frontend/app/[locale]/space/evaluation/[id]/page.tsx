@@ -97,8 +97,7 @@ function getSessionColor(sessionId?: string | null): string {
   if (!sessionId) return "#bfbfbf";
   let hash = 0;
   for (let i = 0; i < sessionId.length; i++) {
-    hash = (hash << 5) - hash + sessionId.charCodeAt(i);
-    hash |= 0;
+    hash = Math.trunc((hash << 5) - hash + sessionId.charCodeAt(i));
   }
   return SESSION_COLORS[Math.abs(hash) % SESSION_COLORS.length];
 }

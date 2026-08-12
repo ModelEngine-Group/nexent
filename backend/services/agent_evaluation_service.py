@@ -230,8 +230,7 @@ def validate_code_evaluator(code: str) -> None:
         # introspection scan, ALLOWED_BUILTINS whitelist, evaluate() signature
         # check) is applied BEFORE the evaluator reaches this call — see
         # docstring.
-        # codeql[py/code-injection]
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  NOSONAR
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  NOSONAR  # codeql[py/code-injection]
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -884,8 +883,7 @@ def _run_code_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            # codeql[py/code-injection]
-            exec(  # nosec B102  NOSONAR
+            exec(  # nosec B102  NOSONAR  # codeql[py/code-injection]
                 ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
             )
             fn = local_vars.get("evaluate")
