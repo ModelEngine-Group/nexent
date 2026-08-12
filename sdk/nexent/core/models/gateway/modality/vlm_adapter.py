@@ -233,12 +233,29 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     async def health_check(self) -> bool:
         return await self.check_connectivity()
 
+    def _is_siliconflow_non_omni(self) -> bool:
+        """SiliconFlow VLMs that are not Qwen3-Omni cannot accept audio input.
+
+        This is the only place that should know which (provider, model) combos
+        can't ingest a given media type — callers ask the adapter via
+        :meth:`get_model_info` rather than reaching into the wrapped model's
+        ``client_kwargs`` / ``model_id``.
+        """
+        return (
+            "siliconflow" in (self._context.base_url or "").lower()
+            and "omni" not in (self._context.model_name or "").lower()
+        )
+
     def get_model_info(self) -> ModelInfo:
-        caps = self._context.capabilities or {
-            "image": True,
-            "audio": True,
-            "video": True,
-        }
+        # Explicit capability overrides from context win; defaults assume a
+        # capable VLM. Provider-specific limitations are computed here so the
+        # capability dict, not the caller's URL-sniffing, is the source of truth.
+        caps = dict(self._context.capabilities)
+        if "audio" not in caps and self._is_siliconflow_non_omni():
+            caps["audio"] = False
+        caps.setdefault("image", True)
+        caps.setdefault("audio", True)
+        caps.setdefault("video", True)
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",

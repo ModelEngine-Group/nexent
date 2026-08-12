@@ -76,11 +76,11 @@ def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock
     assert result == "audio result"
 
 
-def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_storage_client):
-    vlm_model = SimpleNamespace(
-        model_id="Qwen/Qwen3-VL-32B-Instruct",
-        client_kwargs={"base_url": "https://api.siliconflow.cn/v1"},
-    )
+def test_analyze_audio_rejects_model_that_lacks_audio_capability(observer_en, mock_storage_client):
+    """Validation routes through get_model_info().capabilities, not the wrapped
+    model's client_kwargs/model_id — the adapter owns the capability mapping."""
+    info = SimpleNamespace(capabilities={"audio": False})
+    vlm_model = SimpleNamespace(get_model_info=lambda: info)
     tool = AnalyzeAudioTool(
         observer=observer_en,
         vlm_model=vlm_model,
