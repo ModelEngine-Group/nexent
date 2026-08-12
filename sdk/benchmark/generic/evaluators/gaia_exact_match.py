@@ -24,7 +24,7 @@ def _strip_markdown_formatting(s: str) -> str:
 
     Agents sometimes wrap the FINAL ANSWER marker or the answer itself in
     markdown formatting (e.g. "**FINAL ANSWER:** answer" or "FINAL ANSWER: **answer**").
-    The regex captures the trailing markers as part of the answer - strip them here.
+    Answer extraction preserves trailing markers, so strip them here.
     """
     value = s.strip()
 
