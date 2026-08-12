@@ -63,7 +63,7 @@ def _run_loop():
                 )
 
         except Exception as exc:
-            logger.error("Evaluation maintenance loop error: %s", exc)
+            logger.exception("Evaluation maintenance loop error: %s", exc)
             time.sleep(60)  # back off on persistent failure
 
 

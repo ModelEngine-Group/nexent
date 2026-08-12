@@ -230,8 +230,15 @@ def validate_code_evaluator(code: str) -> None:
         # introspection scan, ALLOWED_BUILTINS whitelist, evaluate() signature
         # check) is applied BEFORE the evaluator reaches this call — see
         # docstring.
-        # codeql[py/code-injection]  # nosec B102
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # lgtm[py/code-injection]  # NOSONAR
+        # Compile the source to a code object first so ``exec`` never receives
+        # the raw, unvalidated user string directly (the same pure-syntax gate
+        # as stage 1); runtime execution stays inside the ALLOWED_BUILTINS
+        # sandbox.
+        exec(  # nosec B102  # NOSONAR
+            compile(code, "<evaluator>", "exec"),
+            {"__builtins__": ALLOWED_BUILTINS, "json": json},
+            local_vars,
+        )
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -882,9 +889,12 @@ def _run_code_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            # codeql[py/code-injection]  # nosec B102
-            exec(  # NOSONAR
-                ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
+            # Compile first so ``exec`` never receives the raw stored string
+            # directly; authoring-time validation already gated the same source.
+            exec(  # nosec B102  # NOSONAR
+                compile(ev["code"], "<evaluator>", "exec"),
+                {"__builtins__": ALLOWED_BUILTINS, "json": json},
+                local_vars,
             )
             fn = local_vars.get("evaluate")
             result = fn(

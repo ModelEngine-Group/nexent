@@ -102,6 +102,15 @@ function getSessionColor(sessionId?: string | null): string {
   return SESSION_COLORS[Math.abs(hash) % SESSION_COLORS.length];
 }
 
+const RUN_STATUS_TAG_COLOR: Record<string, string> = {
+  COMPLETED: "green",
+  RUNNING: "blue",
+};
+
+function getRunStatusColor(status: string): string {
+  return RUN_STATUS_TAG_COLOR[status] || "red";
+}
+
 // ── component ────────────────────────────────────────────────
 
 export default function EvaluationDetailPage() {
@@ -1081,13 +1090,7 @@ export default function EvaluationDetailPage() {
               {run.agent_name || `#${run.agent_evaluation_id}`}
             </Title>
             <Tag
-              color={
-                run.status === "COMPLETED"
-                  ? "green"
-                  : run.status === "RUNNING"
-                    ? "blue"
-                    : "red"
-              }
+              color={getRunStatusColor(run.status)}
               style={{ fontSize: 13 }}
             >
               {run.status}
