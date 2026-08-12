@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Select, message } from "antd";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
+import { buildGroupSelectOptions } from "@/hooks/group/buildGroupSelectOptions";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -28,7 +29,7 @@ export function KnowledgeBaseEditModal({
   onSuccess,
 }: KnowledgeBaseEditModalProps) {
   const { t } = useTranslation("common");
-  const { groupIds } = useAuthorizationContext();
+  const { getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm();
 
   // Name validation state
@@ -41,9 +42,23 @@ export function KnowledgeBaseEditModal({
   const [currentPermission, setCurrentPermission] =
     useState<string>("READ_ONLY");
 
-  // Fetch tenant groups and limit selections to current user's groups.
+  // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
   const { data: groupData } = useGroupList(tenantId);
-  const { groups } = useGroupDetails(groupData?.groups ?? [], groupIds);
+  const accessibleGroupIds = getAccessibleGroupIds();
+  const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
+
+  const selectedGroupIds = Form.useWatch("group_ids", form);
+
+  const groupSelectOptions = useMemo(
+    () =>
+      buildGroupSelectOptions({
+        groups,
+        allGroups: groupData?.groups ?? [],
+        selectedGroupIds: selectedGroupIds ?? knowledgeBase?.group_ids ?? [],
+        deletedGroupLabel: t("group.deleted"),
+      }),
+    [groups, groupData?.groups, selectedGroupIds, knowledgeBase?.group_ids, t]
+  );
 
   // Reset form and states when knowledge base changes
   React.useEffect(() => {
@@ -102,7 +117,7 @@ export function KnowledgeBaseEditModal({
 
       // Ensure group_ids is empty when permission is PRIVATE
       const groupIds =
-        values.ingroup_permission === "PRIVATE" ? [] : values.group_ids;
+        values.ingroup_permission === "PRIVATE" ? [] : values.group_ids ?? [];
 
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,
@@ -218,13 +233,7 @@ export function KnowledgeBaseEditModal({
                   ? t("knowledgeBase.create.permission.groupPlaceholder")
                   : t("tenantResources.knowledgeBase.groupNames")
               }
-              value={
-                isGroupSelectDisabled ? [] : form.getFieldValue("group_ids")
-              }
-              options={groups.map((group) => ({
-                label: group.group_name,
-                value: group.group_id,
-              }))}
+              options={groupSelectOptions}
               disabled={isGroupSelectDisabled}
             />
           </Form.Item>

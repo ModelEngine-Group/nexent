@@ -3,25 +3,20 @@
 import aiofiles
 import argparse
 import ast
-import asyncio
 import inspect
 import io
 import json
 import logging
 import ntpath
 import os
-import uuid
 import zipfile
 import re
-import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
-from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import ModelConfig
 from consts.const import (
     CAN_EDIT_ALL_USER_ROLES,
     CONTAINER_SKILLS_PATH,
@@ -35,9 +30,6 @@ from consts.exceptions import ForbiddenError, SkillException
 from database import skill_db
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
-from agents.skill_creation_agent import create_skill_from_request
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
-from utils.content_classifier_utils import ContentClassifier
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger(__name__)
@@ -2571,291 +2563,6 @@ class SkillService:
             })
 
         return results
-
-
-def classify_streaming_content(
-    content: str,
-    classifier: Any
-) -> List[Dict[str, Any]]:
-    """Classify streaming content using the ContentClassifier.
-
-    Args:
-        content: Raw streaming content to classify
-        classifier: ContentClassifier instance
-
-    Returns:
-        List of classified event dictionaries
-    """
-    return classifier.classify(content)
-
-
-class SkillCreationStreamService:
-    """Service for handling skill creation streaming operations."""
-
-    def __init__(self, skill_service: Optional["SkillService"] = None):
-        """Initialize the stream service.
-
-        Args:
-            skill_service: Optional SkillService instance for accessing skill manager
-        """
-        self.skill_service = skill_service or SkillService()
-
-    def get_skill_manager_local_dir(self) -> str:
-        """Get local_skills_dir from SkillManager.
-
-        Returns:
-            Local skills directory path
-        """
-        return self.skill_service.skill_manager.resolve_tenant_dir(
-            tenant_id=self.skill_service.tenant_id
-        )
-
-    def create_classifier(self) -> "ContentClassifier":
-        """Create a new ContentClassifier instance.
-
-        Returns:
-            New ContentClassifier instance
-        """
-        from utils.content_classifier_utils import ContentClassifier
-        return ContentClassifier()
-
-    def classify_content(
-        self,
-        content: str,
-        classifier: "ContentClassifier"
-    ) -> List[Dict[str, Any]]:
-        """Classify streaming content using the provided classifier.
-
-        Args:
-            content: Raw streaming content to classify
-            classifier: ContentClassifier instance
-
-        Returns:
-            List of classified event dictionaries
-        """
-        return classifier.classify(content)
-
-
-def create_skill_creation_stream_generator(
-    observer: Any,
-    classifier: "ContentClassifier",
-) -> Any:
-    """Create a generator that processes observer messages and yields SSE events.
-
-    Args:
-        observer: MessageObserver instance with cached messages
-        classifier: ContentClassifier instance for content classification
-
-    Yields:
-        SSE-formatted event strings
-    """
-    import json
-    from consts.const import STREAMABLE_CONTENT_TYPES
-
-    cached = observer.get_cached_message()
-    for msg in cached:
-        if isinstance(msg, str):
-            try:
-                data = json.loads(msg)
-                msg_type = data.get("type", "")
-                content = data.get("content", "")
-
-                if msg_type == "step_count":
-                    yield f"data: {json.dumps({'type': 'step_count', 'content': content}, ensure_ascii=False)}\n\n"
-                elif msg_type in STREAMABLE_CONTENT_TYPES:
-                    for event in classifier.classify(content):
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except (json.JSONDecodeError, Exception):
-                pass
-
-
-def format_final_answer_sse(classifier: "ContentClassifier", final_result: str) -> List[str]:
-    """Format final answer content into SSE event strings.
-
-    Args:
-        classifier: ContentClassifier instance for content classification
-        final_result: Final answer content to format
-
-    Returns:
-        List of SSE-formatted event strings
-    """
-    import json
-
-    events = []
-    for event in classifier.classify(final_result):
-        events.append(f"data: {json.dumps(event, ensure_ascii=False)}\n\n")
-    return events
-
-
-# ========== Skill Creation Task Manager ==========
-
-
-class SkillCreationTaskManager:
-    """Singleton manager to track active skill creation threads and their stop events."""
-
-    _instance: Optional["SkillCreationTaskManager"] = None
-    _lock = threading.Lock()
-
-    def __new__(cls) -> "SkillCreationTaskManager":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._tasks: Dict[str, Tuple[threading.Thread, threading.Event]] = {}
-                    cls._instance._tasks_lock = threading.Lock()
-        return cls._instance
-
-    def register_task(self, task_id: str, thread: threading.Thread, stop_event: threading.Event) -> None:
-        """Register a new skill creation task.
-
-        Args:
-            task_id: Unique identifier for the task
-            thread: The thread running the skill creation
-            stop_event: Event to signal stop request
-        """
-        with self._tasks_lock:
-            self._tasks[task_id] = (thread, stop_event)
-            logger.info(f"Registered skill creation task: {task_id}")
-
-    def unregister_task(self, task_id: str) -> None:
-        """Unregister a completed skill creation task.
-
-        Args:
-            task_id: Unique identifier for the task
-        """
-        with self._tasks_lock:
-            if task_id in self._tasks:
-                del self._tasks[task_id]
-                logger.info(f"Unregistered skill creation task: {task_id}")
-
-    def stop_task(self, task_id: str) -> bool:
-        """Signal a skill creation task to stop.
-
-        Args:
-            task_id: Unique identifier for the task
-
-        Returns:
-            True if the task was found and stop was signaled, False otherwise
-        """
-        with self._tasks_lock:
-            if task_id in self._tasks:
-                _, stop_event = self._tasks[task_id]
-                stop_event.set()
-                logger.info(f"Stop signal sent for skill creation task: {task_id}")
-                return True
-        return False
-
-    def is_task_running(self, task_id: str) -> bool:
-        """Check if a task is still running.
-
-        Args:
-            task_id: Unique identifier for the task
-
-        Returns:
-            True if the task exists and is still alive
-        """
-        with self._tasks_lock:
-            if task_id in self._tasks:
-                thread, _ = self._tasks[task_id]
-                return thread.is_alive()
-        return False
-
-
-# Singleton instance
-skill_creation_task_manager = SkillCreationTaskManager()
-
-
-# ========== Skill Creation Stream Service ==========
-
-
-def stream_skill_creation(
-    user_request: str,
-    language: str,
-    model_config: "ModelConfig",
-    existing_skill: Optional[Dict[str, Any]] = None,
-    complexity: str = "simple",
-) -> tuple[str, Any]:
-    """Stream skill creation process as an async generator.
-
-    This function handles all the business logic for skill creation:
-    - Loads prompt template
-    - Creates observer, stop_event, and classifier
-    - Registers the task with the task manager
-    - Starts the agent thread
-    - Yields SSE events until completion
-
-    Args:
-        user_request: User's skill description request
-        language: Language code (e.g., "zh", "en")
-        model_config: Model configuration
-        existing_skill: Optional existing skill for modification
-        complexity: Skill complexity level ("simple" or "complicated")
-
-    Returns:
-        Tuple of (task_id, generator_function)
-        The task_id should be passed to the caller for stop functionality
-    """
-    task_id = str(uuid.uuid4())
-
-    async def generate():
-        is_task_registered = False
-        observer = None
-        classifier = None
-
-        try:
-            # Load prompt template
-            template = get_skill_creation_simple_prompt_template(
-                language=language,
-                existing_skill=existing_skill,
-                complexity=complexity
-            )
-
-            # Create observer and classifier
-            observer = MessageObserver(lang=language)
-            stop_event = threading.Event()
-            classifier = ContentClassifier()
-
-            # Get local skills directory
-            local_skills_dir = get_skill_manager().resolve_tenant_dir(tenant_id=None)
-
-            def run_task():
-                create_skill_from_request(
-                    system_prompt=template.get("system_prompt", ""),
-                    user_prompt=user_request,
-                    model_config_list=[model_config],
-                    observer=observer,
-                    stop_event=stop_event,
-                    local_skills_dir=local_skills_dir
-                )
-
-            thread = threading.Thread(target=run_task)
-
-            # Register task before starting
-            skill_creation_task_manager.register_task(task_id, thread, stop_event)
-            is_task_registered = True
-
-            thread.start()
-
-            while thread.is_alive():
-                for event in create_skill_creation_stream_generator(observer, classifier):
-                    yield event
-                await asyncio.sleep(0.1)
-
-            thread.join()
-
-            for event in create_skill_creation_stream_generator(observer, classifier):
-                yield event
-
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error in stream_skill_creation: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-        finally:
-            if is_task_registered:
-                skill_creation_task_manager.unregister_task(task_id)
-
-    return task_id, generate
 
 
 # ============== Skill List Initialization ==============
