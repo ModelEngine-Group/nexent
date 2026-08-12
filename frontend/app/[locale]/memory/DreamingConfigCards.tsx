@@ -233,7 +233,7 @@ export function DreamingConfigCards() {
         style={{ flex: 2 }}
         title={t("dreaming.thresholds.title")}
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
           <div>
             <Text strong>{t("dreaming.thresholds.minScore")}</Text>
             <InputNumber
@@ -331,7 +331,7 @@ export function DreamingConfigCards() {
           </div>
         </div>
 
-        <div className="mt-6">
+        <div className="mt-6 flex justify-end">
           <Button
             type="primary"
             loading={saving}
