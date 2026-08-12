@@ -19,14 +19,14 @@ class AdapterRegistry:
     """Registry of adapter classes keyed by ``(factory, modality)``."""
 
     def __init__(self) -> None:
-        self._table: Dict[Tuple[str, str], Type[MultimodalAdapter]] = {}
+        self._adapter_map: Dict[Tuple[str, str], Type[MultimodalAdapter]] = {}
 
     def register(self, factory: str, modality: str):
         """Class decorator: register an adapter under ``(factory, modality)``."""
 
         def deco(cls: Type[MultimodalAdapter]) -> Type[MultimodalAdapter]:
             key = (factory.lower().strip(), modality)
-            self._table[key] = cls
+            self._adapter_map[key] = cls
             logger.debug("Registered adapter %s for %s", key, cls.__name__)
             return cls
 
@@ -39,18 +39,18 @@ class AdapterRegistry:
             KeyError: if no adapter is registered for the pair.
         """
         key = (factory.lower().strip(), modality)
-        if key not in self._table:
+        if key not in self._adapter_map:
             raise KeyError(
                 f"No adapter registered for factory={factory!r} modality={modality!r}; "
                 f"registered: {self.list_adapters()}"
             )
-        return self._table[key]
+        return self._adapter_map[key]
 
     def has(self, factory: str, modality: str) -> bool:
-        return (factory.lower().strip(), modality) in self._table
+        return (factory.lower().strip(), modality) in self._adapter_map
 
     def list_adapters(self) -> list:
-        return list(self._table.keys())
+        return list(self._adapter_map.keys())
 
 
 _registry = AdapterRegistry()

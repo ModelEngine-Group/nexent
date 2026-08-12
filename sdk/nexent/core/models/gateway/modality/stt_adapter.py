@@ -176,7 +176,7 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             auth_headers=context.extra.get("auth_headers"),
         )
         extras = context.extra
-        self.config = AliSTTConfig(
+        self._config = AliSTTConfig(
             api_key=context.api_key,
             model=context.model_name,
             language=context.language,
@@ -186,19 +186,19 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             enable_vad=extras.get("enable_vad", True),
             timeout=extras.get("timeout", 60),
         )
-        self.audio_file_path = context.audio_file_path
-        self._current_result = TranscriptionResult()
+        self._audio_file_path = context.audio_file_path
+        self._transcription = TranscriptionResult()
 
     def get_websocket_url(self) -> str:
         """Get the WebSocket URL for the STT service."""
-        if self.config.ws_url:
-            return f"{self.config.ws_url}?model={self.config.model}"
-        return f"wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model={self.config.model}"
+        if self._config.ws_url:
+            return f"{self._config.ws_url}?model={self._config.model}"
+        return f"wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model={self._config.model}"
 
     def get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers for the WebSocket connection."""
         return {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": f"Bearer {self._config.api_key}",
             "OpenAI-Beta": "realtime=v1"
         }
 
@@ -208,11 +208,11 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     def construct_session_update(self) -> Dict[str, Any]:
         """Construct the session.update event."""
-        if self.config.enable_vad:
+        if self._config.enable_vad:
             turn_detection = {
                 "type": "server_vad",
-                "threshold": self.config.vad_threshold,
-                "silence_duration_ms": self.config.vad_silence_duration_ms
+                "threshold": self._config.vad_threshold,
+                "silence_duration_ms": self._config.vad_silence_duration_ms
             }
         else:
             turn_detection = None
@@ -222,11 +222,11 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             "type": "session.update",
             "session": {
                 "modalities": ["text"],
-                "input_audio_format": self.config.format,
-                "sample_rate": self.config.rate,
+                "input_audio_format": self._config.format,
+                "sample_rate": self._config.rate,
                 "input_audio_transcription": {
-                    "model": self.config.model,
-                    "language": self.config.language
+                    "model": self._config.model,
+                    "language": self._config.language
                 },
                 "turn_detection": turn_detection
             }
@@ -398,19 +398,19 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             data = await _f.read()
         audio_data = bytes(data)
 
-        if self.config.format == "wav":
+        if self._config.format == "wav":
             nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
             size_per_sec = nchannels * sampwidth * framerate
-            segment_size = int(size_per_sec * self.config.seg_duration / 1000)
+            segment_size = int(size_per_sec * self._config.seg_duration / 1000)
             return await self.process_audio_data(wav_bytes, segment_size, on_result)
 
-        if self.config.format == "pcm":
+        if self._config.format == "pcm":
             if audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
                 nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
-                segment_size = int(self.config.rate * 2 * self.config.channel * self.config.seg_duration / 1000)
+                segment_size = int(self._config.rate * 2 * self._config.channel * self._config.seg_duration / 1000)
                 return await self.process_audio_data(wav_bytes, segment_size, on_result)
             else:
-                segment_size = int(self.config.rate * 2 * self.config.channel * self.config.seg_duration / 1000)
+                segment_size = int(self._config.rate * 2 * self._config.channel * self._config.seg_duration / 1000)
                 return await self.process_audio_data(audio_data, segment_size, on_result)
 
         raise Exception("Unsupported format, only wav and pcm are supported")
@@ -426,12 +426,12 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         headers = self.get_auth_headers()
         logger.info(f"Connecting to {ws_url}")
 
-        self._current_result = TranscriptionResult()
+        self._transcription = TranscriptionResult()
         transcription_texts = []
 
         try:
             async with websockets.connect(ws_url, additional_headers=headers, max_size=1000000000) as ws:
-                response_text = await asyncio.wait_for(ws.recv(), timeout=self.config.timeout)
+                response_text = await asyncio.wait_for(ws.recv(), timeout=self._config.timeout)
                 response = json.loads(response_text)
                 logger.info(f"Session created: {response}")
 
@@ -454,7 +454,7 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
                 logger.info(f"Sent {audio_chunks_sent} audio chunks")
 
-                if not self.config.enable_vad:
+                if not self._config.enable_vad:
                     commit_event = self.construct_audio_commit_event()
                     await ws.send(json.dumps(commit_event))
                     logger.info("Audio buffer committed")
@@ -465,13 +465,13 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
                 for _ in range(100):
                     try:
-                        response_text = await asyncio.wait_for(ws.recv(), timeout=self.config.timeout)
+                        response_text = await asyncio.wait_for(ws.recv(), timeout=self._config.timeout)
                         response = json.loads(response_text)
                         result = self.parse_response(response)
                         logger.info(f"Received: {result}")
 
                         if "error" in result:
-                            self._current_result.error = result["error"]
+                            self._transcription.error = result["error"]
                             return {"error": result["error"]}
 
                         event_type = result.get("event", "")
@@ -500,12 +500,12 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
                         break
 
                 final_text = " ".join(transcription_texts)
-                self._current_result.text = final_text
+                self._transcription.text = final_text
 
                 if final_text:
                     return {"text": final_text}
-                elif self._current_result.error:
-                    return {"error": self._current_result.error}
+                elif self._transcription.error:
+                    return {"error": self._transcription.error}
                 else:
                     return {"text": ""}
 
@@ -521,7 +521,7 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         """Check if the STT service is accessible."""
         try:
             logger.info("STT connectivity test started...")
-            result = await self.process_audio_file(self.audio_file_path)
+            result = await self.process_audio_file(self._audio_file_path)
             is_success = self._is_stt_result_successful(result)
             if is_success:
                 logger.info("STT connectivity test successful")
@@ -546,7 +546,7 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
         try:
             async with websockets.connect(ws_url, additional_headers=headers, max_size=1000000000) as ws_server:
-                response_text = await asyncio.wait_for(ws_server.recv(), timeout=self.config.timeout)
+                response_text = await asyncio.wait_for(ws_server.recv(), timeout=self._config.timeout)
                 response = json.loads(response_text)
                 logger.info(f"STT server session created: {response}")
 
@@ -556,24 +556,24 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
                     "type": "session.update",
                     "session": {
                         "modalities": ["text"],
-                        "input_audio_format": self.config.format,
-                        "sample_rate": self.config.rate,
+                        "input_audio_format": self._config.format,
+                        "sample_rate": self._config.rate,
                         "input_audio_transcription": {
-                            "language": self.config.language
+                            "language": self._config.language
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": self.config.vad_threshold,
-                            "silence_duration_ms": self.config.vad_silence_duration_ms
+                            "threshold": self._config.vad_threshold,
+                            "silence_duration_ms": self._config.vad_silence_duration_ms
                         }
                     }
                 }
                 await ws_server.send(json.dumps(session_update))
-                logger.info(f"Session.update sent with VAD (threshold={self.config.vad_threshold}, silence={self.config.vad_silence_duration_ms}ms)")
+                logger.info(f"Session.update sent with VAD (threshold={self._config.vad_threshold}, silence={self._config.vad_silence_duration_ms}ms)")
 
                 # Wait for session.updated event
                 try:
-                    response_text = await asyncio.wait_for(ws_server.recv(), timeout=self.config.timeout)
+                    response_text = await asyncio.wait_for(ws_server.recv(), timeout=self._config.timeout)
                     response = json.loads(response_text)
                     logger.info(f"Session updated: {response}")
                 except asyncio.TimeoutError:
@@ -833,7 +833,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             ws_url=context.extra.get("ws_url"),
             auth_headers=context.extra.get("auth_headers"),
         )
-        self.config = VolcSTTConfig(
+        self._config = VolcSTTConfig(
             appid=context.model_appid or "",
             access_token=context.access_token or "",
             ws_url=self._ws_url or "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
@@ -843,25 +843,25 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
                 "resourceid", "volc.bigasr.sauc.duration"
             ),
         )
-        self.audio_file_path = context.audio_file_path
+        self._audio_file_path = context.audio_file_path
         self.success_code = 1000
 
     def get_websocket_url(self) -> str:
         """Get the WebSocket URL for the STT service."""
-        return self.config.ws_url
+        return self._config.ws_url
 
     def get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers for the WebSocket connection."""
         headers = {
-            "X-Api-Resource-Id": self.config.resourceid,
+            "X-Api-Resource-Id": self._config.resourceid,
             "X-Api-Connect-Id": str(uuid.uuid4())
         }
 
-        if self.config.access_token:
-            headers["X-Api-Access-Key"] = self.config.access_token
+        if self._config.access_token:
+            headers["X-Api-Access-Key"] = self._config.access_token
 
-        if self.config.appid:
-            headers["X-Api-App-Key"] = self.config.appid
+        if self._config.appid:
+            headers["X-Api-App-Key"] = self._config.appid
 
         return headers
 
@@ -871,7 +871,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
                         reserved_data=0x00) -> bytearray:
         """Generate protocol header."""
         if compression_type is None:
-            compression_type = GZIP if self.config.compression else NO_COMPRESSION
+            compression_type = GZIP if self._config.compression else NO_COMPRESSION
 
         header = bytearray()
         header_size = 1
@@ -959,13 +959,13 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
     def construct_request(self, reqid: str) -> Dict[str, Any]:
         """Construct request parameters."""
         req = {
-            "user": {"uid": self.config.uid},
+            "user": {"uid": self._config.uid},
             "audio": {
-                'format': self.config.format,
-                "sample_rate": self.config.rate,
-                "bits": self.config.bits,
-                "channel": self.config.channel,
-                "codec": self.config.codec
+                'format': self._config.format,
+                "sample_rate": self._config.rate,
+                "bits": self._config.bits,
+                "channel": self._config.channel,
+                "codec": self._config.codec
             },
             "request": {
                 "model_name": "bigmodel",
@@ -983,7 +983,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         request_params = self.construct_request(reqid)
         payload_bytes = str.encode(json.dumps(request_params))
 
-        if self.config.compression:
+        if self._config.compression:
             payload_bytes = gzip.compress(payload_bytes)
 
         full_client_request = bytearray(self.generate_header(message_type_specific_flags=POS_SEQUENCE))
@@ -993,10 +993,10 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
         headers = self.get_auth_headers()
         headers["X-Api-Connect-Id"] = reqid
-        logger.info(f"Connecting to {self.config.ws_url} with headers: {headers}")
+        logger.info(f"Connecting to {self._config.ws_url} with headers: {headers}")
 
         try:
-            async with websockets.connect(self.config.ws_url, additional_headers=headers,
+            async with websockets.connect(self._config.ws_url, additional_headers=headers,
                                           max_size=1000000000) as ws:
                 await ws.send(full_client_request)
                 res = await ws.recv()
@@ -1012,7 +1012,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
                     start = time.time()
 
-                    if self.config.compression:
+                    if self._config.compression:
                         payload_bytes = gzip.compress(chunk)
                     else:
                         payload_bytes = chunk
@@ -1036,8 +1036,8 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
                     logger.info(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}, seq: {seq}, result: {result}")
 
-                    if self.config.streaming:
-                        sleep_time = max(0.0, self.config.seg_duration / 1000.0 - (time.time() - start))
+                    if self._config.streaming:
+                        sleep_time = max(0.0, self._config.seg_duration / 1000.0 - (time.time() - start))
                         await asyncio.sleep(sleep_time)
 
             return result
@@ -1068,18 +1068,18 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             data = await _f.read()
         audio_data = bytes(data)
 
-        if self.config.format == "mp3":
-            segment_size = self.config.mp3_seg_size
+        if self._config.format == "mp3":
+            segment_size = self._config.mp3_seg_size
             return await self.process_audio_data(audio_data, segment_size)
 
-        if self.config.format == "wav":
+        if self._config.format == "wav":
             nchannels, sampwidth, framerate, _, wav_bytes = self.read_wav_info(audio_data)
             size_per_sec = nchannels * sampwidth * framerate
-            segment_size = int(size_per_sec * self.config.seg_duration / 1000)
+            segment_size = int(size_per_sec * self._config.seg_duration / 1000)
             return await self.process_audio_data(wav_bytes, segment_size)
 
-        if self.config.format == "pcm":
-            segment_size = int(self.config.rate * 2 * self.config.channel * self.config.seg_duration / 500)
+        if self._config.format == "pcm":
+            segment_size = int(self._config.rate * 2 * self._config.channel * self._config.seg_duration / 500)
             return await self.process_audio_data(audio_data, segment_size)
 
         raise Exception("Unsupported format, only wav, mp3, and pcm are supported")
@@ -1094,7 +1094,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         request_params = self.construct_request(reqid)
         payload_bytes = str.encode(json.dumps(request_params))
 
-        if self.config.compression:
+        if self._config.compression:
             payload_bytes = gzip.compress(payload_bytes)
 
         full_client_request = bytearray(self.generate_header(message_type_specific_flags=POS_SEQUENCE))
@@ -1107,7 +1107,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         logger.info(f"Request headers: {headers}")
 
         try:
-            async with websockets.connect(self.config.ws_url, additional_headers=headers,
+            async with websockets.connect(self._config.ws_url, additional_headers=headers,
                                           max_size=1000000000) as ws_server:
                 logger.info("Connected to STT service")
 
@@ -1151,7 +1151,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
                             self.generate_header(message_type=CLIENT_AUDIO_ONLY_REQUEST,
                                                  message_type_specific_flags=POS_SEQUENCE))
 
-                    if self.config.compression:
+                    if self._config.compression:
                         payload_bytes = gzip.compress(client_data)
                     else:
                         payload_bytes = client_data
@@ -1218,8 +1218,8 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
                         logger.info("Last chunk processed, exiting loop")
                         break
 
-                    if self.config.streaming:
-                        sleep_time = max(0, (self.config.seg_duration / 1000.0))
+                    if self._config.streaming:
+                        sleep_time = max(0, (self._config.seg_duration / 1000.0))
                         await asyncio.sleep(sleep_time)
 
         except websockets.exceptions.ConnectionClosedError as e:
@@ -1257,7 +1257,7 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
     async def start_streaming_session(self, ws_client):
         """Start a streaming session for real-time STT."""
         logger.info("Preparing streaming session...")
-        segment_size = int(self.config.rate * self.config.bits * self.config.channel / 8 * 0.1)
+        segment_size = int(self._config.rate * self._config.bits * self._config.channel / 8 * 0.1)
         logger.info(f"Using segment size: {segment_size} bytes")
 
         try:
@@ -1277,14 +1277,14 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
     async def check_connectivity(self) -> bool:
         """Test if the connection to the remote STT service is normal."""
         try:
-            logger.info(f"STT connectivity test started with config: ws_url={self.config.ws_url}")
-            logger.info(f"Test voice file path: {self.audio_file_path}")
+            logger.info(f"STT connectivity test started with config: ws_url={self._config.ws_url}")
+            logger.info(f"Test voice file path: {self._audio_file_path}")
 
-            if not self.audio_file_path:
+            if not self._audio_file_path:
                 logger.warning("No test voice file path provided")
                 return False
 
-            result = await self.process_audio_file(self.audio_file_path)
+            result = await self.process_audio_file(self._audio_file_path)
             logger.info(f"STT process_audio_file result: {result}")
 
             is_success = self._is_stt_result_successful(result)

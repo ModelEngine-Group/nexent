@@ -20,15 +20,15 @@ class MultimodalGateway:
 
     def __init__(self, registry: AdapterRegistry = None) -> None:
         self._registry = registry or get_registry()
-        self._instances: Dict[Tuple, MultimodalAdapter] = {}
+        self._adapter_cache: Dict[Tuple, MultimodalAdapter] = {}
 
     def get_adapter(self, context: ModelContext) -> MultimodalAdapter:
         """Return the adapter for ``context`` (cached after first build)."""
         cls = self._registry.resolve(context.factory, context.modality)
         key = context.cache_key()
-        if key not in self._instances:
-            self._instances[key] = cls(context)
-        return self._instances[key]
+        if key not in self._adapter_cache:
+            self._adapter_cache[key] = cls(context)
+        return self._adapter_cache[key]
 
     async def invoke(self, context: ModelContext, request: Any) -> Any:
         return await self.get_adapter(context).invoke(request)
@@ -43,9 +43,9 @@ class MultimodalGateway:
     def invalidate(self, context: ModelContext = None) -> None:
         """Drop cached instances (all, or a specific context's)."""
         if context is None:
-            self._instances.clear()
+            self._adapter_cache.clear()
         else:
-            self._instances.pop(context.cache_key(), None)
+            self._adapter_cache.pop(context.cache_key(), None)
 
 
 _gateway: MultimodalGateway = None

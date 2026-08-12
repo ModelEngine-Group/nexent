@@ -162,7 +162,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             auth_headers=context.extra.get("auth_headers"),
         )
         extras = context.extra
-        self.config = AliTTSConfig(
+        self._config = AliTTSConfig(
             api_key=context.api_key,
             model=context.model_name,
             voice=context.voice or "Cherry",
@@ -171,20 +171,20 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             format=extras.get("format", "mp3"),
             sample_rate=extras.get("sample_rate", 16000),
         )
-        self.audio_file_path = context.audio_file_path
-        self._is_realtime = self.config.is_realtime_api() or "qwen" in self.config.model.lower()
+        self._audio_file_path = context.audio_file_path
+        self._is_realtime = self._config.is_realtime_api() or "qwen" in self._config.model.lower()
 
     def get_websocket_url(self) -> str:
         """Get the WebSocket URL for the TTS service."""
-        base_url = self.config.get_api_url()
+        base_url = self._config.get_api_url()
         if self._is_realtime:
             separator = "&" if "?" in base_url else "?"
-            return f"{base_url}{separator}model={self.config.model}"
+            return f"{base_url}{separator}model={self._config.model}"
         return base_url
 
     def get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers for the WebSocket connection."""
-        return {"Authorization": f"Bearer {self.config.api_key}"}
+        return {"Authorization": f"Bearer {self._config.api_key}"}
 
     async def generate_speech(
             self,
@@ -195,7 +195,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         ws_url = self.get_websocket_url()
         headers = self.get_auth_headers()
         logger.info(f"Connecting to Ali TTS service at {ws_url}")
-        logger.info(f"Using model: {self.config.model}, voice: {self.config.voice}")
+        logger.info(f"Using model: {self._config.model}, voice: {self._config.voice}")
         logger.info(f"API type: {'Qwen Realtime' if self._is_realtime else 'CosyVoice'}")
 
         if self._is_realtime:
@@ -225,15 +225,15 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
                 "task_group": "audio",
                 "task": "tts",
                 "function": "SpeechSynthesizer",
-                "model": self.config.model,
+                "model": self._config.model,
                 "parameters": {
                     "text_type": "PlainText",
-                    "voice": self.config.voice,
-                    "format": self.config.format,
-                    "sample_rate": self.config.sample_rate,
-                    "volume": int(self.config.volume),
-                    "rate": self.config.speech_rate,
-                    "pitch": self.config.pitch_rate,
+                    "voice": self._config.voice,
+                    "format": self._config.format,
+                    "sample_rate": self._config.sample_rate,
+                    "volume": int(self._config.volume),
+                    "rate": self._config.speech_rate,
+                    "pitch": self._config.pitch_rate,
                     "enable_ssml": False
                 },
                 "input": {}
@@ -404,7 +404,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
     def _qwen_construct_session_update(self) -> Dict[str, Any]:
         """Construct session.update request for Qwen Realtime API."""
         # Use default voice if not specified
-        voice = self.config.voice or "Cherry"
+        voice = self._config.voice or "Cherry"
         return {
             "event_id": self._qwen_generate_event_id(),
             "type": "session.update",
@@ -412,10 +412,10 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
                 "voice": voice,
                 "mode": "server_commit",
                 "language_type": "Auto",
-                "response_format": self._qwen_format_to_response_format(self.config.format),
-                "sample_rate": self.config.sample_rate,
-                "speech_rate": self.config.speech_rate,
-                "volume": int(self.config.volume)
+                "response_format": self._qwen_format_to_response_format(self._config.format),
+                "sample_rate": self._config.sample_rate,
+                "speech_rate": self._config.speech_rate,
+                "volume": int(self._config.volume)
             }
         }
 
@@ -569,7 +569,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
                 # Send session update
                 await ws.send(json.dumps(self._qwen_construct_session_update()))
-                voice = self.config.voice or "Cherry"
+                voice = self._config.voice or "Cherry"
                 logger.info(f"Sent Qwen Realtime session.update with voice={voice}")
 
                 # Send text
@@ -614,7 +614,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
                 # Send session update
                 await ws.send(json.dumps(self._qwen_construct_session_update()))
-                voice = self.config.voice or "Cherry"
+                voice = self._config.voice or "Cherry"
                 logger.info(f"Sent Qwen Realtime session.update with voice={voice}")
 
                 # Send text
@@ -649,7 +649,7 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         api_type = "Qwen Realtime" if self._is_realtime else "CosyVoice"
         try:
             logger.info(f"Ali TTS connectivity test started with {api_type}")
-            logger.info(f"model={self.config.model}, voice={self.config.voice}")
+            logger.info(f"model={self._config.model}, voice={self._config.voice}")
             audio_data = await self.generate_speech("Hello", stream=False)
             is_success = self._is_tts_result_successful(audio_data)
             if is_success:
@@ -736,7 +736,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             ws_url=context.extra.get("ws_url"),
             auth_headers=context.extra.get("auth_headers"),
         )
-        self.config = VolcTTSConfig(
+        self._config = VolcTTSConfig(
             appid=context.model_appid or "",
             token=context.access_token or "",
             speed_ratio=context.speed_ratio,
@@ -746,29 +746,29 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             ws_url=self._ws_url
             or "wss://openspeech.bytedance.com/api/v1/tts/ws_binary",
         )
-        self.audio_file_path = context.audio_file_path
+        self._audio_file_path = context.audio_file_path
         self._request_template = {
-            "app": {"appid": self.config.appid, "token": self.config.token, "cluster": self.config.cluster, "resource_id": self.config.resource_id},
+            "app": {"appid": self._config.appid, "token": self._config.token, "cluster": self._config.cluster, "resource_id": self._config.resource_id},
             "user": {"uid": "388808087185088"},
             "audio": {
-                "voice_type": self.config.voice_type,
-                "encoding": self.config.encoding,
-                "speed_ratio": self.config.speed_ratio,
-                "volume_ratio": self.config.volume_ratio,
-                "pitch_ratio": self.config.pitch_ratio,
+                "voice_type": self._config.voice_type,
+                "encoding": self._config.encoding,
+                "speed_ratio": self._config.speed_ratio,
+                "volume_ratio": self._config.volume_ratio,
+                "pitch_ratio": self._config.pitch_ratio,
             },
             "request": {"reqid": "xxx", "text": "", "text_type": "plain", "operation": "xxx"}
         }
 
     def get_websocket_url(self) -> str:
-        return self.config.api_url
+        return self._config.api_url
 
     def get_auth_headers(self) -> Dict[str, str]:
         headers = {
-            "Authorization": f"Bearer; {self.config.token}",
-            "X-Api-App-Id": self.config.appid,
-            "X-Api-Access-Key": self.config.token,
-            "X-Api-Resource-Id": self.config.resource_id
+            "Authorization": f"Bearer; {self._config.token}",
+            "X-Api-App-Id": self._config.appid,
+            "X-Api-Access-Key": self._config.token,
+            "X-Api-Resource-Id": self._config.resource_id
         }
         return headers
 
@@ -820,7 +820,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         logger.info(f"Volc TTS request prepared, text_len={len(text)}, stream={stream}")
         if not stream:
             buffer = io.BytesIO()
-            async with websockets.connect(self.config.api_url, additional_headers=headers, ping_interval=None) as ws:
+            async with websockets.connect(self._config.api_url, additional_headers=headers, ping_interval=None) as ws:
                 await ws.send(request)
                 while True:
                     response = await ws.recv()
@@ -830,7 +830,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return buffer.getvalue()
         else:
             async def audio_generator():
-                async with websockets.connect(self.config.api_url, additional_headers=headers,
+                async with websockets.connect(self._config.api_url, additional_headers=headers,
                                               ping_interval=None) as ws:
                     await ws.send(request)
                     while True:

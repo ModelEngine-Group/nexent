@@ -48,7 +48,7 @@ _FACTORY_NORMALIZE: Dict[str, str] = {
 }
 
 # Modality-specific default factory when the raw factory is empty/unknown.
-_MODILITY_DEFAULT_FACTORY: Dict[str, str] = {
+_MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
     "llm": "openai",
     "llm_long_context": "openai",
     "vlm": "openai",
@@ -69,7 +69,7 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
         factory = "ali"
     if get_registry().has(factory, modality):
         return factory
-    default = _MODILITY_DEFAULT_FACTORY.get(modality, "openai")
+    default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
     if factory:
         logger.debug(
             "factory %r has no %s adapter; falling back to %r", factory, modality, default

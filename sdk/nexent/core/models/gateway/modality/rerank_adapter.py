@@ -1,4 +1,4 @@
-"""Rerank adapter — protocol implementation sunk in (no _inner wrapper).
+"""Rerank adapter — protocol implementation sunk in (no _model wrapper).
 
 The rerank protocol (OpenAI-compatible + DashScope URL-sniff request formatting,
 retry, connectivity check) lives directly in the adapter. The old

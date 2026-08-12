@@ -81,18 +81,18 @@ class WebSocketTransportMixin:
     ) -> None:
         self._ws_url = ws_url
         self._auth_headers = auth_headers or {}
-        self._ws_session = None  # websockets.ClientConnection, created lazily
+        self._ws_connection = None  # websockets.ClientConnection, created lazily
 
     async def connect(self) -> None:
         # The wrapped model owns its WS lifecycle; the mixin only carries state.
         return None
 
     async def close(self) -> None:
-        if self._ws_session is not None:
+        if self._ws_connection is not None:
             try:
-                await self._ws_session.close()
+                await self._ws_connection.close()
             finally:
-                self._ws_session = None
+                self._ws_connection = None
 
     async def health_check(self) -> bool:
         return self._ws_url is not None

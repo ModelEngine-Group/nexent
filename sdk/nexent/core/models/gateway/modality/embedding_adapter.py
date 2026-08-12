@@ -1,4 +1,4 @@
-"""Embedding adapter — protocol implementation sunk in (no _inner wrapper).
+"""Embedding adapter — protocol implementation sunk in (no _model wrapper).
 
 The HTTP REST embedding protocol (session POST + retry loop + response parsing
 + dimension_check connectivity test) lives directly in the adapters. The old
