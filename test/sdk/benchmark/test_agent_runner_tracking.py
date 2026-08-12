@@ -271,6 +271,13 @@ def _context_item(item_id, text):
     )
 
 
+@pytest.fixture
+def configured_model(monkeypatch):
+    monkeypatch.setattr(agent_runner, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(agent_runner, "LLM_MODEL_NAME", "test-model")
+    monkeypatch.setattr(agent_runner, "LLM_API_URL", "https://model.invalid")
+
+
 def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypatch):
     context_items = [
         _context_item("system:header", "default header"),
@@ -343,6 +350,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
 
 def test_build_agent_run_info_uses_fallback_context_when_segments_are_empty(
     monkeypatch,
+    configured_model,
 ):
     monkeypatch.setattr(
         agent_runner,
@@ -370,6 +378,7 @@ def test_build_agent_run_info_uses_fallback_context_when_segments_are_empty(
 
 def test_build_agent_run_info_with_custom_prompt_uses_single_context_item(
     monkeypatch,
+    configured_model,
 ):
     monkeypatch.setattr(
         agent_runner,

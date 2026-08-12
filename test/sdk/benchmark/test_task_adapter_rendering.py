@@ -1,9 +1,10 @@
+import importlib
 import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
-
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+
 from sdk.benchmark.agent_runner import AgentRunResult
 from sdk.benchmark.generic.runtime import task_adapter
 from sdk.benchmark.generic.runtime.task_adapter import render_precompact_system_prompt
@@ -159,19 +160,39 @@ def test_make_nexent_task_maps_agent_run_to_benchmark_output(
         lambda context_items: "rendered system",
     )
 
-    import provenance.parity_snapshot as parity_module
-    import tools.web_evidence as web_evidence_module
+    from sdk.benchmark.generic.provenance import parity_snapshot as parity_module
+    from sdk.benchmark.generic.tools import web_evidence as web_evidence_module
 
     monkeypatch.setattr(
         parity_module,
         "build_agent_run_info_parity_snapshot",
         lambda *args, **kwargs: {"snapshot": "stable"},
     )
+    try:
+        legacy_parity_module = importlib.import_module("provenance.parity_snapshot")
+    except ImportError:
+        legacy_parity_module = None
+    if legacy_parity_module is not None:
+        monkeypatch.setattr(
+            legacy_parity_module,
+            "build_agent_run_info_parity_snapshot",
+            lambda *args, **kwargs: {"snapshot": "stable"},
+        )
     monkeypatch.setattr(
         web_evidence_module,
         "build_web_evidence",
         lambda *args, **kwargs: {"exa_search_calls": 1},
     )
+    try:
+        legacy_web_evidence_module = importlib.import_module("tools.web_evidence")
+    except ImportError:
+        legacy_web_evidence_module = None
+    if legacy_web_evidence_module is not None:
+        monkeypatch.setattr(
+            legacy_web_evidence_module,
+            "build_web_evidence",
+            lambda *args, **kwargs: {"exa_search_calls": 1},
+        )
 
     task = task_adapter.make_nexent_task(
         system_prompt=system_prompt,
