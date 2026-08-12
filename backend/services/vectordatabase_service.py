@@ -740,11 +740,10 @@ class ElasticSearchService:
         """Delete the canonical union of ES references and active ledger objects."""
         try:
             knowledge = get_knowledge_record({"index_name": index_name}) or {}
-        except Exception as exc:
-            logger.error(
-                "Failed to retrieve knowledge record for index '%s': %s",
+        except Exception:
+            logger.exception(
+                "Failed to retrieve knowledge record for index '%s'",
                 index_name,
-                exc,
             )
             knowledge = {}
         tenant_id = knowledge.get("tenant_id")
@@ -757,30 +756,12 @@ class ElasticSearchService:
                     tenant_id=tenant_id,
                     knowledge_id=knowledge_id,
                 ) or []
-            except Exception as exc:
-                logger.error(
-                    "Failed to retrieve active storage ledger objects for index '%s': %s",
+            except Exception:
+                logger.exception(
+                    "Failed to retrieve active storage ledger objects for index '%s'",
                     index_name,
-                    exc,
                 )
 
-        targets: Dict[tuple, Dict[str, Optional[str]]] = {}
-        ledger_aliases: Dict[str, tuple] = {}
-        for row in ledger_objects:
-            bucket_name = row.get("bucket_name")
-            object_name = row.get("object_name")
-            if not bucket_name or not object_name:
-                continue
-            identity = ("canonical", bucket_name, object_name)
-            targets[identity] = {
-                "bucket_name": bucket_name,
-                "object_name": object_name,
-            }
-            ledger_aliases[object_name] = identity
-            ledger_aliases[f"s3://{bucket_name}/{object_name}"] = identity
-            ledger_aliases[f"/{bucket_name}/{object_name}"] = identity
-
-        invalid_entries = 0
         try:
             file_list_result = await ElasticSearchService.list_files(
                 index_name,
@@ -788,82 +769,29 @@ class ElasticSearchService:
                 vdb_core=vdb_core,
             )
             files_to_delete = file_list_result.get("files", [])
-        except Exception as exc:
-            logger.error(
-                "Failed to retrieve file list for index '%s': %s",
+        except Exception:
+            logger.exception(
+                "Failed to retrieve file list for index '%s'",
                 index_name,
-                exc,
             )
             files_to_delete = []
 
-        for file_info in files_to_delete:
-            raw_path = file_info.get("path_or_url")
-            if not raw_path:
-                logger.warning(
-                    "Could not find 'path_or_url' for file entry: %s. Skipping deletion.",
-                    file_info,
-                )
-                invalid_entries += 1
-                continue
-            if raw_path in ledger_aliases:
-                continue
-            reference = resolve_storage_reference(raw_path)
-            if reference:
-                identity = (
-                    "canonical",
-                    reference.bucket_name,
-                    reference.object_name,
-                )
-                targets.setdefault(identity, {
-                    "bucket_name": reference.bucket_name,
-                    "object_name": reference.object_name,
-                })
-            else:
-                targets.setdefault(("raw", raw_path), {
-                    "bucket_name": None,
-                    "object_name": raw_path,
-                })
+        targets, invalid_entries = ElasticSearchService._collect_kb_source_targets(
+            ledger_objects,
+            files_to_delete,
+        )
 
         deleted_count = 0
         failed_count = invalid_entries
         for target in targets.values():
-            object_name = target["object_name"]
-            bucket_name = target["bucket_name"]
-            try:
-                delete_result = delete_file(
-                    object_name=object_name,
-                    bucket=bucket_name,
-                )
-                if not delete_result.get("success"):
-                    failed_count += 1
-                    logger.error(
-                        "Failed to delete object '%s' from MinIO: %s",
-                        object_name,
-                        delete_result.get("error", "unknown deletion error"),
-                    )
-                    continue
-
+            if ElasticSearchService._delete_kb_source_target(
+                target=target,
+                tenant_id=tenant_id,
+                updated_by=updated_by,
+            ):
                 deleted_count += 1
-                if tenant_id and bucket_name:
-                    try:
-                        release_storage_charge(
-                            tenant_id=tenant_id,
-                            bucket_name=bucket_name,
-                            object_name=object_name,
-                            updated_by=updated_by,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to release storage charge after deleting '%s'",
-                            object_name,
-                        )
-            except Exception as exc:
+            else:
                 failed_count += 1
-                logger.error(
-                    "An exception occurred while deleting object '%s' from MinIO: %s",
-                    object_name,
-                    exc,
-                )
 
         logger.info(
             "MinIO file deletion summary for index '%s': %s succeeded, %s failed.",
@@ -876,6 +804,79 @@ class ElasticSearchService:
             "deleted_count": deleted_count,
             "failed_count": failed_count,
         }
+
+    @staticmethod
+    def _collect_kb_source_targets(
+        ledger_objects: List[Dict[str, Any]],
+        es_files: List[Dict[str, Any]],
+    ) -> tuple[Dict[tuple, Dict[str, str]], int]:
+        """Build canonical deletion targets and skip ambiguous ES references."""
+        targets: Dict[tuple, Dict[str, str]] = {}
+        ledger_aliases = set()
+        for row in ledger_objects:
+            bucket_name = row.get("bucket_name")
+            object_name = row.get("object_name")
+            if not bucket_name or not object_name:
+                continue
+            identity = (bucket_name, object_name)
+            targets[identity] = {
+                "bucket_name": bucket_name,
+                "object_name": object_name,
+            }
+            ledger_aliases.update({
+                object_name,
+                f"s3://{bucket_name}/{object_name}",
+                f"/{bucket_name}/{object_name}",
+            })
+
+        invalid_entries = 0
+        for file_info in es_files:
+            raw_path = file_info.get("path_or_url")
+            if not raw_path or raw_path in ledger_aliases:
+                invalid_entries += int(not raw_path)
+                continue
+            reference = resolve_storage_reference(raw_path)
+            if reference is None:
+                invalid_entries += 1
+                logger.warning("Skipping non-canonical KB source reference during deletion")
+                continue
+            identity = (reference.bucket_name, reference.object_name)
+            targets.setdefault(identity, {
+                "bucket_name": reference.bucket_name,
+                "object_name": reference.object_name,
+            })
+        return targets, invalid_entries
+
+    @staticmethod
+    def _delete_kb_source_target(
+        *,
+        target: Dict[str, str],
+        tenant_id: Optional[str],
+        updated_by: Optional[str],
+    ) -> bool:
+        """Delete one canonical source target and release its ledger charge."""
+        object_name = target["object_name"]
+        bucket_name = target["bucket_name"]
+        try:
+            delete_result = delete_file(object_name=object_name, bucket=bucket_name)
+            if not delete_result.get("success"):
+                logger.error("Failed to delete a canonical KB source object from MinIO")
+                return False
+        except Exception:
+            logger.exception("Failed to delete a canonical KB source object from MinIO")
+            return False
+
+        if tenant_id:
+            try:
+                release_storage_charge(
+                    tenant_id=tenant_id,
+                    bucket_name=bucket_name,
+                    object_name=object_name,
+                    updated_by=updated_by,
+                )
+            except Exception:
+                logger.exception("Failed to release a deleted KB source object's charge")
+        return True
 
     @staticmethod
     def create_index(
@@ -1902,11 +1903,10 @@ class ElasticSearchService:
             )
             try:
                 knowledge = get_knowledge_record({"index_name": index_name}) or {}
-            except Exception as exc:
-                logger.error(
-                    "Failed to resolve storage ownership for index '%s': %s",
+            except Exception:
+                logger.exception(
+                    "Failed to resolve storage ownership for index '%s'",
                     index_name,
-                    exc,
                 )
                 knowledge = {}
             minio_part = ElasticSearchService.delete_source_file(

@@ -614,7 +614,7 @@ async def remove_storage_file(
         user_id, tenant_id = get_current_user_id(authorization)
 
         if not check_file_access(object_name, user_id, tenant_id):
-            logger.warning(f"[remove_storage_file] Access denied: object_name={object_name}, user_id={user_id}")
+            logger.warning("[remove_storage_file] Access denied")
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="You don't have permission to delete this file"
@@ -632,14 +632,10 @@ async def remove_storage_file(
     except HTTPException:
         raise
     except PermissionError as e:
-        logger.warning(
-            "[remove_storage_file] Tenant ownership check failed: object_name=%s, error=%s",
-            object_name,
-            str(e),
-        )
+        logger.warning("[remove_storage_file] Tenant ownership check failed")
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
-    except Exception as e:
-        logger.error(f"Remove storage file error: {str(e)}")
+    except Exception:
+        logger.exception("Remove storage file error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Remove storage file error."
         )

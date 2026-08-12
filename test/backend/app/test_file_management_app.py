@@ -10,6 +10,7 @@ import types
 from typing import Any, AsyncGenerator, Dict, List
 
 import pytest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -788,13 +789,14 @@ async def test_remove_storage_file_maps_tenant_ownership_failure_to_forbidden(mo
         raise PermissionError("not owned by tenant")
 
     monkeypatch.setattr(file_management_app, "delete_file_impl", deny_delete)
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         await file_management_app.remove_storage_file(
             object_name="knowledge_base/private.pdf",
             authorization=MOCK_AUTH,
         )
 
-    assert getattr(exc_info.value, "status_code", None) == 403
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "not owned by tenant"
 
 
 # --- get_storage_file_batch_urls tests ---

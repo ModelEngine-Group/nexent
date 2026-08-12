@@ -927,6 +927,14 @@ class TestResolveMinioUploadFolder:
 class TestUploadQuotaEnforcement:
     """Test KB-only accounting, batch enforcement, and compensation."""
 
+    @pytest.fixture(autouse=True)
+    def _install_knowledge_storage_stub(self, monkeypatch):
+        monkeypatch.setitem(
+            sys.modules,
+            "services.knowledge_storage_service",
+            knowledge_storage_stub,
+        )
+
     @staticmethod
     def _quota_module(quota_service):
         module = types.ModuleType("services.quota_service")
@@ -934,7 +942,7 @@ class TestUploadQuotaEnforcement:
         return module
 
     @pytest.mark.asyncio
-    async def test_upload_runs_pre_and_post_write_checks(self):
+    async def test_upload_runs_pre_and_post_write_checks(self, monkeypatch):
         upload = MagicMock(filename="quota.txt", size=128)
         context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
         knowledge_storage_stub.resolve_storage_context.return_value = context
@@ -942,10 +950,10 @@ class TestUploadQuotaEnforcement:
         quota_service.check_hard_limit.return_value = {"stage": "pre"}
         quota_service.check_hard_limit_post_write.return_value = {"stage": "post"}
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": self._quota_module(quota_service)},
-        ), patch(
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(
                 return_value=[
@@ -981,7 +989,7 @@ class TestUploadQuotaEnforcement:
         assert result.quota_status == {"stage": "post"}
 
     @pytest.mark.asyncio
-    async def test_missing_sizes_read_complete_batch_and_restore_streams(self):
+    async def test_missing_sizes_read_complete_batch_and_restore_streams(self, monkeypatch):
         first = MagicMock(filename="first.txt", size=None)
         first.read = AsyncMock(return_value=b"a" * 300)
         first.seek = AsyncMock()
@@ -992,10 +1000,10 @@ class TestUploadQuotaEnforcement:
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": self._quota_module(quota_service)},
-        ), patch(
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(return_value=[]),
         ):
@@ -1016,7 +1024,38 @@ class TestUploadQuotaEnforcement:
         assert second.seek.await_args_list[-1].args == (0,)
 
     @pytest.mark.asyncio
-    async def test_zero_declared_size_reads_actual_nonempty_stream(self):
+    async def test_missing_size_uses_spooled_file_without_reading_body(self, monkeypatch):
+        spooled_file = BytesIO(b"spooled-content")
+        spooled_file.seek(3)
+        upload = MagicMock(filename="spooled.txt", size=None, file=spooled_file)
+        upload.read = AsyncMock()
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[]),
+        ):
+            await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                index_name="kb-index",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            len(b"spooled-content"),
+            index_name="kb-index",
+        )
+        upload.read.assert_not_awaited()
+        assert spooled_file.tell() == 3
+
+    @pytest.mark.asyncio
+    async def test_zero_declared_size_reads_actual_nonempty_stream(self, monkeypatch):
         upload = MagicMock(filename="zero.txt", size=0)
         upload.read = AsyncMock(return_value=b"actual-content")
         upload.seek = AsyncMock()
@@ -1024,10 +1063,10 @@ class TestUploadQuotaEnforcement:
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": self._quota_module(quota_service)},
-        ), patch(
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(return_value=[]),
         ):
@@ -1046,7 +1085,7 @@ class TestUploadQuotaEnforcement:
         assert upload.seek.await_args_list[-1].args == (0,)
 
     @pytest.mark.asyncio
-    async def test_complete_batch_quota_error_prevents_minio_write(self):
+    async def test_complete_batch_quota_error_prevents_minio_write(self, monkeypatch):
         uploads = [
             MagicMock(filename="a.txt", size=300),
             MagicMock(filename="b.txt", size=200),
@@ -1058,10 +1097,8 @@ class TestUploadQuotaEnforcement:
         quota_service.check_hard_limit.side_effect = quota_error
 
         quota_module = self._quota_module(quota_service)
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": quota_module},
-        ), patch(
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             new_callable=AsyncMock,
         ) as upload_to_minio_mock:
@@ -1081,15 +1118,13 @@ class TestUploadQuotaEnforcement:
         upload_to_minio_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_non_kb_upload_skips_quota_and_accounting(self):
+    async def test_non_kb_upload_skips_quota_and_accounting(self, monkeypatch):
         upload = MagicMock(filename="attachment.txt", size=128)
         quota_service = MagicMock()
         quota_module = self._quota_module(quota_service)
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": quota_module},
-        ), patch(
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(return_value=[{
                 "success": True,
@@ -1112,7 +1147,7 @@ class TestUploadQuotaEnforcement:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure_stage", ["ledger", "post-check"])
-    async def test_failure_compensates_only_new_batch(self, failure_stage):
+    async def test_failure_compensates_only_new_batch(self, failure_stage, monkeypatch):
         upload = MagicMock(filename="quota.txt", size=128)
         context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
         knowledge_storage_stub.resolve_storage_context.return_value = context
@@ -1135,10 +1170,10 @@ class TestUploadQuotaEnforcement:
             },
         ]
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": self._quota_module(quota_service)},
-        ), patch(
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(return_value=upload_results),
         ):
@@ -1164,7 +1199,7 @@ class TestUploadQuotaEnforcement:
         quota_service.invalidate_usage_cache.assert_called_with("tenant-id")
 
     @pytest.mark.asyncio
-    async def test_different_object_names_are_committed_separately(self):
+    async def test_different_object_names_are_committed_separately(self, monkeypatch):
         uploads = [
             MagicMock(filename="same.txt", size=4),
             MagicMock(filename="same.txt", size=4),
@@ -1173,10 +1208,10 @@ class TestUploadQuotaEnforcement:
         knowledge_storage_stub.resolve_storage_context.return_value = context
         quota_service = MagicMock()
 
-        with patch.dict(
-            sys.modules,
-            {"services.quota_service": self._quota_module(quota_service)},
-        ), patch(
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
             "backend.services.file_management_service.upload_to_minio",
             AsyncMock(return_value=[
                 {

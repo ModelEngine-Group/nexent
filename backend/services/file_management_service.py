@@ -298,6 +298,25 @@ async def _get_complete_upload_batch_size(files: List[UploadFile]) -> int:
             total_size += declared_size
             continue
 
+        file_object = getattr(upload, "file", None)
+        if file_object is not None:
+            original_position = None
+            try:
+                original_position = file_object.tell()
+                file_object.seek(0, os.SEEK_END)
+                measured_size = file_object.tell()
+                if isinstance(measured_size, int) and measured_size >= 0:
+                    total_size += measured_size
+                    continue
+            except (AttributeError, OSError, TypeError, ValueError):
+                pass
+            finally:
+                if original_position is not None:
+                    try:
+                        file_object.seek(original_position)
+                    except (AttributeError, OSError, TypeError, ValueError):
+                        logger.warning("Failed to restore upload file position")
+
         try:
             await upload.seek(0)
             content = await upload.read()
@@ -556,12 +575,13 @@ async def delete_file_impl(
                 )
 
     if reference:
-        result = delete_file(
+        result = await asyncio.to_thread(
+            delete_file,
             object_name=reference.object_name,
             bucket=reference.bucket_name,
         )
     else:
-        result = delete_file(object_name=object_name)
+        result = await asyncio.to_thread(delete_file, object_name=object_name)
     if not result["success"]:
         raise Exception(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")

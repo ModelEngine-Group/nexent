@@ -2482,15 +2482,14 @@ class TestElasticSearchService(unittest.TestCase):
             "knowledge_base/failed.pdf": {"state": "PROCESS_FAILED"}
         }
 
+        delete_operation = ElasticSearchService.delete_document_by_scope(
+            "test_index",
+            "knowledge_base/failed.pdf",
+            "source_only",
+            self.mock_vdb_core,
+        )
         with self.assertRaises(ValueError):
-            asyncio.run(
-                ElasticSearchService.delete_document_by_scope(
-                    "test_index",
-                    "knowledge_base/failed.pdf",
-                    "source_only",
-                    self.mock_vdb_core,
-                )
-            )
+            asyncio.run(delete_operation)
 
         mock_delete_file.assert_not_called()
         mock_release.assert_not_called()
@@ -2580,6 +2579,43 @@ class TestElasticSearchService(unittest.TestCase):
             object_name="knowledge_base/indexed.pdf",
             updated_by="user-1",
         )
+
+    @patch('backend.services.vectordatabase_service.release_storage_charge')
+    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('backend.services.vectordatabase_service.list_committed_storage_objects')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_kb_source_cleanup_skips_non_canonical_es_reference(
+        self,
+        mock_get_knowledge,
+        mock_list_ledger,
+        mock_delete_file,
+        mock_resolve,
+        mock_release,
+    ):
+        mock_get_knowledge.return_value = {
+            "tenant_id": "tenant-1",
+            "knowledge_id": 7,
+        }
+        mock_list_ledger.return_value = []
+        mock_resolve.return_value = None
+
+        with patch(
+            'backend.services.vectordatabase_service.ElasticSearchService.list_files',
+            new_callable=AsyncMock,
+            return_value={"files": [{"path_or_url": "https://example.com/source.pdf"}]},
+        ):
+            result = asyncio.run(
+                ElasticSearchService._delete_kb_source_objects(
+                    "kb-1", self.mock_vdb_core, updated_by="user-1"
+                )
+            )
+
+        self.assertEqual(result["total_files_found"], 1)
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["failed_count"], 1)
+        mock_delete_file.assert_not_called()
+        mock_release.assert_not_called()
 
     def test_delete_index_skips_duplicate_source_cleanup(self):
         from backend.services.vectordatabase_service import _SKIP_INDEX_SOURCE_CLEANUP
@@ -5178,14 +5214,18 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         files_payload = {
             "files": [
-                {"path_or_url": "obj-success", "source_type": "minio"},
-                {"path_or_url": "obj-fail", "source_type": "minio"},
+                {"path_or_url": "knowledge_base/obj-success", "source_type": "minio"},
+                {"path_or_url": "knowledge_base/obj-fail", "source_type": "minio"},
             ]
         }
 
         # delete_file returns success for first, failure for second
         with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
+                patch('backend.services.vectordatabase_service.resolve_storage_reference',
+                      side_effect=lambda value: SimpleNamespace(
+                          bucket_name="nexent", object_name=value
+                      )), \
                 patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
                 patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
