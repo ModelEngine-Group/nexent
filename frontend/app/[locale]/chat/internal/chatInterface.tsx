@@ -215,6 +215,10 @@ export function ChatInterface() {
   const [selectedMessageId, setSelectedMessageId] = useState<
     string | undefined
   >();
+  const [selectedCitationKey, setSelectedCitationKey] = useState<
+    string | undefined
+  >();
+  const [selectedCitationContext, setSelectedCitationContext] = useState("");
 
   // Add force scroll to bottom state control
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
@@ -1832,7 +1836,19 @@ export function ChatInterface() {
   const handleMessageSelect = useCallback((messageId: string) => {
     setShowRightPanel(true);
     setSelectedMessageId(messageId);
+    setSelectedCitationKey(undefined);
+    setSelectedCitationContext("");
   }, []);
+
+  const handleCitationClick = useCallback(
+    (messageId: string, citationKey: string, answerText: string) => {
+      setShowRightPanel(true);
+      setSelectedMessageId(messageId);
+      setSelectedCitationKey(citationKey);
+      setSelectedCitationContext(answerText);
+    },
+    []
+  );
 
   const hydrateConversationMessageIds = useCallback(
     async (conversationId: number) => {
@@ -2205,6 +2221,7 @@ export function ChatInterface() {
               selectedAgentId={selectedAgentId}
               onAgentSelect={handleAgentSelectWithGreeting}
               onCitationHover={clearCompletedIndicator}
+              onCitationClick={handleCitationClick}
               onScroll={clearCompletedIndicator}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
@@ -2226,6 +2243,8 @@ export function ChatInterface() {
             isVisible={showRightPanel}
             toggleRightPanel={toggleRightPanel}
             selectedMessageId={selectedMessageId}
+            selectedCitationKey={selectedCitationKey}
+            selectedCitationContext={selectedCitationContext}
           />
         </div>
       </Layout>

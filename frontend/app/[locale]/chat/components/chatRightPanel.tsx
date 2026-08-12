@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Database, X, Server } from "lucide-react";
 
@@ -18,12 +24,131 @@ interface SearchResultItemProps {
   result: SearchResult;
   t: any; // TFunction from react-i18next
   appConfig: AppConfig | null;
+  selected: boolean;
+  answerContext: string;
+}
+
+const getCitationKey = (result: SearchResult): string | undefined => {
+  if (
+    !result.tool_sign ||
+    !Number.isFinite(result.cite_index) ||
+    (result.cite_index ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  return `${result.tool_sign.toLowerCase()}${result.cite_index}`;
+};
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getCitedAnswerContext = (answer: string, citationKey: string): string => {
+  const marker = `\\[\\[${escapeRegExp(citationKey)}\\]\\]`;
+  const matches =
+    answer.match(new RegExp(`[^\\n。！？]*${marker}`, "gi")) || [];
+  return matches.join("\n");
+};
+
+const extractHighlightTerms = (
+  answerContext: string,
+  sourceText: string
+): string[] => {
+  if (!answerContext || !sourceText) return [];
+
+  const sourceLower = sourceText.toLowerCase();
+  const candidates = new Set<string>();
+  const addIfPresent = (value: string) => {
+    const term = value.trim();
+    if (term.length >= 2 && sourceLower.includes(term.toLowerCase())) {
+      candidates.add(term);
+    }
+  };
+
+  for (const value of answerContext.match(
+    /\b(?:\d{1,3}(?:\.\d{1,3}){3}|\d{2,}(?:[-:.]\d{1,4})*)\b/g
+  ) || []) {
+    addIfPresent(value);
+  }
+  for (const value of answerContext.match(/[A-Za-z_][A-Za-z0-9_.\/-]{2,}/g) ||
+    []) {
+    addIfPresent(value);
+  }
+
+  for (const phrase of answerContext.match(/[\u4e00-\u9fff]{3,}/g) || []) {
+    for (let start = 0; start <= phrase.length - 3;) {
+      let matched = "";
+      for (
+        let length = Math.min(12, phrase.length - start);
+        length >= 3;
+        length -= 1
+      ) {
+        const candidate = phrase.slice(start, start + length);
+        if (sourceText.includes(candidate)) {
+          matched = candidate;
+          break;
+        }
+      }
+      if (matched) {
+        candidates.add(matched);
+        start += matched.length;
+      } else {
+        start += 1;
+      }
+    }
+  }
+
+  return Array.from(candidates)
+    .sort((left, right) => right.length - left.length)
+    .filter(
+      (term, index, terms) =>
+        !terms.slice(0, index).some((kept) => kept.includes(term))
+    )
+    .slice(0, 8);
+};
+
+function HighlightedChunkText({
+  text,
+  terms,
+}: {
+  text: string;
+  terms: string[];
+}) {
+  if (!terms.length) return <>{text}</>;
+
+  const matcher = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "gi");
+  return (
+    <>
+      {text.split(matcher).map((part, index) => {
+        const isMatch = terms.some(
+          (term) => part.toLowerCase() === term.toLowerCase()
+        );
+        return isMatch ? (
+          <mark
+            key={`${part}-${index}`}
+            className="rounded-sm bg-yellow-200 px-0.5 text-inherit"
+          >
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+        );
+      })}
+    </>
+  );
 }
 
 // Search result item component - moved to module scope to prevent re-creation on each render
-function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
+function SearchResultItem({
+  result,
+  t,
+  appConfig,
+  selected,
+  answerContext,
+}: SearchResultItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const itemRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLParagraphElement>(null);
   const title = result.title || t("chatRightPanel.unknownTitle");
   const url = result.url || "#";
   const text = result.text || t("chatRightPanel.noContentDescription");
@@ -45,6 +170,23 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     result.score_details?.datamate_base_url ||
     result.score_details?.datamate_baseUrl ||
     result.score_details?.base_url;
+  const highlightTerms = useMemo(
+    () => (selected ? extractHighlightTerms(answerContext, text) : []),
+    [answerContext, selected, text]
+  );
+
+  useEffect(() => {
+    if (!selected) return;
+    itemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setIsExpanded(true);
+    const firstHighlight = textRef.current?.querySelector("mark");
+    if (firstHighlight && textRef.current) {
+      textRef.current.scrollTop = Math.max(
+        0,
+        firstHighlight.offsetTop - textRef.current.offsetTop - 16
+      );
+    }
+  }, [highlightTerms, selected]);
 
   const resolveSourceLabel = (): string => {
     if (source_type === "datamate") {
@@ -206,10 +348,25 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
   }
 
   return (
-    <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
+    <div
+      ref={itemRef}
+      className={`p-3 rounded-lg border text-xs transition-colors overflow-hidden ${
+        selected
+          ? "border-blue-300 shadow-sm"
+          : "border-gray-200 hover:bg-gray-50"
+      }`}
+    >
       <div className="flex flex-col">
         <div>
-          {titleNode}
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">{titleNode}</div>
+            {Number.isFinite(result.cite_index) &&
+              (result.cite_index ?? -1) >= 0 && (
+                <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">
+                  {result.cite_index}
+                </span>
+              )}
+          </div>
 
           {published_date && (
             <div className="text-gray-500 mt-1 text-sm">
@@ -220,11 +377,16 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
 
         <div>
           <p
-            className={`text-gray-700 mt-1 text-sm ${
-              isExpanded ? "" : "line-clamp-3"
+            ref={textRef}
+            className={`text-gray-700 mt-1 text-sm whitespace-pre-wrap ${
+              selected
+                ? "max-h-52 overflow-y-auto pr-1"
+                : isExpanded
+                  ? ""
+                  : "line-clamp-3"
             }`}
           >
-            {text}
+            <HighlightedChunkText text={text} terms={highlightTerms} />
           </p>
         </div>
 
@@ -280,7 +442,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
             )}
           </div>
 
-          {text.length > 150 && (
+          {!selected && text.length > 150 && (
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="text-sm text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2 transition-colors"
@@ -303,6 +465,8 @@ export function ChatRightPanel({
   isVisible = false,
   toggleRightPanel,
   selectedMessageId,
+  selectedCitationKey,
+  selectedCitationContext,
 }: ChatRightPanelProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
@@ -318,6 +482,23 @@ export function ChatRightPanel({
 
   // Get the currently selected message
   const currentMessage = messages.find((msg) => msg.id === selectedMessageId);
+  const selectedAnswerContext = useMemo(() => {
+    if (!selectedCitationKey) return "";
+    const answer =
+      selectedCitationContext ||
+      currentMessage?.finalAnswer ||
+      currentMessage?.content ||
+      "";
+    // Older persisted conversations can lose the raw [[a1]] marker after
+    // rendering. In that case, only shared terms from the answer and the
+    // selected retrieval chunk are highlighted.
+    return getCitedAnswerContext(answer, selectedCitationKey) || answer;
+  }, [
+    currentMessage?.content,
+    currentMessage?.finalAnswer,
+    selectedCitationContext,
+    selectedCitationKey,
+  ]);
 
   // Handle image load failure
   const handleImageLoadFail = useCallback(
@@ -443,6 +624,12 @@ export function ChatRightPanel({
             filename: result.filename || "",
             score: typeof result.score === "number" ? result.score : undefined,
             score_details: result.score_details || {},
+            tool_sign: result.tool_sign,
+            cite_index: result.cite_index,
+            asset_id: result.asset_id,
+            preview_url: result.preview_url,
+            download_url: result.download_url,
+            object_name: result.object_name,
             isExpanded: false,
           };
 
@@ -662,10 +849,14 @@ export function ChatRightPanel({
                     <div className="space-y-3" style={{ maxWidth: "100%" }}>
                       {searchResults.map((result, index) => (
                         <SearchResultItem
-                          key={`result-${index}`}
+                          key={getCitationKey(result) || `result-${index}`}
                           result={result}
                           t={t}
                           appConfig={appConfig}
+                          selected={
+                            getCitationKey(result) === selectedCitationKey
+                          }
+                          answerContext={selectedAnswerContext}
                         />
                       ))}
                     </div>

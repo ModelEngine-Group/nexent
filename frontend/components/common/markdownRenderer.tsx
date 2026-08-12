@@ -38,6 +38,7 @@ interface MarkdownRendererProps {
   searchResults?: SearchResult[];
   showDiagramToggle?: boolean;
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
   enableMultimodal?: boolean;
   /**
    * When true, resolve s3:// media URLs in markdown into data URLs (base64)
@@ -597,10 +598,12 @@ const HoverableText = ({
   text,
   searchResults,
   onCitationHover,
+  onCitationClick,
 }: {
   text: string;
   searchResults?: SearchResult[];
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const containerRef = React.useRef<HTMLSpanElement>(null);
@@ -627,6 +630,15 @@ const HoverableText = ({
   const matchedResult = searchResults?.find(
     (result) => result.tool_sign === toolSign && result.cite_index === citeIndex
   );
+
+  const handleCitationClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext =
+        containerRef.current?.closest("p, li, td")?.textContent || "";
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
 
   // Handle mouse events
   React.useEffect(() => {
@@ -759,7 +771,10 @@ const HoverableText = ({
             className="inline-flex items-center relative"
             style={{ zIndex: isOpen ? 1000 : "auto" }}
           >
-            <span className="inline-flex items-center cursor-pointer transition-colors">
+            <span
+              className="inline-flex items-center cursor-pointer transition-colors"
+              onClick={handleCitationClick}
+            >
               <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
             </span>
           </span>
@@ -1092,6 +1107,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   searchResults = [],
   showDiagramToggle = true,
   onCitationHover,
+  onCitationClick,
   enableMultimodal = true,
   resolveS3Media = false,
   trustedImageUrls = [],
@@ -1219,6 +1235,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                   text={innerText}
                   searchResults={searchResults}
                   onCitationHover={onCitationHover}
+                  onCitationClick={onCitationClick}
                 />
               );
             } else {

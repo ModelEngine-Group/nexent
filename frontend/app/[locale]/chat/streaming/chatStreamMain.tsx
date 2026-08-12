@@ -61,6 +61,7 @@ export function ChatStreamMain({
   selectedAgentId,
   onAgentSelect,
   onCitationHover,
+  onCitationClick,
   onScroll,
   agentGreeting,
   agentExampleQuestions,
@@ -179,6 +180,7 @@ export function ChatStreamMain({
         index={index}
         currentConversationId={currentConversationId}
         onCitationHover={onCitationHover}
+        onCitationClick={onCitationClick}
         shareSelected={shareSelected}
       />
       {message.role === MESSAGE_ROLES.ASSISTANT &&

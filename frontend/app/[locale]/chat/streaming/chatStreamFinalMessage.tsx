@@ -57,6 +57,11 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  onCitationClick?: (
+    messageId: string,
+    citationKey: string,
+    answerText: string
+  ) => void;
   shareSelected?: boolean;
 }
 
@@ -77,6 +82,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  onCitationClick,
   shareSelected = false,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
@@ -320,7 +326,9 @@ function ChatStreamFinalMessageInner({
         {/* Assistant message part - show final answer or content */}
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
-            <div className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}>
+            <div
+              className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}
+            >
               {/* Max steps warning - show when message is complete and has maxStepsInfo */}
               {message.isComplete &&
                 message.steps &&
@@ -354,6 +362,18 @@ function ChatStreamFinalMessageInner({
                 )}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
+                onCitationClick={(citationKey, citationContext) => {
+                  if (message.id) {
+                    onCitationClick?.(
+                      message.id,
+                      citationKey,
+                      citationContext ||
+                        message.finalAnswer ||
+                        message.content ||
+                        ""
+                    );
+                  }
+                }}
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
