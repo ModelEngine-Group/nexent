@@ -6,7 +6,7 @@ delegate construction to the gateway via :func:`get_adapter_from_config`::
 
     cfg = tenant_config_manager.get_model_config(...)
     model = get_adapter_from_config(cfg, "llm", "llm", tenant_id,
-                                    temperature=0.3, top_p=0.95)._inner
+                                    temperature=0.3, top_p=0.95)
 
 The vendor ``if model_factory == ...`` dispatch is replaced by registry
 resolution keyed on the normalized factory, so adding a vendor becomes one
@@ -48,7 +48,7 @@ _FACTORY_NORMALIZE: Dict[str, str] = {
 }
 
 # Modality-specific default factory when the raw factory is empty/unknown.
-_MODILITY_DEFAULT_FACTORY: Dict[str, str] = {
+_MODALITY_DEFAULT_FACTORY: Dict[str, str] = {
     "llm": "openai",
     "llm_long_context": "openai",
     "vlm": "openai",
@@ -69,7 +69,7 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
         factory = "ali"
     if get_registry().has(factory, modality):
         return factory
-    default = _MODILITY_DEFAULT_FACTORY.get(modality, "openai")
+    default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
     if factory:
         logger.debug(
             "factory %r has no %s adapter; falling back to %r", factory, modality, default

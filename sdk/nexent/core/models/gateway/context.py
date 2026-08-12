@@ -57,7 +57,11 @@ class ModelContext:
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def cache_key(self) -> tuple:
-        """Stable identity for adapter instance caching."""
+        """Returns a stable identity for adapter instance caching.
+
+        Returns:
+            A tuple of ``(tenant_id, modality, slot, model_name, factory)``.
+        """
         return (
             self.tenant_id or "",
             self.modality,

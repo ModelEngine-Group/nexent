@@ -3,8 +3,8 @@ OpenAIVLModel class).
 
 The protocol methods (encode_image / prepare_image_message / prepare_media_message
 / analyze_image / analyze_audio / analyze_video / check_connectivity) now live
-directly on the adapter and delegate chat completions to ``_inner`` (an
-OpenAIModel). A mock ``_inner`` is therefore sufficient — no smolagents / OpenAI
+directly on the adapter and delegate chat completions to ``_model`` (an
+OpenAIModel). A mock ``_model`` is therefore sufficient — no smolagents / OpenAI
 client is constructed.
 """
 
@@ -19,12 +19,12 @@ from nexent.core.models.gateway.modality.vlm_adapter import OpenAIVLMAdapter
 
 @pytest.fixture()
 def vlm_adapter():
-    """Return an OpenAIVLMAdapter with a mocked _inner."""
+    """Return an OpenAIVLMAdapter with a mocked _model."""
     adapter = OpenAIVLMAdapter.__new__(OpenAIVLMAdapter)
     inner = MagicMock()
     inner.model_id = "dummy-model"
     inner.client.chat.completions.create = MagicMock()
-    adapter._inner = inner
+    adapter._model = inner
     return adapter
 
 
@@ -210,7 +210,7 @@ def test_prepare_image_message_custom_system_prompt(vlm_adapter, tmp_path):
 
 
 def test_analyze_image_calls_prepare_image_message(vlm_adapter, tmp_path):
-    """analyze_image should call prepare_image_message and delegate to _inner."""
+    """analyze_image should call prepare_image_message and delegate to _model."""
     test_image = tmp_path / "test.png"
     test_image.write_bytes(b"fake png data")
 
@@ -220,9 +220,9 @@ def test_analyze_image_calls_prepare_image_message(vlm_adapter, tmp_path):
         vlm_adapter.analyze_image(str(test_image), system_prompt=custom_prompt, stream=False)
 
         mock_prepare.assert_called_once_with(str(test_image), custom_prompt)
-        vlm_adapter._inner.assert_called_once()
-        # ensure the prepared messages were forwarded to _inner
-        _, kwargs = vlm_adapter._inner.call_args
+        vlm_adapter._model.assert_called_once()
+        # ensure the prepared messages were forwarded to _model
+        _, kwargs = vlm_adapter._model.call_args
         assert kwargs["messages"] == [{"role": "user", "content": "test"}]
 
 
@@ -266,7 +266,7 @@ def test_analyze_audio_calls_prepare_media_message(vlm_adapter):
         vlm_adapter.analyze_audio("audio.mp3", system_prompt="Analyze", content_type="audio/mpeg")
 
         mock_prepare.assert_called_once_with("audio.mp3", "audio", "audio/mpeg", "Analyze")
-        vlm_adapter._inner.assert_called_once()
+        vlm_adapter._model.assert_called_once()
 
 
 def test_analyze_video_calls_prepare_media_message(vlm_adapter):
@@ -275,7 +275,7 @@ def test_analyze_video_calls_prepare_media_message(vlm_adapter):
         vlm_adapter.analyze_video("video.mp4", system_prompt="Analyze", content_type="video/mp4")
 
         mock_prepare.assert_called_once_with("video.mp4", "video", "video/mp4", "Analyze")
-        vlm_adapter._inner.assert_called_once()
+        vlm_adapter._model.assert_called_once()
 
 
 def test_invoke_sync_dispatches_by_media_type(vlm_adapter):
@@ -290,12 +290,12 @@ def test_invoke_sync_dispatches_by_media_type(vlm_adapter):
 
 
 # ---------------------------------------------------------------------------
-# Regression: _build_inner must not leak frequency_penalty onto the wire.
+# Regression: _build_model must not leak frequency_penalty onto the wire.
 # ---------------------------------------------------------------------------
 
 
-def test_build_inner_does_not_send_frequency_penalty():
-    """Real _build_inner (offline OpenAIModel construction) must keep
+def test_build_model_does_not_send_frequency_penalty():
+    """Real _build_model (offline OpenAIModel construction) must keep
     frequency_penalty out of self.kwargs — smolagents merges self.kwargs into
     every chat.completions.create, so leaking it would silently send
     frequency_penalty=0.5 to the VLM API. The original OpenAIVLModel set it
@@ -314,9 +314,9 @@ def test_build_inner_does_not_send_frequency_penalty():
         ssl_verify=True,
         observer=MessageObserver(),
     ))
-    adapter._build_inner()  # offline — no network call
+    adapter._build_model()  # offline — no network call
 
-    inner = adapter._inner
+    inner = adapter._model
     # frequency_penalty must NOT ride along in the smolagents model-defaults
     # dict that _prepare_completion_kwargs merges into the wire request.
     assert "frequency_penalty" not in getattr(inner, "kwargs", {}), inner.kwargs
