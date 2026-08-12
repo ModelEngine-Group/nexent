@@ -47,6 +47,7 @@ import {
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
 import type { SkillFileContent } from "@/types/skill";
@@ -68,9 +69,11 @@ export interface ComposerProps {
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
   onKnowledgeScopeChange?: (
-    scope: ConversationKnowledgeScope | null
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
   ) => Promise<void> | void;
   compact?: boolean;
   skillFiles?: readonly SkillFileContent[];
@@ -194,6 +197,7 @@ export const Composer: FC<ComposerProps> = ({
   showModelSelector = true,
   isDictationConfigured = false,
   knowledgeScope = null,
+  knowledgePreview = null,
   knowledgeCapabilities = null,
   onKnowledgeScopeChange,
   compact = false,
@@ -213,6 +217,50 @@ export const Composer: FC<ComposerProps> = ({
 
   const knowledgeSummary = useMemo(() => {
     if (!knowledgeScope) return t("chat.knowledgeScope.summaryDefault");
+    const selectedCount =
+      (knowledgeScope.local.mode === "override"
+        ? knowledgeScope.local.knowledge_ids.length
+        : 0) +
+      (knowledgeScope.aidp.mode === "override"
+        ? knowledgeScope.aidp.kds_ids.length
+        : 0);
+    const selectedNames = [
+      ...(knowledgeScope.local.mode === "override"
+        ? (knowledgePreview?.local.display_names ?? [])
+        : []),
+      ...(knowledgeScope.aidp.mode === "override"
+        ? (knowledgePreview?.aidp.display_names ?? [])
+        : []),
+    ];
+    const buildSummary = (value: string) => {
+      const summary = t("chat.knowledgeScope.summary", { value });
+      return hasIncompatibleScope
+        ? `${summary} · ${t("chat.knowledgeScope.incompatibleShort")}`
+        : summary;
+    };
+    if (
+      knowledgeScope.local.mode === "disabled" &&
+      knowledgeScope.aidp.mode === "disabled"
+    ) {
+      return buildSummary(t("chat.knowledgeScope.summaryDisabled"));
+    }
+    if (
+      knowledgeScope.local.mode === "inherit" &&
+      knowledgeScope.aidp.mode === "inherit"
+    ) {
+      return t("chat.knowledgeScope.summaryDefault");
+    }
+    if (selectedCount === 1 && selectedNames.length === 1) {
+      return buildSummary(selectedNames[0]);
+    }
+    if (selectedCount > 1 && selectedNames.length > 0) {
+      return buildSummary(
+        t("chat.knowledgeScope.summaryMultiple", {
+          name: selectedNames[0],
+          count: selectedCount,
+        })
+      );
+    }
     const parts: string[] = [];
     if (knowledgeCapabilities?.sources.local.enabled) {
       parts.push(
@@ -236,13 +284,16 @@ export const Composer: FC<ComposerProps> = ({
             : t("chat.knowledgeScope.summaryAidpDefault")
       );
     }
-    const summary = t("chat.knowledgeScope.summary", {
-      value: parts.join(" · ") || t("chat.knowledgeScope.unavailable"),
-    });
-    return hasIncompatibleScope
-      ? `${summary} · ${t("chat.knowledgeScope.incompatibleShort")}`
-      : summary;
-  }, [knowledgeScope, knowledgeCapabilities, hasIncompatibleScope, t]);
+    return buildSummary(
+      parts.join(" · ") || t("chat.knowledgeScope.unavailable")
+    );
+  }, [
+    knowledgeScope,
+    knowledgePreview,
+    knowledgeCapabilities,
+    hasIncompatibleScope,
+    t,
+  ]);
 
   return (
     <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
@@ -404,8 +455,8 @@ export const Composer: FC<ComposerProps> = ({
             value={knowledgeScope}
             capabilities={knowledgeCapabilities}
             onCancel={() => setKnowledgeModalOpen(false)}
-            onConfirm={async (scope) => {
-              await onKnowledgeScopeChange?.(scope);
+            onConfirm={async (scope, preview) => {
+              await onKnowledgeScopeChange?.(scope, preview);
               setKnowledgeModalOpen(false);
             }}
             onRestoreDefault={async () => {

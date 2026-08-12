@@ -101,6 +101,7 @@ import { conversationService } from "@/services/conversationService";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
@@ -117,9 +118,11 @@ export interface ThreadProps {
   showModelSelector?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
+  knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
   onKnowledgeScopeChange?: (
-    scope: ConversationKnowledgeScope | null
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
   ) => Promise<void> | void;
   variant?: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
@@ -172,6 +175,7 @@ export const Thread: FC<ThreadProps> = ({
   showModelSelector = true,
   isDictationConfigured = false,
   knowledgeScope = null,
+  knowledgePreview = null,
   knowledgeCapabilities = null,
   onKnowledgeScopeChange,
   variant = "default",
@@ -385,6 +389,7 @@ export const Thread: FC<ThreadProps> = ({
         showModelSelector={showModelSelector}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
+        knowledgePreview={knowledgePreview}
         knowledgeCapabilities={knowledgeCapabilities}
         onKnowledgeScopeChange={onKnowledgeScopeChange}
         variant={variant}
@@ -474,9 +479,11 @@ interface ThreadViewProps {
   showModelSelector: boolean;
   isDictationConfigured: boolean;
   knowledgeScope: ConversationKnowledgeScope | null;
+  knowledgePreview: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities: KnowledgeCapabilities | null;
   onKnowledgeScopeChange?: (
-    scope: ConversationKnowledgeScope | null
+    scope: ConversationKnowledgeScope | null,
+    preview?: KnowledgeScopeEffectivePreview | null
   ) => Promise<void> | void;
   hasMessages: boolean;
   displayName: string;
@@ -510,6 +517,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   isDictationConfigured,
   knowledgeScope,
+  knowledgePreview,
   knowledgeCapabilities,
   onKnowledgeScopeChange,
   hasMessages,
@@ -669,6 +677,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             showModelSelector={showModelSelector}
             isDictationConfigured={isDictationConfigured}
             knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
             knowledgeCapabilities={knowledgeCapabilities}
             onKnowledgeScopeChange={onKnowledgeScopeChange}
             compact={variant === "embedded"}

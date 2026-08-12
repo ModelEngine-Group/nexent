@@ -321,7 +321,7 @@ def test_inherit_resolves_each_tool_default_and_display_name(
         {"agent_id": 2, "version_no": 1, "agent_name": "plain", "tools": []},
     ],
 )
-def test_missing_capabilities_warn_without_fallback(_mock_tree):
+def test_missing_capabilities_do_not_warn_for_inherited_scope(_mock_tree):
     resolved = resolve_knowledge_scope(
         scope=ConversationKnowledgeScopeRequest(),
         agent_id=1,
@@ -331,12 +331,43 @@ def test_missing_capabilities_warn_without_fallback(_mock_tree):
         is_debug=False,
     )
 
-    assert {warning["source"] for warning in resolved.warnings} == {
-        "local",
-        "aidp",
-    }
+    assert resolved.warnings == []
+    assert resolved.local_capable is False
+    assert resolved.aidp_capable is False
     assert resolved.local_index_names == []
     assert resolved.aidp_kds_ids == []
+
+
+@patch(
+    "backend.services.knowledge_scope_service._walk_agent_tree",
+    return_value=[
+        {"agent_id": 1, "version_no": 1, "agent_name": "plain", "tools": []},
+    ],
+)
+@patch(
+    "backend.services.knowledge_scope_service._resolve_local_override",
+    return_value=([], []),
+)
+def test_missing_capability_warns_for_explicit_override(_mock_local, _mock_tree):
+    scope = ConversationKnowledgeScopeRequest.model_validate({
+        "local": {"mode": "override", "knowledge_ids": ["12"]},
+        "aidp": {"mode": "inherit", "kds_ids": []},
+    })
+
+    resolved = resolve_knowledge_scope(
+        scope=scope,
+        agent_id=1,
+        tenant_id="tenant",
+        user_id="user",
+        version_no=1,
+        is_debug=False,
+    )
+
+    assert resolved.warnings == [{
+        "code": "KNOWLEDGE_SCOPE_CAPABILITY_UNSUPPORTED",
+        "source": "local",
+        "count": 1,
+    }]
 
 
 def test_runtime_policy_and_empty_resource_variants():
@@ -347,8 +378,42 @@ def test_runtime_policy_and_empty_resource_variants():
         tool_params=ToolParamsRequest(agents={}),
     )
     zh_content = build_runtime_knowledge_resources(resolved, "zh")
-    assert "当前没有可用资源" in zh_content
+    assert "当前会话没有可用知识库资源" in zh_content
     resolved.local_disabled = True
     resolved.aidp_disabled = True
     en_content = build_runtime_knowledge_resources(resolved, "en")
-    assert "disabled for this conversation" in en_content
+    assert "Knowledge retrieval is disabled for this conversation" in en_content
+
+
+def test_runtime_resources_omit_unsupported_sources():
+    resolved = ResolvedKnowledgeScope(
+        desired_scope={},
+        tool_params=ToolParamsRequest(agents={}),
+        local_disabled=True,
+        local_capable=True,
+        aidp_capable=False,
+    )
+
+    content = build_runtime_knowledge_resources(resolved, "zh")
+
+    assert "当前会话已禁用知识库检索" in content
+    assert "本地知识库：当前会话已禁用" not in content
+    assert "AIDP 知识库" not in content
+
+
+def test_runtime_resources_only_describe_effective_source():
+    resolved = ResolvedKnowledgeScope(
+        desired_scope={},
+        tool_params=ToolParamsRequest(agents={}),
+        local_display_names=["本地1"],
+        aidp_disabled=True,
+        local_capable=True,
+        aidp_capable=True,
+    )
+
+    content = build_runtime_knowledge_resources(resolved, "zh")
+
+    assert "本地知识库：" in content
+    assert "本地1" in content
+    assert "AIDP 知识库" not in content
+    assert "当前会话已禁用" not in content

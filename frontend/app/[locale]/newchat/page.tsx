@@ -44,7 +44,9 @@ import { useTranslation } from "react-i18next";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
   KnowledgeScopeResolution,
+  KnowledgeScopeWarning,
 } from "@/types/knowledgeScope";
 
 function useLocalChatRuntime(
@@ -151,10 +153,15 @@ const HomeContent: FC<{
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [knowledgeScope, setKnowledgeScope] =
     useState<ConversationKnowledgeScope | null>(null);
+  const [knowledgePreview, setKnowledgePreview] =
+    useState<KnowledgeScopeEffectivePreview | null>(null);
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useState<KnowledgeCapabilities | null>(null);
   const knowledgeScopesRef = useRef<
     Map<string, ConversationKnowledgeScope | null>
+  >(new Map());
+  const knowledgePreviewsRef = useRef<
+    Map<string, KnowledgeScopeEffectivePreview | null>
   >(new Map());
 
   // All hooks must be called before any early returns
@@ -276,11 +283,15 @@ const HomeContent: FC<{
   useEffect(() => {
     if (!activeThreadId) {
       setKnowledgeScope(null);
+      setKnowledgePreview(null);
       return;
     }
 
     if (knowledgeScopesRef.current.has(activeThreadId)) {
       setKnowledgeScope(knowledgeScopesRef.current.get(activeThreadId) ?? null);
+      setKnowledgePreview(
+        knowledgePreviewsRef.current.get(activeThreadId) ?? null
+      );
       return;
     }
 
@@ -290,19 +301,24 @@ const HomeContent: FC<{
       numericConversationId <= 0
     ) {
       knowledgeScopesRef.current.set(activeThreadId, null);
+      knowledgePreviewsRef.current.set(activeThreadId, null);
       setKnowledgeScope(null);
+      setKnowledgePreview(null);
       return;
     }
 
     let cancelled = false;
     setKnowledgeScope(null);
+    setKnowledgePreview(null);
     void conversationService
       .getById(String(numericConversationId))
       .then((conversation) => {
         if (cancelled) return;
         const restoredScope = conversation.knowledge_scope ?? null;
         knowledgeScopesRef.current.set(activeThreadId, restoredScope);
+        knowledgePreviewsRef.current.set(activeThreadId, null);
         setKnowledgeScope(restoredScope);
+        setKnowledgePreview(null);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -315,9 +331,43 @@ const HomeContent: FC<{
     };
   }, [activeConversationId, activeThreadId]);
 
+  const showKnowledgeScopeWarnings = useCallback(
+    (warnings: KnowledgeScopeWarning[]) => {
+      warnings.forEach((warning) => {
+        const source =
+          warning.source === "local"
+            ? t("chat.knowledgeScope.localTab")
+            : warning.source === "aidp"
+              ? t("chat.knowledgeScope.aidpTab")
+              : t("chat.knowledgeScope.title");
+        if (warning.code === "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE") {
+          message.warning(
+            t("chat.knowledgeScope.itemUnavailableWarning", {
+              source,
+              count: warning.count,
+            })
+          );
+          return;
+        }
+        if (warning.code === "KNOWLEDGE_SCOPE_CAPABILITY_UNSUPPORTED") {
+          message.warning(
+            t("chat.knowledgeScope.capabilityUnsupportedWarning", { source })
+          );
+          return;
+        }
+        message.warning(t("chat.knowledgeScope.partialWarning"));
+      });
+    },
+    [t]
+  );
+
   const handleKnowledgeScopeChange = useCallback(
-    async (scope: ConversationKnowledgeScope | null) => {
+    async (
+      scope: ConversationKnowledgeScope | null,
+      preview?: KnowledgeScopeEffectivePreview | null
+    ) => {
       const numericConversationId = Number(activeConversationId);
+      let nextPreview = preview ?? null;
       try {
         if (
           Number.isInteger(numericConversationId) &&
@@ -327,30 +377,33 @@ const HomeContent: FC<{
             numericConversationId,
             scope
           );
-          if (result.warnings.length > 0) {
-            message.warning(t("chat.knowledgeScope.partialWarning"));
-          }
+          nextPreview = result.effective_preview;
+          showKnowledgeScopeWarnings(result.warnings);
         }
         if (activeThreadId) {
           knowledgeScopesRef.current.set(activeThreadId, scope);
+          knowledgePreviewsRef.current.set(activeThreadId, nextPreview);
         }
         setKnowledgeScope(scope);
+        setKnowledgePreview(nextPreview);
       } catch (error) {
         log.error("[HomeContent] Failed to update knowledge scope:", error);
         message.error(t("chat.knowledgeScope.saveFailed"));
         throw error;
       }
     },
-    [activeConversationId, activeThreadId, t]
+    [activeConversationId, activeThreadId, showKnowledgeScopeWarnings, t]
   );
 
   const handleKnowledgeScopeResolved = useCallback(
     (resolution: KnowledgeScopeResolution) => {
-      if (resolution.warnings.length > 0) {
-        message.warning(t("chat.knowledgeScope.runtimeWarning"));
+      if (activeThreadId) {
+        knowledgePreviewsRef.current.set(activeThreadId, resolution.effective);
       }
+      setKnowledgePreview(resolution.effective);
+      showKnowledgeScopeWarnings(resolution.warnings);
     },
-    [t]
+    [activeThreadId, showKnowledgeScopeWarnings]
   );
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
@@ -532,6 +585,7 @@ const HomeContent: FC<{
           onChatModeChange={handleChatModeChange}
           isDictationConfigured={isDictationConfigured}
           knowledgeScope={knowledgeScope}
+          knowledgePreview={knowledgePreview}
           knowledgeCapabilities={knowledgeCapabilities}
           onKnowledgeScopeChange={handleKnowledgeScopeChange}
         />

@@ -655,6 +655,7 @@ class KnowledgeBaseService {
       createdAt: item.created_at || null,
       updatedAt: item.updated_at || null,
       embeddingModel: item.embedding_model || "unknown",
+      is_multimodal: item.is_multimodal === true,
       knowledge_sources: "aidp",
       ingroup_permission: item.ingroup_permission || "",
       group_ids: item.group_ids || [],
