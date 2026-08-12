@@ -287,3 +287,42 @@ def test_invoke_sync_dispatches_by_media_type(vlm_adapter):
         )
     assert result == "img-result"
     mock_analyze.assert_called_once_with(b"bytes", system_prompt="p", stream=False)
+
+
+# ---------------------------------------------------------------------------
+# Regression: _build_inner must not leak frequency_penalty onto the wire.
+# ---------------------------------------------------------------------------
+
+
+def test_build_inner_does_not_send_frequency_penalty():
+    """Real _build_inner (offline OpenAIModel construction) must keep
+    frequency_penalty out of self.kwargs — smolagents merges self.kwargs into
+    every chat.completions.create, so leaking it would silently send
+    frequency_penalty=0.5 to the VLM API. The original OpenAIVLModel set it
+    only as a dead instance attribute (never forwarded, never read).
+    """
+    from nexent.core.models.gateway.context import ModelContext
+    from nexent.core.utils.observer import MessageObserver
+
+    adapter = OpenAIVLMAdapter(ModelContext(
+        modality="vlm",
+        factory="openai",
+        model_name="qwen-vl-max",
+        display_name="vlm-test",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key="sk-fake",
+        ssl_verify=True,
+        observer=MessageObserver(),
+    ))
+    adapter._build_inner()  # offline — no network call
+
+    inner = adapter._inner
+    # frequency_penalty must NOT ride along in the smolagents model-defaults
+    # dict that _prepare_completion_kwargs merges into the wire request.
+    assert "frequency_penalty" not in getattr(inner, "kwargs", {}), inner.kwargs
+    # but the dead instance attribute is preserved for getattr parity.
+    assert inner.frequency_penalty == 0.5
+    # sampling defaults that OpenAIVLModel DID forward must still be set.
+    assert inner.temperature == 0.7
+    assert inner.top_p == 0.7
+    assert inner.max_tokens == 512

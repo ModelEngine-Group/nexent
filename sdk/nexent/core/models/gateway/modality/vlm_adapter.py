@@ -72,7 +72,16 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         extras = self._context.extra
         # Preserve the VLM sampling defaults that OpenAIVLModel used to set on
         # its own instance; allow per-call-site overrides via context.extra.
-        kwargs = dict(
+        #
+        # NOTE: frequency_penalty must NOT be passed to OpenAIModel(). The
+        # smolagents base stores unknown __init__ kwargs in ``self.kwargs``,
+        # which ``_prepare_completion_kwargs`` merges into every
+        # chat.completions.create — so passing it here would silently send
+        # ``frequency_penalty=0.5`` to the VLM API on every analyze_* call.
+        # The original OpenAIVLModel set it only as a dead instance attribute
+        # (never forwarded to super, never read); keep that wire behaviour and
+        # set the attr post-construction purely for getattr parity.
+        self._inner = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
@@ -82,10 +91,9 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             display_name=self._context.display_name,
             temperature=extras.get("temperature", 0.7),
             top_p=extras.get("top_p", 0.7),
-            frequency_penalty=extras.get("frequency_penalty", 0.5),
             max_tokens=extras.get("max_tokens", 512),
         )
-        self._inner = OpenAIModel(**kwargs)
+        self._inner.frequency_penalty = extras.get("frequency_penalty", 0.5)
 
     # ---- VLM protocol (moved from openai_vlm.py) --------------------------
 
