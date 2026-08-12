@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from consts.const import MODEL_CONFIG_MAPPING
@@ -17,6 +18,8 @@ from nexent.monitor import (
     set_monitoring_operation,
 )
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_json_fence(content: object) -> str:
@@ -150,21 +153,25 @@ class TenantDreamingCompressor:
 
         all_facts = []
         fact_counter = 0
-        for chunk in chunks:
-            chunk_units = [u for u in units if any(
-                m.unit_id == u["unit_id"] for m in chunk
-            )]
-            chunk_raw = "\n".join(
-                f"- {u['text'].strip()}" for u in chunk_units if u["text"].strip()
-            )
-            spans = self._extract_spans(chunk_raw, chunk_units, feedback)
-            facts, span_fb = self._validate_spans(spans, chunk_raw, chunk_units)
-            if span_fb:
-                raise ValueError(f"Map chunk span validation failed: {span_fb}")
-            for f in facts:
-                f["fact_id"] = f"f{fact_counter:03d}"
-                fact_counter += 1
-            all_facts.extend(facts)
+        for i, chunk in enumerate(chunks):
+            try:
+                chunk_units = [u for u in units if any(
+                    m.unit_id == u["unit_id"] for m in chunk
+                )]
+                chunk_raw = "\n".join(
+                    f"- {u['text'].strip()}" for u in chunk_units if u["text"].strip()
+                )
+                spans = self._extract_spans(chunk_raw, chunk_units, feedback)
+                facts, span_fb = self._validate_spans(spans, chunk_raw, chunk_units)
+                if span_fb:
+                    raise ValueError(f"Map chunk span validation failed: {span_fb}")
+                for f in facts:
+                    f["fact_id"] = f"f{fact_counter:03d}"
+                    fact_counter += 1
+                all_facts.extend(facts)
+            except Exception as e:
+                logger.warning("Map-reduce chunk %d failed: %s", i, str(e))
+                continue
 
         all_facts.extend(
             self._required_literal_facts(units, fact_counter)
@@ -284,7 +291,10 @@ class TenantDreamingCompressor:
             ]
         )
         raw = _strip_json_fence(response.content)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON parse error in span extraction: {e}") from e
 
     @staticmethod
     def _validate_spans(
@@ -510,7 +520,10 @@ class TenantDreamingCompressor:
             ]
         )
         raw = _strip_json_fence(response.content)
-        payload = json.loads(raw)
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON parse error in lossless formatting: {e}") from e
         formatted_facts = payload.get("facts")
         if not isinstance(formatted_facts, list):
             raise ValueError("Lossless formatting response must contain a facts list")

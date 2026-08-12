@@ -38,6 +38,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { DreamingConfigCards } from "./DreamingConfigCards";
 import { DreamingPanel } from "./DreamingPanel";
 import {
   loadMemoryConfig,
@@ -285,9 +286,9 @@ export function MemoryManager() {
       const saved = await setDreamingConfig(enabled, deleteHistory);
       if (!saved) throw new Error("save failed");
       setConfig((current) => ({ ...current, dreamingEnabled: enabled }));
-      message.success(enabled ? "Dreaming 已启用" : "Dreaming 已关闭");
+      message.success(enabled ? t("dreaming.config.enabled") : t("dreaming.config.disabled"));
     } catch {
-      message.error("更新 Dreaming 配置失败");
+      message.error(t("dreaming.config.updateFailed"));
     } finally {
       setSavingConfig(false);
     }
@@ -299,12 +300,12 @@ export function MemoryManager() {
       return;
     }
     Modal.confirm({
-      title: "关闭 Dreaming",
+      title: t("dreaming.config.disableTitle"),
       content:
-        "是否同时删除历史 Dreaming 版本、运行记录和 Dreaming 生成的长期记忆？原始会话记忆不会被删除。",
-      okText: "删除历史并关闭",
+        t("dreaming.config.disableConfirm"),
+      okText: t("dreaming.config.disableWithHistory"),
       okButtonProps: { danger: true },
-      cancelText: "保留历史并关闭",
+      cancelText: t("dreaming.config.disableKeepHistory"),
       onOk: () => persistDreamingEnabled(false, true),
       onCancel: () => persistDreamingEnabled(false, false),
     });
@@ -530,9 +531,9 @@ export function MemoryManager() {
           <Flex align="center" gap={12}>
             <Brain size={20} />
             <div>
-              <Text strong>启用 Dreaming</Text>
+              <Text strong>{t("dreaming.config.enableTitle")}</Text>
               <Text type="secondary" className="memory-setting-description">
-                允许系统跨智能体整理当前用户的短期记忆
+                {t("dreaming.config.enableDescription")}
               </Text>
             </div>
           </Flex>
@@ -542,6 +543,7 @@ export function MemoryManager() {
             onChange={updateDreamingEnabled}
           />
         </Flex>
+        {config.dreamingEnabled && <DreamingConfigCards />}
       </Card>
     </div>
   );
@@ -714,7 +716,7 @@ export function MemoryManager() {
             label: (
               <span className="tab-label">
                 <Brain size={17} aria-hidden="true" />
-                Dreaming
+                {t("dreaming.title")}
               </span>
             ),
             disabled: !config.memoryEnabled || !config.dreamingEnabled,

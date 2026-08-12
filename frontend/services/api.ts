@@ -504,6 +504,8 @@ export const API_ENDPOINTS = {
       versions: `${API_BASE_URL}/memory/dreaming/versions`,
       activate: (versionId: string | number) =>
         `${API_BASE_URL}/memory/dreaming/versions/${versionId}/activate`,
+      clear: `${API_BASE_URL}/memory/dreaming/versions/clear`,
+      undoClear: `${API_BASE_URL}/memory/dreaming/versions/undo-clear`,
     },
   },
   agentRepository: {

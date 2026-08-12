@@ -43,6 +43,10 @@ class DreamingVersionSwitchRequest(BaseModel):
     target_user_id: Optional[str] = None
 
 
+class DreamingVersionClearRequest(BaseModel):
+    target_user_id: Optional[str] = None
+
+
 class DreamingScheduleRequest(BaseModel):
     enabled: bool
     rule_type: Literal["CRON", "INTERVAL"] = "CRON"
@@ -50,6 +54,12 @@ class DreamingScheduleRequest(BaseModel):
     start_at: Optional[datetime] = None
     cron_expr: Optional[str] = None
     interval_seconds: Optional[int] = Field(default=None, ge=3600)
+    min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    min_recall_count: Optional[int] = Field(default=None, ge=0)
+    min_unique_queries: Optional[int] = Field(default=None, ge=0)
+    source_limit: Optional[int] = Field(default=None, ge=1, le=100)
+    long_term_max_chars: Optional[int] = Field(default=None, ge=100, le=1000000)
+    compression_max_attempts: Optional[int] = Field(default=None, ge=0, le=10)
     target_user_id: Optional[str] = None
 
     @model_validator(mode="after")
@@ -105,11 +115,22 @@ def get_dreaming_parameters(
     authorization: Annotated[Optional[str], Header()] = None,
 ):
     """Expose effective read-only build parameters for an authenticated user."""
-    get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
+    thresholds = memory_dreaming_db.get_thresholds(tenant_id, user_id, USER_DREAMING_SCOPE)
+    source_limit = DREAMING_SOURCE_LIMIT
+    long_term_max_chars = DREAMING_LONG_TERM_MAX_CHARS
+    compression_max_attempts = DREAMING_COMPRESSION_MAX_ATTEMPTS
+    if thresholds:
+        if thresholds.get("source_limit") is not None:
+            source_limit = thresholds["source_limit"]
+        if thresholds.get("long_term_max_chars") is not None:
+            long_term_max_chars = thresholds["long_term_max_chars"]
+        if thresholds.get("compression_max_attempts") is not None:
+            compression_max_attempts = thresholds["compression_max_attempts"]
     return {
-        "source_limit": DREAMING_SOURCE_LIMIT,
-        "long_term_max_chars": DREAMING_LONG_TERM_MAX_CHARS,
-        "compression_max_attempts": DREAMING_COMPRESSION_MAX_ATTEMPTS,
+        "source_limit": source_limit,
+        "long_term_max_chars": long_term_max_chars,
+        "compression_max_attempts": compression_max_attempts,
     }
 
 
@@ -134,6 +155,12 @@ def get_dreaming_schedule(
         "next_fire_at": None,
         "last_fire_at": None,
         "fire_count": 0,
+        "min_score": None,
+        "min_recall_count": None,
+        "min_unique_queries": None,
+        "source_limit": None,
+        "long_term_max_chars": None,
+        "compression_max_attempts": None,
     }
 
 
@@ -177,6 +204,12 @@ def put_dreaming_schedule(
             else None
         ),
         actor_user_id=actor_user_id,
+        min_score=payload.min_score,
+        min_recall_count=payload.min_recall_count,
+        min_unique_queries=payload.min_unique_queries,
+        source_limit=payload.source_limit,
+        long_term_max_chars=payload.long_term_max_chars,
+        compression_max_attempts=payload.compression_max_attempts,
     )
 
 
@@ -272,3 +305,61 @@ def activate_dreaming_version(
             status_code=HTTPStatus.NOT_FOUND, detail="Version not found"
         )
     return version
+
+
+@router.post("/versions/clear")
+def clear_dreaming_version(
+    payload: DreamingVersionClearRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+):
+    user_id, tenant_id = _resolve_target_user(
+        authorization,
+        payload.target_user_id,
+        tenant_capability="EDIT_TENANT",
+    )
+    actor_user_id, _ = get_current_user_id(authorization)
+    deactivated_version_id = memory_dreaming_db.deactivate_active_version(
+        tenant_id,
+        user_id,
+        agent_id=USER_DREAMING_SCOPE,
+        actor_user_id=actor_user_id,
+    )
+    if deactivated_version_id is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="No active version found"
+        )
+    return {
+        "success": True,
+        "message": "Active version cleared",
+        "deactivated_version_id": deactivated_version_id,
+    }
+
+
+class DreamingVersionUndoClearRequest(BaseModel):
+    version_id: int = Field(..., ge=1)
+    target_user_id: Optional[str] = None
+
+
+@router.post("/versions/undo-clear")
+def undo_clear_dreaming_version(
+    payload: DreamingVersionUndoClearRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+):
+    user_id, tenant_id = _resolve_target_user(
+        authorization,
+        payload.target_user_id,
+        tenant_capability="EDIT_TENANT",
+    )
+    actor_user_id, _ = get_current_user_id(authorization)
+    success = memory_dreaming_db.reactivate_version(
+        tenant_id,
+        user_id,
+        agent_id=USER_DREAMING_SCOPE,
+        version_id=payload.version_id,
+        actor_user_id=actor_user_id,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Version not found"
+        )
+    return {"success": True, "message": "Version restored"}

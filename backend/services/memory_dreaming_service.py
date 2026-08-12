@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from consts.const import (
+    DREAMING_COMPRESSION_BACKOFF_BASE_SECONDS,
     DREAMING_COMPRESSION_MAX_ATTEMPTS,
+    DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS,
     DREAMING_LONG_TERM_MAX_CHARS,
+    DREAMING_MAX_AGE_DAYS,
     DREAMING_SOURCE_LIMIT,
     LIGHT_SLEEP_WINDOW_DAYS,
     MIN_PROMOTION_SCORE,
@@ -92,8 +96,15 @@ class MemoryDreamingService:
             status="active",
             limit=None,
         )
+        cutoff = _utcnow() - timedelta(days=DREAMING_MAX_AGE_DAYS)
         candidates = []
         for record in records:
+            created_at = record.get("create_time")
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at)
+                if created_at.replace(tzinfo=None) < cutoff:
+                    continue
             evidence = stats.get(int(record["memory_id"]), {})
             candidate = build_candidate(
                 record, float(evidence.get("total_retrieval_score") or 0)
@@ -130,9 +141,19 @@ class MemoryDreamingService:
         parent_evidence_ids = {
             evidence_id for unit in parent_units for evidence_id in unit.evidence_ids
         }
+        effective_source_limit = (
+            (config_snapshot or {}).get("source_limit") or DREAMING_SOURCE_LIMIT
+        )
+        effective_long_term_max_chars = (
+            (config_snapshot or {}).get("long_term_max_chars") or DREAMING_LONG_TERM_MAX_CHARS
+        )
+        effective_compression_max_attempts = (
+            (config_snapshot or {}).get("compression_max_attempts")
+            or DREAMING_COMPRESSION_MAX_ATTEMPTS
+        )
         new_units = units_from_decisions(
             decisions,
-            source_limit=DREAMING_SOURCE_LIMIT,
+            source_limit=effective_source_limit,
             excluded_evidence_ids=parent_evidence_ids,
         )
         new_units = [
@@ -146,11 +167,12 @@ class MemoryDreamingService:
         result = build_dreaming_version(
             parent_units=parent_units,
             new_units=new_units,
-            max_chars=DREAMING_LONG_TERM_MAX_CHARS,
+            max_chars=effective_long_term_max_chars,
             compressor=self.compressor or self._tenant_compressor(tenant_id, user_id),
-            max_attempts=DREAMING_COMPRESSION_MAX_ATTEMPTS,
+            max_attempts=effective_compression_max_attempts,
             run_id=run_id,
             agent_id=agent_id,
+            backoff_base_seconds=DREAMING_COMPRESSION_BACKOFF_BASE_SECONDS,
         )
         return memory_dreaming_db.create_and_activate_version(
             tenant_id=tenant_id,
@@ -172,9 +194,9 @@ class MemoryDreamingService:
             ),
             config_snapshot=config_snapshot
             or {
-                "source_limit": DREAMING_SOURCE_LIMIT,
-                "long_term_max_chars": DREAMING_LONG_TERM_MAX_CHARS,
-                "compression_max_attempts": DREAMING_COMPRESSION_MAX_ATTEMPTS,
+                "source_limit": effective_source_limit,
+                "long_term_max_chars": effective_long_term_max_chars,
+                "compression_max_attempts": effective_compression_max_attempts,
             },
             raw_char_count=result.raw_char_count,
             published_char_count=result.published_char_count,
@@ -252,38 +274,82 @@ class MemoryDreamingService:
                     run_id,
                     {"current_phase": "deep", "rem_count": len(candidates)},
                 )
+                user_thresholds = memory_dreaming_db.get_thresholds(
+                    tenant_id, user_id, agent_id
+                )
+                effective_min_score = min_score
+                effective_min_recall = min_recall_count
+                effective_min_queries = min_unique_queries
+                effective_source_limit = DREAMING_SOURCE_LIMIT
+                effective_long_term_max_chars = DREAMING_LONG_TERM_MAX_CHARS
+                effective_compression_max_attempts = DREAMING_COMPRESSION_MAX_ATTEMPTS
+                if user_thresholds:
+                    if user_thresholds.get("min_score") is not None:
+                        effective_min_score = user_thresholds["min_score"]
+                    if user_thresholds.get("min_recall_count") is not None:
+                        effective_min_recall = user_thresholds["min_recall_count"]
+                    if user_thresholds.get("min_unique_queries") is not None:
+                        effective_min_queries = user_thresholds["min_unique_queries"]
+                    if user_thresholds.get("source_limit") is not None:
+                        effective_source_limit = user_thresholds["source_limit"]
+                    if user_thresholds.get("long_term_max_chars") is not None:
+                        effective_long_term_max_chars = user_thresholds["long_term_max_chars"]
+                    if user_thresholds.get("compression_max_attempts") is not None:
+                        effective_compression_max_attempts = user_thresholds["compression_max_attempts"]
+
                 decisions = select_candidates(
                     candidates,
                     thresholds=DreamingThresholds(
-                        min_score=min_score,
-                        min_recall_count=min_recall_count,
-                        min_unique_queries=min_unique_queries,
+                        min_score=effective_min_score,
+                        min_recall_count=effective_min_recall,
+                        min_unique_queries=effective_min_queries,
                     ),
                     recency_half_life_days=RECENCY_HALF_LIFE_DAYS,
                 )
                 memory_dreaming_db.update_audit(
                     run_id, {"current_phase": "compression"}
                 )
-                version = self._build_version(
-                    tenant_id,
-                    user_id,
-                    agent_id,
-                    run_id,
-                    decisions,
-                    config_snapshot={
-                        "window_days": window_days,
-                        "min_score": min_score,
-                        "min_recall_count": min_recall_count,
-                        "min_unique_queries": min_unique_queries,
-                        "source_limit": DREAMING_SOURCE_LIMIT,
-                        "long_term_max_chars": DREAMING_LONG_TERM_MAX_CHARS,
-                        "compression_max_attempts": (DREAMING_COMPRESSION_MAX_ATTEMPTS),
-                    },
-                )
+                config_snapshot = {
+                    "window_days": window_days,
+                    "min_score": effective_min_score,
+                    "min_recall_count": effective_min_recall,
+                    "min_unique_queries": effective_min_queries,
+                    "source_limit": effective_source_limit,
+                    "long_term_max_chars": effective_long_term_max_chars,
+                    "compression_max_attempts": effective_compression_max_attempts,
+                }
+                executor = ThreadPoolExecutor(max_workers=1)
+                try:
+                    future = executor.submit(
+                        self._build_version,
+                        tenant_id,
+                        user_id,
+                        agent_id,
+                        run_id,
+                        decisions,
+                        config_snapshot,
+                    )
+                    try:
+                        version = future.result(
+                            timeout=DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS
+                        )
+                    except FuturesTimeoutError:
+                        logger.warning(
+                            "Compression phase timed out after %d seconds for run=%s, cancelling task",
+                            DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS,
+                            run_id,
+                        )
+                        future.cancel()
+                        version = None
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
                 results = [
                     {
                         "memory_id": decision.candidate.memory_id,
                         "score": decision.score,
+                        "noise": decision.candidate.noise,
+                        "signal_count": decision.metrics.signal_count,
+                        "context_diversity": decision.metrics.context_diversity,
                         "evidence_ids": [str(decision.candidate.memory_id)],
                         "event": "SELECT" if decision.promote else "DEFER",
                         "reason": decision.reason,

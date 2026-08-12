@@ -7,109 +7,71 @@ import {
   Button,
   Card,
   Empty,
-  InputNumber,
-  List,
-  Progress,
+  Modal,
   Select,
   Space,
   Spin,
-  Switch,
   Tag,
-  TimePicker,
   Timeline,
+  Tooltip,
   Typography,
 } from "antd";
-import { Brain, Clock, History, Play, RotateCcw, Save } from "lucide-react";
-import dayjs from "dayjs";
+import { Brain, Loader2, Play, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { getAuthHeaders } from "@/lib/auth";
 import {
   activateDreamingVersion,
+  clearActiveDreamingVersion,
+  undoClearActiveDreamingVersion,
   DreamingAudit,
   DreamingVersion,
   fetchDreamingAudits,
   fetchDreamingParameters,
-  fetchDreamingSchedule,
   fetchDreamingVersions,
   runDreaming,
-  saveDreamingSchedule,
 } from "@/services/memoryService";
-import type {
-  DreamingParameters,
-  DreamingSchedule,
-} from "@/services/memoryService";
-import { getTenantUsers, TenantUser } from "@/services/tenantService";
+import type { DreamingParameters } from "@/services/memoryService";
 
-const phaseProgress: Record<string, number> = {
-  light: 20,
-  rem: 45,
-  deep: 70,
-  compression: 90,
-};
-
+const phases = ["light", "rem", "deep", "compression"] as const;
 export function DreamingPanel() {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
+  const phaseLabels: Record<string, string> = {
+    light: t("dreaming.phase.light.label"),
+    rem: t("dreaming.phase.rem.label"),
+    deep: t("dreaming.phase.deep.label"),
+    compression: t("dreaming.phase.compression.label"),
+  };
   const { user, hasPermission } = useAuthorizationContext();
   const agentId = "__user__";
-  const [tenantUsers, setTenantUsers] = useState<TenantUser[]>([]);
   const [targetUserId, setTargetUserId] = useState<string>();
   const [audits, setAudits] = useState<DreamingAudit[]>([]);
   const [versions, setVersions] = useState<DreamingVersion[]>([]);
   const [parameters, setParameters] = useState<DreamingParameters>();
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
-  const [schedule, setSchedule] = useState<DreamingSchedule>();
-  const [scheduleMode, setScheduleMode] = useState<
-    "daily" | "weekly" | "interval"
-  >("daily");
-  const [scheduleTime, setScheduleTime] = useState("03:00");
-  const [scheduleWeekday, setScheduleWeekday] = useState(1);
-  const [intervalHours, setIntervalHours] = useState(24);
-  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearedVersionId, setClearedVersionId] = useState<number | null>(null);
+  const [memoryContents, setMemoryContents] = useState<Record<number, string>>(
+    {}
+  );
 
   const refresh = useCallback(async () => {
     const target =
       targetUserId && targetUserId !== user?.id ? targetUserId : undefined;
-    const [nextAudits, nextVersions, nextSchedule] = await Promise.all([
+    const [nextAudits, nextVersions] = await Promise.all([
       fetchDreamingAudits(20, target),
       fetchDreamingVersions(20, target),
-      fetchDreamingSchedule(target),
     ]);
     setAudits(nextAudits);
     setVersions(nextVersions);
-    setSchedule(nextSchedule);
-    if (nextSchedule.rule_type === "INTERVAL") {
-      setScheduleMode("interval");
-      setIntervalHours((nextSchedule.interval_seconds || 86400) / 3600);
-    } else {
-      const parts = (nextSchedule.cron_expr || "0 3 * * *").split(" ");
-      setScheduleTime(
-        `${parts[1].padStart(2, "0")}:${parts[0].padStart(2, "0")}`
-      );
-      if (parts[4] !== "*") {
-        setScheduleMode("weekly");
-        setScheduleWeekday(Number(parts[4]));
-      } else {
-        setScheduleMode("daily");
-      }
-    }
   }, [targetUserId, user?.id]);
 
   useEffect(() => {
     if (user?.id && !targetUserId) setTargetUserId(user.id);
   }, [targetUserId, user?.id]);
-
-  useEffect(() => {
-    if (!user?.tenantId || !hasPermission("DREAMING:VIEW_TENANT")) {
-      setTenantUsers([]);
-      return;
-    }
-    getTenantUsers(user.tenantId)
-      .then(({ users }) => setTenantUsers(users))
-      .catch(() => message.error(t("dreaming.error.loadUsers")));
-  }, [hasPermission, message, t, user?.tenantId]);
 
   useEffect(() => {
     fetchDreamingParameters()
@@ -133,26 +95,48 @@ export function DreamingPanel() {
     [audits]
   );
   const latestRun = audits[0];
-  const displayedSchedule: DreamingSchedule = schedule || {
-    agent_id: agentId || "",
-    enabled: false,
-    rule_type: "CRON",
-    timezone: "Asia/Shanghai",
-    cron_expr: "0 3 * * *",
-    interval_seconds: null,
-    fire_count: 0,
-  };
   const selectedIsSelf = !targetUserId || targetUserId === user?.id;
   const canEditTarget = selectedIsSelf || hasPermission("DREAMING:EDIT_TENANT");
   const queueDelayed =
     activeRun?.status === "queued" &&
     !!activeRun.started_at &&
-    Date.now() - new Date(activeRun.started_at).getTime() > 60_000;
+    Date.now() - new Date(activeRun.started_at + "Z").getTime() > 60_000;
   useEffect(() => {
     if (!activeRun) return;
     const timer = window.setInterval(() => refresh(), 2000);
     return () => window.clearInterval(timer);
   }, [activeRun, agentId, refresh]);
+
+  useEffect(() => {
+    const decisions = latestRun?.result?.decisions;
+    if (!decisions?.length) return;
+    const missingIds = decisions
+      .map((d) => d.memory_id)
+      .filter((id) => !(id in memoryContents));
+    if (!missingIds.length) return;
+    Promise.all(
+      missingIds.map(async (id) => {
+        try {
+          const resp = await fetch(`/api/memory/records/${id}`, {
+            headers: getAuthHeaders(),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            return { id, content: data.content || "" };
+          }
+        } catch {
+          // ignore
+        }
+        return { id, content: "" };
+      })
+    ).then((results) => {
+      const updates: Record<number, string> = {};
+      results.forEach(({ id, content }) => {
+        updates[id] = content;
+      });
+      setMemoryContents((prev) => ({ ...prev, ...updates }));
+    });
+  }, [latestRun?.result?.decisions]);
 
   const trigger = async () => {
     if (!agentId) return;
@@ -165,36 +149,6 @@ export function DreamingPanel() {
       message.error(t("dreaming.error.trigger"));
     } finally {
       setTriggering(false);
-    }
-  };
-
-  const saveSchedule = async () => {
-    if (!agentId || !schedule) return;
-    const [hour, minute] = scheduleTime.split(":").map(Number);
-    const timezone =
-      Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
-    setSavingSchedule(true);
-    try {
-      const saved = await saveDreamingSchedule({
-        agent_id: agentId,
-        enabled: schedule.enabled,
-        rule_type: scheduleMode === "interval" ? "INTERVAL" : "CRON",
-        timezone,
-        start_at: new Date().toISOString(),
-        cron_expr:
-          scheduleMode === "interval"
-            ? null
-            : `${minute} ${hour} * * ${scheduleMode === "weekly" ? scheduleWeekday : "*"}`,
-        interval_seconds:
-          scheduleMode === "interval" ? Math.round(intervalHours * 3600) : null,
-        ...(selectedIsSelf ? {} : { target_user_id: targetUserId }),
-      });
-      setSchedule(saved);
-      message.success(t("dreaming.schedule.saved"));
-    } catch {
-      message.error(t("dreaming.schedule.saveFailed"));
-    } finally {
-      setSavingSchedule(false);
     }
   };
 
@@ -218,6 +172,59 @@ export function DreamingPanel() {
     }
   };
 
+  const clearActiveVersion = async () => {
+    Modal.confirm({
+      title: t("dreaming.active.clearConfirmTitle"),
+      content: t("dreaming.active.clearConfirmContent"),
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          setClearing(true);
+          const result = await clearActiveDreamingVersion(
+            selectedIsSelf ? undefined : targetUserId
+          );
+          if (result.success && result.deactivated_version_id) {
+            setClearedVersionId(result.deactivated_version_id);
+          }
+          message.success(t("dreaming.active.cleared"));
+          await refresh();
+        } catch {
+          message.error(t("dreaming.error.clear"));
+        } finally {
+          setClearing(false);
+        }
+      },
+    });
+  };
+
+  const undoClear = async () => {
+    if (clearedVersionId === null) return;
+    try {
+      setClearing(true);
+      await undoClearActiveDreamingVersion(
+        clearedVersionId,
+        selectedIsSelf ? undefined : targetUserId
+      );
+      setClearedVersionId(null);
+      message.success(t("dreaming.active.undoSuccess"));
+      await refresh();
+    } catch {
+      message.error(t("dreaming.error.undoClear"));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (clearedVersionId === null) return;
+    const timer = setTimeout(() => {
+      setClearedVersionId(null);
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [clearedVersionId]);
+
   if (loading && !agentId) return <Spin />;
 
   return (
@@ -230,7 +237,7 @@ export function DreamingPanel() {
           <div>
             <Typography.Title level={4} style={{ margin: 0 }}>
               <Brain className="inline size-5 mr-2" />
-              Dreaming
+              {t("dreaming.title")}
             </Typography.Title>
             <Typography.Text type="secondary">
               {t("dreaming.description")}
@@ -257,20 +264,7 @@ export function DreamingPanel() {
               )}
             </div>
           </div>
-          <Space>
-            {tenantUsers.length > 1 && (
-              <Select
-                aria-label={t("dreaming.user.placeholder")}
-                style={{ minWidth: 220 }}
-                options={tenantUsers.map((tenantUser) => ({
-                  value: tenantUser.user_id,
-                  label: tenantUser.user_email || tenantUser.user_id,
-                }))}
-                value={targetUserId}
-                onChange={setTargetUserId}
-                placeholder={t("dreaming.user.placeholder")}
-              />
-            )}
+          <div className="flex flex-col items-end gap-2">
             <Button
               type="primary"
               icon={<Play className="size-4" />}
@@ -280,158 +274,76 @@ export function DreamingPanel() {
             >
               {t("dreaming.run.manual")}
             </Button>
-          </Space>
-        </div>
-      </Card>
-
-      <Card
-        title={
-          <Space>
-            <Clock className="size-4" />
-            {t("dreaming.schedule.title")}
-          </Space>
-        }
-        extra={
-          <Button
-            icon={<Save className="size-4" />}
-            loading={savingSchedule}
-            disabled={!schedule || !canEditTarget}
-            onClick={saveSchedule}
-          >
-            {t("dreaming.schedule.save")}
-          </Button>
-        }
-      >
-        <Space wrap size="large">
-          <Space>
-            <Typography.Text>{t("dreaming.schedule.enabled")}</Typography.Text>
-            <Switch
-              checked={displayedSchedule.enabled}
-              disabled={!schedule || !canEditTarget}
-              onChange={(enabled) =>
-                setSchedule({ ...displayedSchedule, enabled })
-              }
-            />
-          </Space>
-          <Select
-            aria-label={t("dreaming.schedule.frequency")}
-            value={scheduleMode}
-            disabled={!schedule || !canEditTarget}
-            style={{ width: 150 }}
-            onChange={setScheduleMode}
-            options={[
-              { value: "daily", label: t("dreaming.schedule.daily") },
-              { value: "weekly", label: t("dreaming.schedule.weekly") },
-              { value: "interval", label: t("dreaming.schedule.interval") },
-            ]}
-          />
-          {scheduleMode === "weekly" && (
-            <Select
-              value={scheduleWeekday}
-              disabled={!schedule || !canEditTarget}
-              style={{ width: 130 }}
-              onChange={setScheduleWeekday}
-              options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
-                value,
-                label: t(`dreaming.schedule.weekday.${value}`),
-              }))}
-            />
-          )}
-          {scheduleMode !== "interval" ? (
-            <TimePicker
-              value={dayjs(`2000-01-01T${scheduleTime}:00`)}
-              format="HH:mm"
-              minuteStep={5}
-              disabled={!schedule || !canEditTarget}
-              onChange={(value) =>
-                value && setScheduleTime(value.format("HH:mm"))
-              }
-            />
-          ) : (
-            <Space>
-              <InputNumber
-                min={1}
-                max={720}
-                value={intervalHours}
-                disabled={!schedule || !canEditTarget}
-                onChange={(value) => setIntervalHours(value || 1)}
-              />
-              <Typography.Text>{t("dreaming.schedule.hours")}</Typography.Text>
-            </Space>
-          )}
-        </Space>
-        <div className="mt-3">
-          <Typography.Text type="secondary">
-            {displayedSchedule.next_fire_at
-              ? t("dreaming.schedule.nextFire", {
-                  time: new Date(
-                    displayedSchedule.next_fire_at
-                  ).toLocaleString(),
-                })
-              : t("dreaming.schedule.disabledHint")}
-          </Typography.Text>
-        </div>
-      </Card>
-
-      {activeRun && (
-        <Alert
-          type={queueDelayed ? "warning" : "info"}
-          showIcon
-          message={
-            queueDelayed
-              ? t("dreaming.run.queueDelayed")
-              : t("dreaming.run.inProgress")
-          }
-          description={
-            <div>
-              {queueDelayed && (
-                <div className="mb-2">
-                  {t("dreaming.run.queueDelayedDescription")}
+            {activeRun && (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Loader2 className="size-3.5 animate-spin text-gray-500 shrink-0" />
+                <div className="flex items-center gap-0">
+                  {phases.map((phase, i) => {
+                    const currentIdx = activeRun.current_phase
+                      ? phases.indexOf(
+                          activeRun.current_phase as (typeof phases)[number]
+                        )
+                      : -1;
+                    const isCompleted = currentIdx >= 0 && i < currentIdx;
+                    const isCurrent = currentIdx >= 0 && i === currentIdx;
+                    return (
+                      <React.Fragment key={phase}>
+                        {i > 0 && (
+                          <span
+                            className={`mx-1 ${
+                              currentIdx >= 0 && i <= currentIdx
+                                ? "text-green-500"
+                                : "text-gray-300"
+                            }`}
+                          >
+                            –
+                          </span>
+                        )}
+                        <span
+                          className={
+                            isCompleted
+                              ? "text-green-600"
+                              : isCurrent
+                                ? "text-gray-900 font-semibold"
+                                : "text-gray-400"
+                          }
+                        >
+                          {phaseLabels[phase]}
+                        </span>
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
-              )}
-              <div className="mb-2">
-                {t("dreaming.run.currentPhase")}:{" "}
-                {activeRun.current_phase
-                  ? t(`dreaming.phase.${activeRun.current_phase}`, {
-                      defaultValue: activeRun.current_phase,
-                    })
-                  : t("dreaming.phase.queued")}
+                {queueDelayed && (
+                  <span className="text-orange-500 ml-1 shrink-0">
+                    ({t("dreaming.run.queueDelayed")})
+                  </span>
+                )}
               </div>
-              <Progress
-                percent={phaseProgress[activeRun.current_phase || ""] || 5}
-                status="active"
-              />
-            </div>
-          }
-        />
-      )}
-      {!activeRun && latestRun?.status === "failed" && (
-        <Alert
-          type="error"
-          showIcon
-          message={t("dreaming.run.failed")}
-          description={latestRun.error || t("dreaming.run.failedDescription")}
-        />
-      )}
-      {!activeRun && latestRun?.status === "completed" && (
-        <Alert
-          type="success"
-          showIcon
-          message={t("dreaming.run.completed")}
-          description={t("dreaming.run.completedDescription", {
-            promoted: latestRun.promoted_count,
-            deferred: latestRun.deferred_count,
-          })}
-        />
-      )}
-      {!activeRun && latestRun?.status === "skipped" && (
-        <Alert
-          type="warning"
-          showIcon
-          message={t("dreaming.run.skipped")}
-          description={t("dreaming.run.skippedDescription")}
-        />
-      )}
+            )}
+            {!activeRun && latestRun?.status === "completed" && (
+              <div className="text-xs text-green-600">
+                ✓ {t("dreaming.run.completed")} —{" "}
+                {t("dreaming.run.completedDescription", {
+                  promoted: latestRun.promoted_count,
+                  deferred: latestRun.deferred_count,
+                })}
+              </div>
+            )}
+            {!activeRun && latestRun?.status === "failed" && (
+              <div className="text-xs text-red-500">
+                ✗ {t("dreaming.run.failed")} —{" "}
+                {latestRun.error || t("dreaming.run.failedDescription")}
+              </div>
+            )}
+            {!activeRun && latestRun?.status === "skipped" && (
+              <div className="text-xs text-orange-500">
+                ⚠ {t("dreaming.run.skipped")}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <Card title={t("dreaming.active.title")}>
         {versions.find((version) => version.is_active) ? (
@@ -439,17 +351,64 @@ export function DreamingPanel() {
             const active = versions.find((version) => version.is_active)!;
             return (
               <div>
-                <Space className="mb-3">
-                  <Tag color="green">Active V{active.version_no}</Tag>
-                  <Tag>
-                    {t("dreaming.characters", {
-                      count: active.published_char_count,
-                    })}
-                  </Tag>
-                  <Tag color={active.mechanical_truncation ? "orange" : "blue"}>
-                    {active.compression_status}
-                  </Tag>
-                </Space>
+                <div className="flex items-center justify-between mb-3">
+                  <Space>
+                    <Tag color="green">
+                      {t("dreaming.active.versionPrefix", {
+                        version: active.version_no,
+                      })}
+                    </Tag>
+                    <Tag>
+                      {t("dreaming.characters", {
+                        count: active.published_char_count,
+                      })}
+                    </Tag>
+                    <Tag color={active.mechanical_truncation ? "orange" : "blue"}>
+                      {t(`dreaming.compression.${active.compression_status}`)}
+                    </Tag>
+                    {versions.length > 1 && (
+                      <Select
+                        size="small"
+                        style={{ width: 200 }}
+                        value={active.version_id}
+                        onChange={(versionId) => {
+                          const version = versions.find(
+                            (v) => v.version_id === versionId
+                          );
+                          if (version && !version.is_active) {
+                            activate(version);
+                          }
+                        }}
+                        options={versions.map((v) => ({
+                          value: v.version_id,
+                          label: `V${v.version_no}${v.is_active ? ` (${t("dreaming.version.current")})` : ""}`,
+                        }))}
+                      />
+                    )}
+                  </Space>
+                  {canEditTarget && (
+                    <Space>
+                      <Button
+                        size="small"
+                        danger
+                        icon={<Trash2 className="size-3" />}
+                        loading={clearing}
+                        onClick={clearActiveVersion}
+                      >
+                        {t("dreaming.active.clear")}
+                      </Button>
+                      {clearedVersionId !== null && (
+                        <Button
+                          size="small"
+                          loading={clearing}
+                          onClick={undoClear}
+                        >
+                          {t("dreaming.active.undo")}
+                        </Button>
+                      )}
+                    </Space>
+                  )}
+                </div>
                 {active.mechanical_truncation && (
                   <Alert
                     className="mb-3"
@@ -465,8 +424,9 @@ export function DreamingPanel() {
                   className="whitespace-pre-wrap rounded-md bg-gray-50 p-4"
                   ellipsis={{
                     rows: 12,
-                    expandable: true,
-                    symbol: t("dreaming.expand"),
+                    expandable: "collapsible" as const,
+                    symbol: (expanded: boolean) =>
+                      expanded ? t("dreaming.collapse") : t("dreaming.expand"),
                   }}
                 >
                   {active.published_content}
@@ -475,112 +435,133 @@ export function DreamingPanel() {
             );
           })()
         ) : (
-          <Empty
-            description={
-              latestRun?.status === "completed" &&
-              latestRun.promoted_count === 0
-                ? t("dreaming.active.noEligible")
-                : t("dreaming.active.empty")
-            }
-          />
+          <div>
+            {clearedVersionId !== null &&
+            versions.find((v) => v.version_id === clearedVersionId) ? (
+              (() => {
+                const cleared = versions.find(
+                  (v) => v.version_id === clearedVersionId
+                )!;
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <Space>
+                        <Tag color="default">
+                          {t("dreaming.active.versionPrefixCleared", {
+                            version: cleared.version_no,
+                          })}
+                        </Tag>
+                        <Tag>
+                          {t("dreaming.characters", { count: 0 })}
+                        </Tag>
+                        <Tag color="blue">
+                          {t("dreaming.compression.not_needed")}
+                        </Tag>
+                      </Space>
+                      {canEditTarget && (
+                        <Button
+                          size="small"
+                          loading={clearing}
+                          onClick={undoClear}
+                        >
+                          {t("dreaming.active.undo")}
+                        </Button>
+                      )}
+                    </div>
+                    <Typography.Paragraph className="whitespace-pre-wrap rounded-md bg-gray-50 p-4 text-gray-400 italic">
+                      {t("dreaming.active.clearedContent")}
+                    </Typography.Paragraph>
+                  </div>
+                );
+              })()
+            ) : (
+              <Empty
+                description={
+                  latestRun?.status === "completed" &&
+                  latestRun.promoted_count === 0
+                    ? t("dreaming.active.noEligible")
+                    : t("dreaming.active.empty")
+                }
+              />
+            )}
+          </div>
         )}
       </Card>
 
       <Card title={t("dreaming.decisions.title")}>
         {latestRun?.result?.decisions?.length ? (
-          <List
-            dataSource={latestRun.result.decisions}
-            renderItem={(decision) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={
-                    <Space>
-                      <Tag
-                        color={
-                          decision.event === "SELECT" ? "green" : "default"
-                        }
-                      >
-                        {t(`dreaming.decision.${decision.event.toLowerCase()}`)}
-                      </Tag>
-                      <span>
-                        {t("dreaming.decision.memory", {
-                          id: decision.memory_id,
-                        })}
-                      </span>
-                      <Tag>
-                        {t("dreaming.decision.score", {
-                          score: decision.score.toFixed(3),
-                        })}
-                      </Tag>
-                    </Space>
-                  }
-                  description={
-                    <div>
-                      <div>{decision.reason}</div>
-                      <Typography.Text type="secondary">
-                        {t("dreaming.decision.evidence", {
-                          ids: (
-                            decision.evidence_ids || [
-                              String(decision.memory_id),
-                            ]
-                          ).join(", "),
-                        })}
-                      </Typography.Text>
-                    </div>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        ) : (
-          <Empty description={t("dreaming.decisions.empty")} />
-        )}
-      </Card>
-
-      <Card
-        title={
-          <>
-            <History className="inline size-4 mr-2" />
-            {t("dreaming.history.title")}
-          </>
-        }
-      >
-        {versions.length ? (
-          <Timeline
-            items={versions.map((version) => ({
-              color: version.is_active ? "green" : "gray",
-              children: (
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <Space>
-                      <strong>V{version.version_no}</strong>
-                      {version.is_active && (
-                        <Tag color="green">{t("dreaming.version.current")}</Tag>
-                      )}
-                      <Tag>{version.compression_status}</Tag>
-                    </Space>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {t("dreaming.version.lengths", {
-                        raw: version.raw_char_count,
-                        published: version.published_char_count,
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {latestRun.result.decisions.map((decision) => (
+              <Tooltip
+                key={decision.memory_id}
+                title={
+                  <div className="max-w-md">
+                    <div className="font-medium mb-1">
+                      {t("dreaming.decision.memory", {
+                        id: decision.memory_id,
                       })}
                     </div>
+                    <div className="text-xs opacity-80">
+                      {memoryContents[decision.memory_id] || decision.reason}
+                    </div>
                   </div>
-                  {!version.is_active && canEditTarget && (
-                    <Button
-                      size="small"
-                      icon={<RotateCcw className="size-3" />}
-                      onClick={() => activate(version)}
+                }
+                placement="top"
+                mouseEnterDelay={0.5}
+              >
+                <div
+                  className={`rounded-lg border p-3 transition-all hover:shadow-md cursor-default ${
+                    decision.event === "SELECT"
+                      ? "border-green-200 bg-green-50 hover:border-green-300"
+                      : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <Tag
+                      color={decision.event === "SELECT" ? "green" : "default"}
+                      style={{ margin: 0 }}
                     >
-                      {t("dreaming.version.activate")}
-                    </Button>
-                  )}
+                      {t(`dreaming.decision.${decision.event.toLowerCase()}`)}
+                    </Tag>
+                    <Typography.Text type="secondary" className="text-xs">
+                      #{decision.memory_id}
+                    </Typography.Text>
+                  </div>
+                  <div className="flex gap-2 text-xs mb-1">
+                    <span
+                      className={
+                        decision.noise ? "text-red-500" : "text-gray-500"
+                      }
+                    >
+                      {t("dreaming.decision.noise")}{" "}
+                      {decision.noise
+                        ? t("dreaming.decision.noiseYes")
+                        : t("dreaming.decision.noiseNo")}
+                    </span>
+                    <span className="text-gray-500">
+                      {t("dreaming.decision.scoreLabel")}{" "}
+                      {decision.score.toFixed(2)}
+                    </span>
+                    <span className="text-gray-500">
+                      {t("dreaming.decision.recallLabel")}{" "}
+                      {decision.signal_count}
+                    </span>
+                  </div>
+                  <Typography.Paragraph
+                    type="secondary"
+                    className="text-xs mb-0"
+                    ellipsis={{ rows: 2 }}
+                    style={{ marginBottom: 0 }}
+                  >
+                    {memoryContents[decision.memory_id] ||
+                      t("dreaming.decision.noContent")}
+                  </Typography.Paragraph>
                 </div>
-              ),
-            }))}
-          />
+              </Tooltip>
+            ))}
+          </div>
         ) : (
-          <Empty description={t("dreaming.history.empty")} />
+          <Empty description={t("dreaming.decisions.empty")} />
         )}
       </Card>
     </div>

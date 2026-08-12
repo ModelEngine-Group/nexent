@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_activation_audit_t (
     agent_id VARCHAR(100) NOT NULL,
     actor_user_id VARCHAR(100) NOT NULL,
     from_version_id BIGINT,
-    to_version_id BIGINT NOT NULL,
+    to_version_id BIGINT,
     reason VARCHAR(100) NOT NULL DEFAULT 'user_switch',
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

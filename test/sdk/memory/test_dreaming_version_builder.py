@@ -413,3 +413,66 @@ def test_truncate_at_sentence_word_boundary():
     result = _truncate_at_sentence(text, 30)
     assert len(result) <= 30
     assert result == "This is a long sentence"
+
+
+def test_backoff_between_retries():
+    """Verify that backoff delay is applied between retry attempts."""
+    from unittest.mock import patch
+
+    # Mock compressor that fails on first attempt, succeeds on second
+    call_count = [0]
+
+    def mock_compressor(request):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ValueError("Simulated failure")
+        # Return valid output on second attempt
+        return DreamingCompressionOutput(
+            content="- Fact 1\n- Fact 2",
+            metadata={
+                "fact_to_units_map": {},
+                "covered_fact_ids": [],
+            },
+        )
+
+    # Create test units
+    units = [
+        DreamingMemoryUnit(
+            unit_id="test:1",
+            content="Test content that exceeds limit",
+            evidence_ids=["1"],
+        )
+    ]
+
+    # Patch time.sleep in the version_builder module to track calls
+    with patch("nexent.memory.dreaming.version_builder.time.sleep") as mock_sleep:
+        result = build_dreaming_version(
+            parent_units=[],
+            new_units=units,
+            max_chars=10,  # Force compression
+            compressor=mock_compressor,
+            max_attempts=2,
+            backoff_base_seconds=1.0,
+        )
+
+        # Verify sleep was called once (between attempt 1 and 2)
+        assert mock_sleep.call_count == 1
+        # Verify it was called with backoff_base_seconds * (attempt - 1) = 1.0 * 1 = 1.0
+        mock_sleep.assert_called_once_with(1.0)
+
+
+def test_default_parameters_updated():
+    """Verify that default promotion parameters match OpenClaw calibration."""
+    from consts.const import DREAMING_MAX_AGE_DAYS, MIN_PROMOTION_SCORE, MIN_UNIQUE_QUERIES
+
+    assert MIN_PROMOTION_SCORE == 0.75, "MIN_PROMOTION_SCORE should be 0.75 per OpenClaw 3x3 rule"
+    assert MIN_UNIQUE_QUERIES == 3, "MIN_UNIQUE_QUERIES should be 3 per OpenClaw 3x3 rule"
+    assert DREAMING_MAX_AGE_DAYS == 30, "DREAMING_MAX_AGE_DAYS should be 30"
+
+
+def test_max_age_days_constant_exists():
+    """Verify that DREAMING_MAX_AGE_DAYS constant is defined."""
+    from consts.const import DREAMING_MAX_AGE_DAYS
+
+    assert isinstance(DREAMING_MAX_AGE_DAYS, int)
+    assert DREAMING_MAX_AGE_DAYS > 0

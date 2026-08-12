@@ -89,6 +89,12 @@ def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
             else None
         ),
         "fire_count": row.fire_count,
+        "min_score": row.min_score,
+        "min_recall_count": row.min_recall_count,
+        "min_unique_queries": row.min_unique_queries,
+        "source_limit": row.source_limit,
+        "long_term_max_chars": row.long_term_max_chars,
+        "compression_max_attempts": row.compression_max_attempts,
     }
 
 
@@ -122,6 +128,12 @@ def upsert_schedule(
     interval_seconds: Optional[int],
     next_fire_at: Optional[datetime],
     actor_user_id: str,
+    min_score: Optional[float] = None,
+    min_recall_count: Optional[int] = None,
+    min_unique_queries: Optional[int] = None,
+    source_limit: Optional[int] = None,
+    long_term_max_chars: Optional[int] = None,
+    compression_max_attempts: Optional[int] = None,
 ) -> Dict[str, Any]:
     with get_db_session() as session:
         row = (
@@ -153,9 +165,53 @@ def upsert_schedule(
         row.cron_expr = cron_expr
         row.interval_seconds = interval_seconds
         row.next_fire_at = next_fire_at if enabled else None
+        row.min_score = min_score
+        row.min_recall_count = min_recall_count
+        row.min_unique_queries = min_unique_queries
+        row.source_limit = source_limit
+        row.long_term_max_chars = long_term_max_chars
+        row.compression_max_attempts = compression_max_attempts
         row.updated_by = actor_user_id
         session.flush()
         return _schedule_to_dict(row)
+
+
+def get_thresholds(
+    tenant_id: str, user_id: str, agent_id: str
+) -> Optional[Dict[str, Any]]:
+    """Return per-user threshold overrides, or None if not configured."""
+    with get_db_session() as session:
+        row = (
+            session.query(
+                MemoryDreamingSchedule.min_score,
+                MemoryDreamingSchedule.min_recall_count,
+                MemoryDreamingSchedule.min_unique_queries,
+                MemoryDreamingSchedule.source_limit,
+                MemoryDreamingSchedule.long_term_max_chars,
+                MemoryDreamingSchedule.compression_max_attempts,
+            )
+            .filter(
+                MemoryDreamingSchedule.tenant_id == tenant_id,
+                MemoryDreamingSchedule.user_id == user_id,
+                MemoryDreamingSchedule.agent_id == agent_id,
+                MemoryDreamingSchedule.delete_flag == "N",
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        result = {
+            "min_score": row.min_score,
+            "min_recall_count": row.min_recall_count,
+            "min_unique_queries": row.min_unique_queries,
+            "source_limit": row.source_limit,
+            "long_term_max_chars": row.long_term_max_chars,
+            "compression_max_attempts": row.compression_max_attempts,
+        }
+        # Return None if ALL thresholds are unset
+        if all(v is None for v in result.values()):
+            return None
+        return result
 
 
 def _next_schedule_fire(row: MemoryDreamingSchedule, after: datetime) -> Optional[datetime]:
@@ -395,6 +451,113 @@ def activate_version(
         session.commit()
         session.refresh(target)
         return _version_to_dict(target)
+
+
+def deactivate_active_version(
+    tenant_id: str,
+    user_id: str,
+    agent_id: str,
+    *,
+    actor_user_id: Optional[str] = None,
+) -> Optional[int]:
+    """Deactivate the currently active version without deleting it.
+    
+    Returns the version_id of the deactivated version, or None if no active version exists.
+    """
+    with get_db_session() as session:
+        current = (
+            session.query(MemoryDreamingVersion)
+            .filter(
+                MemoryDreamingVersion.tenant_id == tenant_id,
+                MemoryDreamingVersion.user_id == user_id,
+                MemoryDreamingVersion.agent_id == agent_id,
+                MemoryDreamingVersion.delete_flag == "N",
+                MemoryDreamingVersion.is_active.is_(True),
+            )
+            .first()
+        )
+        if current is None:
+            return None
+        actor = actor_user_id or user_id
+        session.query(MemoryDreamingVersion).filter(
+            MemoryDreamingVersion.tenant_id == tenant_id,
+            MemoryDreamingVersion.user_id == user_id,
+            MemoryDreamingVersion.agent_id == agent_id,
+            MemoryDreamingVersion.delete_flag == "N",
+            MemoryDreamingVersion.is_active.is_(True),
+        ).update(
+            {"is_active": False, "updated_by": actor},
+            synchronize_session=False,
+        )
+        session.add(
+            MemoryDreamingActivationAudit(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                actor_user_id=actor,
+                from_version_id=current.version_id,
+                to_version_id=None,
+                reason="user_clear",
+                created_by=actor,
+            )
+        )
+        session.commit()
+        return current.version_id
+
+
+def reactivate_version(
+    tenant_id: str,
+    user_id: str,
+    agent_id: str,
+    version_id: int,
+    *,
+    actor_user_id: Optional[str] = None,
+) -> bool:
+    """Reactivate a previously deactivated version.
+    
+    Returns True if successful, False if version not found.
+    """
+    with get_db_session() as session:
+        target = (
+            session.query(MemoryDreamingVersion)
+            .filter(
+                MemoryDreamingVersion.tenant_id == tenant_id,
+                MemoryDreamingVersion.user_id == user_id,
+                MemoryDreamingVersion.agent_id == agent_id,
+                MemoryDreamingVersion.version_id == version_id,
+                MemoryDreamingVersion.delete_flag == "N",
+            )
+            .first()
+        )
+        if target is None:
+            return False
+        actor = actor_user_id or user_id
+        session.query(MemoryDreamingVersion).filter(
+            MemoryDreamingVersion.tenant_id == tenant_id,
+            MemoryDreamingVersion.user_id == user_id,
+            MemoryDreamingVersion.agent_id == agent_id,
+            MemoryDreamingVersion.delete_flag == "N",
+            MemoryDreamingVersion.is_active.is_(True),
+        ).update(
+            {"is_active": False, "updated_by": actor},
+            synchronize_session=False,
+        )
+        target.is_active = True
+        target.updated_by = actor
+        session.add(
+            MemoryDreamingActivationAudit(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                actor_user_id=actor,
+                from_version_id=None,
+                to_version_id=version_id,
+                reason="user_undo_clear",
+                created_by=actor,
+            )
+        )
+        session.commit()
+        return True
 
 
 def _version_to_dict(row: MemoryDreamingVersion) -> Dict[str, Any]:

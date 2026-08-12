@@ -478,6 +478,9 @@ export interface DreamingAudit {
     decisions?: Array<{
       memory_id: number;
       score: number;
+      noise: boolean;
+      signal_count: number;
+      context_diversity: number;
       event: "SELECT" | "DEFER";
       reason: string;
       evidence_ids?: string[];
@@ -505,6 +508,12 @@ export interface DreamingSchedule {
   next_fire_at?: string | null;
   last_fire_at?: string | null;
   fire_count: number;
+  min_score?: number | null;
+  min_recall_count?: number | null;
+  min_unique_queries?: number | null;
+  source_limit?: number | null;
+  long_term_max_chars?: number | null;
+  compression_max_attempts?: number | null;
 }
 
 export interface DreamingVersion {
@@ -616,6 +625,32 @@ export async function activateDreamingVersion(
     headers: getAuthHeaders(),
     body: JSON.stringify({
       expected_active_version_id: expectedActiveVersionId,
+      ...(targetUserId ? { target_user_id: targetUserId } : {}),
+    }),
+  });
+}
+
+export async function clearActiveDreamingVersion(
+  targetUserId?: string
+): Promise<{ success: boolean; message: string; deactivated_version_id?: number }> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.clear, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      ...(targetUserId ? { target_user_id: targetUserId } : {}),
+    }),
+  });
+}
+
+export async function undoClearActiveDreamingVersion(
+  versionId: number,
+  targetUserId?: string
+): Promise<{ success: boolean; message: string }> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.undoClear, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      version_id: versionId,
       ...(targetUserId ? { target_user_id: targetUserId } : {}),
     }),
   });

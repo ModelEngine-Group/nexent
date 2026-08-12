@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 from typing import Callable, Iterable, List, Optional
 
@@ -115,6 +116,7 @@ def build_dreaming_version(
     max_attempts: int = 2,
     run_id: Optional[int] = None,
     agent_id: Optional[str] = None,
+    backoff_base_seconds: float = 1.0,
 ) -> DreamingVersionBuildResult:
     """Build RAW and bounded published content without mutating parent data."""
     if max_chars <= 0:
@@ -140,6 +142,8 @@ def build_dreaming_version(
         required_evidence = {evidence_id for unit in units for evidence_id in unit.evidence_ids}
         required_literals = _critical_literals(raw_content)
         for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                time.sleep(backoff_base_seconds * (attempt - 1))
             try:
                 output = compressor(
                     DreamingCompressionRequest(

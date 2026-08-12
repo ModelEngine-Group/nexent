@@ -763,3 +763,124 @@ def test_fact_coverage_too_low_raises_in_main_path():
                 attempt=1,
             )
         )
+
+
+def test_json_parse_error_in_extraction_raises_value_error():
+    """Verify that JSON parse errors in span extraction are wrapped in ValueError."""
+
+    class Model:
+        def generate(self, messages):
+            return SimpleNamespace(content="This is not valid JSON")
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.tenant_id = "t"
+    compressor.user_id = "u"
+    compressor.model = Model()
+    compressor.max_compression_input_chars = 40_000
+
+    request = DreamingCompressionRequest(
+        raw_content="Test content",
+        units=[
+            DreamingMemoryUnit(
+                unit_id="test:1",
+                content="Test content",
+                evidence_ids=["1"],
+            )
+        ],
+        max_chars=10,
+        attempt=1,
+    )
+
+    with pytest.raises(ValueError, match="JSON parse error"):
+        compressor(request)
+
+
+def test_json_parse_error_in_lossless_formatting_raises_value_error():
+    """Verify that JSON parse errors in lossless formatting are wrapped in ValueError."""
+
+    class Model:
+        def generate(self, messages):
+            system_content = messages[0]["content"]
+            if "information extraction" in system_content.lower():
+                raw = "Test content that is very long and needs formatting to fit within the limit"
+                return SimpleNamespace(
+                    content=json.dumps([
+                        {"unit_id": "test:1", "start": 0, "end": len(raw)}
+                    ])
+                )
+            else:
+                return SimpleNamespace(content="This is not valid JSON")
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.tenant_id = "t"
+    compressor.user_id = "u"
+    compressor.model = Model()
+    compressor.max_compression_input_chars = 40_000
+
+    request = DreamingCompressionRequest(
+        raw_content="Test content that is very long and needs formatting to fit within the limit",
+        units=[
+            DreamingMemoryUnit(
+                unit_id="test:1",
+                content="Test content that is very long and needs formatting to fit within the limit",
+                evidence_ids=["1"],
+            )
+        ],
+        max_chars=10,
+        attempt=1,
+    )
+
+    with pytest.raises(ValueError, match="JSON parse error"):
+        compressor(request)
+
+
+def test_map_reduce_chunk_failure_does_not_abort():
+    """Verify that map-reduce continues processing even if one chunk fails."""
+    call_count = [0]
+
+    class Model:
+        def generate(self, messages):
+            system_content = messages[0]["content"]
+            if "lossless formatter" in system_content:
+                unit_ids = re.findall(r'\[f(\d+)\]', messages[1]["content"])
+                facts = [
+                    {"fact_id": f"f{fid}", "text": "x"}
+                    for fid in unit_ids
+                ]
+                return SimpleNamespace(content=json.dumps({"facts": facts}))
+
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise ValueError("Simulated chunk failure")
+            unit_ids = re.findall(
+                r'"unit_id": "([^"]+)", "text":', messages[1]["content"]
+            )
+            spans = []
+            for uid in unit_ids:
+                spans.append({"unit_id": uid, "start": 0, "end": 10})
+            return SimpleNamespace(content=json.dumps(spans))
+
+    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
+    compressor.tenant_id = "t"
+    compressor.user_id = "u"
+    compressor.model = Model()
+    compressor.max_compression_input_chars = 800
+
+    units = [
+        DreamingMemoryUnit(
+            unit_id=f"test:{i}",
+            content=f"Content for unit {i}" * 100,
+            evidence_ids=[str(i)],
+        )
+        for i in range(1, 15)
+    ]
+
+    request = DreamingCompressionRequest(
+        raw_content="Very long content" * 1000,
+        units=units,
+        max_chars=100,
+        attempt=1,
+    )
+
+    result = compressor(request)
+    assert result is not None
