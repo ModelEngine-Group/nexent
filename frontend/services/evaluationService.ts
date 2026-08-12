@@ -222,7 +222,7 @@ export const evaluationService = {
     a.download = `${setName}.xlsx`;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    a.remove();
     URL.revokeObjectURL(url);
   },
 
@@ -249,7 +249,7 @@ export const evaluationService = {
     a.download = "evaluators_export.json";
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    a.remove();
     URL.revokeObjectURL(url);
   },
 

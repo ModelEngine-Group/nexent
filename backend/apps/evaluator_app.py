@@ -28,6 +28,8 @@ from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("evaluator_app")
 
+_UNAUTHORIZED_MESSAGE = "Authentication required"
+
 router = APIRouter(prefix="/evaluators")
 
 
@@ -112,7 +114,7 @@ async def list_evaluators_api(
         )
         return _ok(data)
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _UNAUTHORIZED_MESSAGE)
     except AppException:
         raise
     except Exception as exc:
@@ -164,7 +166,7 @@ async def create_evaluator_api(
         )
         return _ok(data)
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _UNAUTHORIZED_MESSAGE)
     except AppException:
         raise
     except Exception as exc:
@@ -274,7 +276,7 @@ async def list_evaluator_versions_api(
         )
         return _ok(data)
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _UNAUTHORIZED_MESSAGE)
     except AppException:
         raise
     except Exception as exc:
@@ -390,7 +392,7 @@ async def import_evaluators_api(
         )
         return _ok(result)
     except UnauthorizedError:
-        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, "Authentication required")
+        raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _UNAUTHORIZED_MESSAGE)
     except AppException:
         raise
     except Exception as exc:

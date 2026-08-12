@@ -217,6 +217,26 @@ function RunsTab() {
     };
   }, [runs, fetchRuns]);
 
+  // Shared create-run POST used by both eval modes (no_set / with_set).
+  const submitEvaluation = async (payload: any) => {
+    const r = await fetch(API_ENDPOINTS.agentEvaluations.create, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      setRuns((prev) => [d.data || d, ...prev]);
+      setDrawer(false);
+      setFilterAgent(sA);
+    } else {
+      message.error(d?.detail || t("agentEvaluation.createFailed"));
+    }
+  };
+
   // Parse scores JSON (may be a single number, or {"evaluator_name": score, ...})
   const cols = [
     { title: "ID", dataIndex: "agent_evaluation_id", width: 50 },
@@ -732,27 +752,7 @@ function RunsTab() {
                         evaluator_ids: sE,
                         query_count: queryCount,
                       };
-                      const r = await fetch(
-                        API_ENDPOINTS.agentEvaluations.create,
-                        {
-                          method: "POST",
-                          headers: {
-                            ...getAuthHeaders(),
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify(b),
-                        }
-                      );
-                      const d = await r.json();
-                      if (r.ok) {
-                        setRuns((prev) => [d.data || d, ...prev]);
-                        setDrawer(false);
-                        setFilterAgent(sA);
-                      } else {
-                        message.error(
-                          d?.detail || t("agentEvaluation.createFailed")
-                        );
-                      }
+                      await submitEvaluation(b);
                     } else {
                       const b: any = {
                         agent_id: sA,
@@ -764,28 +764,7 @@ function RunsTab() {
                         b.evaluator_ids = sE;
                         b.field_mappings = mappings;
                       }
-                      const r = await fetch(
-                        API_ENDPOINTS.agentEvaluations.create,
-                        {
-                          method: "POST",
-                          headers: {
-                            ...getAuthHeaders(),
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify(b),
-                        }
-                      );
-                      const d = await r.json();
-                      if (r.ok) {
-                        const run = d.data || d;
-                        setRuns((prev) => [run, ...prev]);
-                        setDrawer(false);
-                        setFilterAgent(sA);
-                      } else {
-                        message.error(
-                          d?.detail || t("agentEvaluation.createFailed")
-                        );
-                      }
+                      await submitEvaluation(b);
                     }
                   } finally {
                     setCreating(false);

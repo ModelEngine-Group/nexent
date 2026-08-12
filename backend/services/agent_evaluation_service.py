@@ -231,7 +231,7 @@ def validate_code_evaluator(code: str) -> None:
         # check) is applied BEFORE the evaluator reaches this call — see
         # docstring.
         # codeql[py/code-injection]  # nosec B102
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # NOSONAR
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # lgtm[py/code-injection]  # NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,

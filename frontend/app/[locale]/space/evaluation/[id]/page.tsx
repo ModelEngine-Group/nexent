@@ -907,50 +907,59 @@ export default function EvaluationDetailPage() {
   // `session_id=`), so the raw `cases` list is rendered directly — no
   // client-side post-filtering is needed and pagination stays consistent.
 
-  // Table change handler for server-side pagination + sorting
-  const handleTableChange = useCallback(
-    (pagination: any, filters: any, sorter: any, extra: any) => {
-      // Handle annotation filter changes
-      if (extra.action === "filter") {
-        const newFilters = { ...annoFilters };
-        let newSessionFilter: string | null = sessionIdFilter;
-        for (const key of Object.keys(filters || {})) {
-          if (key.startsWith("anno_")) {
-            const sid = Number(key.replace("anno_", ""));
-            if (filters[key]?.length) {
-              newFilters[sid] = filters[key][0];
-            } else {
-              delete newFilters[sid];
-            }
-          }
-          if (key === "session_id") {
-            // Only treat this as a session-filter change when the value
-            // actually differs from the current one. The `filters` object
-            // always contains the session_id column (even with null), so
-            // unconditionally flagging it here would swallow anno filters.
-            const nextVal = filters[key]?.length ? filters[key][0] : null;
-            if (nextVal !== sessionIdFilter) {
-              newSessionFilter = nextVal;
-            }
+  // Apply server-side annotation / session filters (triggered by filter menu)
+  const applyAnnoFilters = useCallback(
+    (filters: any, pagination: any) => {
+      const newFilters = { ...annoFilters };
+      let newSessionFilter: string | null = sessionIdFilter;
+      for (const key of Object.keys(filters || {})) {
+        if (key.startsWith("anno_")) {
+          const sid = Number(key.replace("anno_", ""));
+          if (filters[key]?.length) {
+            newFilters[sid] = filters[key][0];
+          } else {
+            delete newFilters[sid];
           }
         }
-        setSessionIdFilter(newSessionFilter);
-        setAnnoFilters(newFilters);
-        setCasePage(1);
-        fetchCases(
-          1,
-          pagination.pageSize || 10,
-          caseTab,
-          caseSortBy,
-          caseSortOrder,
-          newFilters,
-          // Session filter is server-side now — send it with the fetch so
-          // the pagination total and page boundaries match the visible rows.
-          newSessionFilter
-        );
-        return;
+        if (key === "session_id") {
+          // Only treat this as a session-filter change when the value
+          // actually differs from the current one. The `filters` object
+          // always contains the session_id column (even with null), so
+          // unconditionally flagging it here would swallow anno filters.
+          const nextVal = filters[key]?.length ? filters[key][0] : null;
+          if (nextVal !== sessionIdFilter) {
+            newSessionFilter = nextVal;
+          }
+        }
       }
+      setSessionIdFilter(newSessionFilter);
+      setAnnoFilters(newFilters);
+      setCasePage(1);
+      fetchCases(
+        1,
+        pagination.pageSize || 10,
+        caseTab,
+        caseSortBy,
+        caseSortOrder,
+        newFilters,
+        // Session filter is server-side now — send it with the fetch so
+        // the pagination total and page boundaries match the visible rows.
+        newSessionFilter
+      );
+    },
+    [
+      annoFilters,
+      sessionIdFilter,
+      caseTab,
+      caseSortBy,
+      caseSortOrder,
+      fetchCases,
+    ]
+  );
 
+  // Handle pagination / sort changes (non-filter actions)
+  const handlePaginationSort = useCallback(
+    (pagination: any, sorter: any) => {
       const newPage = pagination.current || 1;
       const newPageSize = pagination.pageSize || 10;
       setCasePage(newPage);
@@ -982,15 +991,19 @@ export default function EvaluationDetailPage() {
         );
       }
     },
-    [
-      caseTab,
-      caseSortBy,
-      caseSortOrder,
-      scoreEvaluator,
-      fetchCases,
-      annoFilters,
-      sessionIdFilter,
-    ]
+    [scoreEvaluator, caseTab, annoFilters, sessionIdFilter, fetchCases]
+  );
+
+  // Table change handler for server-side pagination + sorting
+  const handleTableChange = useCallback(
+    (pagination: any, filters: any, sorter: any, extra: any) => {
+      if (extra.action === "filter") {
+        applyAnnoFilters(filters, pagination);
+        return;
+      }
+      handlePaginationSort(pagination, sorter);
+    },
+    [applyAnnoFilters, handlePaginationSort]
   );
 
   // When tab changes, reset page and refetch
