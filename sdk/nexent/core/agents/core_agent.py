@@ -1021,9 +1021,7 @@ Additional Args:
         if task.startswith("[Current time:"):
             self.task = task
         else:
-            now = datetime.now().astimezone()
-            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            self.task = f"[Current time: {time_str}]\n\n{task}"
+            self.task = f"[Current time: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""

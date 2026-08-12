@@ -58,3 +58,12 @@ export function formatDateTimeLocale(date: DateInput, locale?: string): string {
   const isZh = locale?.startsWith("zh");
   return formatLocal(date, isZh ? "YYYY-MM-DD HH:mm" : "MMM D, YYYY h:mm A") ?? "-";
 }
+
+/**
+ * Format a date to YYYY-MM-DD, falling back to the string representation
+ * of the input when parsing fails. Convenience for components that need
+ * a non-undefined string return.
+ */
+export function formatDateOrFallback(date: DateInput): string {
+  return formatDate(date) ?? String(date ?? "");
+}
