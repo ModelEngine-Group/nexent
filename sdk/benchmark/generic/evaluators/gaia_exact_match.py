@@ -26,12 +26,26 @@ def _strip_markdown_formatting(s: str) -> str:
     markdown formatting (e.g. "**FINAL ANSWER:** answer" or "FINAL ANSWER: **answer**").
     The regex captures the trailing markers as part of the answer - strip them here.
     """
-    s = s.strip()
-    # Strip leading markdown markers: *, **, ***, _, __, ___, `, or ```
-    s = re.sub(r"^(?:[_*]{1,3}|`{1,3})\s*", "", s)
-    # Strip trailing markdown markers
-    s = re.sub(r"\s*(?:[_*]{1,3}|`{1,3})$", "", s)
-    return s.strip()
+    value = s.strip()
+
+    marker_length = 0
+    if value.startswith("`"):
+        marker_length = min(3, len(value) - len(value.lstrip("`")))
+    elif value.startswith(("_", "*")):
+        marker_length = min(3, len(value) - len(value.lstrip("_*")))
+    if marker_length:
+        value = value[marker_length:].lstrip()
+
+    value = value.rstrip()
+    marker_length = 0
+    if value.endswith("`"):
+        marker_length = min(3, len(value) - len(value.rstrip("`")))
+    elif value.endswith(("_", "*")):
+        marker_length = min(3, len(value) - len(value.rstrip("_*")))
+    if marker_length:
+        value = value[:-marker_length].rstrip()
+
+    return value
 
 
 def _extract_final_answer(text: str) -> str:
@@ -130,7 +144,8 @@ def _normalize_string(s: str) -> str:
     # GAIA answers may include or omit a sentence-final period. Normalize it
     # symmetrically for predictions and gold answers without changing internal
     # whitespace or word boundaries (for example, "seagull" != "sea gull").
-    s = re.sub(r"\s*\.$", "", s).strip()
+    if s.endswith("."):
+        s = s[:-1].rstrip()
     return s
 
 

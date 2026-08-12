@@ -1,5 +1,7 @@
 from sdk.benchmark.generic.evaluators.gaia_exact_match import (
     _extract_final_answer,
+    _normalize_string,
+    _strip_markdown_formatting,
     gaia_exact_match_evaluator,
 )
 
@@ -41,6 +43,15 @@ FINAL ANSWER: green, white
 
 def test_extract_final_answer_preserves_single_marker_behavior() -> None:
     assert _extract_final_answer("Reasoning.\nFINAL ANSWER: **Right.**") == "Right."
+
+
+def test_strip_markdown_formatting_preserves_mixed_markers() -> None:
+    assert _strip_markdown_formatting("  *_ answer _*  ") == "answer"
+    assert _strip_markdown_formatting("``` answer ```") == "answer"
+
+
+def test_normalization_handles_long_trailing_whitespace_without_regex_backtracking() -> None:
+    assert _normalize_string("Answer" + " " * 100_000 + ".") == "answer"
 
 
 def test_extract_final_answer_uses_last_natural_language_marker() -> None:
