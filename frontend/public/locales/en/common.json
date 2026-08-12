@@ -300,6 +300,7 @@
   ],
   "page.loginPrompt.githubSupport": "Support us on GitHub",
   "page.loginPrompt.noAccount": "Don't have an account yet? Click the \"Register\" button to create your exclusive account~",
+  "page.loginPrompt.slogan": "A powerful AI agent platform for intelligent conversations and automation",
   "page.adminPrompt.close": "OK",
   "page.adminPrompt.unlockHeader": "🌟 Become an administrator and unlock more capabilities!",
   "page.adminPrompt.unlockIntro": "After becoming an administrator, you can:",

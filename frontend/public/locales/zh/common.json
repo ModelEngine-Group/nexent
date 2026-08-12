@@ -299,6 +299,7 @@
   "page.loginPrompt.intro": "请登录您的账户以访问此页面。",
   "page.loginPrompt.githubSupport": "在 GitHub 上支持我们",
   "page.loginPrompt.noAccount": "还没有账号？点击\"注册\"按钮创建您的专属账号~",
+  "page.loginPrompt.slogan": "一个强大的 AI 智能体平台，支持智能对话与流程自动化",
   "page.adminPrompt.close": "好的",
   "page.adminPrompt.unlockHeader": "🌟 成为管理员，解锁更多能力！",
   "page.adminPrompt.unlockIntro": "成为管理员后，您可以：",
