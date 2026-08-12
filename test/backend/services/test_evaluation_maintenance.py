@@ -102,7 +102,7 @@ def test_run_loop_reaps_and_cleans_up(mocker):
     info.assert_any_call("Cleaned up %d aged evaluations for tenant %s", 5, "t1")
 
 
-def test_run_loop_skips_cleanup_until_interval(mocker):
+def test_run_loop_skips_cleanup_until_interval(mocker, monkeypatch):
     _fake_session_rows([("t1",)])
     reap = mocker.patch("evaluation_maintenance.reap_stale_runs", return_value=0)
     cleanup = mocker.patch("evaluation_maintenance.cleanup_aged_evaluations")
@@ -110,15 +110,17 @@ def test_run_loop_skips_cleanup_until_interval(mocker):
                  side_effect=lambda *a: setattr(em, "_running", False))
     mocker.patch.object(em, "AGED_CLEANUP_INTERVAL", 10**12)
 
-    em._running = True
+    monkeypatch.setattr(em, "_running", True)
     em._run_loop()
 
     reap.assert_called_once_with("t1")
     cleanup.assert_not_called()
 
 
-def test_run_loop_handles_error_and_backs_off(mocker):
-    client.get_db_session.side_effect = RuntimeError("db down")
+def test_run_loop_handles_error_and_backs_off(mocker, monkeypatch):
+    monkeypatch.setattr(
+        client.get_db_session, "side_effect", RuntimeError("db down")
+    )
     error_log = mocker.patch.object(em.logger, "error")
     mocker.patch("evaluation_maintenance.time.sleep",
                  side_effect=lambda *a: setattr(em, "_running", False))
@@ -152,9 +154,9 @@ def test_start_idempotent(mocker):
     thread_cls.assert_not_called()
 
 
-def test_stop_sets_running_false(mocker):
+def test_stop_sets_running_false(mocker, monkeypatch):
     info = mocker.patch.object(em.logger, "info")
-    em._running = True
+    monkeypatch.setattr(em, "_running", True)
     em.stop()
     assert em._running is False
     info.assert_called_once()

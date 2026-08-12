@@ -74,7 +74,6 @@ def create_evaluator_impl(
     description: str,
     evaluator_type: str,
     prompt: str | None,
-    prompt_en: str | None = None,
     code: str | None = None,
     score_range_min: float = 0.0,
     score_range_max: float = 1.0,
@@ -93,7 +92,6 @@ def create_evaluator_impl(
         description=description,
         evaluator_type=evaluator_type,
         prompt=prompt,
-        prompt_en=prompt_en,
         code=code,
         score_range_min=score_range_min,
         score_range_max=score_range_max,
@@ -180,7 +178,7 @@ def _parse_llm_evaluator_response(response) -> dict[str, Any]:
         raw = m.group(1)
     try:
         return json.loads(raw)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         logger.error("Failed to parse LLM response as JSON: %s", str(response)[:500])
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -221,6 +219,7 @@ def generate_evaluator_by_llm_impl(
     tenant_id: str,
     model_id: int,
     agent_id: int | None = None,
+    language: str = "zh",
 ) -> dict[str, Any]:
     """Generate evaluator config via LLM from a natural language description.
 
@@ -234,7 +233,7 @@ def generate_evaluator_by_llm_impl(
         agent_id,
     )
 
-    template = get_prompt_template("evaluation_generate_evaluator", "zh")
+    template = get_prompt_template("evaluation_generate_evaluator", language)
     user_prompt = _build_evaluator_gen_prompt(description, agent_id, tenant_id)
 
     try:
@@ -455,7 +454,6 @@ def _try_create_evaluator(
             description=item.get("description") or "",
             evaluator_type=etype,
             prompt=item.get("prompt"),
-            prompt_en=item.get("prompt_en"),
             code=item.get("code"),
             score_range_min=lo,
             score_range_max=hi,

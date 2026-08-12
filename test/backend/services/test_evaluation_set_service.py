@@ -1026,8 +1026,10 @@ class TestExecuteKbSearches:
 
     def test_searches_all_kbs(self, service_module, monkeypatch):
         service, _ = service_module
-        sys.modules["services.vectordatabase_service"].get_vector_db_core = MagicMock(
-            return_value="es_core"
+        monkeypatch.setattr(
+            sys.modules["services.vectordatabase_service"],
+            "get_vector_db_core",
+            MagicMock(return_value="es_core"),
         )
         monkeypatch.setattr(
             service, "_get_kb_embedding_model", MagicMock(return_value="model")
@@ -1043,8 +1045,10 @@ class TestExecuteKbSearches:
 
     def test_skips_kb_without_embedding_model(self, service_module, monkeypatch):
         service, _ = service_module
-        sys.modules["services.vectordatabase_service"].get_vector_db_core = MagicMock(
-            return_value="es_core"
+        monkeypatch.setattr(
+            sys.modules["services.vectordatabase_service"],
+            "get_vector_db_core",
+            MagicMock(return_value="es_core"),
         )
         monkeypatch.setattr(service, "_get_kb_embedding_model", MagicMock(return_value=None))
         text = service._execute_kb_searches(
@@ -1056,23 +1060,29 @@ class TestExecuteKbSearches:
 class TestGetKbEmbeddingModel:
     def test_returns_model(self, service_module, monkeypatch):
         service, _ = service_module
-        sys.modules[
-            "services.vectordatabase_service"
-        ].get_embedding_model_by_index_name = MagicMock(return_value=("m", None, None))
+        monkeypatch.setattr(
+            sys.modules["services.vectordatabase_service"],
+            "get_embedding_model_by_index_name",
+            MagicMock(return_value=("m", None, None)),
+        )
         assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) == "m"
 
     def test_returns_none_when_model_missing(self, service_module, monkeypatch):
         service, _ = service_module
-        sys.modules[
-            "services.vectordatabase_service"
-        ].get_embedding_model_by_index_name = MagicMock(return_value=(None, None, None))
+        monkeypatch.setattr(
+            sys.modules["services.vectordatabase_service"],
+            "get_embedding_model_by_index_name",
+            MagicMock(return_value=(None, None, None)),
+        )
         assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) is None
 
     def test_returns_none_on_error(self, service_module, monkeypatch):
         service, _ = service_module
-        sys.modules[
-            "services.vectordatabase_service"
-        ].get_embedding_model_by_index_name = MagicMock(side_effect=RuntimeError("x"))
+        monkeypatch.setattr(
+            sys.modules["services.vectordatabase_service"],
+            "get_embedding_model_by_index_name",
+            MagicMock(side_effect=RuntimeError("x")),
+        )
         assert service._get_kb_embedding_model("t1", {"index_name": "i1"}) is None
 
 

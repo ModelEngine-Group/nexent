@@ -89,8 +89,8 @@ class TestGetCjkFontPath:
 
 
 class TestSetupMatplotlibCjk:
-    def test_uses_cache(self):
-        font_utils._CACHED_FONT_NAME = "cached"
+    def test_uses_cache(self, monkeypatch):
+        monkeypatch.setattr(font_utils, "_CACHED_FONT_NAME", "cached")
         assert font_utils.setup_matplotlib_cjk() == "cached"
 
     @patch("font_utils.get_cjk_font_path", return_value="C:/x.ttf")

@@ -154,9 +154,8 @@ def profile_mod():
 
     _src = _BACKEND_DIR / "utils" / "agent_profile_utils.py"
     _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(_src))
-    assert _spec is not None and _spec.loader is not None, (
-        f"cannot locate agent_profile_utils.py at {_src}"
-    )
+    assert _spec is not None, f"cannot locate agent_profile_utils.py at {_src}"
+    assert _spec.loader is not None, f"cannot locate agent_profile_utils.py at {_src}"
     mod = _ilu.module_from_spec(_spec)
     sys.modules[MODULE_UNDER_TEST] = mod
     _spec.loader.exec_module(mod)

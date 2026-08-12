@@ -198,7 +198,7 @@ def export_evaluation_set_impl(evaluation_set_id: int, tenant_id: str) -> tuple:
     meta = get_evaluation_set_impl(evaluation_set_id, tenant_id)
     cases = get_evaluation_set_cases_all(evaluation_set_id, tenant_id)
     filename = f"{meta['name']}.xlsx"
-    excel_bytes = build_evaluation_set_export_bytes(meta["name"], cases)
+    excel_bytes = build_evaluation_set_export_bytes(cases)
     return filename, excel_bytes
 
 

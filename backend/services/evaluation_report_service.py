@@ -247,12 +247,12 @@ def _metric_card(val_text, label, bg, s_metric_val, s_metric_lbl):
 # ── Section builders ────────────────────────────────────────────────
 
 
-def _build_report_header(story, L, styles, agent_name, agent_evaluation_id, now_str):
+def _build_report_header(story, labels, styles, agent_name, agent_evaluation_id, now_str):
     """Add report title, subtitle, and horizontal rule to the story."""
-    story.append(Paragraph(L["TITLE"], styles["s_report_title"]))
+    story.append(Paragraph(labels["TITLE"], styles["s_report_title"]))
     story.append(
         Paragraph(
-            L["SUBTITLE"].format(
+            labels["SUBTITLE"].format(
                 agent=agent_name, id=str(agent_evaluation_id), time=now_str
             ),
             styles["s_subtitle"],
@@ -264,7 +264,7 @@ def _build_report_header(story, L, styles, agent_name, agent_evaluation_id, now_
     story.append(Spacer(1, 6 * mm))
 
 
-def _build_report_metrics(story, L, styles, overall, pass_rate, total):
+def _build_report_metrics(story, labels, styles, overall, pass_rate, total):
     """Add the three metric cards (score / pass-rate / total) in a row."""
     s_metric_val = styles["s_metric_val"]
     s_metric_lbl = styles["s_metric_lbl"]
@@ -272,21 +272,21 @@ def _build_report_metrics(story, L, styles, overall, pass_rate, total):
     metrics = [
         _metric_card(
             f"{overall:.2f}" if overall is not None else "-",
-            L["METRIC_SCORE"],
+            labels["METRIC_SCORE"],
             HexColor("#f6ffed"),
             s_metric_val,
             s_metric_lbl,
         ),
         _metric_card(
             pass_rate,
-            L["METRIC_PASS_RATE"],
+            labels["METRIC_PASS_RATE"],
             HexColor("#e6f7ff"),
             s_metric_val,
             s_metric_lbl,
         ),
         _metric_card(
             str(total),
-            L["METRIC_TOTAL"],
+            labels["METRIC_TOTAL"],
             HexColor("#f9f0ff"),
             s_metric_val,
             s_metric_lbl,
@@ -308,39 +308,39 @@ def _build_report_metrics(story, L, styles, overall, pass_rate, total):
     story.append(Spacer(1, 6 * mm))
 
 
-def _build_report_config(story, L, styles, run, avg_scores, is_no_set, cn_font):
+def _build_report_config(story, labels, styles, run, avg_scores, is_no_set, cn_font):
     """Add the configuration / meta-info section with a two-column table."""
     gray = styles["gray"]
     dark = styles["dark"]
 
-    story.append(Paragraph(L["SECTION_CONFIG"], styles["s_h1"]))
+    story.append(Paragraph(labels["SECTION_CONFIG"], styles["s_h1"]))
 
     meta_data = [
         [
-            L["META_TARGET"],
+            labels["META_TARGET"],
             run.get("agent_name") or f"#{run.get('agent_id')}",
-            L["META_SET"],
+            labels["META_SET"],
             (run.get("evaluation_set_name") or "-")
-            + (L["META_NO_SET"] if is_no_set else ""),
+            + (labels["META_NO_SET"] if is_no_set else ""),
         ],
         [
-            L["META_MODEL"],
+            labels["META_MODEL"],
             run.get("judge_model_name") or "-",
-            L["META_VERSION"],
+            labels["META_VERSION"],
             f"v{run.get('agent_version_no', '-')}",
         ],
         [
-            L["META_CREATED"],
+            labels["META_CREATED"],
             _fmt(run.get("create_time")),
-            L["META_COMPLETED"],
+            labels["META_COMPLETED"],
             _fmt(run.get("update_time"))
             if run.get("status") in ("COMPLETED", "FAILED")
             else "-",
         ],
         [
-            L["META_EVALUATORS"],
+            labels["META_EVALUATORS"],
             str(len(avg_scores)),
-            L["META_PROGRESS"],
+            labels["META_PROGRESS"],
             f"{run.get('progress_done', 0)} / {run.get('progress_total', 0)}",
         ],
     ]
@@ -368,7 +368,7 @@ def _build_report_config(story, L, styles, run, avg_scores, is_no_set, cn_font):
     story.append(Spacer(1, 4 * mm))
 
 
-def _build_report_charts_section(story, L, styles, avg_scores, chart_buf, hist_buf):
+def _build_report_charts_section(story, labels, styles, avg_scores, chart_buf, hist_buf):
     """Add analysis text and chart/ histogram images. Returns (chart_path, hist_path)."""
     chart_path = hist_path = None
     s_h1 = styles["s_h1"]
@@ -376,12 +376,12 @@ def _build_report_charts_section(story, L, styles, avg_scores, chart_buf, hist_b
     s_body = styles["s_body"]
 
     story.append(PageBreak())
-    story.append(Paragraph(L["SECTION_ANALYSIS"], s_h1))
+    story.append(Paragraph(labels["SECTION_ANALYSIS"], s_h1))
 
     if avg_scores:
         best = max(avg_scores.items(), key=lambda x: x[1])
         worst = min(avg_scores.items(), key=lambda x: x[1])
-        analysis_text = L["ANALYSIS_TEMPLATE"].format(
+        analysis_text = labels["ANALYSIS_TEMPLATE"].format(
             n=str(len(avg_scores)),
             best=best[0],
             best_score=best[1],
@@ -399,7 +399,7 @@ def _build_report_charts_section(story, L, styles, avg_scores, chart_buf, hist_b
             chart_path = tf.name
         img_h = 18 * mm + 8 * mm * len(avg_scores)
         story.append(Spacer(1, 2 * mm))
-        story.append(Paragraph(L["CHART_SCORES"], s_h2))
+        story.append(Paragraph(labels["CHART_SCORES"], s_h2))
         story.append(Image(chart_path, width=165 * mm, height=img_h))
 
     # Histogram
@@ -409,7 +409,7 @@ def _build_report_charts_section(story, L, styles, avg_scores, chart_buf, hist_b
             tf.write(hist_buf.getvalue())
             hist_path = tf.name
         story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph(L["CHART_DISTRIBUTION"], s_h2))
+        story.append(Paragraph(labels["CHART_DISTRIBUTION"], s_h2))
         story.append(Image(hist_path, width=165 * mm, height=55 * mm))
 
     return chart_path, hist_path
@@ -458,11 +458,11 @@ def _format_case_score_text(scores, status, thmap):
     return str(scores or "-")
 
 
-def _format_status_tag(status, L):
+def _format_status_tag(status, labels):
     """Format a pass/fail status into a colored HTML tag string."""
     color = _STATUS_COLORS.get(status)
     if color:
-        label = L["PASS_LABEL"] if status == "pass" else L["FAIL_LABEL"]
+        label = labels["PASS_LABEL"] if status == "pass" else labels["FAIL_LABEL"]
         return f"<font color='{color}'><b>{label}</b></font>"
     return status
 
@@ -485,7 +485,7 @@ def _apply_zebra_striping(case_table, num_rows, light_gray):
 
 
 def _build_report_case_table(
-    story, L, styles, all_cases, cn_font, evaluator_thresholds=None
+    story, labels, styles, all_cases, cn_font, evaluator_thresholds=None
 ):
     """Add the per-case detail table (one section, always on its own page).
 
@@ -515,14 +515,14 @@ def _build_report_case_table(
     thmap = evaluator_thresholds or {}
 
     story.append(PageBreak())
-    story.append(Paragraph(L["SECTION_DETAILS"], s_h1))
+    story.append(Paragraph(labels["SECTION_DETAILS"], s_h1))
     story.append(Spacer(1, 3 * mm))
 
     case_header = [
-        L["COL_HEADER_INDEX"],
-        L["COL_HEADER_QUERY"],
-        L["COL_HEADER_SCORE"],
-        L["COL_HEADER_RESULT"],
+        labels["COL_HEADER_INDEX"],
+        labels["COL_HEADER_QUERY"],
+        labels["COL_HEADER_SCORE"],
+        labels["COL_HEADER_RESULT"],
     ]
     col_widths = [7 * mm, 76 * mm, 47 * mm, 16 * mm]
     case_data = [case_header]
@@ -532,7 +532,7 @@ def _build_report_case_table(
         scores = c.get("score")
         status = c.get("pass_status") or ""
         score_text = _format_case_score_text(scores, status, thmap)
-        status_tag = _format_status_tag(status, L)
+        status_tag = _format_status_tag(status, labels)
         case_data.append(
             [
                 Paragraph(str(i + 1), s_body),
@@ -841,19 +841,19 @@ def _generate_report_charts(avg_scores, all_avg_scores):
     return chart_buf, hist_buf, chart_gen_ok
 
 
-def _compute_score_level(pass_rate_val, L):
+def _compute_score_level(pass_rate_val, labels):
     """Compute the localized score-level label from the pass rate.
 
     Thresholds: >=0.8 excellent, >=0.5 good, otherwise needs improvement.
     """
     if pass_rate_val >= 0.8:
-        return L["SCORE_EXCELLENT"]
+        return labels["SCORE_EXCELLENT"]
     if pass_rate_val >= 0.5:
-        return L["SCORE_GOOD"]
-    return L["SCORE_NEEDS_IMPROVEMENT"]
+        return labels["SCORE_GOOD"]
+    return labels["SCORE_NEEDS_IMPROVEMENT"]
 
 
-def _compute_quality_level(top_count, total, L):
+def _compute_quality_level(top_count, total, labels):
     """Compute the localized quality-level label from the top-score case ratio.
 
     Thresholds: >=70% high, >=40% medium, otherwise low.  Extracted as a
@@ -861,10 +861,10 @@ def _compute_quality_level(top_count, total, L):
     branch sequence (SonarCloud).
     """
     if top_count >= total * 0.7:
-        return L["QUALITY_HIGH"]
+        return labels["QUALITY_HIGH"]
     if top_count >= total * 0.4:
-        return L["QUALITY_MEDIUM"]
-    return L["QUALITY_LOW"]
+        return labels["QUALITY_MEDIUM"]
+    return labels["QUALITY_LOW"]
 
 
 def _cleanup_temp_chart_files(chart_path, hist_path):
@@ -928,7 +928,7 @@ def generate_agent_evaluation_report_impl(
     * Temp-file cleanup failures are WARNed per-file but the PDF is still
       returned (unlink failures don't corrupt the in-memory ``buf``).
     """
-    L = get_report_labels(language)
+    labels = get_report_labels(language)
     run = get_agent_evaluation(
         agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
     )
@@ -987,23 +987,23 @@ def generate_agent_evaluation_report_impl(
     story: list = []
 
     # Header
-    _build_report_header(story, L, styles, agent_name, agent_evaluation_id, now_str)
+    _build_report_header(story, labels, styles, agent_name, agent_evaluation_id, now_str)
 
     # Executive summary
     status_map = {
-        "COMPLETED": L["STATUS_COMPLETED"],
-        "RUNNING": L["STATUS_RUNNING"],
-        "PENDING": L["STATUS_PENDING"],
-        "FAILED": L["STATUS_FAILED"],
+        "COMPLETED": labels["STATUS_COMPLETED"],
+        "RUNNING": labels["STATUS_RUNNING"],
+        "PENDING": labels["STATUS_PENDING"],
+        "FAILED": labels["STATUS_FAILED"],
     }
     status_label = status_map.get(run.get("status", ""), run.get("status", ""))
     pass_rate_val = pass_count / total if total else 0.0
-    score_level = _compute_score_level(pass_rate_val, L)
-    eval_names = "、".join(list(avg_scores.keys())[:5]) if avg_scores else L["SCORE_NA"]
+    score_level = _compute_score_level(pass_rate_val, labels)
+    eval_names = "、".join(list(avg_scores.keys())[:5]) if avg_scores else labels["SCORE_NA"]
     overall_str = f"{overall:.2f}" if overall is not None else "N/A"
-    quality = _compute_quality_level(top_count, total, L)
+    quality = _compute_quality_level(top_count, total, labels)
 
-    summary_text = L["SUMMARY_TEMPLATE"].format(
+    summary_text = labels["SUMMARY_TEMPLATE"].format(
         agent=f"<b>{agent_name}</b>",
         total=str(total),
         status=f"<b>{status_label}</b>",
@@ -1016,30 +1016,30 @@ def generate_agent_evaluation_report_impl(
         pass_rate=pass_rate,
     )
     if total:
-        summary_text += L["SUMMARY_EXTRA"].format(
+        summary_text += labels["SUMMARY_EXTRA"].format(
             top=str(top_count), total=str(total), quality=quality
         )
-    story.append(Paragraph(L["SECTION_OVERVIEW"], styles["s_h1"]))
+    story.append(Paragraph(labels["SECTION_OVERVIEW"], styles["s_h1"]))
     story.append(Paragraph(summary_text, styles["s_body"]))
     story.append(Spacer(1, 5 * mm))
 
     # Sections
-    _build_report_metrics(story, L, styles, overall, pass_rate, total)
-    _build_report_config(story, L, styles, run, avg_scores, is_no_set, cn_font)
+    _build_report_metrics(story, labels, styles, overall, pass_rate, total)
+    _build_report_config(story, labels, styles, run, avg_scores, is_no_set, cn_font)
     chart_path, hist_path = _build_report_charts_section(
-        story, L, styles, avg_scores, chart_buf, hist_buf
+        story, labels, styles, avg_scores, chart_buf, hist_buf
     )
     _build_report_case_table(
-        story, L, styles, all_cases, cn_font, evaluator_thresholds=evaluator_thresholds
+        story, labels, styles, all_cases, cn_font, evaluator_thresholds=evaluator_thresholds
     )
     _build_report_annotations(
-        story, L, styles, cn_font, tenant_id, agent_evaluation_id, total, run
+        story, labels, styles, cn_font, tenant_id, agent_evaluation_id, total, run
     )
 
     # Footer
     story.append(Spacer(1, 5 * mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#e8e8e8")))
-    story.append(Paragraph(L["FOOTER"].format(time=now_str), styles["s_footer"]))
+    story.append(Paragraph(labels["FOOTER"].format(time=now_str), styles["s_footer"]))
 
     doc.build(story)
 

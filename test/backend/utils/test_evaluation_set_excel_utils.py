@@ -346,7 +346,7 @@ class TestBuildTemplateBytes:
 
 class TestBuildExportBytes:
     def test_returns_bytes(self):
-        result = build_evaluation_set_export_bytes("test_set", [])
+        result = build_evaluation_set_export_bytes([])
         assert isinstance(result, bytes)
         assert len(result) > 0
 
@@ -360,7 +360,7 @@ class TestBuildExportBytes:
                 "label": {"answer": "a1"},
             },
         ]
-        result = build_evaluation_set_export_bytes("test_set", cases)
+        result = build_evaluation_set_export_bytes(cases)
         wb = load_workbook(io.BytesIO(result))
         ws = wb.active
         row2 = [cell.value for cell in ws[2]]
@@ -381,7 +381,7 @@ class TestBuildExportBytes:
                 "label": {"answer": "a1"},
             },
         ]
-        result = build_evaluation_set_export_bytes("test_set", cases)
+        result = build_evaluation_set_export_bytes(cases)
         wb = load_workbook(io.BytesIO(result))
         ws = wb.active
         row3 = [cell.value for cell in ws[3]]
@@ -398,7 +398,7 @@ class TestBuildExportBytes:
                 "session_id": "top_level_s",
             },
         ]
-        result = build_evaluation_set_export_bytes("test_set", cases)
+        result = build_evaluation_set_export_bytes(cases)
         wb = load_workbook(io.BytesIO(result))
         ws = wb.active
         row3 = [cell.value for cell in ws[3]]
@@ -416,7 +416,7 @@ class TestBuildExportBytes:
                 "label": {"answer": "round trip answer"},
             },
         ]
-        exported = build_evaluation_set_export_bytes("rt", cases)
+        exported = build_evaluation_set_export_bytes(cases)
         parsed = parse_evaluation_cases_from_excel("rt.xlsx", exported)
         assert len(parsed) == 1
         assert parsed[0]["inputs"]["query"] == "round trip query"

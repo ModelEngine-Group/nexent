@@ -339,9 +339,7 @@ def build_evaluation_set_excel_template_bytes(language: str = "zh") -> bytes:
     return out.getvalue()
 
 
-def build_evaluation_set_export_bytes(
-    set_name: str, cases: list[dict[str, Any]]
-) -> bytes:
+def build_evaluation_set_export_bytes(cases: list[dict[str, Any]]) -> bytes:
     """Build an XLSX file containing all cases of an evaluation set.
 
     Produces the same column layout as the zh import template so the file

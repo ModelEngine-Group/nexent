@@ -1,12 +1,5 @@
 "use client";
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-  type Key,
-} from "react";
+import { useState, useEffect, useRef, useCallback, type Key } from "react";
 import {
   Tabs,
   Typography,
@@ -85,8 +78,9 @@ function useList(url: string) {
 }
 
 function RunsTab() {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
+  const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
   const [agents] = useList("/api/agent/published_list");
 
   // ── Top-level list state ──────────────────────────────────────────────
@@ -599,9 +593,15 @@ function RunsTab() {
                   options={evaluators
                     .filter((e: any) => e.status === "PUBLISHED")
                     .map((e: any) => ({
-                      label: e.name,
+                      label:
+                        currentLang === "en"
+                          ? e.name_en || e.name
+                          : e.name || e.name_en,
                       value: e.evaluator_id,
-                      desc: e.description || e.description_en || "",
+                      desc:
+                        currentLang === "en"
+                          ? e.description_en || e.description || ""
+                          : e.description || e.description_en || "",
                     }))}
                   optionRender={(opt: any) => (
                     <Flex vertical gap={2}>
@@ -873,7 +873,6 @@ function EvaluatorsTab() {
     desc: "",
     type: "llm" as "llm" | "code",
     prompt: "",
-    promptEn: "",
     code: "",
     sMin: 0,
     sMax: 1,
@@ -889,7 +888,6 @@ function EvaluatorsTab() {
       desc: "",
       type: "llm",
       prompt: "",
-      promptEn: "",
       code: "",
       sMin: 0,
       sMax: 1,
@@ -987,6 +985,8 @@ function EvaluatorsTab() {
       title: t("agentEvaluation.colHeader.name"),
       dataIndex: "name",
       ellipsis: true,
+      render: (v: string, e: any) =>
+        currentLang === "en" ? e.name_en || e.name : e.name || e.name_en,
       filterDropdown: ({
         setSelectedKeys,
         selectedKeys,
@@ -1042,6 +1042,10 @@ function EvaluatorsTab() {
       title: t("agentEvaluation.colHeader.description"),
       dataIndex: "description",
       ellipsis: true,
+      render: (v: string, e: any) =>
+        currentLang === "en"
+          ? e.description_en || e.description || ""
+          : e.description || e.description_en || "",
     },
     {
       title: t("agentEvaluation.colHeader.actions"),
@@ -1284,7 +1288,13 @@ function EvaluatorsTab() {
       {evalTab === "builtin" && (
         <div className="grid grid-cols-3 gap-3">
           {builtin.map((e: any) => (
-            <Card key={e.evaluator_id} size="small" title={e.name}>
+            <Card
+              key={e.evaluator_id}
+              size="small"
+              title={
+                currentLang === "en" ? e.name_en || e.name : e.name || e.name_en
+              }
+            >
               <Space wrap>
                 <Tag color={e.evaluator_type === "llm" ? "blue" : "purple"}>
                   {tl[e.evaluator_type] || e.evaluator_type}
@@ -1292,7 +1302,9 @@ function EvaluatorsTab() {
                 <Tag color="green">{t("agentEvaluation.published")}</Tag>
               </Space>
               <div className="text-xs text-gray-400 mt-1">
-                {e.description || ""}
+                {currentLang === "en"
+                  ? e.description_en || e.description || ""
+                  : e.description || e.description_en || ""}
               </div>
             </Card>
           ))}
@@ -1306,7 +1318,11 @@ function EvaluatorsTab() {
               <Card
                 key={e.evaluator_id}
                 size="small"
-                title={e.name}
+                title={
+                  currentLang === "en"
+                    ? e.name_en || e.name
+                    : e.name || e.name_en
+                }
                 extra={
                   <Space size={0}>
                     <Button
@@ -1381,7 +1397,9 @@ function EvaluatorsTab() {
                   )}
                 </Space>
                 <div className="text-xs text-gray-400 mt-1">
-                  {e.description || ""}
+                  {currentLang === "en"
+                    ? e.description_en || e.description || ""
+                    : e.description || e.description_en || ""}
                 </div>
               </Card>
             ))}
@@ -1485,6 +1503,7 @@ function EvaluatorsTab() {
                               description: genDesc.trim(),
                               model_id: genModel,
                               agent_id: genAgent ?? undefined,
+                              language: currentLang,
                             }),
                           }
                         );
@@ -1495,7 +1514,6 @@ function EvaluatorsTab() {
                             desc: d.data.description || "",
                             type: d.data.evaluator_type || "llm",
                             prompt: d.data.prompt || "",
-                            promptEn: "",
                             code: d.data.code || "",
                             sMin: d.data.score_range_min ?? 0,
                             sMax: d.data.score_range_max ?? 1,
@@ -1570,9 +1588,7 @@ function EvaluatorsTab() {
                 {f.type === "llm" && (
                   <Flex vertical gap={4}>
                     <Text className="text-xs">
-                      {currentLang === "zh"
-                        ? t("agentEvaluation.evaluatorPrompt")
-                        : "Prompt (English)"}{" "}
+                      {t("agentEvaluation.evaluatorPrompt")}{" "}
                       <Text type="danger">*</Text>
                     </Text>
                     <Text className="text-xs" type="secondary">
@@ -1580,7 +1596,8 @@ function EvaluatorsTab() {
                         <>
                           评估 Prompt，使用 {"{{query}}"}、{"{{expected}}"}、
                           {"{{actual}}"} 作为占位变量；过程判定类评估器可用{" "}
-                          {"{{runtime_stats}}"} 替代 {"{{expected}}"}
+                          {"{{runtime_stats}}"} 替代 {"{{expected}}"}； prompt
+                          内置语言指令，LLM 会按用户问题的语言输出
                         </>
                       ) : (
                         <>
@@ -1595,14 +1612,8 @@ function EvaluatorsTab() {
                       rows={8}
                       maxLength={5000}
                       showCount
-                      value={currentLang === "zh" ? f.prompt : f.promptEn}
-                      onChange={(e) =>
-                        setF({
-                          ...f,
-                          [currentLang === "zh" ? "prompt" : "promptEn"]:
-                            e.target.value,
-                        })
-                      }
+                      value={f.prompt}
+                      onChange={(e) => setF({ ...f, prompt: e.target.value })}
                     />
                   </Flex>
                 )}
@@ -1677,8 +1688,6 @@ function EvaluatorsTab() {
                     description: f.desc,
                     evaluator_type: f.type,
                     prompt: f.type === "llm" ? f.prompt : null,
-                    prompt_en:
-                      f.type === "llm" && f.promptEn ? f.promptEn : null,
                     code: f.type === "code" ? f.code : null,
                     score_range_min: f.sMin,
                     score_range_max: f.sMax,
@@ -1704,17 +1713,15 @@ function EvaluatorsTab() {
                     refreshEval();
                   } else {
                     const d = await r.json();
+                    const arrayDetail = Array.isArray(d?.detail)
+                      ? d.detail
+                          .map(
+                            (e: any) => `${e.loc?.join(".") || ""}: ${e.msg}`
+                          )
+                          .join("; ")
+                      : t("agentEvaluation.saveFailed");
                     const detail =
-                      typeof d?.detail === "string"
-                        ? d.detail
-                        : Array.isArray(d?.detail)
-                          ? d.detail
-                              .map(
-                                (e: any) =>
-                                  `${e.loc?.join(".") || ""}: ${e.msg}`
-                              )
-                              .join("; ")
-                          : t("agentEvaluation.saveFailed");
+                      typeof d?.detail === "string" ? d.detail : arrayDetail;
                     message.error(detail);
                   }
                 } catch {
@@ -1872,25 +1879,15 @@ function EvaluatorsTab() {
             {editTarget.evaluator_type === "llm" && (
               <Flex vertical gap={4}>
                 <Text className="text-xs">
-                  {currentLang === "zh"
-                    ? t("agentEvaluation.evaluatorPrompt")
-                    : "Prompt (English)"}
+                  {t("agentEvaluation.evaluatorPrompt")}
                 </Text>
                 <Input.TextArea
                   rows={6}
                   maxLength={5000}
                   showCount
-                  value={
-                    currentLang === "zh"
-                      ? editTarget.prompt
-                      : editTarget.prompt_en || ""
-                  }
+                  value={editTarget.prompt || ""}
                   onChange={(e) =>
-                    setEditTarget((prev: any) => ({
-                      ...prev,
-                      [currentLang === "zh" ? "prompt" : "prompt_en"]:
-                        e.target.value,
-                    }))
+                    setEditTarget({ ...editTarget, prompt: e.target.value })
                   }
                 />
               </Flex>
@@ -1970,7 +1967,6 @@ function EvaluatorsTab() {
                       name: editTarget.name,
                       description: editTarget.description,
                       prompt: editTarget.prompt,
-                      prompt_en: editTarget.prompt_en,
                       score_range_min: editTarget.score_range_min,
                       score_range_max: editTarget.score_range_max,
                       pass_threshold: editTarget.pass_threshold,
@@ -2669,7 +2665,15 @@ function SetsTab() {
                 background: "#fafafa",
                 cursor: "pointer",
               }}
+              role="button"
+              tabIndex={0}
               onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileRef.current?.click();
+                }
+              }}
             >
               {ulFile ? (
                 <Flex vertical gap={4} align="center">
@@ -2754,17 +2758,15 @@ function SetsTab() {
                     refreshSets();
                   } else {
                     const d = await r.json();
+                    const arrayDetail = Array.isArray(d?.detail)
+                      ? d.detail
+                          .map(
+                            (e: any) => `${e.loc?.join(".") || ""}: ${e.msg}`
+                          )
+                          .join("; ")
+                      : t("agentEvaluation.uploadErrorFormat");
                     const msg =
-                      typeof d?.detail === "string"
-                        ? d.detail
-                        : Array.isArray(d?.detail)
-                          ? d.detail
-                              .map(
-                                (e: any) =>
-                                  `${e.loc?.join(".") || ""}: ${e.msg}`
-                              )
-                              .join("; ")
-                          : t("agentEvaluation.uploadErrorFormat");
+                      typeof d?.detail === "string" ? d.detail : arrayDetail;
                     setFileErr(msg);
                   }
                 } catch {
@@ -3270,15 +3272,17 @@ function LabelsTab() {
       message.warning(t("agentEvaluation.labelNameRequired"));
       return;
     }
+    const booleanOptions =
+      f.annotation_type === "boolean"
+        ? [{ label: "True" }, { label: "False" }]
+        : null;
     const options =
       f.annotation_type === "classification"
         ? f.optionsText
             .split("\n")
             .filter((l) => l.trim())
             .map((l) => ({ label: l.trim() }))
-        : f.annotation_type === "boolean"
-          ? [{ label: "True" }, { label: "False" }]
-          : null;
+        : booleanOptions;
     const body = {
       name: f.name,
       description: f.description,

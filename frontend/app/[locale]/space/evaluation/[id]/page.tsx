@@ -642,10 +642,7 @@ export default function EvaluationDetailPage() {
         title: t("agentEvaluation.colHeader.turn"),
         key: "turn",
         width: 60,
-        render: (_: any, r: any) =>
-          r.turn_order !== undefined && r.turn_order !== null
-            ? r.turn_order
-            : "-",
+        render: (_: any, r: any) => r.turn_order ?? "-",
       },
       {
         title: t("agentEvaluation.colHeader.question"),
@@ -712,16 +709,18 @@ export default function EvaluationDetailPage() {
       dataIndex: "score",
       key: "score",
       width: 140,
-      sorter: scoreEvaluator ? true : false,
+      sorter: !!scoreEvaluator,
       showSorterTooltip: false,
       render: (v: any) => {
         if (v == null) return "-";
         const obj = parseScore(v);
         const entries = Object.entries(obj);
-        const summary = scoreEvaluator
-          ? typeof obj[scoreEvaluator] === "number"
+        const singleScore =
+          scoreEvaluator && typeof obj[scoreEvaluator] === "number"
             ? Number(obj[scoreEvaluator]).toFixed(2)
-            : "-"
+            : "-";
+        const summary = scoreEvaluator
+          ? singleScore
           : entries
               .map(([k, val]) => `${k}:${Number(val).toFixed(2)}`)
               .join(" / ");
@@ -914,7 +913,6 @@ export default function EvaluationDetailPage() {
       // Handle annotation filter changes
       if (extra.action === "filter") {
         const newFilters = { ...annoFilters };
-        let sessionFilterChanged = false;
         let newSessionFilter: string | null = sessionIdFilter;
         for (const key of Object.keys(filters || {})) {
           if (key.startsWith("anno_")) {
@@ -932,7 +930,6 @@ export default function EvaluationDetailPage() {
             // unconditionally flagging it here would swallow anno filters.
             const nextVal = filters[key]?.length ? filters[key][0] : null;
             if (nextVal !== sessionIdFilter) {
-              sessionFilterChanged = true;
               newSessionFilter = nextVal;
             }
           }
@@ -1045,7 +1042,8 @@ export default function EvaluationDetailPage() {
           items={[
             {
               title: (
-                <a
+                <button
+                  type="button"
                   onClick={() =>
                     router.push(
                       `/space/evaluation?agent_id=${run?.agent_id || ""}`
@@ -1054,7 +1052,7 @@ export default function EvaluationDetailPage() {
                   style={{ cursor: "pointer" }}
                 >
                   {t("agentEvaluation.breadcrumbEval")}
-                </a>
+                </button>
               ),
             },
             { title: t("agentEvaluation.breadcrumbDetail") },
@@ -1297,54 +1295,52 @@ export default function EvaluationDetailPage() {
                 <List
                   size="small"
                   dataSource={analysisReport.top_issues}
-                  renderItem={(item: any, i: number) => (
-                    <List.Item
-                      key={`${item.problem}_${i}`}
-                      style={{
-                        padding: "10px 12px",
-                        background: "#fafafa",
-                        borderRadius: 8,
-                        borderLeft: `3px solid ${
-                          item.severity === "high"
-                            ? "#ff4d4f"
-                            : item.severity === "medium"
-                              ? "#faad14"
-                              : "#1677ff"
-                        }`,
-                      }}
-                    >
-                      <Flex vertical gap={4} style={{ width: "100%" }}>
-                        <Flex gap={8} align="center" wrap>
-                          <Tag
-                            color={
-                              item.severity === "high"
-                                ? "red"
-                                : item.severity === "medium"
-                                  ? "orange"
-                                  : "blue"
-                            }
-                          >
-                            {item.severity === "high"
-                              ? t("agentEvaluation.severity.high")
+                  renderItem={(item: any, i: number) => {
+                    const severityTagColor =
+                      item.severity === "medium" ? "orange" : "blue";
+                    const severityColor =
+                      item.severity === "high" ? "red" : severityTagColor;
+                    return (
+                      <List.Item
+                        key={`${item.problem}_${i}`}
+                        style={{
+                          padding: "10px 12px",
+                          background: "#fafafa",
+                          borderRadius: 8,
+                          borderLeft: `3px solid ${
+                            item.severity === "high"
+                              ? "#ff4d4f"
                               : item.severity === "medium"
-                                ? t("agentEvaluation.severity.medium")
-                                : t("agentEvaluation.severity.low")}
-                          </Tag>
-                          <Text strong>{item.problem}</Text>
+                                ? "#faad14"
+                                : "#1677ff"
+                          }`,
+                        }}
+                      >
+                        <Flex vertical gap={4} style={{ width: "100%" }}>
+                          <Flex gap={8} align="center" wrap>
+                            <Tag color={severityColor}>
+                              {item.severity === "high"
+                                ? t("agentEvaluation.severity.high")
+                                : item.severity === "medium"
+                                  ? t("agentEvaluation.severity.medium")
+                                  : t("agentEvaluation.severity.low")}
+                            </Tag>
+                            <Text strong>{item.problem}</Text>
+                          </Flex>
+                          {item.detail ? (
+                            <Text type="secondary" className="text-xs">
+                              {item.detail}
+                            </Text>
+                          ) : null}
+                          {item.fix ? (
+                            <Text type="secondary" className="text-xs">
+                              → {item.fix}
+                            </Text>
+                          ) : null}
                         </Flex>
-                        {item.detail ? (
-                          <Text type="secondary" className="text-xs">
-                            {item.detail}
-                          </Text>
-                        ) : null}
-                        {item.fix ? (
-                          <Text type="secondary" className="text-xs">
-                            → {item.fix}
-                          </Text>
-                        ) : null}
-                      </Flex>
-                    </List.Item>
-                  )}
+                      </List.Item>
+                    );
+                  }}
                 />
               </Flex>
             )}
@@ -1445,6 +1441,13 @@ export default function EvaluationDetailPage() {
                   const large = a2 - a1 > Math.PI ? 1 : 0;
                   return `M${x1i},${y1i} A${r1},${r1} 0 ${large} 1 ${x2i},${y2i} L${x2o},${y2o} A${r2},${r2} 0 ${large} 0 ${x1o},${y1o} Z`;
                 };
+                const passColor =
+                  passCount >= Math.ceil(totalCases / 2)
+                    ? "#52c41a"
+                    : "#ff4d4f";
+                const scoreColor =
+                  (run.score_overall ?? 0) >= 0.5 ? "#52c41a" : "#ff4d4f";
+                const chartFill = totalCases > 0 ? passColor : scoreColor;
                 return (
                   <div
                     style={{ maxWidth: VB, margin: "0 auto", aspectRatio: "1" }}
@@ -1542,15 +1545,7 @@ export default function EvaluationDetailPage() {
                         dominantBaseline="middle"
                         fontSize={22}
                         fontWeight={700}
-                        fill={
-                          totalCases > 0
-                            ? passCount >= Math.ceil(totalCases / 2)
-                              ? "#52c41a"
-                              : "#ff4d4f"
-                            : (run.score_overall ?? 0) >= 0.5
-                              ? "#52c41a"
-                              : "#ff4d4f"
-                        }
+                        fill={chartFill}
                       >
                         {run.score_overall != null
                           ? Number(run.score_overall).toFixed(2)

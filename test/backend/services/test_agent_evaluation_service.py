@@ -1312,7 +1312,6 @@ def _call_evaluator(service_module, response):
         actual="a",
         judge_model_id=99,
         runtime_events=[],
-        language="zh",
         context_window=8000,
         conversation_history=None,
     )
@@ -1565,7 +1564,9 @@ class TestRuntimeContextHelpers:
         cat, content, fixed = service_module._classify_step_event(
             {"type": "execution_logs", "content": "hi"}
         )
-        assert cat == "log" and content == "hi" and fixed == ""
+        assert cat == "log"
+        assert content == "hi"
+        assert fixed == ""
 
         # trimmable with empty content -> category empty
         cat, content, fixed = service_module._classify_step_event(
@@ -1660,17 +1661,12 @@ class TestRuntimeContextHelpers:
 
 
 class TestBuildEvaluatorPrompt:
-    def test_selects_prompt_en_when_language_en(self, service_module):
-        ev = {"prompt": "ZH", "prompt_en": "EN"}
+    def test_uses_single_prompt_field_verbatim(self, service_module):
+        # Single-field prompt design: no language switching, the prompt is
+        # used as-is (builtin prompts carry their own language instruction).
+        ev = {"prompt": "ZH"}
         prompt = service_module._build_evaluator_prompt(
-            ev, "en", "q", "e", "a", None, 4096, None
-        )
-        assert prompt == "EN"
-
-    def test_falls_back_to_default_prompt(self, service_module):
-        ev = {"prompt": "ZH", "prompt_en": "EN"}
-        prompt = service_module._build_evaluator_prompt(
-            ev, "zh", "q", "e", "a", None, 4096, None
+            ev, "q", "e", "a", None, 4096, None
         )
         assert prompt == "ZH"
 
@@ -1678,7 +1674,6 @@ class TestBuildEvaluatorPrompt:
         ev = {"prompt": "q={{query}} e={{expected}} a={{actual}}"}
         prompt = service_module._build_evaluator_prompt(
             ev,
-            "zh",
             "Q",
             "E",
             "A",
@@ -1687,7 +1682,9 @@ class TestBuildEvaluatorPrompt:
             [{"role": "user", "content": "prev"}],
         )
         assert prompt.startswith("## Previous Conversation Turns")
-        assert "q=Q" in prompt and "e=E" in prompt and "a=A" in prompt
+        assert "q=Q" in prompt
+        assert "e=E" in prompt
+        assert "a=A" in prompt
 
     def test_injects_runtime_stats_when_placeholder_present(self, service_module, monkeypatch):
         ev = {"prompt": "ctx={{runtime_stats}}"}
@@ -1697,14 +1694,14 @@ class TestBuildEvaluatorPrompt:
             MagicMock(return_value="RUNTIME"),
         )
         prompt = service_module._build_evaluator_prompt(
-            ev, "zh", "q", "e", "a", [{"type": "step_count"}], 4096, None
+            ev, "q", "e", "a", [{"type": "step_count"}], 4096, None
         )
         assert "ctx=RUNTIME" in prompt
 
     def test_does_not_inject_when_no_placeholder(self, service_module):
         ev = {"prompt": "no placeholder"}
         prompt = service_module._build_evaluator_prompt(
-            ev, "zh", "q", "e", "a", [{"type": "step_count"}], 4096, None
+            ev, "q", "e", "a", [{"type": "step_count"}], 4096, None
         )
         assert prompt == "no placeholder"
 
@@ -1774,7 +1771,7 @@ class TestScoreWithEvaluators:
             2: {"evaluator_type": "code", "name": "c1", "code": "x=1\ndef evaluate(query, expected, actual, runtime_events, **kw):\n    return {'score': 1, 'reason': ''}"},
         }
         scores, reasons = service_module._score_with_evaluators(
-            evaluators, "sys", "t1", "q", "e", "a", 99, language="zh"
+            evaluators, "sys", "t1", "q", "e", "a", 99
         )
         assert scores == {"n1": 0.9, "c1": 1.0}
         executor.submit.assert_called_once()
@@ -2819,7 +2816,7 @@ class TestTrialRunEvaluatorImpl:
         import asyncio
         service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.JiuwenSDKAdapter = None
-        with pytest.raises(Exception):
+        with pytest.raises(service_module.JiuwenSDKUnavailableError):
             asyncio.run(
                 service_module.trial_run_evaluator_impl("t1", "u1", 1, 2, "q", 99)
             )

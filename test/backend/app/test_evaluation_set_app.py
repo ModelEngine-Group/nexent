@@ -10,6 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from consts.exceptions import AppException
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -902,7 +904,7 @@ class TestValidateAndParseDocx:
         assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
 
     def test_parse_failure(self):
-        with pytest.raises(Exception) as ei:
+        with pytest.raises(AppException) as ei:
             _app_mod()._validate_and_parse_docx(b"not a real docx", "a.docx")
         assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
 

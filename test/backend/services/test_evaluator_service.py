@@ -190,7 +190,7 @@ class TestCRUDWrappers:
         bundle.code_val.assert_not_called()
         bundle.db["create_evaluator"].assert_called_once_with(
             tenant_id="t1", user_id="u1", name="n", description="d",
-            evaluator_type="llm", prompt="p", prompt_en=None, code=None,
+            evaluator_type="llm", prompt="p", code=None,
             score_range_min=0.0, score_range_max=1.0, pass_threshold=0.5,
             input_fields=[], model_id=None,
         )
@@ -327,7 +327,8 @@ class TestGenerateEvaluatorByLlm:
         bundle.llm.return_value = '{"name": "n", "evaluator_type": "llm", "prompt": "p"}'
         out = bundle.mod.generate_evaluator_by_llm_impl("desc", "t1", 7)
         assert out["name"] == "n" and out["evaluator_type"] == "llm"
-        assert out["prompt"] == "p" and out["code"] is None
+        assert out["prompt"] == "p"
+        assert out["code"] is None
         assert out["score_range_min"] == 0.0 and out["score_range_max"] == 1.0
         assert out["pass_threshold"] == 0.5
         assert out["input_fields"] == [
@@ -369,7 +370,9 @@ class TestStripInstanceFields:
             "prompt": "p", "status": "active",
         }
         out = bundle.mod._strip_instance_fields(row)
-        assert "name" in out and "prompt" in out and "evaluator_type" in out
+        assert "name" in out
+        assert "prompt" in out
+        assert "evaluator_type" in out
         assert "evaluator_id" not in out and "tenant_id" not in out and "status" not in out
 
 
@@ -510,14 +513,14 @@ class TestImportEvaluators:
         bundle.db["list_evaluators"].return_value = []
         bundle.db["create_evaluator"].return_value = {"id": 9}
         item = self._valid_item(
-            "rich", description="d", prompt_en="pe", score_range_min=0, score_range_max=10,
+            "rich", description="d", score_range_min=0, score_range_max=10,
             pass_threshold=5, input_fields=[{"name": "q"}], model_id=3,
         )
         out = bundle.mod.import_evaluators_impl("t1", "u1", self._export([item]))
         assert out == {"imported": 1, "skipped": 0, "errors": []}
         bundle.db["create_evaluator"].assert_called_once_with(
             tenant_id="t1", user_id="u1", name="rich", description="d",
-            evaluator_type="llm", prompt="p", prompt_en="pe", code=None,
+            evaluator_type="llm", prompt="p", code=None,
             score_range_min=0.0, score_range_max=10.0, pass_threshold=5.0,
             input_fields=[{"name": "q"}], model_id=3,
         )

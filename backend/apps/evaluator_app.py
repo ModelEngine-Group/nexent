@@ -44,6 +44,9 @@ class GenerateEvaluatorRequest(BaseModel):
     agent_id: int | None = Field(
         default=None, description="Optional agent ID for context-aware generation"
     )
+    language: str = Field(
+        default="zh", description="Language of the generation prompt: zh / en"
+    )
 
 
 class ExportEvaluatorsRequest(BaseModel):
@@ -56,7 +59,6 @@ class EvaluatorFields(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=200)
     prompt: str | None = Field(default=None, max_length=5_000)
-    prompt_en: str | None = Field(default=None, max_length=5_000)
     code: str | None = Field(default=None, max_length=20_000)
     score_range_min: float | None = None
     score_range_max: float | None = None
@@ -153,7 +155,6 @@ async def create_evaluator_api(
             description=payload.description,
             evaluator_type=payload.evaluator_type,
             prompt=payload.prompt,
-            prompt_en=payload.prompt_en,
             code=payload.code,
             score_range_min=payload.score_range_min,
             score_range_max=payload.score_range_max,
@@ -412,6 +413,7 @@ async def generate_evaluator_api(
             tenant_id=tenant_id,
             model_id=payload.model_id,
             agent_id=payload.agent_id,
+            language=payload.language,
         )
         return _ok(data)
     except AppException:

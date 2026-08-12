@@ -1,7 +1,23 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    Boolean,
+    Column,
+    Float,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
+
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -2015,7 +2031,6 @@ class Evaluator(TableBase):
     evaluator_type = Column(String(20), nullable=False, default="llm", doc="llm / code")
     source = Column(String(20), nullable=False, default="custom", doc="builtin / custom")
     prompt = Column(Text, doc="LLM evaluator prompt template (zh)")
-    prompt_en = Column(Text, doc="LLM evaluator prompt template (en)")
     code = Column(Text, doc="Code/runtime evaluator Python function")
     score_range_min = Column(Float, default=0.0)
     score_range_max = Column(Float, default=1.0)

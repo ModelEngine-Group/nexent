@@ -247,11 +247,12 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
     def test_delete_evaluation_set_blocked_by_referenced_runs(self):
         # Service raises AGENT_EVALUATION_SET_IN_USE (→409) when the set
         # is still referenced by evaluation runs.
-        _DELETE_SET_MOCK.side_effect = self._exc(
+        exc = self._exc(
             self._code("AGENT_EVALUATION_SET_IN_USE"),
             "evaluation set is referenced by 3 evaluation run(s); cannot delete",
         )
-        resp = self.client.delete("/evaluation-sets/9")
+        with patch.object(_DELETE_SET_MOCK, "side_effect", exc):
+            resp = self.client.delete("/evaluation-sets/9")
         self.assertEqual(resp.status_code, 409)
         self.assertIn("referenced by 3", resp.json()["message"])
 

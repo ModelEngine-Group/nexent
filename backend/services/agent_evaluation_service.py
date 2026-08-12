@@ -230,7 +230,8 @@ def validate_code_evaluator(code: str) -> None:
         # introspection scan, ALLOWED_BUILTINS whitelist, evaluate() signature
         # check) is applied BEFORE the evaluator reaches this call — see
         # docstring.
-        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # nosec B102  NOSONAR  # codeql[py/code-injection]
+        # codeql[py/code-injection]  # nosec B102
+        exec(code, {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars)  # NOSONAR
     except NameError as e:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,
@@ -324,11 +325,12 @@ def _generate_friendly_error_message(
     default_msg: str,
     model_id: int | None = None,
     tenant_id: str | None = None,
+    language: str = "zh",
 ) -> str:
     if not model_id or not _is_llm_related_error(exc):
         return default_msg
     try:
-        template = get_prompt_template("evaluation_error_explain", "zh")
+        template = get_prompt_template("evaluation_error_explain", language)
         user_prompt = template["USER_PROMPT"].replace(
             "{{error_message}}", str(exc)[:500]
         )
@@ -345,7 +347,7 @@ def _generate_friendly_error_message(
 
 
 def _make_background_done_callback(
-    tenant_id: str, user_id: str, agent_evaluation_id: int
+    tenant_id: str, user_id: str, agent_evaluation_id: int, language: str = "zh"
 ):
     def callback(future):
         exc = future.exception()
@@ -353,7 +355,9 @@ def _make_background_done_callback(
             logger.exception(
                 "Background evaluation run failed (id=%s): %r", agent_evaluation_id, exc
             )
-            friendly_msg = _generate_friendly_error_message(exc, str(exc))
+            friendly_msg = _generate_friendly_error_message(
+                exc, str(exc), language=language
+            )
             try:
                 update_agent_evaluation_status(
                     agent_evaluation_id=agent_evaluation_id,
@@ -782,7 +786,6 @@ def _format_conversation_history(
 
 def _build_evaluator_prompt(
     ev: dict[str, Any],
-    language: str,
     query: str,
     expected: str,
     actual: str,
@@ -792,15 +795,12 @@ def _build_evaluator_prompt(
 ) -> str:
     """Build the final user prompt for an LLM evaluator.
 
-    Selects the language-appropriate prompt template, prepends multi-turn
+    The evaluator's own ``prompt`` is used verbatim (single-field; builtin
+    prompts carry their own language instruction). Prepends multi-turn
     conversation history, then substitutes ``{{query}}``, ``{{expected}}``,
     ``{{actual}}`` and ``{{runtime_stats}}`` placeholders.
     """
-    prompt = (
-        ev.get("prompt_en")
-        if language == "en" and ev.get("prompt_en")
-        else ev.get("prompt") or ""
-    )
+    prompt = ev["prompt"]
     history = _format_conversation_history(conversation_history)
     if history:
         prompt = history + prompt
@@ -825,7 +825,6 @@ def _call_one_llm_evaluator(
     actual: str,
     judge_model_id: int,
     runtime_events: list[dict] | None,
-    language: str,
     context_window: int,
     conversation_history: list[dict[str, Any]] | None,
 ) -> tuple:
@@ -834,7 +833,7 @@ def _call_one_llm_evaluator(
     Returns ``(eid, name, score, reason)``.
     """
     prompt = _build_evaluator_prompt(
-        ev, language, query, expected, actual,
+        ev, query, expected, actual,
         runtime_events, context_window, conversation_history,
     )
     response = call_llm_for_system_prompt(
@@ -883,7 +882,8 @@ def _run_code_evaluators(
         name = ev["name"]
         try:
             local_vars = {}
-            exec(  # nosec B102  NOSONAR  # codeql[py/code-injection]
+            # codeql[py/code-injection]  # nosec B102
+            exec(  # NOSONAR
                 ev["code"], {"__builtins__": ALLOWED_BUILTINS, "json": json}, local_vars
             )
             fn = local_vars.get("evaluate")
@@ -933,7 +933,6 @@ def _score_with_evaluators(
     actual: str,
     judge_model_id: int,
     runtime_events: list[dict] | None = None,
-    language: str = "zh",
     context_window: int = 4096,
     conversation_history: list[dict[str, Any]] | None = None,
 ) -> tuple:
@@ -958,7 +957,7 @@ def _score_with_evaluators(
             _call_one_llm_evaluator,
             eid, ev, judge_system_prompt, tenant_id,
             query, expected, actual, judge_model_id,
-            runtime_events, language, context_window, conversation_history,
+            runtime_events, context_window, conversation_history,
         ): eid
         for eid, ev in llm_evals.items()
     }
@@ -988,11 +987,15 @@ def _check_run_limits(tenant_id: str) -> None:
         )
 
 
-def _run_in_background(fn, *fn_args, tenant_id, user_id, agent_evaluation_id):
+def _run_in_background(
+    fn, *fn_args, tenant_id, user_id, agent_evaluation_id, language="zh"
+):
     """Submit fn to the thread pool and attach a failure-cleanup callback."""
     future = pool.submit(fn, *fn_args)
     future.add_done_callback(
-        _make_background_done_callback(tenant_id, user_id, agent_evaluation_id)
+        _make_background_done_callback(
+            tenant_id, user_id, agent_evaluation_id, language
+        )
     )
 
 
@@ -1083,6 +1086,7 @@ def _create_no_set_mode_run(
         tenant_id=tenant_id,
         user_id=user_id,
         agent_evaluation_id=run["agent_evaluation_id"],
+        language=language,
     )
     return run
 
@@ -1161,6 +1165,7 @@ def create_agent_evaluation_run_impl(
         tenant_id=tenant_id,
         user_id=user_id,
         agent_evaluation_id=run["agent_evaluation_id"],
+        language=language,
     )
     return run
 
@@ -1318,7 +1323,6 @@ async def _evaluate_query(
             actual=answer_text,
             judge_model_id=judge_model_id,
             runtime_events=runtime_events or events,
-            language=language,
             context_window=context_window,
             conversation_history=history,
         )
@@ -1502,7 +1506,8 @@ def _execute_single_case(
             exc,
         )
         friendly_msg = _generate_friendly_error_message(
-            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id
+            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id,
+            language=run.get("language", "zh"),
         )
         update_agent_evaluation_case_result(
             agent_evaluation_case_id=case_id,
@@ -1796,7 +1801,8 @@ def execute_agent_evaluation_run(
     except Exception as exc:
         logger.exception("Evaluation run failed: %r", exc)
         friendly_msg = _generate_friendly_error_message(
-            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id
+            exc, str(exc), model_id=judge_model_id, tenant_id=tenant_id,
+            language=run.get("language", "zh"),
         )
         update_agent_evaluation_status(
             agent_evaluation_id=agent_evaluation_id,
@@ -2304,6 +2310,7 @@ async def trial_run_evaluator_impl(
     query: str,
     judge_model_id: int,
     evaluator_ids: list | None = None,
+    language: str = "zh",
 ) -> dict:
     # Preload evaluators
     evaluators: dict[int, dict[str, Any]] = {}
@@ -2312,9 +2319,9 @@ async def trial_run_evaluator_impl(
             ev = get_evaluator(eid, tenant_id)
             if ev and ev.get("status") == "PUBLISHED":
                 evaluators[eid] = ev
-    judge_system_prompt = get_prompt_template("evaluation_judge_system", "zh")[
-        "SYSTEM_PROMPT"
-    ]
+    judge_system_prompt = get_prompt_template(
+        "evaluation_judge_system", language
+    )["SYSTEM_PROMPT"]
 
     if JiuwenSDKAdapter is None:
         raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable")
@@ -2330,6 +2337,6 @@ async def trial_run_evaluator_impl(
         adapter=adapter,
         evaluators=evaluators,
         judge_system_prompt=judge_system_prompt,
-        language="zh",
+        language=language,
     )
     return {"query": query, "answer": answer_text, "scores": score, "reasons": reason}

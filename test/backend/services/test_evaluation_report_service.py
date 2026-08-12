@@ -391,7 +391,8 @@ class TestBuildReportChartsSection:
             io.BytesIO(_PNG_BYTES),
         )
         try:
-            assert chart_path and hist_path
+            assert chart_path
+            assert hist_path
             assert os.path.exists(chart_path)
             assert os.path.exists(hist_path)
             analysis = _plain(story[2])
@@ -624,7 +625,8 @@ class TestLoadEvaluatorThresholdsForReport:
         bundle.m["get_evaluator"].side_effect = [RuntimeError("boom"), self._ev()]
         run = _default_run(evaluator_config={"evaluator_ids": [1, 2]})
         th, rng, err = bundle.mod._load_evaluator_thresholds_for_report(run, "t1")
-        assert th == {"llm": 0.6} and err == 1
+        assert th == {"llm": 0.6}
+        assert err == 1
 
     def test_no_evaluator_ids(self, bundle):
         run = _default_run(evaluator_config={})
@@ -749,7 +751,8 @@ class TestCleanupTempChartFiles:
         f1.close()
         f2.close()
         assert bundle.mod._cleanup_temp_chart_files(f1.name, f2.name) == 0
-        assert not os.path.exists(f1.name) and not os.path.exists(f2.name)
+        assert not os.path.exists(f1.name)
+        assert not os.path.exists(f2.name)
 
     def test_missing_path_fails(self, bundle):
         assert bundle.mod._cleanup_temp_chart_files("/nope/x.png", None) == 1

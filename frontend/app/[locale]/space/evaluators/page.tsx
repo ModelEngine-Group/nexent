@@ -8,7 +8,8 @@ import { getAuthHeaders } from "@/lib/auth";
 const { Title, Text } = Typography;
 
 export default function EvaluatorPage() {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
   const { message: msg } = App.useApp();
   const [evaluators, setEvaluators] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,7 +58,15 @@ export default function EvaluatorPage() {
             </Text>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {group.data.map((e: any) => (
-                <Card key={e.evaluator_id} size="small" title={e.name}>
+                <Card
+                  key={e.evaluator_id}
+                  size="small"
+                  title={
+                    currentLang === "en"
+                      ? e.name_en || e.name
+                      : e.name || e.name_en
+                  }
+                >
                   <Space wrap>
                     <Tag color={e.evaluator_type === "llm" ? "blue" : "purple"}>
                       {typeLabels[e.evaluator_type] || e.evaluator_type}
@@ -67,7 +76,13 @@ export default function EvaluatorPage() {
                     </Tag>
                   </Space>
                   <div className="text-xs text-gray-500 mt-2">
-                    {e.description || t("agentEvaluation.noDescription")}
+                    {currentLang === "en"
+                      ? e.description_en ||
+                        e.description ||
+                        t("agentEvaluation.noDescription")
+                      : e.description ||
+                        e.description_en ||
+                        t("agentEvaluation.noDescription")}
                   </div>
                 </Card>
               ))}

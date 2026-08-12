@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
@@ -61,6 +61,7 @@ class TrialRunRequest(BaseModel):
     judge_model_id: int
     evaluator_ids: list[int] | None = None
     field_mappings: dict[str, Any] | None = None
+    language: str = Field(default="zh", description="Language of the trial run: zh / en")
 
 
 # Module-level constants for Sonar python:S1192 — duplicated string
@@ -559,6 +560,7 @@ async def trial_run_api(
             query=payload.query,
             judge_model_id=payload.judge_model_id,
             evaluator_ids=payload.evaluator_ids,
+            language=payload.language,
         )
         logger.info(
             "trial_run_api OK: tenant=%s user=%s agent_id=%s version=%s "

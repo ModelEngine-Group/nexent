@@ -244,7 +244,7 @@ class TestCreateEvaluator:
         assert _resp_json(resp)["data"] == {"evaluator_id": 9}
         bundle.impls["create_evaluator_impl"].assert_called_once_with(
             tenant_id="t1", user_id="u1", name="ev", description="d",
-            evaluator_type="llm", prompt=None, prompt_en=None, code=None,
+            evaluator_type="llm", prompt=None, code=None,
             score_range_min=None, score_range_max=None, pass_threshold=None,
             input_fields=None, model_id=3,
         )
@@ -504,10 +504,9 @@ class TestImport:
 
     async def test_unauthorized(self, bundle):
         bundle.auth.side_effect = bundle.UnauthorizedError("no")
+        upload = self._make_upload(b"{}")
         with pytest.raises(bundle.AppException) as exc:
-            await bundle.mod.import_evaluators_api(
-                file=self._make_upload(b"{}")
-            )
+            await bundle.mod.import_evaluators_api(file=upload)
         assert exc.value.code == bundle.ErrorCode.COMMON_UNAUTHORIZED
 
     async def test_internal_error(self, bundle):
@@ -527,7 +526,7 @@ class TestGenerate:
         assert resp.status_code == 200
         assert _resp_json(resp)["data"] == {"evaluator_id": 5}
         bundle.impls["generate_evaluator_by_llm_impl"].assert_called_once_with(
-            description="d", tenant_id="t1", model_id=3, agent_id=9
+            description="d", tenant_id="t1", model_id=3, agent_id=9, language="zh"
         )
 
     async def test_internal_error(self, bundle):
