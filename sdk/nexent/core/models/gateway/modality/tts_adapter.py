@@ -41,7 +41,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TTSRequest:
-    """TTS request: synthesize ``text`` to audio."""
+    """TTS request: synthesize ``text`` to audio.
+
+    ``stream`` selects streaming vs. non-streaming output; ``voice`` and
+    ``speed_ratio`` optionally tune the synthesis.
+    """
 
     text: str
     stream: bool = False
@@ -60,14 +64,35 @@ class TTSAdapter(MultimodalAdapter):
 
     @abstractmethod
     async def invoke(self, request: TTSRequest) -> bytes:
-        """Synthesize ``request.text`` → complete audio bytes (stream=False)."""
+        """Synthesize the full audio for a request.
+
+        Args:
+            request: The TTS request to synthesize.
+
+        Returns:
+            The complete audio as bytes.
+        """
 
     @abstractmethod
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
-        """Stream audio chunks for ``request.text`` (stream=True)."""
+        """Synthesize speech as a stream of audio chunks.
+
+        Args:
+            request: The TTS request to synthesize.
+
+        Yields:
+            Audio chunks as they are generated.
+        """
 
     def _is_tts_result_successful(self, result: Any) -> bool:
-        """Check if TTS result indicates a successful synthesis."""
+        """Check whether a TTS result indicates successful synthesis.
+
+        Args:
+            result: The TTS result to inspect.
+
+        Returns:
+            True if the result represents synthesized audio.
+        """
         if isinstance(result, bytes):
             return len(result) > 0
         if isinstance(result, dict):
@@ -77,7 +102,14 @@ class TTSAdapter(MultimodalAdapter):
         return False
 
     def _extract_tts_error_message(self, result: Any) -> str:
-        """Extract error message from TTS result."""
+        """Extract an error message from a TTS result.
+
+        Args:
+            result: The TTS result to inspect.
+
+        Returns:
+            The error message string, or a fallback message if none is found.
+        """
         if isinstance(result, dict):
             if 'error' in result:
                 return str(result['error'])
@@ -132,11 +164,20 @@ class AliTTSConfig:
         self.workspace_id = workspace_id
 
     def is_realtime_api(self) -> bool:
-        """Check if URL is for Qwen Realtime API."""
+        """Check whether the configured URL points to the Qwen Realtime API.
+
+        Returns:
+            True if the URL contains a ``/realtime`` path segment.
+        """
         return "/realtime" in (self.ws_url or "")
 
     def get_api_url(self) -> str:
-        """Get the WebSocket API URL based on the model."""
+        """Get the WebSocket API URL based on the model.
+
+        Returns:
+            The explicitly configured ``ws_url``, or the default URL
+            matching the selected API (Qwen Realtime or CosyVoice).
+        """
         if self.ws_url:
             return self.ws_url
         if self.is_realtime_api() or "qwen" in self.model.lower():
@@ -175,7 +216,12 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         self._is_realtime = self._config.is_realtime_api() or "qwen" in self._config.model.lower()
 
     def get_websocket_url(self) -> str:
-        """Get the WebSocket URL for the TTS service."""
+        """Get the WebSocket URL for the TTS service.
+
+        Returns:
+            The base URL, with the model appended as a query parameter
+            for the Qwen Realtime API.
+        """
         base_url = self._config.get_api_url()
         if self._is_realtime:
             separator = "&" if "?" in base_url else "?"
@@ -183,7 +229,11 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return base_url
 
     def get_auth_headers(self) -> Dict[str, str]:
-        """Get authentication headers for the WebSocket connection."""
+        """Get authentication headers for the WebSocket connection.
+
+        Returns:
+            A dict with the Bearer Authorization header.
+        """
         return {"Authorization": f"Bearer {self._config.api_key}"}
 
     async def generate_speech(
@@ -191,7 +241,19 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             text: str,
             stream: bool = False
     ) -> Union[bytes, AsyncGenerator[bytes, None]]:
-        """Generate speech from text using the appropriate API."""
+        """Generate speech from text using the appropriate API.
+
+        Dispatches to the Qwen Realtime or CosyVoice sub-protocol based on
+        the configured model and URL, in streaming or non-streaming mode.
+
+        Args:
+            text: The text to synthesize.
+            stream: Whether to stream audio chunks.
+
+        Returns:
+            Complete audio bytes when ``stream`` is False, otherwise an
+            async generator yielding audio chunks.
+        """
         ws_url = self.get_websocket_url()
         headers = self.get_auth_headers()
         logger.info(f"Connecting to Ali TTS service at {ws_url}")
@@ -210,11 +272,22 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
     # ==================== CosyVoice API Implementation ====================
 
     def _cosyvoice_generate_task_id(self) -> str:
-        """Generate a unique task ID for CosyVoice API."""
+        """Generate a unique task ID for the CosyVoice API.
+
+        Returns:
+            A random hex string usable as a task ID.
+        """
         return uuid.uuid4().hex
 
     def _cosyvoice_construct_run_task_request(self, task_id: str) -> Dict[str, Any]:
-        """Construct the run-task request for CosyVoice API."""
+        """Construct the run-task request for the CosyVoice API.
+
+        Args:
+            task_id: The task ID to associate with the request.
+
+        Returns:
+            The run-task request payload.
+        """
         return {
             "header": {
                 "action": "run-task",
@@ -241,7 +314,15 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def _cosyvoice_construct_continue_request(self, task_id: str, text: str) -> Dict[str, Any]:
-        """Construct the continue-task request for CosyVoice API."""
+        """Construct the continue-task request for the CosyVoice API.
+
+        Args:
+            task_id: The task ID to associate with the request.
+            text: The text to continue synthesizing.
+
+        Returns:
+            The continue-task request payload.
+        """
         return {
             "header": {
                 "action": "continue-task",
@@ -254,7 +335,14 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def _cosyvoice_construct_finish_request(self, task_id: str) -> Dict[str, Any]:
-        """Construct the finish-task request for CosyVoice API."""
+        """Construct the finish-task request for the CosyVoice API.
+
+        Args:
+            task_id: The task ID to associate with the request.
+
+        Returns:
+            The finish-task request payload.
+        """
         return {
             "header": {
                 "action": "finish-task",
@@ -265,7 +353,14 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def _cosyvoice_parse_event(self, message: str) -> Dict[str, Any]:
-        """Parse a JSON event from CosyVoice API."""
+        """Parse a JSON event from the CosyVoice API.
+
+        Args:
+            message: The raw JSON message received from the server.
+
+        Returns:
+            A dict with the event ``type`` and relevant fields.
+        """
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
@@ -287,7 +382,17 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return result
 
     async def _cosyvoice_wait_for_task_started(self, ws) -> bool:
-        """Wait for task_started event from CosyVoice API."""
+        """Wait for the task_started event from the CosyVoice API.
+
+        Args:
+            ws: The open WebSocket connection.
+
+        Returns:
+            True once the task has started.
+
+        Raises:
+            AliTTSError: If the task fails before starting.
+        """
         while True:
             message = await asyncio.wait_for(ws.recv(), timeout=30)
             if isinstance(message, bytes):
@@ -307,7 +412,22 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             buffer: Optional[bytearray] = None,
             yield_chunks: bool = False
     ) -> AsyncGenerator[bytes, None]:
-        """Receive audio from CosyVoice API."""
+        """Receive audio from the CosyVoice API.
+
+        Accumulates audio in ``buffer`` when given, and optionally yields
+        chunks as they arrive. Ends when the task-finished event is received.
+
+        Args:
+            ws: The open WebSocket connection.
+            buffer: Optional buffer to accumulate audio into.
+            yield_chunks: Whether to yield audio chunks as they arrive.
+
+        Yields:
+            Audio chunks when ``yield_chunks`` is True.
+
+        Raises:
+            AliTTSError: If the task fails while receiving audio.
+        """
         while True:
             try:
                 message = await asyncio.wait_for(ws.recv(), timeout=60)
@@ -332,7 +452,16 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
                 break
 
     async def _generate_cosyvoice_non_streaming(self, text: str, ws_url: str, headers: Dict[str, str]) -> bytes:
-        """Non-streaming speech generation using CosyVoice API."""
+        """Synthesize non-streaming speech using the CosyVoice API.
+
+        Args:
+            text: The text to synthesize.
+            ws_url: The WebSocket URL to connect to.
+            headers: The authentication headers to send.
+
+        Returns:
+            The complete audio as bytes.
+        """
         buffer = bytearray()
         task_id = self._cosyvoice_generate_task_id()
 
@@ -368,7 +497,16 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     async def _generate_cosyvoice_streaming(self, text: str, ws_url: str, headers: Dict[str, str]) -> AsyncGenerator[
         bytes, None]:
-        """Streaming speech generation using CosyVoice API."""
+        """Synthesize streaming speech using the CosyVoice API.
+
+        Args:
+            text: The text to synthesize.
+            ws_url: The WebSocket URL to connect to.
+            headers: The authentication headers to send.
+
+        Yields:
+            Audio chunks as they are received.
+        """
         task_id = self._cosyvoice_generate_task_id()
 
         try:
@@ -398,11 +536,19 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
     # ==================== Qwen Realtime API Implementation ====================
 
     def _qwen_generate_event_id(self) -> str:
-        """Generate a unique event ID for Qwen Realtime API."""
+        """Generate a unique event ID for the Qwen Realtime API.
+
+        Returns:
+            A unique event ID string.
+        """
         return f"event_{uuid.uuid4().hex[:16]}"
 
     def _qwen_construct_session_update(self) -> Dict[str, Any]:
-        """Construct session.update request for Qwen Realtime API."""
+        """Construct the session.update request for the Qwen Realtime API.
+
+        Returns:
+            The session.update request payload.
+        """
         # Use default voice if not specified
         voice = self._config.voice or "Cherry"
         return {
@@ -420,12 +566,26 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def _qwen_format_to_response_format(self, format_str: str) -> str:
-        """Convert format to Qwen Realtime response_format."""
+        """Convert a format name to a Qwen Realtime response_format.
+
+        Args:
+            format_str: The encoding name (e.g. ``mp3``, ``pcm``).
+
+        Returns:
+            The matching response_format, defaulting to ``pcm``.
+        """
         format_map = {"mp3": "mp3", "pcm": "pcm", "wav": "wav", "opus": "opus"}
         return format_map.get(format_str.lower(), "pcm")
 
     def _qwen_construct_text_append(self, text: str) -> Dict[str, Any]:
-        """Construct input_text_buffer.append request for Qwen Realtime API."""
+        """Construct the input_text_buffer.append request for the Qwen Realtime API.
+
+        Args:
+            text: The text to append to the input buffer.
+
+        Returns:
+            The input_text_buffer.append request payload.
+        """
         return {
             "event_id": self._qwen_generate_event_id(),
             "type": "input_text_buffer.append",
@@ -433,21 +593,36 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def _qwen_construct_text_commit(self) -> Dict[str, Any]:
-        """Construct input_text_buffer.commit request for Qwen Realtime API."""
+        """Construct the input_text_buffer.commit request for the Qwen Realtime API.
+
+        Returns:
+            The input_text_buffer.commit request payload.
+        """
         return {
             "event_id": self._qwen_generate_event_id(),
             "type": "input_text_buffer.commit"
         }
 
     def _qwen_construct_session_finish(self) -> Dict[str, Any]:
-        """Construct session.finish request for Qwen Realtime API."""
+        """Construct the session.finish request for the Qwen Realtime API.
+
+        Returns:
+            The session.finish request payload.
+        """
         return {
             "event_id": self._qwen_generate_event_id(),
             "type": "session.finish"
         }
 
     def _qwen_parse_event(self, message: str) -> Dict[str, Any]:
-        """Parse a JSON event from Qwen Realtime API."""
+        """Parse a JSON event from the Qwen Realtime API.
+
+        Args:
+            message: The raw JSON message received from the server.
+
+        Returns:
+            A dict with the event ``type`` and relevant fields.
+        """
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
@@ -465,7 +640,17 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return result
 
     async def _qwen_wait_for_session_created(self, ws) -> bool:
-        """Wait for session.created event from Qwen Realtime API."""
+        """Wait for the session.created event from the Qwen Realtime API.
+
+        Args:
+            ws: The open WebSocket connection.
+
+        Returns:
+            True once the session is created.
+
+        Raises:
+            AliTTSError: If an error event is received while waiting.
+        """
         while True:
             message = await asyncio.wait_for(ws.recv(), timeout=30)
             if isinstance(message, bytes):
@@ -480,11 +665,28 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return False
 
     def _qwen_is_terminal_event(self, event_type: str) -> bool:
-        """Check if event type indicates the session is done."""
+        """Check whether an event type indicates the session is done.
+
+        Args:
+            event_type: The event type to check.
+
+        Returns:
+            True for the terminal audio/session events.
+        """
         return event_type in ("response.audio.done", "session.finished")
 
     async def _qwen_wait_for_response_created(self, ws) -> bool:
-        """Wait for response.created event before collecting audio."""
+        """Wait for the response.created event before collecting audio.
+
+        Args:
+            ws: The open WebSocket connection.
+
+        Returns:
+            True if the response was created, False if the session finished first.
+
+        Raises:
+            AliTTSError: If an error event is received while waiting.
+        """
         while True:
             message = await asyncio.wait_for(ws.recv(), timeout=60)
             if isinstance(message, bytes):
@@ -505,7 +707,16 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     def _qwen_handle_audio_delta(self, event: Dict[str, Any], buffer: Optional[bytearray], yield_chunks: bool) -> \
             Optional[bytes]:
-        """Handle response.audio.delta event and return audio chunk."""
+        """Handle a response.audio.delta event and return the audio chunk.
+
+        Args:
+            event: The parsed Qwen Realtime event dict.
+            buffer: Optional buffer to accumulate audio into.
+            yield_chunks: Whether to return the decoded chunk.
+
+        Returns:
+            The decoded audio bytes when ``yield_chunks`` is True, else None.
+        """
         delta = event.get("raw", {}).get("delta", "")
         if not delta:
             return None
@@ -520,7 +731,22 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             buffer: Optional[bytearray] = None,
             yield_chunks: bool = False
     ) -> AsyncGenerator[bytes, None]:
-        """Receive audio from Qwen Realtime API."""
+        """Receive audio from the Qwen Realtime API.
+
+        Accumulates audio in ``buffer`` when given, and optionally yields
+        chunks as they arrive. Ends when a terminal event is received.
+
+        Args:
+            ws: The open WebSocket connection.
+            buffer: Optional buffer to accumulate audio into.
+            yield_chunks: Whether to yield audio chunks as they arrive.
+
+        Yields:
+            Audio chunks when ``yield_chunks`` is True.
+
+        Raises:
+            AliTTSError: If an error event is received while receiving audio.
+        """
         audio_done = False
         while not audio_done:
             try:
@@ -556,7 +782,16 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
                 break
 
     async def _generate_qwen_realtime_non_streaming(self, text: str, ws_url: str, headers: Dict[str, str]) -> bytes:
-        """Non-streaming speech generation using Qwen Realtime API."""
+        """Synthesize non-streaming speech using the Qwen Realtime API.
+
+        Args:
+            text: The text to synthesize.
+            ws_url: The WebSocket URL to connect to.
+            headers: The authentication headers to send.
+
+        Returns:
+            The complete audio as bytes.
+        """
         buffer = bytearray()
 
         try:
@@ -603,7 +838,16 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     async def _generate_qwen_realtime_streaming(self, text: str, ws_url: str, headers: Dict[str, str]) -> \
             AsyncGenerator[bytes, None]:
-        """Streaming speech generation using Qwen Realtime API."""
+        """Synthesize streaming speech using the Qwen Realtime API.
+
+        Args:
+            text: The text to synthesize.
+            ws_url: The WebSocket URL to connect to.
+            headers: The authentication headers to send.
+
+        Yields:
+            Audio chunks as they are received.
+        """
         try:
             async with websockets.connect(ws_url, additional_headers=headers, ping_interval=None,
                                           open_timeout=DEFAULT_WS_OPEN_TIMEOUT,
@@ -645,7 +889,11 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
     # ==================== Connectivity Check ====================
 
     async def check_connectivity(self) -> bool:
-        """Test if the connection to the remote TTS service is normal."""
+        """Test whether the connection to the remote TTS service is normal.
+
+        Returns:
+            True if a short synthesis succeeds and produces audio.
+        """
         api_type = "Qwen Realtime" if self._is_realtime else "CosyVoice"
         try:
             logger.info(f"Ali TTS connectivity test started with {api_type}")
@@ -668,17 +916,21 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
+        """Synthesize the full audio for a request."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
+        """Synthesize speech as a stream of audio chunks."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
+        """Check whether the TTS service is reachable."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -708,6 +960,7 @@ class VolcTTSConfig:
 
     @property
     def api_url(self) -> str:
+        """The WebSocket URL used for the binary connection."""
         return self.ws_url
 
 
@@ -761,9 +1014,11 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         }
 
     def get_websocket_url(self) -> str:
+        """Get the WebSocket URL for the TTS service."""
         return self._config.api_url
 
     def get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers for the WebSocket connection."""
         headers = {
             "Authorization": f"Bearer; {self._config.token}",
             "X-Api-App-Id": self._config.appid,
@@ -773,6 +1028,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return headers
 
     def _prepare_request(self, text: str, operation: str = "submit") -> bytes:
+        """Build the gzip-compressed binary request payload."""
         request_json = copy.deepcopy(self._request_template)
         request_json["request"]["reqid"] = str(uuid.uuid4())
         request_json["request"]["text"] = text
@@ -785,6 +1041,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return bytes(full_request)
 
     def _parse_response(self, res: bytes, buffer: Optional[io.BytesIO] = None) -> tuple[bool, Optional[bytes]]:
+        """Parse a binary response frame from the Volc TTS server."""
         protocol_version = res[0] >> 4
         header_size = res[0] & 0x0f
         message_type = res[1] >> 4
@@ -815,6 +1072,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         text: str,
         stream: bool = False
     ) -> Union[bytes, AsyncGenerator[bytes, None]]:
+        """Generate speech from text using the Volc TTS API."""
         request = self._prepare_request(text)
         headers = self.get_auth_headers()
         logger.info(f"Volc TTS request prepared, text_len={len(text)}, stream={stream}")
@@ -845,6 +1103,7 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return audio_generator()
 
     async def check_connectivity(self) -> bool:
+        """Check whether the Volc TTS service is reachable."""
         try:
             logger.info("Volc TTS connectivity test started...")
             audio_data = await self.generate_speech("Hello", stream=False)
@@ -861,17 +1120,21 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
+        """Synthesize the full audio for a request."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
+        """Synthesize speech as a stream of audio chunks."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
+        """Check whether the TTS service is reachable."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -906,6 +1169,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
+        """Build the wrapped OpenAIModel on first use."""
         from ...openai_llm import OpenAIModel
 
         self._model = OpenAIModel(
@@ -920,6 +1184,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: TTSRequest) -> bytes:
+        """Synthesize audio via the ModelEngine Chat Completions API."""
         if self._model is None:
             self._build_model()
         messages = [
@@ -937,6 +1202,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         raise ValueError("ModelEngine TTS response missing audio_url in content")
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
+        """Stream audio chunks via the ModelEngine Chat Completions API."""
         if self._model is None:
             self._build_model()
         completion_kwargs = {
@@ -952,11 +1218,13 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
                 yield base64.b64decode(delta.content)
 
     async def health_check(self) -> bool:
+        """Check whether the ModelEngine service is reachable."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
+        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",

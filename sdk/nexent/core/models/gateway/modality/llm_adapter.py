@@ -27,7 +27,11 @@ from ..transport import HttpTransportMixin
 
 @dataclass
 class LLMRequest:
-    """Batch LLM request: messages + forward kwargs."""
+    """Batch LLM request: messages plus forward kwargs.
+
+    Holds the conversation ``messages`` and the per-call forwarding ``kwargs``
+    for an LLM invocation.
+    """
 
     messages: List[Dict[str, Any]]
     kwargs: Dict[str, Any] = field(default_factory=dict)
@@ -52,7 +56,14 @@ class LLMAdapter(MultimodalAdapter):
 
     @abstractmethod
     async def invoke(self, request: LLMRequest) -> Any:
-        """Return a smolagents ChatMessage for ``request.messages``."""
+        """Return a smolagents ChatMessage for ``request.messages``.
+
+        Args:
+            request: The LLM request whose messages should be processed.
+
+        Returns:
+            A smolagents ``ChatMessage`` for ``request.messages``.
+        """
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[Any]:
         raise NotImplementedError(f"{self.modality} adapter does not support streaming")
@@ -60,18 +71,36 @@ class LLMAdapter(MultimodalAdapter):
     def __call__(self, messages: List[Dict[str, Any]], **kwargs) -> Any:
         """Forward ``__call__`` so CoreAgent can use the adapter as its model.
 
-        Python special methods do not route through ``__getattr__``.
-        Attribute forwarding (``model.client`` / ``model.model_id`` / ...) is
-        provided by :meth:`__getattr__`.
+        Python special methods do not route through ``__getattr__``; attribute
+        forwarding (``model.client`` / ``model.model_id`` / ...) is provided by
+        :meth:`__getattr__`.
+
+        Args:
+            messages: The conversation messages to pass to the wrapped model.
+            **kwargs: Additional arguments forwarded to the wrapped model.
+
+        Returns:
+            The wrapped model's output for the given messages.
         """
         if self._model is None:
             self._build_model()
         return self._model(messages, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
-        """Forward unknown attributes to the wrapped ``_model`` (smolagents Model
-        contract). ``_model`` and ``_context`` are real instance attributes set in
-        ``__init__``, so accessing them never recurses.
+        """Forward unknown attributes to the wrapped ``_model``.
+
+        Satisfies the smolagents Model contract. ``_model`` and ``_context``
+        are real instance attributes set in ``__init__``, so accessing them
+        never recurses.
+
+        Args:
+            name: The attribute name to look up on the wrapped model.
+
+        Returns:
+            The value of ``name`` from the wrapped model.
+
+        Raises:
+            AttributeError: If the wrapped model does not expose ``name``.
         """
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)

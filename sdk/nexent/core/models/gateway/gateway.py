@@ -19,11 +19,24 @@ class MultimodalGateway:
     """Resolve and cache :class:`MultimodalAdapter` instances by context."""
 
     def __init__(self, registry: AdapterRegistry = None) -> None:
+        """Initializes the gateway with a registry and empty cache.
+
+        Args:
+            registry: The adapter registry to resolve from. Defaults to the
+                process-wide singleton.
+        """
         self._registry = registry or get_registry()
         self._adapter_cache: Dict[Tuple, MultimodalAdapter] = {}
 
     def get_adapter(self, context: ModelContext) -> MultimodalAdapter:
-        """Return the adapter for ``context`` (cached after first build)."""
+        """Returns the adapter for ``context``, building and caching it once.
+
+        Args:
+            context: The construction context identifying the desired model.
+
+        Returns:
+            The cached or newly built adapter instance.
+        """
         cls = self._registry.resolve(context.factory, context.modality)
         key = context.cache_key()
         if key not in self._adapter_cache:
@@ -31,17 +44,47 @@ class MultimodalGateway:
         return self._adapter_cache[key]
 
     async def invoke(self, context: ModelContext, request: Any) -> Any:
+        """Resolves the adapter for ``context`` and invokes it.
+
+        Args:
+            context: The construction context identifying the desired model.
+            request: The modality-specific request payload.
+
+        Returns:
+            The modality-specific response.
+        """
         return await self.get_adapter(context).invoke(request)
 
     def stream(self, context: ModelContext, request: Any):
-        """Return the adapter's async iterator (not awaited — it's a generator)."""
+        """Returns the adapter's async iterator (not awaited — it's a generator).
+
+        Args:
+            context: The construction context identifying the desired model.
+            request: The modality-specific request payload.
+
+        Returns:
+            The adapter's async stream object.
+        """
         return self.get_adapter(context).stream(request)
 
     async def health_check(self, context: ModelContext) -> bool:
+        """Resolves the adapter for ``context`` and checks its health.
+
+        Args:
+            context: The construction context identifying the desired model.
+
+        Returns:
+            True if the model is reachable, False otherwise.
+        """
         return await self.get_adapter(context).health_check()
 
     def invalidate(self, context: ModelContext = None) -> None:
-        """Drop cached instances (all, or a specific context's)."""
+        """Drops cached adapter instances.
+
+        Args:
+            context: If provided, drops only that context's cached adapter.
+                If None, drops the entire cache.
+        """
         if context is None:
             self._adapter_cache.clear()
         else:
@@ -52,7 +95,11 @@ _gateway: MultimodalGateway = None
 
 
 def get_gateway() -> MultimodalGateway:
-    """Return the process-wide gateway singleton (lazy)."""
+    """Returns the process-wide gateway singleton (lazy).
+
+    Returns:
+        The shared :class:`MultimodalGateway` instance.
+    """
     global _gateway
     if _gateway is None:
         _gateway = MultimodalGateway()

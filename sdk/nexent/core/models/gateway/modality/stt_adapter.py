@@ -67,11 +67,22 @@ class STTAdapter(MultimodalAdapter):
 
     @abstractmethod
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        """Transcribe ``request.audio_path`` → ``{"text": ..., "raw": ...}``."""
+        """Transcribe an audio file to text.
+
+        Args:
+            request: The STT request containing the audio file path.
+
+        Returns:
+            A dict shaped ``{"text": ..., "raw": ...}``.
+        """
 
     @abstractmethod
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
-        """Real-time streaming transcription."""
+        """Stream real-time transcription over the client websocket.
+
+        Args:
+            request: The streaming STT request carrying the client websocket.
+        """
 
     def _is_stt_result_successful(self, result: Any) -> bool:
         """Check if STT result indicates a successful recognition."""
@@ -134,6 +145,22 @@ class AliSTTConfig:
         vad_threshold: float = 0.5,
         vad_silence_duration_ms: int = 2000,
     ):
+        """Initialize the Ali STT configuration.
+
+        Args:
+            api_key: The DashScope API key.
+            model: The realtime ASR model name.
+            language: The transcription language code.
+            ws_url: Optional custom WebSocket URL; defaults to the official one.
+            format: Audio input format (pcm or wav).
+            rate: Audio sample rate in Hz.
+            channel: Number of audio channels.
+            seg_duration: Segment duration in milliseconds.
+            timeout: Per-operation timeout in seconds.
+            enable_vad: Whether server-side VAD is enabled.
+            vad_threshold: VAD trigger threshold.
+            vad_silence_duration_ms: VAD silence duration in milliseconds.
+        """
         self.api_key = api_key
         self.model = model
         self.language = language
@@ -256,7 +283,16 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         }
 
     async def _handle_stt_event(self, result: Dict[str, Any], websocket: Any, transcription_texts: List[str]) -> bool:
-        """Handle STT server event and return True if session should end."""
+        """Handle a single STT server event.
+
+        Args:
+            result: The parsed server event.
+            websocket: The client websocket to forward status updates to.
+            transcription_texts: Accumulated transcription texts.
+
+        Returns:
+            True if the session should end, else False.
+        """
         event_type = result.get("event", "")
 
         if event_type == "error":
@@ -368,7 +404,14 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     @staticmethod
     def read_wav_info(data: bytes) -> tuple:
-        """Read WAV file information."""
+        """Read WAV file information.
+
+        Args:
+            data: The raw WAV file bytes.
+
+        Returns:
+            A tuple of ``(nchannels, sampwidth, framerate, nframes, wave_bytes)``.
+        """
         with BytesIO(data) as _f:
             wave_fp = wave.open(_f, 'rb')
             nchannels, sampwidth, framerate, nframes = wave_fp.getparams()[:4]
@@ -377,7 +420,15 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     @staticmethod
     def slice_data(data: bytes, chunk_size: int):
-        """Slice audio data into chunks."""
+        """Slice audio data into chunks.
+
+        Args:
+            data: The audio bytes to slice.
+            chunk_size: The maximum byte size of each chunk.
+
+        Yields:
+            Tuples of ``(chunk, is_last)``.
+        """
         offset = 0
         total_len = len(data)
 
@@ -393,7 +444,15 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         audio_path: str,
         on_result: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """Process audio file and perform speech recognition."""
+        """Process an audio file and perform speech recognition.
+
+        Args:
+            audio_path: Path to the audio file to transcribe.
+            on_result: Optional callback invoked with intermediate results.
+
+        Returns:
+            A dict with a ``text`` key on success or an ``error`` key on failure.
+        """
         async with aiofiles.open(audio_path, mode="rb") as _f:
             data = await _f.read()
         audio_data = bytes(data)
@@ -421,7 +480,16 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         segment_size: int,
         on_result: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """Process audio data and perform speech recognition using Qwen Realtime API."""
+        """Process audio data using the Qwen Realtime API over WebSocket.
+
+        Args:
+            audio_data: Raw audio bytes to transcribe.
+            segment_size: Byte size of each audio chunk sent to the server.
+            on_result: Optional callback invoked with intermediate results.
+
+        Returns:
+            A dict with a ``text`` key on success or an ``error`` key on failure.
+        """
         ws_url = self.get_websocket_url()
         headers = self.get_auth_headers()
         logger.info(f"Connecting to {ws_url}")
@@ -514,7 +582,14 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return {"error": f"WebSocket error: {str(e)}"}
 
     async def recognize_file(self, audio_path: str) -> Dict[str, Any]:
-        """Recognize speech from audio file."""
+        """Recognize speech from an audio file.
+
+        Args:
+            audio_path: Path to the audio file to transcribe.
+
+        Returns:
+            A dict with a ``text`` key on success or an ``error`` key on failure.
+        """
         return await self.process_audio_file(audio_path)
 
     async def check_connectivity(self) -> bool:
@@ -725,9 +800,22 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
                 pass
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
+        """Transcribe an audio file to text.
+
+        Args:
+            request: The STT request containing the audio file path.
+
+        Returns:
+            The recognition result dict.
+        """
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
+        """Run a real-time streaming transcription session.
+
+        Args:
+            request: The streaming STT request carrying the client websocket.
+        """
         await self.start_streaming_session(
             request.websocket, config_received=request.config_received
         )
@@ -735,9 +823,19 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         yield  # pragma: no cover  (marks as async generator)
 
     async def health_check(self) -> bool:
+        """Check connectivity to the STT service.
+
+        Returns:
+            True if the service is reachable, else False.
+        """
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return metadata about the STT model.
+
+        Returns:
+            A ModelInfo describing the model and its capabilities.
+        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -800,6 +898,24 @@ class VolcSTTConfig:
         streaming: bool = True,
         compression: bool = True
     ):
+        """Initialize the Volcano Engine STT configuration.
+
+        Args:
+            appid: The Volcano application ID.
+            access_token: The access token for authentication.
+            ws_url: The SAUC WebSocket endpoint.
+            uid: The client user ID.
+            format: Audio input format.
+            rate: Audio sample rate in Hz.
+            bits: Audio bit depth.
+            channel: Number of audio channels.
+            codec: Audio codec.
+            seg_duration: Segment duration in milliseconds.
+            mp3_seg_size: Chunk size for mp3 audio.
+            resourceid: The BigASR SAUC resource ID.
+            streaming: Whether to throttle sending to streaming rate.
+            compression: Whether to gzip-compress payloads.
+        """
         self.appid = appid
         self.access_token = access_token
         self.ws_url = ws_url
@@ -869,7 +985,18 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
                         message_type_specific_flags=NO_SEQUENCE,
                         serial_method=JSON, compression_type=None,
                         reserved_data=0x00) -> bytearray:
-        """Generate protocol header."""
+        """Generate a SAUC protocol header.
+
+        Args:
+            message_type: The message type bits.
+            message_type_specific_flags: The message-type-specific flag bits.
+            serial_method: The serialization method bits.
+            compression_type: The compression bits; defaults to GZIP or none per config.
+            reserved_data: The reserved header byte.
+
+        Returns:
+            The 4-byte protocol header as a bytearray.
+        """
         if compression_type is None:
             compression_type = GZIP if self._config.compression else NO_COMPRESSION
 
@@ -882,13 +1009,28 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         return header
 
     def generate_before_payload(self, sequence: int) -> bytearray:
-        """Generate the payload prefix with sequence number."""
+        """Generate the sequence-number prefix prepended to a payload.
+
+        Args:
+            sequence: The signed 32-bit sequence number; negative marks the last chunk.
+
+        Returns:
+            The 4-byte big-endian sequence prefix as a bytearray.
+        """
         before_payload = bytearray()
         before_payload.extend(sequence.to_bytes(4, 'big', signed=True))
         return before_payload
 
     def parse_response(self, res: bytes) -> Dict[str, Any]:
-        """Parse response from server."""
+        """Parse a SAUC binary-gzip frame from the server.
+
+        Args:
+            res: The raw binary response frame.
+
+        Returns:
+            A dict with the parsed header fields, payload metadata, and decoded
+            ``payload_msg``.
+        """
         header_size = res[0] & 0x0f
         message_type = res[1] >> 4
         message_type_specific_flags = res[1] & 0x0f
@@ -939,7 +1081,14 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     @staticmethod
     def read_wav_info(data: bytes) -> tuple:
-        """Read WAV file information."""
+        """Read WAV file information.
+
+        Args:
+            data: The raw WAV file bytes.
+
+        Returns:
+            A tuple of ``(nchannels, sampwidth, framerate, nframes, wave_bytes)``.
+        """
         with BytesIO(data) as _f:
             wave_fp = wave.open(_f, 'rb')
             nchannels, sampwidth, framerate, nframes = wave_fp.getparams()[:4]
@@ -948,7 +1097,15 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     @staticmethod
     def slice_data(data: bytes, chunk_size: int):
-        """Slice data into chunks."""
+        """Slice data into chunks.
+
+        Args:
+            data: The bytes to slice.
+            chunk_size: The maximum byte size of each chunk.
+
+        Yields:
+            Tuples of ``(chunk, is_last)``.
+        """
         data_len = len(data)
         offset = 0
         while offset + chunk_size < data_len:
@@ -957,7 +1114,14 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         yield data[offset: data_len], True
 
     def construct_request(self, reqid: str) -> Dict[str, Any]:
-        """Construct request parameters."""
+        """Construct the full-request parameters.
+
+        Args:
+            reqid: The request ID used as the connect ID.
+
+        Returns:
+            The request parameter dict.
+        """
         req = {
             "user": {"uid": self._config.uid},
             "audio": {
@@ -976,7 +1140,15 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         return req
 
     async def process_audio_data(self, audio_data: bytes, segment_size: int) -> Dict[str, Any]:
-        """Process audio data and perform speech recognition."""
+        """Process audio data over the SAUC WebSocket.
+
+        Args:
+            audio_data: Raw audio bytes to transcribe.
+            segment_size: Byte size of each audio chunk sent to the server.
+
+        Returns:
+            A dict with the recognition result or an ``error`` key on failure.
+        """
         reqid = str(uuid.uuid4())
         seq = 1
 
@@ -1063,7 +1235,14 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return {"error": f"Unexpected error: {str(e)}"}
 
     async def process_audio_file(self, audio_path: str) -> Dict[str, Any]:
-        """Process audio file and perform speech recognition."""
+        """Process an audio file and perform speech recognition.
+
+        Args:
+            audio_path: Path to the audio file to transcribe.
+
+        Returns:
+            A dict with a ``text`` key on success or an ``error`` key on failure.
+        """
         async with aiofiles.open(audio_path, mode="rb") as _f:
             data = await _f.read()
         audio_data = bytes(data)
@@ -1085,7 +1264,12 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         raise Exception("Unsupported format, only wav, mp3, and pcm are supported")
 
     async def process_streaming_audio(self, ws_client, segment_size: int):
-        """Process streaming audio from WebSocket client and send transcription back."""
+        """Process streaming audio from a WebSocket client and send transcription back.
+
+        Args:
+            ws_client: The client websocket receiving audio and results.
+            segment_size: Byte size of each audio chunk sent to the server.
+        """
         logger.info("Starting audio processing loop...")
         reqid = str(uuid.uuid4())
         seq = 1
@@ -1255,7 +1439,11 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             logger.info("Audio processing loop ended")
 
     async def start_streaming_session(self, ws_client):
-        """Start a streaming session for real-time STT."""
+        """Start a real-time streaming transcription session.
+
+        Args:
+            ws_client: The client websocket to receive audio from and send results to.
+        """
         logger.info("Preparing streaming session...")
         segment_size = int(self._config.rate * self._config.bits * self._config.channel / 8 * 0.1)
         logger.info(f"Using segment size: {segment_size} bytes")
@@ -1271,7 +1459,14 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             await ws_client.send_json({"error": error_msg})
 
     async def recognize_file(self, audio_path: str) -> Dict[str, Any]:
-        """Recognize speech from audio file."""
+        """Recognize speech from an audio file.
+
+        Args:
+            audio_path: Path to the audio file to transcribe.
+
+        Returns:
+            A dict with a ``text`` key on success or an ``error`` key on failure.
+        """
         return await self.process_audio_file(audio_path)
 
     async def check_connectivity(self) -> bool:
@@ -1303,17 +1498,40 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
+        """Transcribe an audio file to text.
+
+        Args:
+            request: The STT request containing the audio file path.
+
+        Returns:
+            The recognition result dict.
+        """
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
+        """Run a real-time streaming transcription session.
+
+        Args:
+            request: The streaming STT request carrying the client websocket.
+        """
         await self.start_streaming_session(request.websocket)
         return
         yield  # pragma: no cover
 
     async def health_check(self) -> bool:
+        """Check connectivity to the STT service.
+
+        Returns:
+            True if the service is reachable, else False.
+        """
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return metadata about the STT model.
+
+        Returns:
+            A ModelInfo describing the model and its capabilities.
+        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1351,6 +1569,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
+        """Lazily build the wrapped OpenAIModel from the context."""
         from ...openai_llm import OpenAIModel
 
         self._model = OpenAIModel(
@@ -1365,6 +1584,14 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
+        """Transcribe an audio file to text via HTTP Chat Completions.
+
+        Args:
+            request: The STT request containing the audio file path.
+
+        Returns:
+            A dict with a ``text`` key and the raw model result.
+        """
         if self._model is None:
             self._build_model()
         audio_bytes = open(request.audio_path, "rb").read()
@@ -1384,16 +1611,34 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         return {"text": getattr(result, "content", str(result)), "raw": result}
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
+        """Stream real-time transcription over HTTP SSE.
+
+        Args:
+            request: The streaming STT request.
+
+        Raises:
+            NotImplementedError: ModelEngine STT streaming is a Phase 2 deliverable.
+        """
         # ModelEngine realtime STT = Chat Completions stream=True over HTTP (SSE),
         # feeding PCM chunks incrementally. Scaffold; full SSE parsing in Phase 2.
         raise NotImplementedError("ModelEngine STT streaming is a Phase 2 deliverable")
 
     async def health_check(self) -> bool:
+        """Check connectivity to the ModelEngine STT service.
+
+        Returns:
+            True if the service is reachable, else False.
+        """
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
+        """Return metadata about the STT model.
+
+        Returns:
+            A ModelInfo describing the model and its capabilities.
+        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",

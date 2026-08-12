@@ -47,7 +47,11 @@ class VLMAdapter(MultimodalAdapter):
 
     @abstractmethod
     async def invoke(self, request: VLMRequest) -> Any:
-        """Analyze ``media_input`` with ``prompt`` → ChatMessage."""
+        """Analyze ``media_input`` with ``prompt`` and return a ChatMessage.
+
+        Args:
+            request: The VLM request describing the media and prompt to use.
+        """
 
 
 @register_adapter("openai", "vlm")
@@ -99,7 +103,14 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     # ---- VLM protocol (moved from openai_vlm.py) --------------------------
 
     def encode_image(self, image_input: Union[str, BinaryIO]) -> str:
-        """Encode an image file or file stream into a base64 string."""
+        """Encode an image file or file stream into a base64 string.
+
+        Args:
+            image_input: Path to an image file, or a binary file stream.
+
+        Returns:
+            The base64-encoded image data as a UTF-8 string.
+        """
         if isinstance(image_input, str):
             with open(image_input, "rb") as image_file:
                 return base64.b64encode(image_file.read()).decode('utf-8')
@@ -107,7 +118,15 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
     def prepare_image_message(self, image_input: Union[str, BinaryIO],
                              system_prompt: str = "Describe this picture.") -> List[Dict[str, Any]]:
-        """Prepare a message format containing an image."""
+        """Prepare a message format containing an image.
+
+        Args:
+            image_input: Path to an image file, or a binary file stream.
+            system_prompt: The system prompt to prepend as text content.
+
+        Returns:
+            A list of OpenAI-compatible chat messages embedding the encoded image.
+        """
         base64_image = self.encode_image(image_input)
 
         image_format = "jpeg"
@@ -127,7 +146,20 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
     def prepare_media_message(self, media_input: Union[str, BinaryIO], media_type: str,
                               content_type: str, system_prompt: str) -> List[Dict[str, Any]]:
-        """Prepare an OpenAI-compatible multimodal message for audio or video."""
+        """Prepare an OpenAI-compatible multimodal message for audio or video.
+
+        Args:
+            media_input: Path to a media file, or a binary file stream.
+            media_type: The media kind, either "audio" or "video".
+            content_type: The MIME content type of the media (e.g. "audio/mpeg").
+            system_prompt: The prompt text to include alongside the media.
+
+        Returns:
+            A list of OpenAI-compatible chat messages embedding the encoded media.
+
+        Raises:
+            ValueError: If ``media_type`` is not "audio" or "video".
+        """
         if media_type not in ("audio", "video"):
             raise ValueError(f"Unsupported media type: {media_type}")
 
@@ -151,7 +183,17 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_image(self, image_input: Union[str, BinaryIO],
                       system_prompt: str = "Please describe this picture concisely and carefully, within 200 words.",
                       stream: bool = True, **kwargs) -> Any:
-        """Analyze image content. Returns a smolagents ChatMessage."""
+        """Analyze image content and return a smolagents ChatMessage.
+
+        Args:
+            image_input: Path to an image file, or a binary file stream.
+            system_prompt: The prompt guiding the image analysis.
+            stream: Whether to stream the model response.
+            **kwargs: Extra keyword arguments forwarded to the model call.
+
+        Returns:
+            The model's response as a smolagents ChatMessage.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_image_message(image_input, system_prompt)
@@ -161,7 +203,17 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_audio(self, audio_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this audio carefully.",
                       content_type: str = "audio/mpeg", **kwargs) -> Any:
-        """Analyze audio content using the configured multimodal model."""
+        """Analyze audio content using the configured multimodal model.
+
+        Args:
+            audio_input: Path to an audio file, or a binary file stream.
+            system_prompt: The prompt guiding the audio analysis.
+            content_type: The MIME content type of the audio.
+            **kwargs: Extra keyword arguments forwarded to the model call.
+
+        Returns:
+            The model's response as a smolagents ChatMessage.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_media_message(audio_input, "audio", content_type, system_prompt)
@@ -170,17 +222,30 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_video(self, video_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this video carefully.",
                       content_type: str = "video/mp4", **kwargs) -> Any:
-        """Analyze video content using the configured multimodal model."""
+        """Analyze video content using the configured multimodal model.
+
+        Args:
+            video_input: Path to a video file, or a binary file stream.
+            system_prompt: The prompt guiding the video analysis.
+            content_type: The MIME content type of the video.
+            **kwargs: Extra keyword arguments forwarded to the model call.
+
+        Returns:
+            The model's response as a smolagents ChatMessage.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_media_message(video_input, "video", content_type, system_prompt)
         return self._model(messages=messages, **kwargs)
 
     async def check_connectivity(self) -> bool:
-        """VLM connectivity check: send a test image+text prompt.
+        """Check VLM connectivity by sending a test image + text prompt.
 
         VLM APIs (especially DashScope qwen-vl) require content as a list with
         'image_url' and 'text' objects.
+
+        Returns:
+            True if the connectivity check call succeeds, False otherwise.
         """
         if self._model is None:
             self._build_model()
@@ -222,7 +287,14 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         return self.invoke_sync(request)
 
     def invoke_sync(self, request: VLMRequest) -> Any:
-        """Synchronous invoke for sync smolagents tools (analyze_* are sync)."""
+        """Invoke the VLM synchronously for sync smolagents tools.
+
+        Args:
+            request: The VLM request describing the media and prompt to use.
+
+        Returns:
+            The model's response for the requested media type.
+        """
         method = getattr(self, _METHOD_MAP[request.media_type])
         call_kwargs: Dict[str, Any] = {"stream": request.stream}
         if request.prompt:
@@ -235,12 +307,15 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         return await self.check_connectivity()
 
     def _is_siliconflow_non_omni(self) -> bool:
-        """SiliconFlow VLMs that are not Qwen3-Omni cannot accept audio input.
+        """Check whether this is a SiliconFlow VLM that cannot accept audio input.
 
         This is the only place that should know which (provider, model) combos
         can't ingest a given media type — callers ask the adapter via
         :meth:`get_model_info` rather than reaching into the wrapped model's
         ``client_kwargs`` / ``model_id``.
+
+        Returns:
+            True if the provider is SiliconFlow and the model is not Qwen3-Omni.
         """
         return (
             "siliconflow" in (self._context.base_url or "").lower()
