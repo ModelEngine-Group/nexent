@@ -593,6 +593,83 @@ const CitationBadge = ({
   </span>
 );
 
+/**
+ * A citation belongs to the Markdown section immediately before it, rather
+ * than to the entire assistant response.  A section can include a paragraph
+ * followed by a table.  The preceding citation or heading starts a new
+ * section, so separately cited answer sections cannot affect each other.
+ */
+const getCitationScopeText = (citationElement: HTMLElement | null) => {
+  if (!citationElement) return "";
+
+  const markdownRoot = citationElement.closest(".markdown-body");
+  if (!markdownRoot) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  let currentBlock: HTMLElement = citationElement;
+  while (
+    currentBlock.parentElement &&
+    currentBlock.parentElement !== markdownRoot
+  ) {
+    currentBlock = currentBlock.parentElement;
+  }
+
+  if (currentBlock.parentElement !== markdownRoot) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  const blocks = Array.from(markdownRoot.children) as HTMLElement[];
+  const currentBlockIndex = blocks.indexOf(currentBlock);
+  if (currentBlockIndex < 0) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  const citationBadge = citationElement.querySelector(".ds-markdown-cite");
+  const citationsInCurrentBlock = Array.from(
+    currentBlock.querySelectorAll(".ds-markdown-cite")
+  );
+  const citationIndex = citationBadge
+    ? citationsInCurrentBlock.indexOf(citationBadge)
+    : -1;
+
+  const currentBlockRange = document.createRange();
+  currentBlockRange.selectNodeContents(currentBlock);
+  if (citationIndex > 0) {
+    // A previous citation in the same paragraph already closed the preceding
+    // fact. Start after it so two cited sentences never share a highlight.
+    currentBlockRange.setStartAfter(citationsInCurrentBlock[citationIndex - 1]);
+  }
+  if (citationBadge) {
+    currentBlockRange.setEndBefore(citationBadge);
+  }
+  const currentBlockText = currentBlockRange.toString().trim();
+
+  if (citationIndex > 0) {
+    return currentBlockText;
+  }
+
+  let sectionStartIndex = 0;
+  for (let index = currentBlockIndex - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    const startsNewSection = /^H[1-6]$/.test(block.tagName);
+    const hasEarlierCitation = Boolean(
+      block.querySelector(".ds-markdown-cite")
+    );
+    if (startsNewSection || hasEarlierCitation) {
+      sectionStartIndex = index + 1;
+      break;
+    }
+  }
+
+  return blocks
+    .slice(sectionStartIndex, currentBlockIndex)
+    .map((block) => block.textContent?.trim() || "")
+    .filter(Boolean)
+    .concat(currentBlockText ? [currentBlockText] : [])
+    .join("\n");
+};
+
 // Modified HoverableText component
 const HoverableText = ({
   text,
@@ -634,8 +711,7 @@ const HoverableText = ({
   const handleCitationClick = (event: React.MouseEvent) => {
     event.stopPropagation();
     if (matchedResult) {
-      const citationContext =
-        containerRef.current?.closest("p, li, td")?.textContent || "";
+      const citationContext = getCitationScopeText(containerRef.current);
       onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
     }
   };
