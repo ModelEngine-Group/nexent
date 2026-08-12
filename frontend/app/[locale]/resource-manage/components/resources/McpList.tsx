@@ -501,7 +501,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       key: "enabled",
       width: "10%",
       render: (_: any, record: McpServer) => {
-        const isEnabled = Boolean(record.status);
+        const isEnabled = record.enabled;
         return isEnabled ? (
           <Tag
             color="#229954"

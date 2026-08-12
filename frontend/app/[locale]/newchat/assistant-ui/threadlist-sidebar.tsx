@@ -25,10 +25,14 @@ import { useTranslation } from "react-i18next";
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  onPrepareNewConversation?: () => void;
+  onNewConversation?: () => void | Promise<void>;
 }
 
 export function ThreadListSidebar({
   generatedTitles,
+  onPrepareNewConversation,
+  onNewConversation,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
@@ -64,6 +68,7 @@ export function ThreadListSidebar({
                 variant="ghost"
                 size="icon"
                 className="size-8"
+                onClick={onNewConversation}
               >
                 <PlusIcon className="size-4" />
               </TooltipIconButton>
@@ -102,7 +107,10 @@ export function ThreadListSidebar({
         >
           <SidebarHeader>
             <div className="flex items-center gap-2 px-1">
-              <ThreadListPrimitive.New className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate">
+              <ThreadListPrimitive.New
+                className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate"
+                onClick={onPrepareNewConversation}
+              >
                 <PlusIcon className="size-4 shrink-0" />
                 {t("chat.sidebar.newConversation")}
               </ThreadListPrimitive.New>

@@ -285,7 +285,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
-  const threadListItem = aui.threadListItem();
+  const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
   const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
@@ -307,6 +307,22 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const handleCancelRename = useCallback(() => {
     setIsEditing(false);
   }, []);
+
+  const handleDelete = useCallback(() => {
+    confirm({
+      title: t("chat.threadList.delete"),
+      content: t("chat.threadList.confirmDeletionDescription"),
+      onOk: async () => {
+        try {
+          await threadListItem.delete();
+        } catch (error) {
+          log.error("[ThreadList] Failed to delete thread:", error);
+          message.error(t("chatInterface.deleteFailed"));
+          throw error;
+        }
+      },
+    });
+  }, [confirm, t, threadListItem]);
 
   return (
     <>
@@ -344,8 +360,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
             <ThreadListItemMorePrimitive.Item
-              onSelect={(e) => {
-                e.preventDefault();
+              onSelect={() => {
                 handleRenameClick();
               }}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
@@ -354,13 +369,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
-              onSelect={(e) => {
-                e.preventDefault();
-                confirm({
-                  title: t("chat.threadList.delete"),
-                  content: t("chat.threadList.confirmDeletionDescription"),
-                  onOk: () => aui.threadListItem().delete(),
-                });
+              onSelect={() => {
+                setTimeout(handleDelete, 0);
               }}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
             >
@@ -379,7 +389,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
+  const status = aui.threadListItem.getState().status as string;
   const isRunning = status === "running" || status === "streaming";
 
   return (
