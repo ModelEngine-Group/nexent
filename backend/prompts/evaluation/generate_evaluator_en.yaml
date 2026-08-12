@@ -183,10 +183,9 @@ SYSTEM_PROMPT: |-
   - The system auto-catches unhandled exceptions and returns score=0
 
   ## Selection Rules
-  - User cares about "answer quality" or "content quality" → llm type (result evaluation)
-  - User cares about "execution process" or "following procedures" → check logic complexity: simple deterministic → code type, complex semantic → llm type (process evaluation)
-  - User cares about "data accuracy" or "numeric precision" → code type
-  - Default to llm type when uncertain
+  - Default to the llm type; use the code type ONLY when the user explicitly asks for a code implementation (e.g., "validate with code", "write a Python script to check")
+  - The llm type covers most scenarios, including content quality, execution-process soundness, and data-accuracy judgment
+  - Default to the llm type when uncertain
 
   ## input_fields Configuration Guide
   input_fields define the input fields the evaluator needs. The system passes corresponding data based on this list:

@@ -1111,9 +1111,11 @@ function EvaluatorsTab() {
       if (!resp.ok) {
         const d = await resp.json();
         message.warning(
-          typeof d?.detail === "string"
-            ? d.detail
-            : t("agentEvaluation.exportError")
+          d.code
+            ? getI18nErrorMessage(d.code, t)
+            : typeof d?.detail === "string"
+              ? d.detail
+              : t("agentEvaluation.exportError")
         );
         return;
       }
@@ -1141,13 +1143,19 @@ function EvaluatorsTab() {
       formData.append("file", file);
       const resp = await fetch(API_ENDPOINTS.evaluators.import, {
         method: "POST",
-        headers: getAuthHeaders(),
+        // 不设 Content-Type：multipart 需由浏览器自动生成 boundary；
+        // Authorization 已由 server.js 代理根据 cookie 自动注入。
+        headers: { "User-Agent": "AgentFrontEnd/1.0" },
         body: formData,
       });
       const result = await resp.json();
       if (resp.status !== 200) {
         message.warning(
-          result.detail || result.message || t("agentEvaluation.importError")
+          result.code
+            ? getI18nErrorMessage(result.code, t)
+            : result.detail ||
+                result.message ||
+                t("agentEvaluation.importError")
         );
         return;
       }
@@ -1699,8 +1707,11 @@ function EvaluatorsTab() {
                           )
                           .join("; ")
                       : t("agentEvaluation.saveFailed");
-                    const detail =
-                      typeof d?.detail === "string" ? d.detail : arrayDetail;
+                    const detail = d.code
+                      ? getI18nErrorMessage(d.code, t)
+                      : typeof d?.detail === "string"
+                        ? d.detail
+                        : arrayDetail;
                     message.error(detail);
                   }
                 } catch {
@@ -2160,8 +2171,9 @@ function SetsTab() {
                   );
                   if (!blobUrl.ok) {
                     const d = await blobUrl.json();
-                    const msg =
-                      typeof d?.detail === "string"
+                    const msg = d.code
+                      ? getI18nErrorMessage(d.code, t)
+                      : typeof d?.detail === "string"
                         ? d.detail
                         : t("agentEvaluation.exportError");
                     message.warning(msg);
@@ -2192,7 +2204,9 @@ function SetsTab() {
               if (!resp.ok) {
                 const d = await resp.json();
                 message.warning(
-                  d.detail || d.message || t("agentEvaluation.deleteFailed")
+                  d.code
+                    ? getI18nErrorMessage(d.code, t)
+                    : d.detail || d.message || t("agentEvaluation.deleteFailed")
                 );
               }
               refreshSets();
@@ -3332,11 +3346,7 @@ function LabelsTab() {
               );
               if (!resp.ok) {
                 const d = await resp.json();
-                message.warning(
-                  d.detail ||
-                    d.message ||
-                    t("agentEvaluation.batchDeleteFailed")
-                );
+                message.warning(getI18nErrorMessage(d.code, t));
               }
               fetchSchemas();
             }}

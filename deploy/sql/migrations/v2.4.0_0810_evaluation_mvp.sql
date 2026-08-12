@@ -1,12 +1,16 @@
 -- ============================================================
 -- v2.4.0_0810: Agent Evaluation MVP
---  1. evaluator_t table — store evaluator definitions
---  2. 6 built-in LLM/code evaluators (bilingual names/descriptions)
---  3. 5 built-in runtime evaluators (bilingual names/descriptions)
---     prompts are single-field; they instruct the judge to output
---     reason in the same language as the user query
---  4. evaluation_set_t — generation tracking columns
---  5. agent_evaluation_t — evaluator_config column
+--  1. evaluator_t table — store evaluator definitions (incl.
+--     version_group_id / is_current for single-table versioning)
+--  2. 11 built-in evaluators (6 LLM/code + 5 process, bilingual
+--     zh/en) in one INSERT; prompts are single-field; they instruct
+--     the judge to output reason in the same language as the query
+--  3. evaluation_set_t — generation tracking columns
+--  4. agent_evaluation_t — evaluator_config / analysis columns
+--  5. agent_evaluation_case_t — score jsonb + multi-turn columns
+--  6. evaluation_set_case_t — multi-turn columns
+--  7. LEFT_NAV_MENU permissions for /space/evaluation
+--  8. Annotation tables
 -- ============================================================
 
 SET search_path TO nexent;
@@ -15,6 +19,10 @@ BEGIN;
 
 -- ============================================================
 -- 1. Create evaluator_t table
+--    version_group_id links all versions of the same evaluator,
+--    is_current marks the active version. Publishing creates a new
+--    row (new version_no) within the same version_group; restoring
+--    sets a historical row as is_current.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS nexent.evaluator_t (
     evaluator_id        BIGSERIAL,
@@ -33,6 +41,8 @@ CREATE TABLE IF NOT EXISTS nexent.evaluator_t (
     input_fields        JSONB NOT NULL DEFAULT '[]',
     status              VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     version_no          INTEGER NOT NULL DEFAULT 1,
+    version_group_id    BIGINT,
+    is_current          BOOLEAN DEFAULT true,
     model_id            INTEGER,
     created_by          VARCHAR(100),
     updated_by          VARCHAR(100),
@@ -45,8 +55,12 @@ CREATE TABLE IF NOT EXISTS nexent.evaluator_t (
 CREATE INDEX IF NOT EXISTS ix_evaluator_tenant ON nexent.evaluator_t(tenant_id, delete_flag);
 CREATE INDEX IF NOT EXISTS ix_evaluator_status ON nexent.evaluator_t(tenant_id, status, delete_flag);
 
+-- Uniqueness is enforced only for current versions via a partial index.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluator_current
+    ON nexent.evaluator_t (tenant_id, name, source) WHERE is_current = true;
+
 -- ============================================================
--- 2. 6 built-in LLM/code evaluators (bilingual zh/en)
+-- 2. 11 built-in evaluators (bilingual zh/en), one INSERT
 --    tenant_id = '' means system-wide, visible to all tenants
 --
 -- NOTE (SonarSource SQL parser constraint): string literals must not
@@ -58,7 +72,6 @@ CREATE INDEX IF NOT EXISTS ix_evaluator_status ON nexent.evaluator_t(tenant_id, 
 -- S1192 warnings on migration DML, which has no variable mechanism).
 -- ============================================================
 
--- 1-6. built-in evaluators (single INSERT ... SELECT ... UNION ALL)
 WITH const AS (
     SELECT
         ''               AS tenant_id,
@@ -150,105 +163,82 @@ SELECT c.tenant_id, '事实准确性',
     c.score_min, c.score_max, c.threshold, c.fields3,
     c.status, c.version_no
 FROM const c
-ON CONFLICT (tenant_id, name, source) DO NOTHING;
-
--- ============================================================
--- 3. 5 built-in llm evaluators for process evaluation (bilingual zh/en)
---    These use {{runtime_stats}} to evaluate agent execution quality
---    from observer events — no golden answer required.
--- ============================================================
-
--- 1-5. process evaluators (single INSERT ... SELECT ... UNION ALL)
-WITH const AS (
-    SELECT
-        ''               AS tenant_id,
-        'llm'            AS type_llm,
-        'builtin'        AS source,
-        'PUBLISHED'      AS status,
-        0.0              AS score_min,
-        1.0              AS score_max,
-        0.5              AS threshold,
-        1                AS version_no,
-        '[{"name": "query", "type": "string", "required": true}, {"name": "actual", "type": "string", "required": true}]'::jsonb AS fields2
-)
-INSERT INTO nexent.evaluator_t
-    (tenant_id, name, description, name_en, description_en,
-     evaluator_type, source, prompt,
-     score_range_min, score_range_max, pass_threshold, input_fields,
-     status, version_no)
--- 1. Execution Success Rate — 运行成功率
+UNION ALL
+-- 7. Execution Success Rate (LLM) — 运行成功率
 SELECT c.tenant_id, '运行成功率',
     '评估 Agent 执行是否成功完成。无需期望答案，仅检查执行过程中是否出现报错或达到步数上限。',
     'Execution Success Rate',
     'Evaluate whether the Agent execution completed successfully. No golden answer needed — only checks for errors or max-steps-reached during execution.',
     c.type_llm, c.source,
     replace('你是一个 Agent 执行质量评估专家。请根据 Agent 的执行日志评估其运行是否成功完成。\n评分标准：\n- 1.0：Agent 正常运行完成，产生了最终回答，过程中没有报错\n- 0.8：Agent 产生了最终回答，过程中有轻微错误但自行恢复，不影响最终结果\n- 0.5：Agent 达到最大步数限制，但仍产出了部分回答（可能不完整）\n- 0.0：Agent 执行失败，没有产生最终回答（崩溃或全部报错）\n执行日志：\n{{runtime_stats}}\nAgent 最终输出：\n{{actual}}\n请用与用户问题（{{query}}）相同的语言输出 reason，并以 JSON 格式返回：{"score": <0.0-1.0>, "reason": "评分理由"}', '\n', chr(10)),
+    NULL,
     c.score_min, c.score_max, c.threshold, c.fields2,
     c.status, c.version_no
 FROM const c
 UNION ALL
--- 2. Tool Call Health — 工具调用健康度
+-- 8. Tool Call Health (LLM) — 工具调用健康度
 SELECT c.tenant_id, '工具调用健康度',
     '评估 Agent 工具调用的成功率。检查执行日志中是否包含错误，无需期望答案。',
     'Tool Call Health',
     'Evaluate the success rate of Agent tool calls. Checks execution logs for errors — no golden answer needed.',
     c.type_llm, c.source,
     replace('你是一个 Agent 工具调用健康度评估专家。请根据执行日志评估 Agent 的工具调用是否健康、成功。\n评分标准：\n- 1.0：所有工具调用成功，或本次执行未使用工具（无需评估）\n- 0.7：大部分工具调用成功，个别失败但已重试或降级处理\n- 0.5：约一半工具调用成功，存在较多失败\n- 0.0：所有或大部分工具调用失败，Agent 无法正常执行任务\n执行日志：\n{{runtime_stats}}\nAgent 最终输出：\n{{actual}}\n请用与用户问题（{{query}}）相同的语言输出 reason，并以 JSON 格式返回：{"score": <0.0-1.0>, "reason": "评分理由"}', '\n', chr(10)),
+    NULL,
     c.score_min, c.score_max, c.threshold, c.fields2,
     c.status, c.version_no
 FROM const c
 UNION ALL
--- 3. Token Efficiency — Token 效率
+-- 9. Token Efficiency (LLM) — Token 效率
 SELECT c.tenant_id, 'Token 效率',
     '评估 Agent 的 Token 消耗是否合理高效。结合查询复杂度和工具调用情况综合判断，无需期望答案。',
     'Token Efficiency',
     'Evaluate whether Agent token consumption is reasonable and efficient. Judges based on query complexity and tool usage — no golden answer needed.',
     c.type_llm, c.source,
     replace('你是一个 Agent Token 消耗效率评估专家。请根据执行日志评估 Agent 的 Token 消耗是否合理高效。\n评分标准：\n- 1.0：Token 消耗合理高效，对简单问题消耗少、对复杂问题消耗与复杂度匹配\n- 0.7：Token 消耗略高但整体可接受，存在少量冗余推理\n- 0.5：Token 消耗明显偏高，存在较多冗余推理或重复步骤\n- 0.0：Token 消耗严重超标，存在大量无效循环、重复或浪费\n评估时请结合用户问题的复杂度和 Agent 使用的工具数量综合判断。\n执行日志：\n{{runtime_stats}}\nAgent 最终输出：\n{{actual}}\n请用与用户问题（{{query}}）相同的语言输出 reason，并以 JSON 格式返回：{"score": <0.0-1.0>, "reason": "评分理由"}', '\n', chr(10)),
+    NULL,
     c.score_min, c.score_max, c.threshold, c.fields2,
     c.status, c.version_no
 FROM const c
 UNION ALL
--- 4. Response Completeness — 响应完整性
+-- 10. Response Completeness (LLM) — 响应完整性
 SELECT c.tenant_id, '响应完整性',
     '评估 Agent 是否被截断或提前终止。检查是否达到最大步数限制，无需期望答案。',
     'Response Completeness',
     'Evaluate whether the Agent response was truncated or terminated prematurely. Checks for max-steps-reached — no golden answer needed.',
     c.type_llm, c.source,
     replace('你是一个 Agent 响应完整性评估专家。请根据执行日志评估 Agent 是否产生了完整、未被截断的响应。\n评分标准：\n- 1.0：Agent 产生了完整的最终回答，没有被截断或提前终止\n- 0.5：Agent 达到最大步数限制后才产生回答，可能不完整或部分内容缺失\n- 0.0：Agent 未产生最终回答，只有错误信息或无输出\n执行日志：\n{{runtime_stats}}\nAgent 最终输出：\n{{actual}}\n请用与用户问题（{{query}}）相同的语言输出 reason，并以 JSON 格式返回：{"score": <0.0-1.0>, "reason": "评分理由"}', '\n', chr(10)),
+    NULL,
     c.score_min, c.score_max, c.threshold, c.fields2,
     c.status, c.version_no
 FROM const c
 UNION ALL
--- 5. MCP Connection Health — MCP 连接健康度
+-- 11. MCP Connection Health (LLM) — MCP 连接健康度
 SELECT c.tenant_id, 'MCP 连接健康度',
     '评估 Agent 与 MCP 服务器的连接是否正常。检查是否有 MCP 相关连接错误，无需期望答案。',
     'MCP Connection Health',
     'Evaluate whether the Agent MCP server connection is healthy. Checks for MCP-related connection errors — no golden answer needed.',
     c.type_llm, c.source,
     replace('你是一个 MCP 连接健康度评估专家。请根据执行日志评估 Agent 与 MCP 服务器的连接是否正常。\n评分标准：\n- 1.0：MCP 连接正常，未出现连接相关错误（如果 Agent 未使用 MCP，也视为正常，无需检查）\n- 0.5：MCP 连接偶有异常（如超时重试后成功）但整体可用\n- 0.0：MCP 连接出现严重错误，如认证失败、连接被拒绝、持续超时等\n执行日志：\n{{runtime_stats}}\nAgent 最终输出：\n{{actual}}\n请用与用户问题（{{query}}）相同的语言输出 reason，并以 JSON 格式返回：{"score": <0.0-1.0>, "reason": "评分理由"}', '\n', chr(10)),
+    NULL,
     c.score_min, c.score_max, c.threshold, c.fields2,
     c.status, c.version_no
 FROM const c
-ON CONFLICT (tenant_id, name, source) DO NOTHING;
+ON CONFLICT (tenant_id, name, source) WHERE is_current = true DO NOTHING;
+
+-- Backfill: rows created above are all current versions, each in its own group
+UPDATE nexent.evaluator_t
+  SET version_group_id = evaluator_id, is_current = true
+WHERE version_group_id IS NULL;
 
 -- ============================================================
--- 3a. Unique constraint to prevent duplicate evaluator inserts
--- ============================================================
--- Allow multiple versions of the same evaluator (same tenant+name+source).
--- Uniqueness is enforced only for current versions via a partial index.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluator_current
-    ON nexent.evaluator_t (tenant_id, name, source) WHERE is_current = true;
-
--- ============================================================
--- 4. evaluation_set_t — generation tracking columns
+-- 3. evaluation_set_t — generation tracking columns
 -- ============================================================
 ALTER TABLE nexent.evaluation_set_t
   ADD COLUMN IF NOT EXISTS generation_status VARCHAR(20) DEFAULT 'IDLE',
   ADD COLUMN IF NOT EXISTS generation_progress INTEGER DEFAULT 0;
 
 -- ============================================================
--- 5. agent_evaluation_t — new columns
+-- 4. agent_evaluation_t — new columns
 -- ============================================================
 ALTER TABLE nexent.agent_evaluation_t
   ADD COLUMN IF NOT EXISTS evaluator_config JSONB,
@@ -258,15 +248,24 @@ ALTER TABLE nexent.agent_evaluation_t
   ADD COLUMN IF NOT EXISTS fail_count INTEGER DEFAULT 0;
 
 -- ============================================================
--- 5a. agent_evaluation_case_t — score column type fix
+-- 5. agent_evaluation_case_t — score jsonb + multi-turn columns
+--    ORM model defines score as JSONB to support multi-evaluator dict
+--    scores, but the original DDL created it as DOUBLE PRECISION.
 -- ============================================================
--- ORM model defines score as JSONB to support multi-evaluator dict scores,
--- but the original DDL created it as DOUBLE PRECISION.
 ALTER TABLE nexent.agent_evaluation_case_t
-  ALTER COLUMN score TYPE jsonb USING CASE WHEN score IS NULL THEN NULL ELSE to_jsonb(score) END;
+  ALTER COLUMN score TYPE jsonb USING CASE WHEN score IS NULL THEN NULL ELSE to_jsonb(score) END,
+  ADD COLUMN IF NOT EXISTS session_id VARCHAR(128),
+  ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
 
 -- ============================================================
--- 6. LEFT_NAV_MENU permissions for /space/evaluation
+-- 6. evaluation_set_case_t — multi-turn columns
+-- ============================================================
+ALTER TABLE nexent.evaluation_set_case_t
+  ADD COLUMN IF NOT EXISTS session_id VARCHAR(128),
+  ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
+
+-- ============================================================
+-- 7. LEFT_NAV_MENU permissions for /space/evaluation
 -- ============================================================
 -- The frontend side navigation includes /space/evaluation (parent: /agent-dev)
 -- but the v2.4.0 MVP bundle didn't insert the corresponding LEFT_NAV_MENU rows.
@@ -292,22 +291,6 @@ FROM (VALUES
 ) AS v(role_permission_id, user_role)
 CROSS JOIN const c
 ON CONFLICT (role_permission_id) DO NOTHING;
-
--- ============================================================
--- 7. evaluator_t — version management columns
--- ============================================================
--- Single-table versioning: version_group_id links all versions of the same
--- evaluator, is_current marks the active version. Publishing creates a new
--- row (new version_no) within the same version_group. Restoring sets a
--- historical row as is_current.
-ALTER TABLE nexent.evaluator_t
-  ADD COLUMN IF NOT EXISTS version_group_id BIGINT,
-  ADD COLUMN IF NOT EXISTS is_current BOOLEAN DEFAULT true;
-
--- Backfill: existing evaluators are all current versions, each in its own group
-UPDATE nexent.evaluator_t
-  SET version_group_id = evaluator_id, is_current = true
-WHERE version_group_id IS NULL;
 
 -- ============================================================
 -- 8. Annotation tables
@@ -343,16 +326,5 @@ CREATE TABLE IF NOT EXISTS nexent.evaluation_annotation_t (
 CREATE INDEX IF NOT EXISTS ix_annot_case_id ON nexent.evaluation_annotation_t(tenant_id, case_id);
 CREATE INDEX IF NOT EXISTS ix_annot_schema_id ON nexent.evaluation_annotation_t(tenant_id, schema_id);
 CREATE INDEX IF NOT EXISTS ix_annot_eval_id ON nexent.evaluation_annotation_t(tenant_id, agent_evaluation_id);
-
--- ============================================================
--- 12. Multi-turn conversation support
--- ============================================================
-ALTER TABLE nexent.evaluation_set_case_t
-  ADD COLUMN IF NOT EXISTS session_id VARCHAR(128),
-  ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
-
-ALTER TABLE nexent.agent_evaluation_case_t
-  ADD COLUMN IF NOT EXISTS session_id VARCHAR(128),
-  ADD COLUMN IF NOT EXISTS turn_order INTEGER DEFAULT 0;
 
 COMMIT;

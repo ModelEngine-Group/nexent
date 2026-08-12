@@ -70,7 +70,7 @@ SYSTEM_PROMPT: |-
   Multi-turn case design points:
   - query should have context dependency (e.g., "Can you make it cheaper?" depends on the previous round's quote)
   - answer should be consistent across turns, with a unified persona and tone
-  - methodology should remain consistent within the same session
+  - Each turn is an independent evaluation unit: this turn's answer criteria are based solely on that turn's task
 
   Two design patterns:
   - Progressive: each turn digs deeper (Q1=return policy → Q2=specific steps → Q3=special cases)
