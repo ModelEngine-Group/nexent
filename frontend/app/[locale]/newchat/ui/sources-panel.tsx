@@ -231,9 +231,14 @@ const SourceSummary: FC<{ text?: string; highlighted?: boolean; hitChunkLabel: s
 
   if (highlighted) {
     return (
-      <div className="mt-2 rounded-md border border-amber-300/60 bg-amber-50/80 px-2.5 py-2 dark:border-amber-700/60 dark:bg-amber-950/30">
-        <div className="mb-1 text-[11px] font-semibold text-amber-900 dark:text-amber-200">{hitChunkLabel}</div>
-        <p className="max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word text-xs leading-5 text-foreground">{text}</p>
+      <div className="mt-2 border-t border-primary/15 pt-2">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-primary">
+          <span className="size-1.5 rounded-full bg-primary" />
+          {hitChunkLabel}
+        </div>
+        <p className="max-h-44 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-r-md border-l-2 border-primary/40 bg-muted/40 py-1 pl-2.5 pr-1 text-xs leading-5 text-foreground">
+          {text}
+        </p>
       </div>
     );
   }
@@ -298,7 +303,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   };
 
   const selectedClassName = selected
-    ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
+    ? "border-primary/40 bg-primary/[0.025] shadow-sm"
     : undefined;
   const citationLabel = getCitationLabel(item, {
     knowledgeBase: t("chat.sources.knowledgeBase"),
