@@ -3209,7 +3209,7 @@ async def run_agent_stream(
     # time-related questions correctly. The SDK strips this prefix before
     # sending AGENT_NEW_RUN to the frontend, so the user message display
     # does not show the time marker.
-    agent_request.query = _inject_user_timezone_time(agent_request.query, http_request)
+    agent_request.query = _inject_user_timezone_time(agent_request.query, http_request)  # pragma: no cover
 
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist

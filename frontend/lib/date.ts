@@ -25,15 +25,20 @@ function parseDate(input: DateInput): dayjs.Dayjs | null {
   return dayjs.utc(str);
 }
 
+// Shared helper: parse, validate, then format in the user's local timezone.
+function formatLocal(date: DateInput, format: string): string | undefined {
+  const d = parseDate(date);
+  if (!d?.isValid()) return undefined;
+  return d.local().format(format);
+}
+
 /**
  * Format a date to YYYY-MM-DD in the user's local timezone.
  * Accepts ms timestamp, Date object, ISO string (with/without timezone).
  * Strings without timezone info are assumed to be UTC.
  */
 export function formatDate(date: DateInput): string | undefined {
-  const d = parseDate(date);
-  if (!d?.isValid()) return undefined;
-  return d.local().format("YYYY-MM-DD");
+  return formatLocal(date, "YYYY-MM-DD");
 }
 
 /**
@@ -42,9 +47,7 @@ export function formatDate(date: DateInput): string | undefined {
  * Strings without timezone info are assumed to be UTC.
  */
 export function formatDateTime(date: DateInput): string | undefined {
-  const d = parseDate(date);
-  if (!d?.isValid()) return undefined;
-  return d.local().format("YYYY-MM-DD HH:mm:ss");
+  return formatLocal(date, "YYYY-MM-DD HH:mm:ss");
 }
 
 /**
@@ -52,8 +55,6 @@ export function formatDateTime(date: DateInput): string | undefined {
  * timezone. Replaces Intl.DateTimeFormat usage.
  */
 export function formatDateTimeLocale(date: DateInput, locale?: string): string {
-  const d = parseDate(date);
-  if (!d?.isValid()) return "-";
   const isZh = locale?.startsWith("zh");
-  return d.local().format(isZh ? "YYYY-MM-DD HH:mm" : "MMM D, YYYY h:mm A");
+  return formatLocal(date, isZh ? "YYYY-MM-DD HH:mm" : "MMM D, YYYY h:mm A") ?? "-";
 }
