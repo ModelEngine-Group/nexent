@@ -537,9 +537,7 @@ async def delete_file_impl(
     ledger_record = None
     if tenant_id:
         from database.knowledge_storage_object_db import get_storage_object
-        from services.knowledge_storage_reconciliation_service import (
-            resolve_storage_reference,
-        )
+        from services.knowledge_storage_service import resolve_storage_reference
 
         reference = resolve_storage_reference(object_name)
         if reference:
@@ -569,9 +567,7 @@ async def delete_file_impl(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")
 
     if ledger_record and reference:
-        from services.knowledge_storage_reconciliation_service import (
-            release_storage_charge,
-        )
+        from services.knowledge_storage_service import release_storage_charge
 
         release_storage_charge(
             tenant_id=tenant_id,

@@ -11,7 +11,9 @@ commit_uploaded_object = storage_service.commit_uploaded_object
 compensate_uploaded_objects = storage_service.compensate_uploaded_objects
 get_committed_bytes_by_kb = storage_service.get_committed_bytes_by_kb
 get_tenant_committed_source_bytes = storage_service.get_tenant_committed_source_bytes
+release_storage_charge = storage_service.release_storage_charge
 resolve_storage_context = storage_service.resolve_storage_context
+resolve_storage_reference = storage_service.resolve_storage_reference
 
 
 @pytest.fixture
@@ -100,6 +102,46 @@ def test_storage_usage_wrappers_normalize_values():
 
     aggregate.assert_called_once_with(tenant_id="tenant-a", knowledge_ids=[7, 8])
     tenant_total.assert_called_once_with(tenant_id="tenant-a")
+
+
+@pytest.mark.parametrize(
+    ("path_or_url", "expected"),
+    [
+        ("knowledge_base/a.pdf", ("test-bucket", "knowledge_base/a.pdf")),
+        ("attachments/asset_owner/user-a/a.pdf", ("test-bucket", "attachments/asset_owner/user-a/a.pdf")),
+        ("s3://other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),
+        ("/other-bucket/knowledge_base/a.pdf", ("other-bucket", "knowledge_base/a.pdf")),
+        ("https://example.com/a.pdf", None),
+        ("", None),
+    ],
+)
+def test_resolve_storage_reference_normalizes_kb_source_paths(path_or_url, expected):
+    result = resolve_storage_reference(path_or_url)
+
+    if expected is None:
+        assert result is None
+    else:
+        assert (result.bucket_name, result.object_name) == expected
+
+
+def test_release_storage_charge_invalidates_only_after_ledger_release():
+    with patch.object(
+        storage_service,
+        "mark_storage_object_deleted",
+        side_effect=[True, False],
+    ) as mark, patch.object(
+        storage_service,
+        "invalidate_storage_usage_cache",
+    ) as invalidate:
+        assert release_storage_charge(
+            tenant_id="tenant-a", bucket_name="test-bucket", object_name="one.pdf"
+        )
+        assert not release_storage_charge(
+            tenant_id="tenant-a", bucket_name="test-bucket", object_name="two.pdf"
+        )
+
+    assert mark.call_count == 2
+    invalidate.assert_called_once_with("tenant-a")
 
 
 def test_commit_uploaded_object_uses_authoritative_size(storage_context):

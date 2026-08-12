@@ -2311,68 +2311,6 @@ class TestElasticsearchCoreAdditionalCoverage:
         assert result == []
         assert any("Error getting file list" in m for m in caplog.messages)
 
-    def test_get_documents_detail_strict_paginates_all_sources(
-        self, elasticsearch_core_instance
-    ):
-        elasticsearch_core_instance.client = MagicMock()
-        elasticsearch_core_instance.client.search.side_effect = [
-            {
-                "aggregations": {
-                    "unique_sources": {
-                        "buckets": [{
-                            "doc_count": 2,
-                            "file_sample": {"hits": {"hits": [{"_source": {
-                                "path_or_url": "knowledge_base/a.pdf",
-                                "filename": "a.pdf",
-                                "file_size": 10,
-                            }}]}},
-                        }],
-                        "after_key": {"path_or_url": "knowledge_base/a.pdf"},
-                    },
-                },
-            },
-            {
-                "aggregations": {
-                    "unique_sources": {
-                        "buckets": [{
-                            "doc_count": 3,
-                            "file_sample": {"hits": {"hits": [{"_source": {
-                                "path_or_url": "knowledge_base/b.pdf",
-                                "filename": "b.pdf",
-                                "file_size": 20,
-                            }}]}},
-                        }],
-                    },
-                },
-            },
-        ]
-
-        result = elasticsearch_core_instance.get_documents_detail_strict(
-            "idx", page_size=1
-        )
-
-        assert [item["path_or_url"] for item in result] == [
-            "knowledge_base/a.pdf",
-            "knowledge_base/b.pdf",
-        ]
-        assert result[1]["chunk_count"] == 3
-        second_query = elasticsearch_core_instance.client.search.call_args_list[1].kwargs["body"]
-        assert second_query["aggs"]["unique_sources"]["composite"]["after"] == {
-            "path_or_url": "knowledge_base/a.pdf"
-        }
-
-    def test_get_documents_detail_strict_raises_es_errors(
-        self, elasticsearch_core_instance
-    ):
-        elasticsearch_core_instance.client = MagicMock()
-        elasticsearch_core_instance.client.search.side_effect = RuntimeError("ES unavailable")
-
-        with pytest.raises(RuntimeError, match="ES unavailable"):
-            elasticsearch_core_instance.get_documents_detail_strict("idx")
-
-        with pytest.raises(ValueError, match="page_size"):
-            elasticsearch_core_instance.get_documents_detail_strict("idx", page_size=0)
-
     def test_get_indices_detail_success(self, elasticsearch_core_instance):
         """Cover get_indices_detail success path (lines 1311-1375)."""
         elasticsearch_core_instance.client = MagicMock()

@@ -300,18 +300,16 @@ asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess
 sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
 setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
 
-storage_reconciliation_mock = types.ModuleType(
-    'services.knowledge_storage_reconciliation_service'
-)
-storage_reconciliation_mock.release_storage_charge = MagicMock(return_value=True)
-storage_reconciliation_mock.resolve_storage_reference = MagicMock(return_value=None)
+storage_service_mock = types.ModuleType('services.knowledge_storage_service')
+storage_service_mock.release_storage_charge = MagicMock(return_value=True)
+storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
 sys.modules[
-    'services.knowledge_storage_reconciliation_service'
-] = storage_reconciliation_mock
+    'services.knowledge_storage_service'
+] = storage_service_mock
 setattr(
     sys.modules['services'],
-    'knowledge_storage_reconciliation_service',
-    storage_reconciliation_mock,
+    'knowledge_storage_service',
+    storage_service_mock,
 )
 
 # Create mock utils modules - backend.utils needs __path__ for submodule lookups

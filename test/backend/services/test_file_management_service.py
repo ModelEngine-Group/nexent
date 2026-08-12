@@ -729,20 +729,18 @@ class TestDeleteFileImpl:
     async def test_delete_kb_source_requires_same_tenant_ledger_and_releases_charge(self):
         ledger_module = types.ModuleType("database.knowledge_storage_object_db")
         ledger_module.get_storage_object = MagicMock(return_value={"storage_object_id": 1})
-        reconciliation_module = types.ModuleType(
-            "services.knowledge_storage_reconciliation_service"
-        )
-        reconciliation_module.resolve_storage_reference = MagicMock(
+        storage_module = types.ModuleType("services.knowledge_storage_service")
+        storage_module.resolve_storage_reference = MagicMock(
             return_value=SimpleNamespace(
                 bucket_name="kb-bucket",
                 object_name="knowledge_base/doc.pdf",
             )
         )
-        reconciliation_module.release_storage_charge = MagicMock(return_value=True)
+        storage_module.release_storage_charge = MagicMock(return_value=True)
 
         with patch.dict(sys.modules, {
             "database.knowledge_storage_object_db": ledger_module,
-            "services.knowledge_storage_reconciliation_service": reconciliation_module,
+            "services.knowledge_storage_service": storage_module,
         }), patch(
             "backend.services.file_management_service.delete_file",
             return_value={"success": True},
@@ -758,7 +756,7 @@ class TestDeleteFileImpl:
             object_name="knowledge_base/doc.pdf",
             bucket="kb-bucket",
         )
-        reconciliation_module.release_storage_charge.assert_called_once_with(
+        storage_module.release_storage_charge.assert_called_once_with(
             tenant_id="tenant-a",
             bucket_name="kb-bucket",
             object_name="knowledge_base/doc.pdf",
@@ -769,20 +767,18 @@ class TestDeleteFileImpl:
     async def test_delete_kb_source_denies_missing_or_cross_tenant_ledger(self):
         ledger_module = types.ModuleType("database.knowledge_storage_object_db")
         ledger_module.get_storage_object = MagicMock(return_value=None)
-        reconciliation_module = types.ModuleType(
-            "services.knowledge_storage_reconciliation_service"
-        )
-        reconciliation_module.resolve_storage_reference = MagicMock(
+        storage_module = types.ModuleType("services.knowledge_storage_service")
+        storage_module.resolve_storage_reference = MagicMock(
             return_value=SimpleNamespace(
                 bucket_name="kb-bucket",
                 object_name="knowledge_base/doc.pdf",
             )
         )
-        reconciliation_module.release_storage_charge = MagicMock()
+        storage_module.release_storage_charge = MagicMock()
 
         with patch.dict(sys.modules, {
             "database.knowledge_storage_object_db": ledger_module,
-            "services.knowledge_storage_reconciliation_service": reconciliation_module,
+            "services.knowledge_storage_service": storage_module,
         }), patch(
             "backend.services.file_management_service.delete_file",
         ) as delete:
@@ -793,7 +789,7 @@ class TestDeleteFileImpl:
                 )
 
         delete.assert_not_called()
-        reconciliation_module.release_storage_charge.assert_not_called()
+        storage_module.release_storage_charge.assert_not_called()
 
 
 class TestListFilesImpl:

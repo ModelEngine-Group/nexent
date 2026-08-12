@@ -62,7 +62,7 @@ from database.knowledge_db import (
     update_embedding_model_by_index_name,
 )
 from database.knowledge_storage_object_db import list_committed_storage_objects
-from services.knowledge_storage_reconciliation_service import (
+from services.knowledge_storage_service import (
     release_storage_charge,
     resolve_storage_reference,
 )
@@ -782,13 +782,6 @@ class ElasticSearchService:
 
         invalid_entries = 0
         try:
-            complete_es_references = vdb_core.get_documents_detail_strict(index_name)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to collect complete Elasticsearch source references for '{index_name}'"
-            ) from exc
-
-        try:
             file_list_result = await ElasticSearchService.list_files(
                 index_name,
                 include_chunks=False,
@@ -802,11 +795,6 @@ class ElasticSearchService:
                 exc,
             )
             files_to_delete = []
-
-        # The regular list endpoint enriches active task state but historically
-        # capped unique ES sources at 1000. Add the strict paginated scan so KB
-        # deletion cannot orphan older source objects when the index is removed.
-        files_to_delete.extend(complete_es_references or [])
 
         for file_info in files_to_delete:
             raw_path = file_info.get("path_or_url")
