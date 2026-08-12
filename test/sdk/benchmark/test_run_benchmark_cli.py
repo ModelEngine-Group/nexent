@@ -1,8 +1,11 @@
 import argparse
+import sys
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
+from sdk.benchmark.generic import run_benchmark
 from sdk.benchmark.generic.run_benchmark import (
     load_agent_config,
     non_negative_int,
@@ -96,3 +99,164 @@ def test_select_dataset_items_rejects_missing_ids():
 
     with pytest.raises(ValueError, match="not found"):
         select_dataset_items(items, item_ids=["missing"])
+
+
+def test_select_dataset_items_rejects_conflicts_and_duplicates():
+    items = [type("Item", (), {"id": "a"})(), type("Item", (), {"id": "b"})()]
+
+    assert [item.id for item in select_dataset_items(items, item_limit=1)] == ["a"]
+    with pytest.raises(ValueError, match="cannot be combined"):
+        select_dataset_items(items, item_limit=1, item_ids=["a"])
+    with pytest.raises(ValueError, match="duplicate"):
+        select_dataset_items(items, item_ids=["a", "a"])
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        (["--item-limit", "1", "--item-id", "item-1"], "cannot be combined"),
+        (["--exa-cache-mode", "record"], "--exa-cache-path is required"),
+        (["--exa-cache-path", "cache.json"], "requires --exa-cache-mode"),
+        (["--keep-recent-pairs", "1"], "removed by the unified ContextItems runtime"),
+        (
+            ["--soft-input-budget", "20", "--hard-input-budget", "10"],
+            "cannot exceed",
+        ),
+    ],
+)
+def test_main_rejects_invalid_argument_combinations(monkeypatch, capsys, extra_args, message):
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py", "--dataset", "dataset", *extra_args])
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_benchmark.main()
+
+    assert exc_info.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_main_lists_evaluators_without_connecting_to_langfuse(monkeypatch, capsys):
+    import evaluators
+
+    monkeypatch.setattr(evaluators, "list_evaluators", lambda: ["exact_match", "f1"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_benchmark.py", "--dataset", "dataset", "--list-evaluators"],
+    )
+
+    run_benchmark.main()
+
+    output = capsys.readouterr().out
+    assert "Available evaluators:" in output
+    assert "exact_match" in output
+    assert "f1" in output
+
+
+def test_main_redacts_langfuse_auth_failure(monkeypatch, capsys):
+    import evaluators
+
+    monkeypatch.setattr(evaluators, "resolve_evaluators", lambda names: [])
+
+    def fail_auth():
+        raise RuntimeError("secret auth detail")
+
+    monkeypatch.setattr(
+        "langfuse.Langfuse",
+        lambda: SimpleNamespace(auth_check=fail_auth),
+    )
+    monkeypatch.setattr(sys, "argv", ["run_benchmark.py", "--dataset", "dataset"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_benchmark.main()
+
+    output = capsys.readouterr().out
+    assert exc_info.value.code == 1
+    assert "Langfuse connection failed" in output
+    assert "secret auth detail" not in output
+
+
+def test_main_rejects_missing_upload_file(monkeypatch, tmp_path, capsys):
+    import evaluators
+
+    monkeypatch.setattr(evaluators, "resolve_evaluators", lambda names: [])
+    monkeypatch.setattr(
+        "langfuse.Langfuse",
+        lambda: SimpleNamespace(auth_check=lambda: True),
+    )
+    missing_path = tmp_path / "missing.jsonl"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_benchmark.py", "--dataset", "dataset", "--upload", str(missing_path)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_benchmark.main()
+
+    assert exc_info.value.code == 1
+    assert "File not found" in capsys.readouterr().out
+
+
+def test_main_uploads_and_stops_for_dry_run(monkeypatch, tmp_path, capsys):
+    import evaluators
+
+    monkeypatch.setattr(evaluators, "resolve_evaluators", lambda names: [])
+    monkeypatch.setattr(
+        "langfuse.Langfuse",
+        lambda: SimpleNamespace(auth_check=lambda: True),
+    )
+    upload_path = tmp_path / "dataset.jsonl"
+    upload_path.write_text("{}\n", encoding="utf-8")
+    uploaded = {}
+    monkeypatch.setattr(
+        run_benchmark,
+        "upload_jsonl",
+        lambda **kwargs: uploaded.update(kwargs) or 1,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_benchmark.py",
+            "--dataset",
+            "dataset",
+            "--upload",
+            str(upload_path),
+            "--input-key",
+            "prompt",
+            "--output-key",
+            "gold",
+            "--dry-run",
+        ],
+    )
+
+    run_benchmark.main()
+
+    assert uploaded == {
+        "dataset_name": "dataset",
+        "jsonl_path": str(upload_path),
+        "input_key": "prompt",
+        "output_key": "gold",
+    }
+    assert "Dry run complete" in capsys.readouterr().out
+
+
+def test_main_requires_existing_run_for_rescore(monkeypatch, capsys):
+    import evaluators
+
+    monkeypatch.setattr(evaluators, "resolve_evaluators", lambda names: [])
+    monkeypatch.setattr(
+        "langfuse.Langfuse",
+        lambda: SimpleNamespace(auth_check=lambda: True),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_benchmark.py", "--dataset", "dataset", "--rescore"],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_benchmark.main()
+
+    assert exc_info.value.code == 2
+    assert "--existing-run is required" in capsys.readouterr().err

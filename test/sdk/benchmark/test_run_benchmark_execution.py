@@ -158,6 +158,25 @@ def test_upload_jsonl_skips_invalid_rows_and_preserves_extra_input_fields(
     assert "skipping line 2" in capsys.readouterr().out
 
 
+def test_upload_jsonl_handles_existing_dataset_and_blank_rows(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    fake_langfuse = FakeLangfuse([])
+
+    def reject_duplicate_dataset(**kwargs):
+        raise RuntimeError("already exists")
+
+    fake_langfuse.create_dataset = reject_duplicate_dataset
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+    jsonl_path = tmp_path / "dataset.jsonl"
+    jsonl_path.write_text("\n{\"question\": \"q\", \"answer\": \"a\"}\n", encoding="utf-8")
+
+    assert run_benchmark.upload_jsonl("dataset", str(jsonl_path)) == 1
+    assert "already exists" in capsys.readouterr().out
+
+
 def test_run_experiment_records_trace_scores_manifest_and_aggregates(
     monkeypatch,
     tmp_path,
@@ -274,6 +293,100 @@ def test_run_experiment_rejects_incomplete_task_output(monkeypatch):
         )
 
 
+def test_run_experiment_rejects_existing_manifest_and_web_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    fake_langfuse = FakeLangfuse([FakeItem("item-1")])
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+    monkeypatch.setattr(run_benchmark, "ARTIFACT_ROOT", tmp_path)
+
+    import provenance.experiment_manifest as manifest_module
+    import tools.web_evidence as web_evidence_module
+
+    existing_manifest = tmp_path / "manifest.json"
+    existing_manifest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(manifest_module, "manifest_path", lambda *args: existing_manifest)
+
+    with pytest.raises(FileExistsError, match="already has a manifest"):
+        run_benchmark.run_experiment(
+            "dataset",
+            lambda **kwargs: _complete_task_output(),
+            [],
+            "run",
+            manifest_context={"runner": "test"},
+        )
+
+    existing_manifest.unlink()
+    existing_web_artifact = tmp_path / "web-evidence.json"
+    existing_web_artifact.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        web_evidence_module,
+        "web_evidence_artifact_path",
+        lambda *args: existing_web_artifact,
+    )
+
+    with pytest.raises(FileExistsError, match="already has web evidence"):
+        run_benchmark.run_experiment(
+            "dataset",
+            lambda **kwargs: _complete_task_output(),
+            [],
+            "run",
+            manifest_context={"runner": "test"},
+        )
+
+
+def test_run_experiment_records_failed_item_without_optional_metrics(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    item = FakeItem("item-1")
+    fake_langfuse = FakeLangfuse([item])
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+    monkeypatch.setattr(run_benchmark, "ARTIFACT_ROOT", tmp_path)
+
+    import tools.web_evidence as web_evidence_module
+
+    monkeypatch.setattr(
+        web_evidence_module,
+        "write_web_evidence_artifact",
+        lambda **kwargs: tmp_path / "web.json",
+    )
+    monkeypatch.setattr(
+        web_evidence_module,
+        "aggregate_web_evidence",
+        lambda evidence: {
+            "exa_search_calls": 0,
+            "tavily_extract_calls": 0,
+            "terminal_fetch_calls": 0,
+            "search_after_url_discovery": 0,
+            "items_with_discovered_url_but_no_fetch": 0,
+        },
+    )
+    task_output = _complete_task_output()
+    task_output.update(
+        {
+            "compression": {"calls": 0, "summary_cache_hits": 0},
+            "provider_cache": {"status": "unsupported"},
+            "peak_context": {"peak_context_tokens": 0},
+            "steps": [],
+        }
+    )
+
+    run_benchmark.run_experiment(
+        "dataset",
+        lambda **kwargs: task_output,
+        [lambda **kwargs: {"name": "exact_match", "value": 0.0}],
+        "run",
+    )
+
+    output = capsys.readouterr().out
+    assert "Failed: 1" in output
+    assert "unsupported or metrics unavailable" in output
+    assert item.links == [(fake_langfuse.traces[0], "run")]
+
+
 def test_run_experiment_redacts_task_exception(monkeypatch, capsys):
     fake_langfuse = FakeLangfuse([FakeItem("item-1")])
     monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
@@ -337,6 +450,31 @@ def test_rescore_experiment_scores_linked_items_and_skips_missing_traces(
     output = capsys.readouterr().out
     assert "SKIP (no trace)" in output
     assert "1/2 passed" in output
+
+
+def test_rescore_experiment_isolates_evaluator_failure(monkeypatch, capsys):
+    item = FakeItem("item-1")
+    fake_langfuse = FakeLangfuse([item])
+    fake_langfuse.run_items = [
+        SimpleNamespace(dataset_item_id="item-1", trace_id="old-trace")
+    ]
+    fake_langfuse.trace_outputs["old-trace"] = {"final_answer": "answer"}
+    monkeypatch.setattr("langfuse.Langfuse", lambda: fake_langfuse)
+
+    def failing_evaluator(**kwargs):
+        raise RuntimeError("sensitive evaluator detail")
+
+    run_benchmark.rescore_experiment(
+        "dataset",
+        "old-run",
+        [failing_evaluator],
+        "new-run",
+    )
+
+    output = capsys.readouterr().out
+    assert "EVAL_ERROR: evaluator execution failed" in output
+    assert "sensitive evaluator detail" not in output
+    assert "0/1 passed" in output
 
 
 def test_main_builds_runtime_configuration_and_dispatches_experiment(
