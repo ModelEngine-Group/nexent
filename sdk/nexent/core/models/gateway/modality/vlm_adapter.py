@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, BinaryIO, Dict, List, Optional, Union
 
 from ...openai_llm import OpenAIModel
-from ..base import ModelInfo, MultimodalAdapter
+from ..adapter import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin

@@ -35,7 +35,7 @@ import aiofiles
 import websockets
 
 from ...openai_llm import OpenAIModel
-from ..base import ModelInfo, MultimodalAdapter
+from ..adapter import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin, WebSocketTransportMixin

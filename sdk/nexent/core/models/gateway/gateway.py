@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-from .base import MultimodalAdapter
+from .adapter import MultimodalAdapter
 from .context import ModelContext
 from .registry import AdapterRegistry, get_registry
 

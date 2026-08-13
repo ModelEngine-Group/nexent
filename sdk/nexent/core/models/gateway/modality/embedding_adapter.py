@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 
 from .....monitor.monitoring import record_model_call
-from ..base import ModelInfo, MultimodalAdapter
+from ..adapter import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin
