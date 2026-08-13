@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.gateway.modality.embedding_adapter import EmbeddingAdapter
+from nexent.core.gateway.modality.embedding import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore

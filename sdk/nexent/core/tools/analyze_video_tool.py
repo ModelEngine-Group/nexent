@@ -13,7 +13,7 @@ from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models.gateway.modality.vlm_adapter import VLMRequest
+from ...core.gateway.modality.vlm import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign

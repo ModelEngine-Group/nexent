@@ -6,7 +6,7 @@ import httpx
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..models.gateway.modality.rerank_adapter import RerankAdapter
+from ..gateway.modality.rerank import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager

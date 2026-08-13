@@ -4,7 +4,7 @@ Importing this package registers all built-in adapters with the process-wide
 :class:`AdapterRegistry` via the ``@register_adapter`` decorators.
 """
 
-from .embedding_adapter import (
+from .embedding import (
     DashScopeEmbeddingAdapter,
     EmbeddingAdapter,
     EmbeddingRequest,
@@ -12,13 +12,13 @@ from .embedding_adapter import (
     OpenAICompatibleEmbeddingAdapter,
     SiliconflowEmbeddingAdapter,
 )
-from .llm_adapter import (
+from .llm import (
     LLMAdapter,
     LLMRequest,
     OpenAILLMAdapter,
     OpenAILongContextLLMAdapter,
 )
-from .rerank_adapter import (
+from .rerank import (
     CohereRerankAdapter,
     JinaRerankAdapter,
     OpenAICompatibleRerankAdapter,
@@ -40,7 +40,7 @@ from .tts import (
     TTSRequest,
     VolcTTSAdapter,
 )
-from .vlm_adapter import (
+from .vlm import (
     ModelEngineVLMAdapter,
     OpenAIVLMAdapter,
     VLMAdapter,

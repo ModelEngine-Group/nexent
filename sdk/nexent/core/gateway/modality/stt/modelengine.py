@@ -7,7 +7,7 @@ import base64
 import mimetypes
 from typing import Any, AsyncIterator, Dict
 
-from ....openai_llm import OpenAIModel
+from nexent.core.models import OpenAIModel
 from ...multimodal_adapter import MultimodalAdapter, ModelInfo
 from ...model_context import ModelContext
 from ...registry import register_adapter

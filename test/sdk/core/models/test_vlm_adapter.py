@@ -14,7 +14,7 @@ import base64
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from nexent.core.models.gateway.modality.vlm_adapter import OpenAIVLMAdapter
+from nexent.core.gateway.modality.vlm import OpenAIVLMAdapter
 
 
 @pytest.fixture()
@@ -281,7 +281,7 @@ def test_analyze_video_calls_prepare_media_message(vlm_adapter):
 def test_invoke_sync_dispatches_by_media_type(vlm_adapter):
     """invoke_sync routes to the adapter's own analyze_* via _METHOD_MAP."""
     with patch.object(vlm_adapter, "analyze_image", return_value="img-result") as mock_analyze:
-        from nexent.core.models.gateway.modality.vlm_adapter import VLMRequest
+        from nexent.core.gateway.modality.vlm import VLMRequest
         result = vlm_adapter.invoke_sync(
             VLMRequest(media_type="image", media_input=b"bytes", prompt="p", stream=False)
         )
@@ -301,7 +301,7 @@ def test_build_model_does_not_send_frequency_penalty():
     frequency_penalty=0.5 to the VLM API. The original OpenAIVLModel set it
     only as a dead instance attribute (never forwarded, never read).
     """
-    from nexent.core.models.gateway.context import ModelContext
+    from nexent.core.gateway.model_context import ModelContext
     from nexent.core.utils.observer import MessageObserver
 
     adapter = OpenAIVLMAdapter(ModelContext(
@@ -335,7 +335,7 @@ def test_build_model_does_not_send_frequency_penalty():
 
 
 def _make_vlm(model_name, base_url, **ctx_overrides):
-    from nexent.core.models.gateway.context import ModelContext
+    from nexent.core.gateway.model_context import ModelContext
 
     return OpenAIVLMAdapter(ModelContext(
         modality="vlm",
@@ -381,7 +381,7 @@ def test_model_info_non_siliconflow_keeps_audio():
 def test_model_info_explicit_capability_overrides_heuristic():
     """An explicit audio=True in context.capabilities wins over the
     SiliconFlow heuristic — the config author declared the capability."""
-    from nexent.core.models.gateway.context import ModelContext
+    from nexent.core.gateway.model_context import ModelContext
 
     adapter = OpenAIVLMAdapter(ModelContext(
         modality="vlm",

@@ -8,7 +8,7 @@ directly in the adapter (no wrapped model class); LLM/LongContext stay as thin
 ``@register_adapter(factory, modality)`` decorator — backend services no
 longer hardcode ``if model_factory == ...`` dispatch.
 
-Importing :mod:`nexent.core.models.gateway` (or its :mod:`.modality` subpackage)
+Importing :mod:`nexent.core.gateway` (or its :mod:`.modality` subpackage)
 registers all built-in adapters with the process-wide registry.
 
 See ``doc/multimodal-gateway-design.md`` for the full design.

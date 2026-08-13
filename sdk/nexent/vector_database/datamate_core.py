@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 
 from .base import VectorDatabaseCore
 from ..datamate.datamate_client import DataMateClient
-from ..core.models.gateway.modality.embedding_adapter import EmbeddingAdapter
+from ..core.gateway.modality.embedding import EmbeddingAdapter
 
 logger = logging.getLogger("datamate_core")
 
