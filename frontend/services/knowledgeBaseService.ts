@@ -584,6 +584,58 @@ class KnowledgeBaseService {
     }
   }
 
+  async getIndependentAidpKnowledgeBasesAll(
+    serverUrl: string,
+    apiKey: string,
+    tenantId: string = "aidp"
+  ): Promise<KnowledgeBase[]> {
+    const itemCap = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && allItems.length < itemCap) {
+      const response = await fetch(
+        API_ENDPOINTS.independentAidp.knowledgeBases,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            server_url: serverUrl,
+            api_key: apiKey,
+            tenant_id: tenantId || "aidp",
+            page,
+            page_size: 100,
+          }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          result?.detail || "Failed to fetch independent AIDP knowledge bases"
+        );
+      }
+
+      const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(result?.value)
+        ? result.value
+        : [];
+      allItems.push(...pageItems);
+      hasMore = Boolean(result?.has_more) && pageItems.length > 0;
+      page += 1;
+    }
+
+    return this.mapAidpKnowledgeBasesToKnowledgeBases(allItems).map((kb) => ({
+      ...kb,
+      source: "ind-aidp",
+      knowledge_sources: "ind-aidp",
+      process_source: "Independent AIDP",
+    }));
+  }
+
   async getAidpKnowledgeBases(
     page: number = 1,
     pageSize: number = 20

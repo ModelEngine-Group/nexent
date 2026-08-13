@@ -379,6 +379,18 @@ class NexentAgent:
                 else:
                     # Whitelist not set by backend → treat as uninstalled.
                     tools_obj.set_allowed_kds(None)
+            elif class_name == "IndependentAidpSearchTool":
+                filtered_params = {
+                    key: value
+                    for key, value in params.items()
+                    if key not in ["observer", "image_url_builder", "rerank_model", "rerank"]
+                }
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.image_url_builder = (
+                    tool_config.metadata.get("image_url_builder")
+                    if tool_config.metadata else None
+                )
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

@@ -23,8 +23,9 @@ import {
 const isAidpImageUrl = (url: string): boolean => {
   return (
     typeof url === "string" &&
-    (url.startsWith("http://") || url.startsWith("https://")) &&
-    url.includes("/KnowledgeBase/Tenants/")
+    (((url.startsWith("http://") || url.startsWith("https://")) &&
+      url.includes("/KnowledgeBase/Tenants/")) ||
+      url.startsWith("/api/ind-aidp/images/"))
   );
 };
 

@@ -887,7 +887,7 @@ def _validate_local_tool(
             filtered_params = {k: v for k, v in instantiation_params.items()
                                if k not in ["rerank_model", "rerank", "rerank_model_name"]}
             tool_instance = tool_class(**filtered_params)
-        elif tool_name in ("haotian_search", "aidp_search"):
+        elif tool_name in ("haotian_search", "aidp_search", "ind_aidp_search"):
             # Haotian and AIDP share the same instantiation shape: drop the
             # backend-only rerank keys and explicitly set observer=None
             # (otherwise Python falls back to the FieldInfo default, which

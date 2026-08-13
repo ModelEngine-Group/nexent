@@ -2378,7 +2378,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       for (const image of searchImagesAccumulator) {
         if (
           answerImageUrls.has(image.url) ||
-          (image.url.includes("/KnowledgeBase/Tenants/") &&
+          ((image.url.includes("/KnowledgeBase/Tenants/") ||
+            image.url.includes("/ind-aidp/images/")) &&
             image.imageKey &&
             answerImageKeys.includes(image.imageKey))
         ) {

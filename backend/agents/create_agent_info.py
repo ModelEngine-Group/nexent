@@ -44,6 +44,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.image_service import get_video_understanding_model, get_vlm_model
+from services.ind_aidp_service import create_ind_aidp_image_url_builder
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -1420,7 +1421,15 @@ async def create_tool_config_list(
         elif tool.get("class_name") in agent_tool_overrides:
             override_params = agent_tool_overrides[tool.get("class_name")]
 
-        param_dict = _merge_tool_params(tool, override_params)
+        # Independent AIDP endpoint, credential, and default KDS scope are
+        # instance configuration. Request-level config overrides must not
+        # rewrite them; forward() may still receive a per-call kds_list.
+        effective_override_params = (
+            None
+            if tool.get("class_name") == "IndependentAidpSearchTool"
+            else override_params
+        )
+        param_dict = _merge_tool_params(tool, effective_override_params)
         if tool.get("class_name") == "AidpSearchTool":
             # Credentials are backend-owned since the v7.1 permission
             # redesign; populate them from the central constants (the
@@ -1433,6 +1442,12 @@ async def create_tool_config_list(
                 "api_key": AIDP_API_KEY,
                 "tenant_id": AIDP_TENANT_ID,
             })
+
+        if tool.get("class_name") == "IndependentAidpSearchTool":
+            if not param_dict.get("server_url") or not param_dict.get("api_key"):
+                raise ValidationError(
+                    "Independent AIDP search requires server_url and api_key in its tool configuration."
+                )
 
         # v7.1: inject the runtime whitelist for AidpSearchTool. The
         # permission service recomputes it on every agent call so per-KB
@@ -1512,6 +1527,19 @@ async def create_tool_config_list(
                         "langchain_tool": langchain_tool,
                     }
                     break
+
+        if tool.get("class_name") == "IndependentAidpSearchTool":
+            existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
+            tool_config.metadata = {
+                **existing,
+                "image_url_builder": create_ind_aidp_image_url_builder(
+                    agent_id=agent_id,
+                    tool_id=tool.get("tool_id"),
+                    tenant_id=tenant_id,
+                    version_no=version_no,
+                    aidp_tenant_id=param_dict.get("tenant_id") or "aidp",
+                ),
+            }
 
         if tool.get("source") == "langchain" and tool.get("class_name") != "AidpSearchTool":
             tool_class_name = tool.get("class_name")

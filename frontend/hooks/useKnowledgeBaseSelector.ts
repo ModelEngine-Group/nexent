@@ -34,12 +34,14 @@ export function useKnowledgeBasesForToolConfig(
     | "haotian_search"
     | "ragflow_search"
     | "aidp_search"
+    | "ind_aidp_search"
     | null = null,
   config?: {
     serverUrl?: string;
     apiKey?: string;
     userId?: string;
     knowledgeSpaceId?: string;
+    tenantId?: string;
   }
 ) {
   const { t } = useTranslation();
@@ -164,9 +166,30 @@ export function useKnowledgeBasesForToolConfig(
           showErrorToUser(error, t);
           kbs = [];
         }
+      } else if (toolType === "ind_aidp_search") {
+        if (aidpConfig?.serverUrl && aidpConfig?.apiKey) {
+          try {
+            kbs =
+              await knowledgeBaseService.getIndependentAidpKnowledgeBasesAll(
+                aidpConfig.serverUrl,
+                aidpConfig.apiKey,
+                aidpConfig.tenantId || "aidp"
+              );
+          } catch (error: any) {
+            log.error(
+              "Failed to fetch independent AIDP knowledge bases:",
+              error
+            );
+            showErrorToUser(error, t);
+            kbs = [];
+          }
+        }
       } else {
         // Default: knowledge_base_search or unknown - only get Nexent knowledge bases
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+          false,
+          false
+        );
         kbs = result.knowledgeBases;
       }
 
@@ -188,7 +211,10 @@ export function useKnowledgeBasesForToolConfig(
   // Provide a method to clear knowledge bases cache (useful when sync fails)
   const clearKnowledgeBases = useCallback(() => {
     queryClient.setQueryData(
-      knowledgeBaseKeys.list(toolType || "default", difyConfig?.serverUrl || ""),
+      knowledgeBaseKeys.list(
+        toolType || "default",
+        difyConfig?.serverUrl || ""
+      ),
       []
     );
   }, [queryClient, toolType, difyConfig?.serverUrl]);
@@ -214,21 +240,20 @@ export function usePrefetchKnowledgeBases() {
         | "haotian_search"
         | "ragflow_search"
         | "aidp_search"
+        | "ind_aidp_search"
         | null,
       difyConfig?: {
         serverUrl?: string;
         apiKey?: string;
         userId?: string;
         knowledgeSpaceId?: string;
+        tenantId?: string;
       }
     ) => {
       if (!toolType) return;
 
       await queryClient.prefetchQuery({
-        queryKey: knowledgeBaseKeys.list(
-          toolType,
-          difyConfig?.serverUrl || ""
-        ),
+        queryKey: knowledgeBaseKeys.list(toolType, difyConfig?.serverUrl || ""),
         queryFn: async () => {
           let kbs: KnowledgeBase[] = [];
 
@@ -321,7 +346,8 @@ export function usePrefetchKnowledgeBases() {
             }
           } else if (toolType === "aidp_search") {
             try {
-              const result = await knowledgeBaseService.getAidpKnowledgeBasesAll();
+              const result =
+                await knowledgeBaseService.getAidpKnowledgeBasesAll();
               kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
                 result.value || []
               );
@@ -330,8 +356,20 @@ export function usePrefetchKnowledgeBases() {
               showErrorToUser(error, t);
               kbs = [];
             }
+          } else if (toolType === "ind_aidp_search") {
+            if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+              kbs =
+                await knowledgeBaseService.getIndependentAidpKnowledgeBasesAll(
+                  difyConfig.serverUrl,
+                  difyConfig.apiKey,
+                  difyConfig.tenantId || "aidp"
+                );
+            }
           } else {
-            const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+            const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+              false,
+              false
+            );
             kbs = result.knowledgeBases;
           }
 
@@ -365,6 +403,7 @@ export function useSyncKnowledgeBases() {
         apiKey?: string;
         userId?: string;
         knowledgeSpaceId?: string;
+        tenantId?: string;
       }
     ): Promise<void> => {
       setIsSyncing(toolType);
@@ -416,6 +455,15 @@ export function useSyncKnowledgeBases() {
             break;
           case "aidp_search":
             await knowledgeBaseService.getAidpKnowledgeBasesAll();
+            break;
+          case "ind_aidp_search":
+            if (config?.serverUrl && config?.apiKey) {
+              await knowledgeBaseService.getIndependentAidpKnowledgeBasesAll(
+                config.serverUrl,
+                config.apiKey,
+                config.tenantId || "aidp"
+              );
+            }
             break;
           default:
             // Default sync behavior - sync Nexent only

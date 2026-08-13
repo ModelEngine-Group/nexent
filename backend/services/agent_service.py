@@ -2295,6 +2295,10 @@ async def export_agent_by_agent_id(
     for tool in tool_list:
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
+        if tool.class_name == "IndependentAidpSearchTool":
+            tool.metadata = {}
+            if isinstance(tool.params, dict) and "api_key" in tool.params:
+                tool.params["api_key"] = ""
 
     # Resolve model display names from model_ids array
     model_ids_list = agent_info.get("model_ids") or []
