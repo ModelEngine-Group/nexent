@@ -2350,7 +2350,9 @@ async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
     authorization: str = Header(None),
     force_import: bool = False,
-    skill_name_to_id: Optional[Dict[str, int]] = None
+    skill_name_to_id: Optional[Dict[str, int]] = None,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     """
     Import agent using DFS.
@@ -2360,8 +2362,13 @@ async def import_agent_impl(
         on the frontend / dedicated MCP configuration flows.
         The backend import logic only consumes the tools that already
         exist for the current tenant.
+
+    ``tenant_id`` / ``user_id`` may be passed explicitly (e.g. a super admin
+    installing into a selected tenant). When omitted they are resolved from the
+    ``authorization`` token, preserving the previous behaviour.
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    if tenant_id is None or user_id is None:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
     agent_id = agent_info.agent_id
 
     agent_stack = deque([agent_id])
@@ -3813,42 +3820,41 @@ async def export_agent_with_skills_impl(
     }
 
 
-async def import_agent_with_skills_impl(
-    agent_info: "ExportAndImportDataFormat",
+async def _create_skills_for_install(
     skills: List[SkillZipEntry],
-    authorization: str,
-    force_import: bool = False
-):
-    """Import an agent with skills bundled from a ZIP export.
+    tenant_id: str,
+    user_id: str,
+    reuse_existing_skills: bool = False,
+) -> Dict[str, int]:
+    """Create (or reuse) the skills bundled with an agent import.
 
-    For each skill in the bundle:
-      1. Check if a skill with the same name already exists in the target tenant.
-      2. If duplicates exist, raise SkillDuplicateError (do not create anything).
-      3. If no duplicates, create the skill from ZIP bytes via SkillService.
-      4. Create a SkillInstance linking the new skill_id to the new agent_id.
-
-    Then proceeds with the standard agent import flow using the mapped skill IDs.
+    Raises ``SkillDuplicateError`` when a bundled skill name already exists in
+    the tenant and ``reuse_existing_skills`` is False. Returns a mapping
+    ``skill_name -> skill_id``; existing skills are reused when allowed.
     """
     from services.skill_service import SkillService
-
-    user_id, tenant_id, _ = get_current_user_info(authorization)
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
-    existing_skill_names = {s.get("name") for s in existing_skills}
+    existing_skill_ids = {
+        s.get("name"): s.get("skill_id")
+        for s in existing_skills if s.get("name")
+    }
 
-    import_skill_names = set(skill_name_to_zip_base64.keys())
-    duplicate_names = list(import_skill_names & existing_skill_names)
-
-    if duplicate_names:
+    duplicate_names = list(set(skill_name_to_zip_base64) & set(existing_skill_ids))
+    if duplicate_names and not reuse_existing_skills:
         raise SkillDuplicateError(duplicate_names)
 
     skill_name_to_id: Dict[str, int] = {}
     skill_service = SkillService(tenant_id=tenant_id)
 
     for skill_name, zip_base64 in skill_name_to_zip_base64.items():
+        if reuse_existing_skills and skill_name in existing_skill_ids:
+            # Reuse the tenant's existing skill instead of creating a duplicate.
+            skill_name_to_id[skill_name] = existing_skill_ids[skill_name]
+            continue
         zip_bytes = base64.b64decode(zip_base64)
         result = skill_service.create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
@@ -3860,9 +3866,31 @@ async def import_agent_with_skills_impl(
         )
         skill_name_to_id[skill_name] = result.get("skill_id")
 
+    return skill_name_to_id
+
+
+async def _import_agent_with_skill_links(
+    agent_info: "ExportAndImportDataFormat",
+    skill_name_to_id: Dict[str, int],
+    authorization: str,
+    force_import: bool = False,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+):
+    """Import the agent and link the given skills to its main agent.
+
+    Calls ``import_agent_impl`` (which consumes ``skill_name_to_id``) then
+    creates a skill instance for each skill id against the newly imported main
+    agent. Returns the agent id mapping from ``import_agent_impl``.
+    """
+    if tenant_id is None or user_id is None:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
+
     agent_id_mapping = await import_agent_impl(
         agent_info, authorization, force_import,
-        skill_name_to_id=skill_name_to_id
+        skill_name_to_id=skill_name_to_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
     )
 
     main_agent_id = agent_id_mapping.get(agent_info.agent_id)
@@ -3881,6 +3909,43 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+async def import_agent_with_skills_impl(
+    agent_info: "ExportAndImportDataFormat",
+    skills: List[SkillZipEntry],
+    authorization: str,
+    force_import: bool = False,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    reuse_existing_skills: bool = False
+):
+    """Import an agent with skills bundled from a ZIP export.
+
+    Creates (or, when ``reuse_existing_skills`` is set, reuses) each bundled
+    skill, then imports the agent and links the skills to it. Raises
+    ``SkillDuplicateError`` when a bundled skill name already exists and reuse
+    is disabled.
+
+    ``tenant_id`` / ``user_id`` may be passed explicitly (e.g. a super admin
+    installing into a selected tenant). When omitted they are resolved from the
+    ``authorization`` token, preserving the previous behaviour.
+    """
+    if tenant_id is None or user_id is None:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    skill_name_to_id = await _create_skills_for_install(
+        skills, tenant_id, user_id,
+        reuse_existing_skills=reuse_existing_skills,
+    )
+    return await _import_agent_with_skill_links(
+        agent_info,
+        skill_name_to_id,
+        authorization,
+        force_import,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
 
 
 # =============================================================================

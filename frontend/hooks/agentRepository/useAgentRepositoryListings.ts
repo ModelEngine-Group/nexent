@@ -150,3 +150,41 @@ export function useImportAgentFromRepository() {
     },
   });
 }
+
+export function useOfficialAgents(enabled = true, tenantId?: string) {
+  return useQuery({
+    queryKey: ["officialAgents", tenantId ?? null],
+    queryFn: () => agentRepositoryService.fetchOfficialAgentsWithStatus(tenantId),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+export function useInstallOfficialAgents(tenantId?: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: {
+      names: string[];
+      renames?: Record<string, string>;
+      model_ids?: Record<string, number>;
+      embedding_model_ids?: Record<string, number>;
+    }) =>
+      agentRepositoryService.installOfficialAgents(
+        payload.names,
+        {
+          renames: payload.renames,
+          model_ids: payload.model_ids,
+          embedding_model_ids: payload.embedding_model_ids,
+        },
+        tenantId
+      ),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidateAgentRepositoryCaches(queryClient),
+        queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+        queryClient.invalidateQueries({ queryKey: ["officialAgents"] }),
+      ]);
+    },
+  });
+}

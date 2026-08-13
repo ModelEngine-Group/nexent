@@ -878,14 +878,30 @@ class ElasticSearchService:
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
 
-            # Create Elasticsearch index with generated internal index_name
-            success = vdb_core.create_index(
-                index_name,
-                embedding_dim=embedding_dim
-                or (embedding_model.embedding_dim if embedding_model else 1024),
-            )
-            if not success:
-                raise Exception(f"Failed to create index {index_name}")
+            # Create Elasticsearch index with generated internal index_name.
+            # If this fails (e.g. ES auth/connectivity), roll back the just-inserted
+            # record so we don't leave an orphan row pointing at a missing index.
+            try:
+                success = vdb_core.create_index(
+                    index_name,
+                    embedding_dim=embedding_dim
+                    or (embedding_model.embedding_dim if embedding_model else 1024),
+                )
+                if not success:
+                    raise Exception(f"Failed to create index {index_name}")
+            except Exception:
+                try:
+                    delete_knowledge_record(
+                        {"index_name": index_name, "user_id": user_id}
+                    )
+                except Exception as rollback_error:
+                    logger.warning(
+                        "Failed to roll back knowledge record %s after index "
+                        "creation error: %s",
+                        index_name,
+                        rollback_error,
+                    )
+                raise
 
             return {
                 "status": "success",
@@ -1543,10 +1559,23 @@ class ElasticSearchService:
                     utc_create_timestamp = time.time()
 
                 path_or_url = file_info.get('path_or_url')
+                file_size = file_info.get('file_size', 0)
+                # Fall back to the real storage size when the ES record reports
+                # zero (e.g. the data-process task could not resolve it), so the
+                # KB list never shows a 0-byte document for an existing file.
+                if not file_size and path_or_url:
+                    try:
+                        file_size = get_file_size(
+                            file_info.get('source_type', 'minio'), path_or_url)
+                    except Exception as size_err:
+                        logger.warning(
+                            "Failed to derive file size for '%s': %s",
+                            path_or_url, size_err)
+                        file_size = 0
                 file_data = {
                     'path_or_url': path_or_url,
                     'file': file_info.get('filename', ''),
-                    'file_size': file_info.get('file_size', 0),
+                    'file_size': file_size,
                     'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': '',

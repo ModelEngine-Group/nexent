@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import AgentRepositoryListingCreateRequest
+from consts.model import AgentRepositoryListingCreateRequest, OfficialAgentInstallRequest
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
@@ -106,6 +106,67 @@ async def list_my_editable_agents_api(
             f"Invalid my editable agents request parameters (ownership={ownership}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+
+@agent_repository_router.get("/official")
+async def list_official_agents_api(
+    tenant_id: Optional[str] = Query(
+        None,
+        description="Tenant ID for super admin to query a specific tenant's official agents",
+    ),
+    authorization: str = Header(None),
+):
+    """List platform official agents with installation status for the tenant."""
+    from services.official_agent_service import list_official_agents_with_status
+
+    try:
+        _, current_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        agents = await list_official_agents_with_status(effective_tenant_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"agents": [item.model_dump() for item in agents]},
+        )
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized official agent listing access attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+
+
+@agent_repository_router.post("/official/install")
+async def install_official_agents_api(
+    payload: OfficialAgentInstallRequest = Body(...),
+    tenant_id: Optional[str] = Query(
+        None,
+        description="Tenant ID for super admin to install into a specific tenant",
+    ),
+    authorization: str = Header(None),
+):
+    """Install one or more official agents into a tenant."""
+    from services.official_agent_service import install_official_agents
+
+    try:
+        user_id, current_tenant_id = get_current_user_id(authorization)
+        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        results = await install_official_agents(
+            payload.agent_names,
+            tenant_id=effective_tenant_id,
+            user_id=user_id,
+            authorization=authorization,
+            renames=payload.renames,
+            model_ids=payload.model_ids,
+            embedding_model_ids=payload.embedding_model_ids,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"results": [item.model_dump() for item in results]},
+        )
+    except UnauthorizedError as e:
+        logger.warning(
+            f"Unauthorized official agent install attempt: {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
 
 
 @agent_repository_router.get("/{agent_repository_id}")

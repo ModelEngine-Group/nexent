@@ -163,3 +163,87 @@ export interface RepositoryImportPrecheckResponse {
   has_abnormal: boolean;
   items: RepositoryImportRequirementItem[];
 }
+
+// ---------------------------------------------------------------------------
+// Official (platform-provided) agents
+// ---------------------------------------------------------------------------
+
+export type OfficialAgentStatus =
+  | "installed"
+  | "needs_model"
+  | "installable";
+
+export type OfficialAgentInstallStatus =
+  | "installed"
+  | "needs_model"
+  | "already_installed"
+  | "not_found"
+  | "failed";
+
+/** Item returned by GET /repository/agent/official. */
+export interface OfficialAgentItem {
+  name: string;
+  display_name?: string | null;
+  description?: string | null;
+  icon?: string | null;
+  tags?: string[];
+  version_label?: string | null;
+  status: OfficialAgentStatus;
+  has_knowledge: boolean;
+  mcp_count: number;
+  skill_count: number;
+  kb_count: number;
+  /** Model types the tenant must configure before installing (llm/embedding/rerank). */
+  missing_models?: string[];
+  /** Agents inside the bundle (root + sub) for conflict pre-check. */
+  agents?: OfficialAgentAgentInfo[];
+  /** MCP servers in the bundle with per-tenant install state. */
+  mcps?: OfficialAgentMcpPreview[];
+}
+
+/** An agent inside an official bundle (root or sub-agent). */
+export interface OfficialAgentAgentInfo {
+  name: string;
+  display_name?: string | null;
+}
+
+/** MCP server declaration inside an official bundle, with per-tenant install state. */
+export interface OfficialAgentMcpPreview {
+  mcp_server_name: string;
+  mcp_url: string;
+  installed: boolean;
+}
+
+/** User choices passed with an official agent install request. */
+export interface OfficialAgentInstallOptions {
+  /** Maps an existing agent name inside a bundle to a new name (rename on conflict). */
+  renames?: Record<string, string>;
+  /** Maps a bundle key to a tenant LLM model_id for its root agent. */
+  model_ids?: Record<string, number>;
+  /** Maps a bundle key to a tenant embedding model_id used for its knowledge bases. */
+  embedding_model_ids?: Record<string, number>;
+}
+
+/** Per-agent result of POST /repository/agent/official/install. */
+export interface OfficialAgentInstallItem {
+  name: string;
+  status: OfficialAgentInstallStatus;
+  message?: string | null;
+  steps?: OfficialAgentInstallStep[];
+  missing_models?: string[];
+  /** Newly created main agent id; set only when status is "installed". */
+  agent_id?: number | null;
+}
+
+export type OfficialAgentInstallStepStatus = "ok" | "failed";
+
+/** One step of an official agent install (mcp / skill / knowledge_base / agent). */
+export interface OfficialAgentInstallStep {
+  name: string;
+  status: OfficialAgentInstallStepStatus;
+  message?: string | null;
+}
+
+export interface OfficialAgentInstallResponse {
+  results: OfficialAgentInstallItem[];
+}

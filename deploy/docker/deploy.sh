@@ -1048,6 +1048,15 @@ prepare_directory_and_data() {
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi
 
+  # Copy official-agents folder to /mnt/nexent
+  if [ -d "$DOCKER_ASSETS_DIR/official-agents" ]; then
+    cp -rn "$DOCKER_ASSETS_DIR/official-agents" "$NEXENT_USER_DIR/"
+    chmod -R 775 "$NEXENT_USER_DIR/official-agents"
+    echo "   📦 Official agents copied to $NEXENT_USER_DIR/official-agents"
+  else
+    echo "   ⚠️ official-agents directory not found, skipping agents copy"
+  fi
+
   # Export for docker-compose
   export NEXENT_USER_DIR
 

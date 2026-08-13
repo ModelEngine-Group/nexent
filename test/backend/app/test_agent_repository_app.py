@@ -3,7 +3,7 @@
 import os
 import sys
 import types
-from typing import List, Optional
+from typing import Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,7 +28,15 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     tool_count: Optional[int] = Field(None, ge=0)
 
 
+class _OfficialAgentInstallRequest(BaseModel):
+    agent_names: List[str]
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
+consts_model.OfficialAgentInstallRequest = _OfficialAgentInstallRequest
 sys.modules["consts.model"] = consts_model
 
 from apps.agent_repository_app import agent_repository_router
@@ -757,4 +765,199 @@ def test_check_repository_import_precheck_api_passes_tenant_id(
     mock_precheck.assert_called_once_with(
         agent_repository_id=42,
         tenant_id="test_tenant_id",
+    )
+
+
+class _OfficialAgentItem:
+    """Minimal stand-in exposing model_dump() for endpoint serialization."""
+
+    def __init__(self, name, status):
+        self._data = {"name": name, "status": status}
+
+    def model_dump(self):
+        return self._data
+
+
+def test_list_official_agents_api_success(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent listing API returns serialized items."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.list_official_agents_with_status = AsyncMock(
+        return_value=[
+            _OfficialAgentItem("research-agent", "installable"),
+            _OfficialAgentItem("data-cleaner", "needs_model"),
+        ]
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.get(
+            "/repository/agent/official", headers=mock_auth_header
+        )
+
+    assert response.status_code == 200
+    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
+    assert response.json() == {
+        "agents": [
+            {"name": "research-agent", "status": "installable"},
+            {"name": "data-cleaner", "status": "needs_model"},
+        ]
+    }
+    fake_svc.list_official_agents_with_status.assert_awaited_once_with(
+        "test_tenant_id"
+    )
+
+
+def test_list_official_agents_api_unauthorized(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent listing API returns 401 on unauthorized access."""
+    from consts.exceptions import UnauthorizedError
+
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        side_effect=UnauthorizedError("not authorized"),
+    )
+
+    response = client.get("/repository/agent/official", headers=mock_auth_header)
+
+    assert response.status_code == 401
+
+
+def test_install_official_agents_api_success(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent install API forwards names and serializes results."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.install_official_agents = AsyncMock(
+        return_value=[_OfficialAgentItem("research-agent", "installed")]
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.post(
+            "/repository/agent/official/install",
+            json={"agent_names": ["research-agent"]},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "results": [{"name": "research-agent", "status": "installed"}]
+    }
+    fake_svc.install_official_agents.assert_awaited_once_with(
+        ["research-agent"],
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        authorization=mock_auth_header["Authorization"],
+        renames=None,
+        model_ids=None,
+        embedding_model_ids=None,
+    )
+
+
+def test_install_official_agents_api_unauthorized(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent install API returns 401 on unauthorized access."""
+    from consts.exceptions import UnauthorizedError
+
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        side_effect=UnauthorizedError("not authorized"),
+    )
+
+    response = client.post(
+        "/repository/agent/official/install",
+        json={"agent_names": ["research-agent"]},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 401
+
+
+def test_list_official_agents_api_uses_target_tenant(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent listing API forwards an explicit tenant_id query param."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.list_official_agents_with_status = AsyncMock(return_value=[])
+
+    # Super admin's own tenant differs from the selected target tenant
+    mock_get_user_id.return_value = ("admin_user", "admin_tenant")
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.get(
+            "/repository/agent/official?tenant_id=target-tenant",
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    fake_svc.list_official_agents_with_status.assert_awaited_once_with(
+        "target-tenant"
+    )
+
+
+def test_install_official_agents_api_uses_target_tenant(
+    mocker,
+    mock_auth_header,
+):
+    """Test official agent install API installs into the explicit tenant_id."""
+    from unittest.mock import AsyncMock, patch as unittest_patch
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    fake_svc = types.ModuleType("services.official_agent_service")
+    fake_svc.install_official_agents = AsyncMock(return_value=[])
+
+    mock_get_user_id.return_value = ("admin_user", "admin_tenant")
+
+    with unittest_patch.dict(
+        sys.modules, {"services.official_agent_service": fake_svc}
+    ):
+        response = client.post(
+            "/repository/agent/official/install?tenant_id=target-tenant",
+            json={"agent_names": ["research-agent"]},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    fake_svc.install_official_agents.assert_awaited_once_with(
+        ["research-agent"],
+        tenant_id="target-tenant",
+        user_id="admin_user",
+        authorization=mock_auth_header["Authorization"],
+        renames=None,
+        model_ids=None,
+        embedding_model_ids=None,
     )
