@@ -453,6 +453,7 @@ async def start_streaming_chat(
     # Attach northbound response headers used by streaming clients and proxies.
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
+    response.headers["Access-Control-Expose-Headers"] = "conversation_id"
     response.headers["X-Accel-Buffering"] = "no"
     return response
 
