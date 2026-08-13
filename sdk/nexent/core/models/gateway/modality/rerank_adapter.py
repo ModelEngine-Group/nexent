@@ -78,25 +78,16 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
     @property
     def _model_name(self) -> str:
-        """Returns the underlying model name from the context."""
         return self._context.model_name
 
     def _prepare_request(
         self, query: str, documents: List[str], top_n: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Builds the rerank request payload.
+        """Build the rerank request payload.
 
         DashScope is auto-detected by URL (``dashscope`` in base_url) and uses
         the ``input``/``parameters`` wrapper; otherwise the flat OpenAI format
         is used.
-
-        Args:
-            query: The query to rerank documents against.
-            documents: The documents to rerank.
-            top_n: The number of top results to return.
-
-        Returns:
-            The request payload dictionary.
         """
         if "dashscope" in (self._base_url or "").lower():
             return {
@@ -114,14 +105,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     def _make_request(
         self, data: Dict[str, Any], timeout: Optional[float] = None
     ) -> Dict[str, Any]:
-        """POSTs the payload to the rerank endpoint and returns the JSON.
-
-        Args:
-            data: The request payload to send.
-            timeout: Optional per-request timeout in seconds.
-
-        Returns:
-            The parsed JSON response.
+        """POST the payload to the rerank endpoint and return the JSON.
 
         Raises:
             requests.exceptions.RequestException: If the HTTP request fails.
@@ -139,20 +123,11 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     def rerank(
         self, query: str, documents: List[str], top_n: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Reranks documents against a query, retrying on timeout.
+        """Rerank documents against a query, retrying on timeout.
 
         Empty document lists short-circuit to an empty result. Timeouts are
         retried with increasing timeouts (30s base, +10s per attempt, up to 4
         attempts); other request errors fail immediately.
-
-        Args:
-            query: The query to rerank documents against.
-            documents: The documents to rerank.
-            top_n: The number of top results to return.
-
-        Returns:
-            The reranked result list, each entry containing ``index``,
-            ``relevance_score``, and ``document`` text.
 
         Raises:
             requests.exceptions.Timeout: If all timeout retries are exhausted.
@@ -202,27 +177,11 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     async def rerank_async(
         self, query: str, documents: List[str], top_n: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Asynchronously reranks documents against a query.
-
-        Args:
-            query: The query to rerank documents against.
-            documents: The documents to rerank.
-            top_n: The number of top results to return.
-
-        Returns:
-            The reranked result list.
-        """
+        """Rerank documents against a query, offloaded to a worker thread."""
         return await asyncio.to_thread(self.rerank, query, documents, top_n)
 
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
-        """Verifies the rerank endpoint is reachable.
-
-        Args:
-            timeout: The timeout in seconds for the connectivity probe.
-
-        Returns:
-            True if the endpoint responds, False otherwise.
-        """
+        """Verify the rerank endpoint is reachable with a probe rerank call."""
         try:
             await asyncio.to_thread(
                 self.rerank, "test query", ["test document"], top_n=1
@@ -241,32 +200,14 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     # ---- adapter interface ----
 
     async def invoke(self, request: RerankRequest) -> List[Dict[str, Any]]:
-        """Reranks documents for the given request.
-
-        Args:
-            request: The rerank request containing the query and documents.
-
-        Returns:
-            The reranked result list.
-        """
         return await asyncio.to_thread(
             self.rerank, request.query, request.documents, request.top_n
         )
 
     async def health_check(self) -> bool:
-        """Returns the connectivity status of the rerank endpoint.
-
-        Returns:
-            True if the endpoint is reachable, False otherwise.
-        """
         return await self.connectivity_check()
 
     def get_model_info(self) -> ModelInfo:
-        """Returns the model info for this adapter.
-
-        Returns:
-            The model info describing the rerank model.
-        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -276,13 +217,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
 
 def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> None:
-    """Applies default base_url/model to the context when they are unset.
-
-    Args:
-        context: The model context to update.
-        base_url: The default base URL to apply.
-        model_name: The default model name to apply.
-    """
+    """Apply default base_url/model to the context when they are unset."""
     if not context.base_url:
         context.base_url = base_url
     if not context.model_name:

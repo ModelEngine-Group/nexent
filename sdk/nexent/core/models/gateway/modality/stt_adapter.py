@@ -801,22 +801,9 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
                 pass
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        """Transcribe an audio file to text.
-
-        Args:
-            request: The STT request containing the audio file path.
-
-        Returns:
-            The recognition result dict.
-        """
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
-        """Run a real-time streaming transcription session.
-
-        Args:
-            request: The streaming STT request carrying the client websocket.
-        """
         await self.start_streaming_session(
             request.websocket, config_received=request.config_received
         )
@@ -824,19 +811,9 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         yield  # pragma: no cover  (marks as async generator)
 
     async def health_check(self) -> bool:
-        """Check connectivity to the STT service.
-
-        Returns:
-            True if the service is reachable, else False.
-        """
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
-        """Return metadata about the STT model.
-
-        Returns:
-            A ModelInfo describing the model and its capabilities.
-        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1495,40 +1472,17 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        """Transcribe an audio file to text.
-
-        Args:
-            request: The STT request containing the audio file path.
-
-        Returns:
-            The recognition result dict.
-        """
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
-        """Run a real-time streaming transcription session.
-
-        Args:
-            request: The streaming STT request carrying the client websocket.
-        """
         await self.start_streaming_session(request.websocket)
         return
         yield  # pragma: no cover
 
     async def health_check(self) -> bool:
-        """Check connectivity to the STT service.
-
-        Returns:
-            True if the service is reachable, else False.
-        """
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
-        """Return metadata about the STT model.
-
-        Returns:
-            A ModelInfo describing the model and its capabilities.
-        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1566,7 +1520,6 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
-        """Lazily build the wrapped OpenAIModel from the context."""
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
@@ -1579,14 +1532,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        """Transcribe an audio file to text via HTTP Chat Completions.
-
-        Args:
-            request: The STT request containing the audio file path.
-
-        Returns:
-            A dict with a ``text`` key and the raw model result.
-        """
+        """Transcribe an audio file via HTTP Chat Completions."""
         if self._model is None:
             self._build_model()
         audio_bytes = open(request.audio_path, "rb").read()
@@ -1608,9 +1554,6 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
         """Stream real-time transcription over HTTP SSE.
 
-        Args:
-            request: The streaming STT request.
-
         Raises:
             NotImplementedError: ModelEngine STT streaming is a Phase 2 deliverable.
         """
@@ -1619,21 +1562,11 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         raise NotImplementedError("ModelEngine STT streaming is a Phase 2 deliverable")
 
     async def health_check(self) -> bool:
-        """Check connectivity to the ModelEngine STT service.
-
-        Returns:
-            True if the service is reachable, else False.
-        """
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
-        """Return metadata about the STT model.
-
-        Returns:
-            A ModelInfo describing the model and its capabilities.
-        """
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
