@@ -317,6 +317,34 @@ class A2UIBuilder:
             data_binding=data_binding or "rating.value",
         )
 
+    def add_chart(
+        self,
+        chart_type: str,
+        data: dict[str, Any],
+        options: Optional[dict[str, Any]] = None,
+        cid: Optional[str] = None,
+    ) -> A2UIComponent:
+        """Add a statistical chart component.
+
+        Args:
+            chart_type: Type of chart ('bar', 'line', 'pie', 'area')
+            data: Chart data with labels and datasets
+            options: Optional chart configuration
+            cid: Component ID
+
+        Returns:
+            A2UIComponent for the chart
+        """
+        return self._add(
+            "Chart",
+            cid=cid or f"chart_{uuid.uuid4().hex[:8]}",
+            props={
+                "chartType": chart_type,
+                "data": data,
+                "options": options or {},
+            },
+        )
+
     # ------------------------------------------------------------------
     # Build helpers (produce SSE-ready payload dicts)
     # ------------------------------------------------------------------
@@ -523,4 +551,31 @@ def create_feedback_form(
         submit_payload=submit_payload,
         title=title,
     )
+    return builder, surface
+
+
+def create_chart_card(
+    title: str,
+    chart_type: str,
+    data: dict[str, Any],
+    options: Optional[dict[str, Any]] = None,
+    surface_id: Optional[str] = None,
+) -> tuple[A2UIBuilder, dict]:
+    """Create a builder pre-loaded with a chart card.
+
+    Args:
+        title: Chart title
+        chart_type: Type of chart ('bar', 'line', 'pie', 'area')
+        data: Chart data with labels and datasets
+        options: Optional chart configuration
+        surface_id: Optional surface ID
+
+    Returns:
+        Tuple of (builder, surface_payload)
+    """
+    builder = A2UIBuilder(surface_id=surface_id)
+    surface = builder.create_surface(catalog="basic", title=title)
+
+    builder.add_text(text=title, variant="h3")
+    builder.add_chart(chart_type=chart_type, data=data, options=options)
     return builder, surface

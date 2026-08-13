@@ -1271,7 +1271,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1306,7 +1306,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1346,7 +1346,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1362,11 +1362,18 @@ export const handleStreamResponse = async (
                             ...dataModel,
                           },
                         };
-                        newMessages[newMessages.length - 1] = {
-                          ...lastMsg,
-                          a2uiSurfaces: surfaces,
-                        };
+                      } else {
+                        // Create new surface if it doesn't exist
+                        surfaces.push({
+                          surfaceId,
+                          components: [],
+                          dataModel: dataModel || {},
+                        });
                       }
+                      newMessages[newMessages.length - 1] = {
+                        ...lastMsg,
+                        a2uiSurfaces: surfaces,
+                      };
                       return newMessages;
                     });
                   } catch (e) {
@@ -1382,7 +1389,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || !lastMsg.a2uiSurfaces) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.a2uiSurfaces) return newMessages;
 
                       newMessages[newMessages.length - 1] = {
                         ...lastMsg,
@@ -1404,7 +1411,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
 
                       const interactions = lastMsg.pendingInteractions
                         ? [...lastMsg.pendingInteractions]
@@ -1439,7 +1446,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || !lastMsg.pendingInteractions) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.pendingInteractions) return newMessages;
 
                       newMessages[newMessages.length - 1] = {
                         ...lastMsg,
@@ -1462,7 +1469,7 @@ export const handleStreamResponse = async (
                     setMessages((prev) => {
                       const newMessages = [...prev];
                       const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || !lastMsg.pendingInteractions) return newMessages;
+                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.pendingInteractions) return newMessages;
 
                       newMessages[newMessages.length - 1] = {
                         ...lastMsg,

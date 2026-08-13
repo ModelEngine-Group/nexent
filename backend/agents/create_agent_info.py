@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import copy
 import json
 import logging
@@ -866,16 +866,19 @@ async def create_agent_config(
         description=(
             "Output an interactive A2UI card or form to the user. "
             "Supports info cards, feedback forms, confirmation dialogs, "
-            "custom forms, and rating components. Use this when you need to "
-            "display structured information or request user input."
+            "custom forms, rating components, and chart visualizations. "
+            "Use this when you need to display structured information or request user input."
         ),
         inputs=json.dumps({
-            "card_type": {"type": "string", "description": "Type of card: info/feedback/confirmation/form/rating"},
+            "card_type": {"type": "string", "description": "Type of card: info/feedback/confirmation/form/rating/chart"},
             "title": {"type": "string", "description": "Card title text"},
             "message": {"type": "string", "description": "Card body message"},
             "options": {"type": "array", "description": "Option strings for feedback/confirmation cards"},
             "fields": {"type": "array", "description": "Form field definitions for custom form type"},
             "allow_custom_input": {"type": "boolean", "description": "Allow custom text input"},
+            "chart_type": {"type": "string", "description": "Chart type for chart card: bar/line/pie/area"},
+            "chart_data": {"type": "object", "description": "Chart data with labels and datasets"},
+            "chart_options": {"type": "object", "description": "Chart configuration options"},
         }, ensure_ascii=False),
         output_type="object",
         params={},
@@ -1354,12 +1357,23 @@ output_card(card_type="form", title="信息收集", fields=[{"name": "email", "l
 output_card(card_type="rating", title="请评分", message="您对本次服务的评价？")
 </code>
 
+统计图表：
+<code>
+output_card(card_type="chart", title="销售数据", chart_type="bar", chart_data={"labels": ["一月", "二月", "三月"], "datasets": [{"label": "销售额", "data": [100, 200, 150]}]})
+</code>
+
 ### 卡片类型说明：
 - **info**: 展示结构化信息，如通知、数据摘要、操作结果
 - **feedback**: 收集用户反馈，支持预设选项和自定义输入
 - **confirmation**: 获取用户确认，用于关键操作确认
 - **form**: 收集结构化数据，支持多种字段类型
 - **rating**: 收集评分评价，用于产品/服务反馈
+- **chart**: 展示统计图表，支持柱状图、折线图、饼图、面积图
+
+### 图表类型说明：
+- **chart_type**: 图表类型，可选值：bar（柱状图）、line（折线图）、pie（饼图）、area（面积图）
+- **chart_data**: 图表数据，格式：{"labels": string[], "datasets": [{"label": string, "data": number[]}]}
+- **chart_options**: 图表配置（可选），格式：{"xAxis": string, "yAxis": string, "title": string}
 """
         # Remove old A2UI instructions from database to avoid conflicts
         import re

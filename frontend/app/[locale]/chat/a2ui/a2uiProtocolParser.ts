@@ -34,6 +34,7 @@ const A2UI_TYPES = new Set([
   "feedback",
   "confirmation",
   "rating",
+  "chart",
 ]);
 
 /** List of A2UI XML tags that should be stripped from text */
@@ -211,6 +212,30 @@ function removeOverlappingBlocks(
 /** Convert A2UI protocol JSON to our internal surface format */
 function convertA2UIToSurface(a2uiJson: any): A2UISurface {
   const type = a2uiJson.type;
+
+  if (type === "chart") {
+    const chartType = a2uiJson.chart_type || a2uiJson.chartType || "bar";
+    const chartData = a2uiJson.chart_data || a2uiJson.chartData || a2uiJson.data || {};
+    const chartOptions = a2uiJson.chart_options || a2uiJson.chartOptions || a2uiJson.options || {};
+    const surfaceId = `a2ui_chart_${Date.now()}`;
+
+    return {
+      surfaceId: surfaceId,
+      catalog: "basic",
+      title: a2uiJson.title || "Chart",
+      components: [{
+        id: `chart_${surfaceId}`,
+        component: "Chart",
+        props: {
+          chartType: chartType,
+          data: chartData,
+          options: chartOptions,
+        },
+      }],
+      rootIds: [`chart_${surfaceId}`],
+      dataModel: {},
+    };
+  }
 
   if (type === "card" && a2uiJson.card) {
     return convertStandardCard(a2uiJson);

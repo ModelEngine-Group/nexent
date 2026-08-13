@@ -1022,6 +1022,13 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
+                # Debug log for A2UI messages
+                if chunk_type in ("a2ui_surface", "a2ui_components"):
+                    logger.info(
+                        "[A2UI_debug] Received %s message in _stream_agent_chunks: content_length=%d",
+                        chunk_type, len(chunk_content),
+                    )
+
                 # Add unit_index to the chunk data for frontend resume skip logic.
                 # This allows frontend to accurately skip chunks that were already persisted.
                 # For mergeable types (continuing chunks), use the current unit's index.
@@ -1308,6 +1315,12 @@ async def _stream_agent_chunks(
                                     )
                             next_unit_index += 1
 
+            # Debug log for A2UI messages before publishing
+            if chunk_type in ("a2ui_surface", "a2ui_components"):
+                logger.info(
+                    "[A2UI_debug] Publishing %s message via channel: chunk_length=%d",
+                    chunk_type, len(chunk),
+                )
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True

@@ -32,6 +32,7 @@ class OutputCardTool(Tool):
     - confirmation: Confirmation dialog with yes/no buttons
     - form: Custom form with text fields, selects, etc.
     - rating: Star rating component
+    - chart: Statistical chart visualization (bar, line, pie, area)
     """
 
     name = "output_card"
@@ -53,12 +54,13 @@ class OutputCardTool(Tool):
             "description": (
                 "Type of card to output: 'info' (informational), "
                 "'feedback' (feedback form), 'confirmation' (yes/no dialog), "
-                "'form' (custom form), 'rating' (star rating)"
+                "'form' (custom form), 'rating' (star rating), "
+                "'chart' (statistical chart visualization)"
             ),
             "description_zh": (
                 "卡片类型：'info'（信息卡）、'feedback'（反馈表单）、"
                 "'confirmation'（确认对话框）、'form'（自定义表单）、"
-                "'rating'（评分组件）"
+                "'rating'（评分组件）、'chart'（统计图表）"
             ),
             "nullable": True,
         },
@@ -105,6 +107,38 @@ class OutputCardTool(Tool):
             "description_zh": "反馈表单是否允许自定义文本输入",
             "nullable": True,
         },
+        "chart_type": {
+            "type": "string",
+            "description": (
+                "Type of chart: 'bar' (bar chart), 'line' (line chart), "
+                "'pie' (pie chart), 'area' (area chart). Required when card_type is 'chart'."
+            ),
+            "description_zh": (
+                "图表类型：'bar'（柱状图）、'line'（折线图）、"
+                "'pie'（饼图）、'area'（面积图）。当 card_type 为 'chart' 时必填。"
+            ),
+            "nullable": True,
+        },
+        "chart_data": {
+            "type": "object",
+            "description": (
+                "Chart data object. Format: { labels: string[], datasets: [{ label: string, data: number[] }] }"
+            ),
+            "description_zh": (
+                "图表数据对象。格式：{ labels: string[], datasets: [{ label: string, data: number[] }] }"
+            ),
+            "nullable": True,
+        },
+        "chart_options": {
+            "type": "object",
+            "description": (
+                "Optional chart configuration. Format: { xAxis: string, yAxis: string, title: string }"
+            ),
+            "description_zh": (
+                "可选的图表配置。格式：{ xAxis: string, yAxis: string, title: string }"
+            ),
+            "nullable": True,
+        },
     }
     output_type = "object"
 
@@ -125,16 +159,22 @@ class OutputCardTool(Tool):
         options: Optional[List[str]] = None,
         fields: Optional[List[Dict[str, Any]]] = None,
         allow_custom_input: bool = True,
+        chart_type: Optional[str] = None,
+        chart_data: Optional[Dict[str, Any]] = None,
+        chart_options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Output an A2UI card to the frontend.
 
         Args:
-            card_type: Type of card (info, feedback, confirmation, form, rating)
+            card_type: Type of card (info, feedback, confirmation, form, rating, chart)
             title: Card title
             message: Card body message
             options: Option strings for feedback/confirmation cards
             fields: Form field definitions for custom form type
             allow_custom_input: Allow custom text input in feedback forms
+            chart_type: Type of chart (bar, line, pie, area) for chart card
+            chart_data: Chart data with labels and datasets for chart card
+            chart_options: Optional chart configuration for chart card
 
         Returns:
             Dict with success status and card_id
@@ -179,6 +219,12 @@ class OutputCardTool(Tool):
 
             elif card_type == "rating":
                 self._build_rating_card(builder, title, message)
+
+            elif card_type == "chart":
+                self._build_chart_card(
+                    builder, title, chart_type or "bar",
+                    chart_data or {}, chart_options or {},
+                )
 
             else:
                 # Default to info card
@@ -341,4 +387,29 @@ class OutputCardTool(Tool):
             action_name="submit_rating",
             action_payload={"rating": "$dataModel/rating"},
             variant="primary",
+        )
+
+    def _build_chart_card(
+        self,
+        builder: Any,
+        title: str,
+        chart_type: str,
+        chart_data: Dict[str, Any],
+        chart_options: Dict[str, Any],
+    ) -> None:
+        """Build a statistical chart card.
+
+        Args:
+            builder: A2UI builder instance
+            title: Chart title
+            chart_type: Type of chart (bar, line, pie, area)
+            chart_data: Chart data with labels and datasets
+            chart_options: Optional chart configuration
+        """
+        builder.add_text(text=title or "Chart", variant="h3")
+
+        chart_component = builder.add_chart(
+            chart_type=chart_type,
+            data=chart_data,
+            options=chart_options,
         )

@@ -41,6 +41,72 @@ from .verification import (
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
 
+
+def _find_tool_call_calls(text: str) -> List[str]:
+    """Extract tool calls from text using bracket depth matching.
+
+    Supports nested parentheses in JSON/dict/list parameters and handles
+    parentheses inside string literals correctly.
+
+    Args:
+        text: Text to search for tool calls.
+
+    Returns:
+        List of extracted tool call strings.
+    """
+    tool_names = ['output_card', 'create_scheduled_task_proposal', 'final_answer']
+    results = []
+
+    i = 0
+    while i < len(text):
+        matched = False
+        for name in tool_names:
+            if text[i:].startswith(name):
+                if i > 0 and (text[i - 1].isalnum() or text[i - 1] == '_'):
+                    continue
+                after_name = i + len(name)
+                j = after_name
+                while j < len(text) and text[j] in ' \t':
+                    j += 1
+                if j < len(text) and text[j] == '(':
+                    start = i
+                    i = j + 1
+                    depth = 1
+                    in_string = False
+                    string_char = None
+
+                    while i < len(text) and depth > 0:
+                        char = text[i]
+
+                        if in_string:
+                            if char == '\\':
+                                i += 2
+                                continue
+                            elif char == string_char:
+                                in_string = False
+                        else:
+                            if char in ('"', "'"):
+                                in_string = True
+                                string_char = char
+                            elif char == '(':
+                                depth += 1
+                            elif char == ')':
+                                depth -= 1
+                                if depth == 0:
+                                    i += 1
+                                    break
+                        i += 1
+
+                    if depth == 0:
+                        results.append(text[start:i])
+                    matched = True
+                    break
+        if not matched:
+            i += 1
+
+    return results
+
+
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
 
@@ -105,21 +171,9 @@ def parse_code_blobs(text: str) -> str:
     # Fallback 2: Extract bare tool calls without <code> tags
     # This handles cases where the model forgets to wrap tool calls in <code> tags
     # but still outputs tool calls like: output_card(card_type="info", title="...", message="...")
-    import re
-    tool_call_pattern = r'(output_card\s*\([^)]*\)|create_scheduled_task_proposal\s*\([^)]*\)|final_answer\s*\([^)]*\))'
-    bare_tool_calls = re.findall(tool_call_pattern, text, re.DOTALL)
+    bare_tool_calls = _find_tool_call_calls(text)
     if bare_tool_calls:
-        # Filter out matches that are inside thinking/text blocks (not actual tool calls)
-        valid_calls = []
-        for call in bare_tool_calls:
-            # Check if this is a real tool call by verifying it's not in a text description
-            # Remove leading/trailing quotes and markdown artifacts
-            cleaned = call.strip()
-            if cleaned.startswith(('output_card(', 'create_scheduled_task_proposal(', 'final_answer(')):
-                valid_calls.append(cleaned)
-        
-        if valid_calls:
-            return "\n\n".join(valid_calls)
+        return "\n\n".join(bare_tool_calls)
 
     raise ValueError(
         dedent(

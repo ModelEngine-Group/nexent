@@ -26,6 +26,7 @@ import {
   InfoCircleFilled,
   PushpinOutlined,
 } from "@ant-design/icons";
+import A2UIChart from "./A2UIChart";
 import type { A2UIComponent, A2UISurface, HITLInteraction } from "@/types/chat";
 
 const { TextArea } = Input;
@@ -63,6 +64,7 @@ const cardTypeLabels: Record<string, string> = {
   confirmation: "Confirmation · 确认卡片",
   form: "Form · 表单卡片",
   rating: "Rating · 评分卡片",
+  chart: "Chart · 统计图表",
 };
 
 const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
@@ -634,6 +636,19 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
             style={{ fontSize: 28 }}
           />
         </div>
+      );
+    }
+
+    case "Chart": {
+      const chartType = component.props?.chartType as string || "bar";
+      const chartData = component.props?.data as any || {};
+      const chartOptions = component.props?.options as any || {};
+      return (
+        <A2UIChart
+          chartType={chartType}
+          data={chartData}
+          options={chartOptions}
+        />
       );
     }
 
