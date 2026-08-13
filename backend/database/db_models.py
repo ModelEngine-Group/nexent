@@ -4,6 +4,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Float,
+    ForeignKey,
     Index,
     Integer,
     JSON,
@@ -1016,7 +1017,7 @@ class MemoryLongTermVersion(TableBase):
     character_count = Column(Integer, nullable=False)
     raw_dreaming_input = Column(Text)
     generation_audit = Column(JSONB, nullable=False, default=dict)
-    evidence_ids = Column(JSONB, nullable=False, default=list)
+    evidence_ids = Column(ARRAY(String(100)), nullable=False, default=list)
     fallback_details = Column(JSONB, nullable=False, default=dict)
     omission_details = Column(JSONB, nullable=False, default=dict)
 
@@ -1112,12 +1113,48 @@ class MemoryDreamingAudit(TableBase):
     rem_count = Column(Integer, nullable=False, default=0)
     promoted_count = Column(Integer, nullable=False, default=0)
     deferred_count = Column(Integer, nullable=False, default=0)
-    decisions = Column(JSONB, nullable=False, default=list)
     published_version_id = Column(BigInteger)
     reason = Column(String(100))
     error = Column(Text)
     lock_owner = Column(String(100), nullable=True)
     lock_until = Column(TIMESTAMP(timezone=False), nullable=True)
+
+
+class MemoryDreamingDecision(TableBase):
+    """One normalized candidate decision produced by a Dreaming run."""
+
+    __tablename__ = "memory_dreaming_decision_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "decision_order",
+            name="uq_memory_dreaming_decision_run_order",
+        ),
+        Index("idx_memory_dreaming_decision_memory", "memory_id"),
+        {"schema": SCHEMA},
+    )
+
+    decision_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_decision_t_decision_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    run_id = Column(
+        BigInteger,
+        ForeignKey(f"{SCHEMA}.memory_dreaming_audit_t.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    decision_order = Column(Integer, nullable=False)
+    memory_id = Column(BigInteger, nullable=False)
+    score = Column(Float, nullable=False)
+    noise = Column(Boolean, nullable=False, default=False)
+    signal_count = Column(Integer, nullable=False, default=0)
+    context_diversity = Column(Integer, nullable=False, default=0)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
+    event = Column(String(20), nullable=False)
+    reason = Column(String(100), nullable=False)
+    archive_suggested = Column(Boolean, nullable=False, default=False)
 
 
 class MemoryDreamingSchedule(TableBase):

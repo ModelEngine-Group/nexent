@@ -9,6 +9,7 @@ import pytest
 from database import memory_dreaming_db
 from database.db_models import (
     MemoryDreamingAudit,
+    MemoryDreamingDecision,
     MemoryDreamingSchedule,
     MemoryLongTermVersion,
 )
@@ -237,6 +238,42 @@ def test_update_audit_ignores_disallowed_keys(monkeypatch):
     assert not hasattr(row, "tenant_id") or row.tenant_id != "hacked"
 
 
+def test_ac076_update_audit_replaces_normalized_decisions(monkeypatch):
+    session = _mock_session(monkeypatch)
+    audit_query = MagicMock()
+    decision_query = MagicMock()
+    row = MagicMock(spec=MemoryDreamingAudit)
+    session.query.side_effect = [audit_query, decision_query]
+    audit_query.filter.return_value.first.return_value = row
+    decision_query.filter.return_value.delete.return_value = 2
+    decisions = [{
+        "memory_id": 64,
+        "score": 0.91,
+        "noise": False,
+        "signal_count": 5,
+        "context_diversity": 3,
+        "evidence_ids": ["64"],
+        "event": "SELECT",
+        "reason": "eligible",
+        "archive_suggested": False,
+    }]
+
+    assert memory_dreaming_db.update_audit(42, {"decisions": decisions}) is True
+
+    inserted = list(session.add_all.call_args.args[0])
+    assert len(inserted) == 1
+    assert isinstance(inserted[0], MemoryDreamingDecision)
+    assert inserted[0].run_id == 42
+    assert inserted[0].decision_order == 0
+    assert inserted[0].memory_id == 64
+    assert inserted[0].score == 0.91
+    assert inserted[0].event == "SELECT"
+    decision_query.filter.return_value.delete.assert_called_once_with(
+        synchronize_session=False
+    )
+    session.commit.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # finish_audit
 # ---------------------------------------------------------------------------
@@ -295,17 +332,25 @@ def test_list_audits_with_filters(monkeypatch):
     audit_row.rem_count = 2
     audit_row.promoted_count = 1
     audit_row.deferred_count = 1
-    audit_row.decisions = [{"event": "SELECT"}]
     audit_row.published_version_id = 7
     audit_row.reason = None
     audit_row.error = None
 
-    query_chain = MagicMock()
-    session.query.return_value = query_chain
-    query_chain.filter.return_value = query_chain
-    query_chain.order_by.return_value = query_chain
-    query_chain.limit.return_value = query_chain
-    query_chain.all.return_value = [audit_row]
+    audit_query = MagicMock()
+    audit_query.filter.return_value = audit_query
+    audit_query.order_by.return_value = audit_query
+    audit_query.limit.return_value = audit_query
+    audit_query.all.return_value = [audit_row]
+    decision = MagicMock(
+        run_id=1, memory_id=64, score=0.91, noise=False, signal_count=5,
+        context_diversity=3, evidence_ids=["64"], event="SELECT",
+        reason="eligible", archive_suggested=False,
+    )
+    decision_query = MagicMock()
+    decision_query.filter.return_value = decision_query
+    decision_query.order_by.return_value = decision_query
+    decision_query.all.return_value = [decision]
+    session.query.side_effect = [audit_query, decision_query]
 
     result = memory_dreaming_db.list_audits(
         "t", "u", agent_id="a", run_id=1, limit=50
@@ -316,7 +361,12 @@ def test_list_audits_with_filters(monkeypatch):
     assert result[0]["status"] == "completed"
     assert result[0]["started_at"] == "2026-07-25T00:00:00Z"
     assert result[0]["finished_at"] == "2026-07-25T01:00:00Z"
-    assert result[0]["decisions"] == [{"event": "SELECT"}]
+    assert result[0]["decisions"] == [{
+        "memory_id": 64, "score": 0.91, "noise": False,
+        "signal_count": 5, "context_diversity": 3,
+        "evidence_ids": ["64"], "event": "SELECT",
+        "reason": "eligible", "archive_suggested": False,
+    }]
     assert result[0]["published_version_id"] == 7
     assert "result" not in result[0]
 
@@ -351,13 +401,12 @@ def test_list_audits_none_datetime_fields(monkeypatch):
     audit_row.rem_count = 0
     audit_row.promoted_count = 0
     audit_row.deferred_count = 0
-    audit_row.decisions = []
     audit_row.published_version_id = None
     audit_row.reason = None
     audit_row.error = None
 
     query_chain = MagicMock()
-    session.query.return_value = query_chain
+    session.query.side_effect = [query_chain, MagicMock()]
     query_chain.filter.return_value = query_chain
     query_chain.order_by.return_value = query_chain
     query_chain.limit.return_value = query_chain

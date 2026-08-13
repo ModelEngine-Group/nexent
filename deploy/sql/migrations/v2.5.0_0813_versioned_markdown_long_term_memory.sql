@@ -6,20 +6,19 @@ DO $$ BEGIN
         ALTER TABLE nexent.memory_dreaming_audit_t
             ADD COLUMN IF NOT EXISTS lock_owner VARCHAR(100),
             ADD COLUMN IF NOT EXISTS lock_until TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS decisions JSONB NOT NULL DEFAULT '[]'::jsonb,
             ADD COLUMN IF NOT EXISTS published_version_id BIGINT,
             ADD COLUMN IF NOT EXISTS reason VARCHAR(100);
-
         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
             AND table_name = 'memory_dreaming_audit_t' AND column_name = 'result_json') THEN
+            ALTER TABLE nexent.memory_dreaming_audit_t
+                ADD COLUMN IF NOT EXISTS decisions JSONB NOT NULL DEFAULT '[]'::jsonb;
             UPDATE nexent.memory_dreaming_audit_t
             SET decisions = COALESCE(result_json -> 'decisions', '[]'::jsonb),
                 published_version_id = CASE
                     WHEN result_json #>> '{version,version_id}' ~ '^[0-9]+$'
-                    THEN (result_json #>> '{version,version_id}')::BIGINT
-                    ELSE NULL
-                END,
-                reason = result_json ->> 'reason';
+                    THEN (result_json #>> '{version,version_id}')::BIGINT ELSE NULL END,
+                reason = result_json ->> 'reason'
+            WHERE result_json IS NOT NULL;
             ALTER TABLE nexent.memory_dreaming_audit_t DROP COLUMN result_json;
         END IF;
         ALTER TABLE nexent.memory_dreaming_audit_t ALTER COLUMN agent_id SET DEFAULT '';
@@ -52,13 +51,54 @@ CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_audit_t (
     current_phase VARCHAR(30), started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP, light_count INTEGER NOT NULL DEFAULT 0, rem_count INTEGER NOT NULL DEFAULT 0,
     promoted_count INTEGER NOT NULL DEFAULT 0, deferred_count INTEGER NOT NULL DEFAULT 0,
-    decisions JSONB NOT NULL DEFAULT '[]'::jsonb, published_version_id BIGINT,
+    published_version_id BIGINT,
     reason VARCHAR(100), error TEXT, lock_owner VARCHAR(100), lock_until TIMESTAMP,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100), updated_by VARCHAR(100), delete_flag VARCHAR(1) NOT NULL DEFAULT 'N'
 );
 CREATE INDEX IF NOT EXISTS idx_memory_dreaming_audit_scope
     ON nexent.memory_dreaming_audit_t (tenant_id, user_id, agent_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_decision_t (
+    decision_id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES nexent.memory_dreaming_audit_t(run_id) ON DELETE CASCADE,
+    decision_order INTEGER NOT NULL, memory_id BIGINT NOT NULL, score DOUBLE PRECISION NOT NULL,
+    noise BOOLEAN NOT NULL DEFAULT FALSE, signal_count INTEGER NOT NULL DEFAULT 0,
+    context_diversity INTEGER NOT NULL DEFAULT 0, evidence_ids VARCHAR(100)[] NOT NULL DEFAULT '{}',
+    event VARCHAR(20) NOT NULL, reason VARCHAR(100) NOT NULL,
+    archive_suggested BOOLEAN NOT NULL DEFAULT FALSE,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100), updated_by VARCHAR(100), delete_flag VARCHAR(1) NOT NULL DEFAULT 'N',
+    CONSTRAINT uq_memory_dreaming_decision_run_order UNIQUE (run_id, decision_order)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_dreaming_decision_memory
+    ON nexent.memory_dreaming_decision_t (memory_id);
+
+-- Expand decisions written by unpublished intermediate schemas, then remove their JSON columns.
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent'
+        AND table_name = 'memory_dreaming_audit_t' AND column_name = 'decisions') THEN
+        INSERT INTO nexent.memory_dreaming_decision_t (
+            run_id, decision_order, memory_id, score, noise, signal_count, context_diversity,
+            evidence_ids, event, reason, archive_suggested
+        )
+        SELECT audit.run_id, item.ordinality - 1,
+            CASE WHEN item.value ->> 'memory_id' ~ '^[0-9]+$' THEN (item.value ->> 'memory_id')::BIGINT ELSE 0 END,
+            CASE WHEN item.value ->> 'score' ~ '^-?[0-9]+([.][0-9]+)?$' THEN (item.value ->> 'score')::DOUBLE PRECISION ELSE 0 END,
+            COALESCE((item.value ->> 'noise')::BOOLEAN, FALSE),
+            COALESCE((item.value ->> 'signal_count')::INTEGER, 0),
+            COALESCE((item.value ->> 'context_diversity')::INTEGER, 0),
+            ARRAY(SELECT jsonb_array_elements_text(COALESCE(item.value -> 'evidence_ids', '[]'::jsonb))),
+            COALESCE(item.value ->> 'event', 'DEFER'), LEFT(COALESCE(item.value ->> 'reason', ''), 100),
+            COALESCE((item.value ->> 'archive_suggested')::BOOLEAN, FALSE)
+        FROM nexent.memory_dreaming_audit_t audit
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(audit.decisions, '[]'::jsonb))
+            WITH ORDINALITY AS item(value, ordinality)
+        ON CONFLICT (run_id, decision_order) DO NOTHING;
+        ALTER TABLE nexent.memory_dreaming_audit_t DROP COLUMN decisions;
+    END IF;
+
+END $$;
 
 CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_schedule_t (
     schedule_id BIGSERIAL PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, user_id VARCHAR(100) NOT NULL,

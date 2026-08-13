@@ -65,3 +65,35 @@ def test_historical_activation_flushes_deactivation_before_activation():
     assert value["version_id"] == 1
     assert events[:3] == ["deactivate", "flush", "activate"]
     session.commit.assert_called_once_with()
+
+
+def test_ac078_activation_not_found_conflict_and_noop():
+    events: list[str] = []
+
+    def invoke(rows, version_id, expected):
+        session = MagicMock()
+        session.query.return_value.filter.return_value.with_for_update.return_value.all.return_value = rows
+
+        @contextmanager
+        def session_scope():
+            yield session
+
+        with patch.object(memory_long_term_db, "get_db_session", session_scope):
+            return memory_long_term_db.activate(
+                "tenant", "user", "user", version_id, "user", expected
+            ), session
+
+    (status, value), session = invoke([], 1, None)
+    assert (status, value) == ("not_found", None)
+    session.commit.assert_not_called()
+
+    current = _VersionRow(5, True, events)
+    target = _VersionRow(1, False, events)
+    (status, value), session = invoke([target, current], 1, 4)
+    assert (status, value) == ("conflict", None)
+    session.commit.assert_not_called()
+
+    (status, value), session = invoke([current], 5, 5)
+    assert status == "ok"
+    assert value["version_id"] == 5
+    session.commit.assert_not_called()

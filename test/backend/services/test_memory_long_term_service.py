@@ -49,3 +49,40 @@ def test_ac043_scope_and_limit_validation():
     assert subject_id_for("user", "t", "u") == "u"
     with pytest.raises(LongTermMemoryError): subject_id_for("agent", "t", "u")
     with pytest.raises(LongTermMemoryError): LongTermMemoryService().create_manual("t", "u", "user", "x" * 10001, None)
+
+
+def test_ac078_read_methods_delegate_with_resolved_subject():
+    service = LongTermMemoryService()
+    with patch(
+        "services.memory_long_term_service.memory_long_term_db.get_active",
+        return_value={"version_id": 1},
+    ) as active, patch(
+        "services.memory_long_term_service.memory_long_term_db.get_version",
+        return_value={"version_id": 2},
+    ) as version, patch(
+        "services.memory_long_term_service.memory_long_term_db.list_versions",
+        return_value=[{"version_id": 2}],
+    ) as history:
+        assert service.get_active("t", "u", "tenant")["version_id"] == 1
+        assert service.get_version("t", "u", "user", 2)["version_id"] == 2
+        assert service.list_versions("t", "u", "user", 7)[0]["version_id"] == 2
+    active.assert_called_once_with("t", "tenant", "t")
+    version.assert_called_once_with("t", "user", "u", 2)
+    history.assert_called_once_with("t", "user", "u", 7)
+
+
+def test_ac078_activate_busy_conflict_and_success():
+    service = LongTermMemoryService()
+    with patch("services.memory_long_term_service.try_scope_lock") as lock:
+        lock.return_value.__enter__.return_value = False
+        with pytest.raises(LongTermMemoryConflict):
+            service.activate("t", "u", "user", 2, 1)
+    with patch("services.memory_long_term_service.try_scope_lock") as lock, patch(
+        "services.memory_long_term_service.memory_long_term_db.activate"
+    ) as activate:
+        lock.return_value.__enter__.return_value = True
+        activate.return_value = ("conflict", None)
+        with pytest.raises(LongTermMemoryConflict):
+            service.activate("t", "u", "user", 2, 1)
+        activate.return_value = ("ok", {"version_id": 2})
+        assert service.activate("t", "u", "user", 2, 1) == {"version_id": 2}

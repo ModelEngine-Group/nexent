@@ -12,6 +12,7 @@ from sqlalchemy import func, text
 from .client import get_db_session
 from .db_models import (
     MemoryDreamingAudit,
+    MemoryDreamingDecision,
     MemoryDreamingSchedule,
     MemoryLongTermVersion,
 )
@@ -285,12 +286,12 @@ def update_audit(run_id: int, values: Dict[str, Any]) -> bool:
         "rem_count",
         "promoted_count",
         "deferred_count",
-        "decisions",
         "published_version_id",
         "reason",
         "error",
     }
     with get_db_session() as session:
+        decisions = values.get("decisions")
         row = (
             session.query(MemoryDreamingAudit)
             .filter(MemoryDreamingAudit.run_id == run_id)
@@ -298,6 +299,26 @@ def update_audit(run_id: int, values: Dict[str, Any]) -> bool:
         )
         if row is None:
             return False
+        if decisions is not None:
+            session.query(MemoryDreamingDecision).filter(
+                MemoryDreamingDecision.run_id == run_id
+            ).delete(synchronize_session=False)
+            session.add_all(
+                MemoryDreamingDecision(
+                    run_id=run_id,
+                    decision_order=decision_order,
+                    memory_id=decision["memory_id"],
+                    score=decision["score"],
+                    noise=decision.get("noise", False),
+                    signal_count=decision.get("signal_count", 0),
+                    context_diversity=decision.get("context_diversity", 0),
+                    evidence_ids=decision.get("evidence_ids", []),
+                    event=decision["event"],
+                    reason=decision["reason"],
+                    archive_suggested=decision.get("archive_suggested", False),
+                )
+                for decision_order, decision in enumerate(decisions)
+            )
         for key, value in values.items():
             if key in allowed:
                 setattr(row, key, value)
@@ -346,6 +367,35 @@ def list_audits(
         if run_id is not None:
             query = query.filter(MemoryDreamingAudit.run_id == run_id)
         rows = query.order_by(MemoryDreamingAudit.run_id.desc()).limit(limit).all()
+        run_ids = [row.run_id for row in rows]
+        decision_rows = []
+        if run_ids:
+            decision_rows = (
+                session.query(MemoryDreamingDecision)
+                .filter(MemoryDreamingDecision.run_id.in_(run_ids))
+                .order_by(
+                    MemoryDreamingDecision.run_id,
+                    MemoryDreamingDecision.decision_order,
+                )
+                .all()
+            )
+        decisions_by_run: Dict[int, List[Dict[str, Any]]] = {
+            run_id: [] for run_id in run_ids
+        }
+        for decision in decision_rows:
+            decisions_by_run[decision.run_id].append(
+                {
+                    "memory_id": decision.memory_id,
+                    "score": decision.score,
+                    "noise": decision.noise,
+                    "signal_count": decision.signal_count,
+                    "context_diversity": decision.context_diversity,
+                    "evidence_ids": decision.evidence_ids,
+                    "event": decision.event,
+                    "reason": decision.reason,
+                    "archive_suggested": decision.archive_suggested,
+                }
+            )
         return [
             {
                 "run_id": row.run_id,
@@ -361,7 +411,7 @@ def list_audits(
                 "rem_count": row.rem_count,
                 "promoted_count": row.promoted_count,
                 "deferred_count": row.deferred_count,
-                "decisions": row.decisions,
+                "decisions": decisions_by_run[row.run_id],
                 "published_version_id": row.published_version_id,
                 "reason": row.reason,
                 "error": row.error,
