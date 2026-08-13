@@ -489,6 +489,9 @@ CREATE TABLE IF NOT EXISTS nexent.memory_dreaming_schedule_t (
     min_score DOUBLE PRECISION,
     min_recall_count INTEGER,
     min_unique_queries INTEGER,
+    source_limit INTEGER,
+    long_term_max_chars INTEGER,
+    summarization_max_attempts INTEGER,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -509,3 +512,28 @@ CREATE INDEX IF NOT EXISTS idx_memory_dreaming_schedule_due
 COMMENT ON COLUMN nexent.memory_dreaming_schedule_t.min_score IS 'Per-user promotion score threshold (0-1). NULL = use system default.';
 COMMENT ON COLUMN nexent.memory_dreaming_schedule_t.min_recall_count IS 'Per-user minimum recall count. NULL = use system default.';
 COMMENT ON COLUMN nexent.memory_dreaming_schedule_t.min_unique_queries IS 'Per-user minimum unique query count. NULL = use system default.';
+-- Versioned Markdown long-term memory (tenant/user); memory_records_t is agent-only.
+CREATE TABLE IF NOT EXISTS nexent.memory_long_term_version_t (
+    version_id BIGSERIAL PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL,
+    scope VARCHAR(20) NOT NULL CHECK (scope IN ('tenant', 'user')), subject_id VARCHAR(100) NOT NULL,
+    version_no INTEGER NOT NULL, parent_version_id BIGINT, is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    content TEXT NOT NULL, source VARCHAR(20) NOT NULL CHECK (source IN ('manual', 'dreaming')),
+    author_user_id VARCHAR(100) NOT NULL, editor_user_id VARCHAR(100) NOT NULL,
+    authored_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, dreaming_run_id BIGINT,
+    character_count INTEGER NOT NULL, raw_dreaming_input TEXT,
+    generation_audit JSONB NOT NULL DEFAULT '{}'::jsonb, evidence_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    fallback_details JSONB NOT NULL DEFAULT '{}'::jsonb, omission_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100), updated_by VARCHAR(100), delete_flag VARCHAR(1) DEFAULT 'N'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_long_term_version_scope_no ON nexent.memory_long_term_version_t (tenant_id, scope, subject_id, version_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_long_term_active_scope ON nexent.memory_long_term_version_t (tenant_id, scope, subject_id) WHERE is_active AND delete_flag = 'N';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_long_term_run ON nexent.memory_long_term_version_t (dreaming_run_id) WHERE dreaming_run_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS nexent.memory_long_term_activation_audit_t (
+    activation_id BIGSERIAL PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL, scope VARCHAR(20) NOT NULL,
+    subject_id VARCHAR(100) NOT NULL, actor_user_id VARCHAR(100) NOT NULL, from_version_id BIGINT,
+    to_version_id BIGINT NOT NULL, action VARCHAR(30) NOT NULL, create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_by VARCHAR(100), updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+CREATE INDEX IF NOT EXISTS idx_memory_long_term_activation_scope ON nexent.memory_long_term_activation_audit_t (tenant_id, scope, subject_id, create_time);

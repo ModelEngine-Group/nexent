@@ -70,6 +70,66 @@ export interface MemoryEmbeddingStatus {
   current_es_index_name: string | null;
 }
 
+export type LongTermScope = "tenant" | "user";
+export interface LongTermMemoryVersion {
+  version_id: number;
+  version_no: number;
+  parent_version_id: number | null;
+  is_active: boolean;
+  content?: string;
+  source: "manual" | "dreaming";
+  author_user_id: string;
+  editor_user_id: string;
+  authored_at: string;
+  dreaming_run_id: number | null;
+  character_count: number;
+  fallback_details: Record<string, unknown>;
+}
+
+export async function fetchLongTermActive(scope: LongTermScope) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.active(scope), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<{ empty: boolean; version: LongTermMemoryVersion | null }>;
+}
+export async function fetchLongTermVersions(scope: LongTermScope) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.versions(scope), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<{ items: LongTermMemoryVersion[]; count: number }>;
+}
+export async function fetchLongTermVersion(scope: LongTermScope, id: number) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.detail(scope, id), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<LongTermMemoryVersion>;
+}
+export async function saveLongTermVersion(
+  scope: LongTermScope,
+  content: string,
+  expected: number | null
+) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.versions(scope), {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ content, expected_active_version_id: expected }),
+  }) as Promise<LongTermMemoryVersion>;
+}
+export async function activateLongTermVersion(
+  scope: LongTermScope,
+  id: number,
+  expected: number | null
+) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.activate(scope, id), {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ expected_active_version_id: expected }),
+  }) as Promise<LongTermMemoryVersion>;
+}
+
 export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus> {
   return requestJson(API_ENDPOINTS.memory.config.embeddingStatus, {
     method: "GET",
@@ -466,7 +526,13 @@ export async function deleteMemory(
 export interface DreamingAudit {
   run_id: number;
   status: "queued" | "running" | "completed" | "failed" | "skipped";
-  current_phase?: "light" | "rem" | "deep" | "compression" | null;
+  current_phase?:
+    | "light"
+    | "rem"
+    | "deep"
+    | "summarization"
+    | "compression"
+    | null;
   started_at?: string;
   finished_at?: string;
   light_count: number;
@@ -486,14 +552,14 @@ export interface DreamingAudit {
       evidence_ids?: string[];
       archive_suggested?: boolean;
     }>;
-    version?: DreamingVersion | null;
+    version?: LongTermMemoryVersion | null;
   } | null;
 }
 
 export interface DreamingParameters {
   source_limit: number;
   long_term_max_chars: number;
-  compression_max_attempts: number;
+  summarization_max_attempts: number;
 }
 
 export interface DreamingSchedule {
@@ -513,31 +579,7 @@ export interface DreamingSchedule {
   min_unique_queries?: number | null;
   source_limit?: number | null;
   long_term_max_chars?: number | null;
-  compression_max_attempts?: number | null;
-}
-
-export interface DreamingVersion {
-  version_id: number;
-  version_no: number;
-  parent_version_id?: number | null;
-  run_id: number;
-  is_active: boolean;
-  raw_content: string;
-  published_content: string;
-  source_evidence_ids: string[];
-  config_snapshot: Record<string, unknown>;
-  raw_char_count: number;
-  published_char_count: number;
-  compression_status: string;
-  compression_attempts: number;
-  compression_audit: Array<{
-    attempt: number;
-    outcome: string;
-    validation: string[];
-  }>;
-  omitted_evidence_ids: string[];
-  mechanical_truncation: boolean;
-  created_at?: string;
+  summarization_max_attempts?: number | null;
 }
 
 export async function fetchDreamingAgents() {
@@ -598,60 +640,4 @@ export async function fetchDreamingAudits(
     `${API_ENDPOINTS.memory.dreaming.audits}?${params.toString()}`,
     { headers: getAuthHeaders() }
   );
-}
-
-export async function fetchDreamingVersions(
-  limit = 20,
-  targetUserId?: string
-): Promise<DreamingVersion[]> {
-  const params = new URLSearchParams({
-    limit: String(limit),
-  });
-  if (targetUserId) params.set("target_user_id", targetUserId);
-  return requestJson(
-    `${API_ENDPOINTS.memory.dreaming.versions}?${params.toString()}`,
-    { headers: getAuthHeaders() }
-  );
-}
-
-export async function activateDreamingVersion(
-  agentId: string,
-  versionId: number,
-  expectedActiveVersionId?: number,
-  targetUserId?: string
-): Promise<DreamingVersion> {
-  return requestJson(API_ENDPOINTS.memory.dreaming.activate(versionId), {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      ...(expectedActiveVersionId != null ? { expected_active_version_id: expectedActiveVersionId } : {}),
-      ...(targetUserId ? { target_user_id: targetUserId } : {}),
-    }),
-  });
-}
-
-export async function clearActiveDreamingVersion(
-  targetUserId?: string
-): Promise<{ success: boolean; message: string; deactivated_version_id?: number }> {
-  return requestJson(API_ENDPOINTS.memory.dreaming.clear, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      ...(targetUserId ? { target_user_id: targetUserId } : {}),
-    }),
-  });
-}
-
-export async function undoClearActiveDreamingVersion(
-  versionId: number,
-  targetUserId?: string
-): Promise<{ success: boolean; message: string }> {
-  return requestJson(API_ENDPOINTS.memory.dreaming.undoClear, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      version_id: versionId,
-      ...(targetUserId ? { target_user_id: targetUserId } : {}),
-    }),
-  });
 }

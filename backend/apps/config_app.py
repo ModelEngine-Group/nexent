@@ -43,6 +43,7 @@ from apps.evaluation_annotation_app import router as evaluation_annotation_route
 from apps.cas_app import router as cas_router
 from apps.memory_config_app import router as memory_config_router
 from apps.memory_record_app import router as memory_record_router
+from apps.memory_long_term_app import router as memory_long_term_router
 from apps.memory_dreaming_app import router as memory_dreaming_router
 from apps.quota_app import tenant_quota_router, platform_quota_router
 from consts.const import (
@@ -139,6 +140,7 @@ if ENABLE_AIDP_KNOWLEDGE:
 # New memory architecture routers (upstream #3497)
 app.include_router(memory_config_router)
 app.include_router(memory_record_router)
+app.include_router(memory_long_term_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
 app.include_router(memory_dreaming_router)

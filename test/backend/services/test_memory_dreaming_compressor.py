@@ -1,886 +1,103 @@
-import json
-import re
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
 
 from nexent.memory.dreaming import (
-    DreamingCompressionRequest,
     DreamingMemoryUnit,
+    DreamingSummarizationRequest,
 )
-from nexent.monitor import get_agent_monitoring_context
 from services.memory_dreaming_compressor import (
-    TenantDreamingCompressor,
-    _strip_json_fence,
+    TenantDreamingSummarizer,
+    _load_prompt,
+    _parse_summary_envelope,
 )
 
 
-@pytest.mark.parametrize(
-    ("content", "expected"),
-    [
-        ('[{"unit_id":"u1"}]', '[{"unit_id":"u1"}]'),
-        ("```json\n[]\n```", "[]"),
-        ("```\n{}\n```", "{}"),
-        ("```yaml\n[]\n```", "```yaml\n[]\n```"),
-    ],
-)
-def test_strip_json_fence(content, expected):
-    assert _strip_json_fence(content) == expected
+@pytest.mark.parametrize("value", ["", "# User Memory", "<summary>x", "x<summary>y</summary>",
+                                    "<summary>a</summary><summary>b</summary>",
+                                    "<summary><summary>x</summary></summary>"])
+def test_ac056_rejects_malformed_envelope(value):
+    with pytest.raises(ValueError):
+        _parse_summary_envelope(value)
 
 
-def test_compressor_initializes_tenant_model(mocker):
-    config = {
-        "model_name": "test-model",
-        "base_url": "https://model.invalid/v1",
-        "api_key": "secret",
-        "max_input_tokens": 8_000,
-        "ssl_verify": False,
-    }
-    mocker.patch(
-        "services.memory_dreaming_compressor.tenant_config_manager.get_model_config",
-        return_value=config,
-    )
-    mocker.patch(
-        "services.memory_dreaming_compressor.get_model_name_from_config",
-        return_value="test-model",
-    )
-    model_class = mocker.patch(
-        "services.memory_dreaming_compressor.OpenAIModel"
+def test_ac056_parses_anchored_envelope():
+    assert _parse_summary_envelope("<summary>\n## Project Preferences\n\n- x\n</summary>") == "## Project Preferences\n\n- x"
+
+
+def _request(units, max_chars=1000):
+    return DreamingSummarizationRequest(
+        prior_markdown="## Existing Preference\n\n- old", prior_source="manual",
+        new_evidence_markdown="new", units=units, max_chars=max_chars, attempt=1,
     )
 
-    compressor = TenantDreamingCompressor("tenant-1", "user-1")
 
-    assert compressor.max_compression_input_chars == 24_000
-    model_class.assert_called_once()
-
-
-def test_compressor_rejects_missing_tenant_model(mocker):
-    mocker.patch(
-        "services.memory_dreaming_compressor.tenant_config_manager.get_model_config",
-        return_value=None,
-    )
-    with pytest.raises(RuntimeError, match="No tenant LLM"):
-        TenantDreamingCompressor("tenant-1", "user-1")
+def _summarizer(model, limit=10000):
+    value = TenantDreamingSummarizer.__new__(TenantDreamingSummarizer)
+    value.tenant_id = "t"
+    value.user_id = "u"
+    value.model = model
+    value.prompt = _load_prompt()
+    value.max_summarization_input_chars = limit
+    return value
 
 
-def test_ac019_compressor_binds_run_metadata_and_parses_grounded_json():
-    observed = {}
+def test_ac057_under_limit_uses_exactly_one_model_call():
+    class Model:
+        def __init__(self): self.calls = []
+        def generate(self, messages):
+            self.calls.append(messages)
+            return SimpleNamespace(content="<summary>## Work Preferences\n\n- old\n- new</summary>")
+    model = Model()
+    result = _summarizer(model)(_request([DreamingMemoryUnit(unit_id="u1", content="new", is_new=True)]))
+    assert result.metadata["mode"] == "single"
+    assert len(model.calls) == 1
+    assert "Source: manual" in model.calls[0][1]["content"]
+    assert "Output exactly one <summary>" in model.calls[0][0]["content"]
+    assert "Task mode: single" in model.calls[0][1]["content"]
+
+
+def test_ac058_large_input_map_reduce_is_bounded_parallel_and_ordered():
+    lock = threading.Lock()
+    active = maximum = 0
+    reduce_prompt = ""
+    task_modes = []
 
     class Model:
         def generate(self, messages):
-            metadata = get_agent_monitoring_context()
-            observed["metadata"] = metadata.metadata()
-            observed["messages"] = messages
-            # Return span-based extraction format
-            return SimpleNamespace(
-                content=json.dumps([
-                    {"unit_id": "short-term:7", "start": 0, "end": 31}
-                ])
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "tenant-1"
-    compressor.user_id = "user-1"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    output = compressor(
-        DreamingCompressionRequest(
-            raw_content="- Remember the stable constraint.",
-            units=[
-                DreamingMemoryUnit(
-                    unit_id="short-term:7",
-                    content="Remember the stable constraint.",
-                    evidence_ids=["7"],
-                )
-            ],
-            max_chars=10_000,
-            attempt=1,
-            run_id=42,
-            agent_id="9",
-        )
-    )
-
-    assert "Remember the stable constraint." in output.content
-    assert output.evidence_ids == ["7"]
-    assert observed["metadata"]["dreaming_run_id"] == 42
-    assert observed["metadata"]["dreaming_agent_id"] == "9"
-    assert observed["metadata"]["dreaming_attempt"] == 1
-    assert observed["metadata"]["agent_id"] == 9
-    assert "contiguous substring" in observed["messages"][1]["content"].lower()
-
-
-def test_ac024_oversized_raw_uses_unit_preserving_map_reduce():
-    calls = []
-
-    class Model:
-        def generate(self, messages):
+            nonlocal active, maximum, reduce_prompt
             prompt = messages[1]["content"]
-            calls.append(prompt)
-            unit_ids = re.findall(r'"unit_id": "([^"]+)", "text":', prompt)
-            if not unit_ids:
-                unit_ids = ["one", "two"]
-            spans = []
-            for uid in unit_ids[:1]:
-                spans.append({"unit_id": uid, "start": 0, "end": 100})
-            return SimpleNamespace(content=json.dumps(spans))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "tenant-1"
-    compressor.user_id = "user-1"
-    compressor.max_compression_input_chars = 800
-    compressor.model = Model()
-
-    output = compressor(
-        DreamingCompressionRequest(
-            raw_content="A" * 6_000 + "\n" + "B" * 6_000,
-            units=[
-                DreamingMemoryUnit(
-                    unit_id="one",
-                    content="A" * 6_000,
-                    evidence_ids=["1"],
-                ),
-                DreamingMemoryUnit(
-                    unit_id="two",
-                    content="B" * 6_000,
-                    evidence_ids=["2"],
-                ),
-            ],
-            max_chars=1_000,
-            attempt=1,
-            run_id=43,
-            agent_id="9",
-        )
-    )
-
-    assert len(calls) >= 2
-    assert output.evidence_ids == ["1", "2"]
-
-
-def test_stage1_batches_large_unit_sets_even_when_raw_fits_context():
-    calls = []
-
-    class Model:
-        def generate(self, messages):
-            unit_ids = re.findall(
-                r'"unit_id": "([^"]+)", "text":', messages[1]["content"]
-            )
-            calls.append(unit_ids)
-            return SimpleNamespace(content=json.dumps([
-                {"unit_id": unit_id, "start": 0, "end": 6}
-                for unit_id in unit_ids
-            ]))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.max_compression_input_chars = 40_000
-    compressor.model = Model()
-    units = [
-        DreamingMemoryUnit(
-            unit_id=f"u{i}",
-            content=f"fact{i:02d}",
-            evidence_ids=[str(i)],
-        )
-        for i in range(13)
-    ]
-
-    output = compressor(DreamingCompressionRequest(
-        raw_content="\n".join(f"- {unit.content}" for unit in units),
-        units=units,
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    assert [len(batch) for batch in calls] == [12, 1]
-    assert output.evidence_ids == sorted(str(i) for i in range(13))
-
-
-def test_ac033_information_extraction_framing():
-    observed = {}
-
-    class Model:
-        def generate(self, messages):
-            observed["messages"] = messages
-            return SimpleNamespace(content=json.dumps([{"unit_id": "u1", "start": 0, "end": 5}]))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    compressor(DreamingCompressionRequest(
-        raw_content="Hello world",
-        units=[DreamingMemoryUnit(unit_id="u1", content="Hello world", evidence_ids=["1"])],
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    system_msg = observed["messages"][0]["content"]
-    assert "information extraction" in system_msg.lower()
-    assert "exist exactly in the selected source unit" in system_msg.lower()
-
-
-def test_ac034_extraction_prompt_has_exactly_five_rules():
-    prompt = TenantDreamingCompressor._compression_prompt(
-        "fact one",
-        [{"unit_id": "u1", "text": "fact one", "evidence_ids": ["1"]}],
-    )
-    assert len(re.findall(r"(?m)^[1-5]\. ", prompt)) == 5
-    assert "contiguous substring of its selected unit" in prompt
-    assert "smallest complete atomic fact" in prompt
-    assert "including labels, identifiers, and numbers" in prompt
-    assert '"unit_id": "u1", "text": "fact one"' in prompt
-    assert "exclude JSON syntax and unit_id" in prompt
-
-
-def test_ac036_stage0_preassigned_evidence_ids():
-    units = [
-        DreamingMemoryUnit(unit_id="u1", content="fact A", evidence_ids=["1", "2"]),
-        DreamingMemoryUnit(unit_id="u2", content="fact B", evidence_ids=["3"]),
-    ]
-    prepared = TenantDreamingCompressor._prepare_units_with_ids(units)
-    assert len(prepared) == 2
-    assert prepared[0]["unit_id"] == "u1"
-    assert prepared[0]["evidence_ids"] == ["1", "2"]
-    assert prepared[1]["unit_id"] == "u2"
-    assert prepared[1]["evidence_ids"] == ["3"]
-
-
-def test_ac037_stage1_exact_substring_extraction():
-    observed = {}
-
-    class Model:
-        def generate(self, messages):
-            observed["messages"] = messages
-            return SimpleNamespace(content=json.dumps([
-                {"unit_id": "u1", "start": 0, "end": 8},
-                {"unit_id": "u1", "start": 9, "end": 17},
-            ]))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    raw = "- fact one\n- fact two"
-    output = compressor(DreamingCompressionRequest(
-        raw_content=raw,
-        units=[DreamingMemoryUnit(unit_id="u1", content="fact one\nfact two", evidence_ids=["1"])],
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    assert "fact one" in output.content
-    assert "fact two" in output.content
-
-
-def test_ac038_stage1_exact_substring_validation():
-    raw = "Hello world"
-    units = [{"unit_id": "u1", "text": "Hello world", "evidence_ids": ["1"]}]
-
-    spans = [{"start": 0, "end": 100, "unit_ids": ["u1"]}]
-    facts, feedback = TenantDreamingCompressor._validate_spans(spans, raw, units)
-    assert len(feedback) > 0
-    assert "out_of_bounds" in feedback[0]
-
-    spans = [{"start": "a", "end": 5, "unit_ids": ["u1"]}]
-    facts, feedback = TenantDreamingCompressor._validate_spans(spans, raw, units)
-    assert "non_integer" in feedback[0]
-
-    spans = [{"start": 0, "end": 5, "unit_ids": ["u1"]}]
-    facts, feedback = TenantDreamingCompressor._validate_spans(spans, raw, units)
-    assert len(feedback) == 0
-    assert len(facts) == 1
-    assert facts[0]["text"] == "Hello"
-
-
-def test_stage1_normalizes_json_object_relative_offsets():
-    unit_id = "pattern-1"
-    text = "The authoritative fact."
-    prefix = json.dumps(
-        {"unit_id": unit_id, "text": ""},
-        ensure_ascii=False,
-    )[:-2]
-    spans = [{
-        "unit_id": unit_id,
-        "start": len(prefix),
-        "end": len(prefix) + len(text),
-    }]
-
-    facts, feedback = TenantDreamingCompressor._validate_spans(
-        spans,
-        text,
-        [{"unit_id": unit_id, "text": text, "evidence_ids": ["1"]}],
-    )
-
-    assert feedback == []
-    assert facts[0]["text"] == text
-
-
-@pytest.mark.parametrize(
-    ("span", "expected"),
-    [
-        ({"unit_ids": ["u1"]}, "missing_offsets"),
-        ({"start": 5, "end": 5, "unit_ids": ["u1"]}, "invalid_range"),
-        ({"start": 0, "end": 1}, "invalid_unit"),
-        ({"unit_id": "unknown", "start": 0, "end": 1}, "invalid_unit"),
-        ({"unit_id": "u1", "start": 6, "end": 11}, "out_of_bounds"),
-    ],
-)
-def test_ac038_span_validation_failure_modes(span, expected):
-    _, feedback = TenantDreamingCompressor._validate_spans(
-        [span],
-        "Hello world",
-        [{"unit_id": "u1", "text": "Hello", "evidence_ids": ["1"]}],
-    )
-    assert expected in feedback[0]
-
-
-def test_validation_critical_literals_are_deterministically_grounded():
-    facts = TenantDreamingCompressor._required_literal_facts(
-        [{
-            "unit_id": "u1",
-            "text": "pattern 10 uses 250ms at https://example.test/api",
-            "evidence_ids": ["7"],
-        }],
-        3,
-    )
-
-    assert {fact["text"] for fact in facts} >= {
-        "pattern 10",
-        "10",
-        "250ms",
-        "https://example.test/api",
-    }
-    assert all(fact["unit_ids"] == ["u1"] for fact in facts)
-    assert all(fact["evidence_ids"] == ["7"] for fact in facts)
-    assert facts[0]["fact_id"] == "f003"
-
-
-def test_ac039_stage2a_deterministic_dedup():
-    facts = [
-        {"fact_id": "f001", "text": "User uses Python for ML", "unit_ids": ["u1"], "evidence_ids": ["1"]},
-        {"fact_id": "f002", "text": "User uses Python for ML", "unit_ids": ["u2"], "evidence_ids": ["2"]},
-        {"fact_id": "f003", "text": "User uses Python", "unit_ids": ["u3"], "evidence_ids": ["3"]},
-        {"fact_id": "f004", "text": "User uses Go", "unit_ids": ["u4"], "evidence_ids": ["4"]},
-    ]
-    unique = TenantDreamingCompressor._deterministic_dedup(facts)
-    texts = [f["text"] for f in unique]
-    assert "User uses Python for ML" in texts
-    assert "User uses Python" in texts
-    assert "User uses Go" in texts
-    assert len(unique) == 3
-    assert unique[0]["unit_ids"] == ["u1", "u2"]
-    assert unique[0]["evidence_ids"] == ["1", "2"]
-
-
-def test_ac040_stage2b_conditional_llm_call():
-    calls = []
-
-    class Model:
-        def generate(self, messages):
-            calls.append(messages)
-            return SimpleNamespace(content=json.dumps({"content": "shortened", "evidence_ids": ["1"]}))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-
-    facts = [
-        {"fact_id": "f001", "text": "short fact", "unit_ids": ["u1"], "evidence_ids": ["1"]},
-    ]
-
-    output = compressor._format_facts(facts, max_chars=10_000, evidence_ids=["1"])
-    assert len(calls) == 0
-    assert "short fact" in output.content
-    assert output.metadata["all_fact_ids"] == ["f001"]
-
-
-def test_ac041_retry_always_two_stage():
-    calls = []
-
-    class Model:
-        def generate(self, messages):
-            calls.append(messages)
-            return SimpleNamespace(content=json.dumps([
-                {"start": 0, "end": 10, "unit_ids": ["u1"]},
-            ]))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    compressor(DreamingCompressionRequest(
-        raw_content="fact one!!",
-        units=[DreamingMemoryUnit(unit_id="u1", content="fact one!!", evidence_ids=["1"])],
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    compressor(DreamingCompressionRequest(
-        raw_content="fact one!!",
-        units=[DreamingMemoryUnit(unit_id="u1", content="fact one!!", evidence_ids=["1"])],
-        max_chars=10_000,
-        attempt=2,
-        validation_feedback=["missing_evidence:2"],
-    ))
-
-    for call in calls:
-        assert "information extraction" in call[0]["content"].lower()
-
-
-def test_ac042_fact_coverage_computation():
-    facts = [
-        {"fact_id": "f001", "text": "User uses Python"},
-        {"fact_id": "f002", "text": "User uses Go"},
-        {"fact_id": "f003", "text": "User uses Rust"},
-    ]
-    output_content = "- User uses Python\n- User uses Rust"
-    covered = TenantDreamingCompressor._count_covered_facts(output_content, facts)
-    assert "f001" in covered
-    assert "f003" in covered
-    assert "f002" not in covered
-
-
-def test_ac042_source_coverage_rejects_missed_units():
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "fact one",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        }
-    ]
-    units = [
-        {"unit_id": "u1", "text": "fact one", "evidence_ids": ["1"]},
-        {"unit_id": "u2", "text": "fact two", "evidence_ids": ["2"]},
-    ]
-    with pytest.raises(ValueError, match="Source unit coverage too low: 1/2=0.50"):
-        TenantDreamingCompressor._require_source_coverage(facts, units)
-
-
-def test_ac049_lossless_formatter_rejects_missing_fact_ids():
-    class Model:
-        def generate(self, _messages):
-            return SimpleNamespace(
-                content=json.dumps(
-                    {"facts": [{"fact_id": "f001", "text": "short fact"}]}
-                )
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.model = Model()
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "first fact",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        },
-        {
-            "fact_id": "f002",
-            "text": "second fact",
-            "unit_ids": ["u2"],
-            "evidence_ids": ["2"],
-        },
-    ]
-    with pytest.raises(ValueError, match="fact_ids do not match"):
-        compressor._lossless_formatting(facts, 10, ["1", "2"])
-
-
-def test_ac049_lossless_formatter_preserves_all_fact_ids():
-    class Model:
-        def generate(self, _messages):
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "facts": [
-                            {"fact_id": "f001", "text": "first"},
-                            {"fact_id": "f002", "text": "second"},
-                        ]
-                    }
-                )
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.model = Model()
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "first verbose fact",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        },
-        {
-            "fact_id": "f002",
-            "text": "second verbose fact",
-            "unit_ids": ["u2"],
-            "evidence_ids": ["2"],
-        },
-    ]
-
-    output = compressor._lossless_formatting(facts, 20, ["1", "2"])
-
-    assert output.content == "- first\n- second"
-    assert output.metadata["covered_fact_ids"] == ["f001", "f002"]
-
-
-def test_ac048_ac019_regression_fix():
-    """AC-048: Verify span-based extraction preserves all numbered patterns with coverage >= 0.95."""
-    raw_content = "\n".join([
-        f"- pattern {i}: This is fact number {i} with important data"
-        for i in range(1, 36)
-    ])
-    units = [
-        DreamingMemoryUnit(
-            unit_id=f"u{i:02d}",
-            content=f"pattern {i}: This is fact number {i} with important data",
-            evidence_ids=[str(i)],
-        )
-        for i in range(1, 36)
-    ]
-
-    class Model:
-        def generate(self, messages):
-            spans = []
-            unit_ids = re.findall(
-                r'"unit_id": "([^"]+)", "text":', messages[1]["content"]
-            )
-            for unit_id in unit_ids:
-                i = int(unit_id.removeprefix("u"))
-                unit_text = f"pattern {i}: This is fact number {i} with important data"
-                spans.append({
-                    "unit_id": unit_id,
-                    "start": 0,
-                    "end": len(unit_text),
-                })
-            return SimpleNamespace(content=json.dumps(spans))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    output = compressor(DreamingCompressionRequest(
-        raw_content=raw_content,
-        units=units,
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    for i in range(1, 36):
-        assert f"pattern {i}" in output.content
-    assert len(output.metadata["covered_fact_ids"]) / len(output.metadata["all_fact_ids"]) >= 0.95
-
-
-def test_ac049_fact_preservation_guarantee():
-    """AC-049: Verify no facts are lost during compression pipeline and critical literals preserved."""
-    raw_content = "\n".join([
-        f"- fact {i}: Critical data point {i} with value {i * 100}"
-        for i in range(1, 11)
-    ])
-    units = [
-        DreamingMemoryUnit(
-            unit_id=f"u{i:02d}",
-            content=f"fact {i}: Critical data point {i} with value {i * 100}",
-            evidence_ids=[str(i)],
-        )
-        for i in range(1, 11)
-    ]
-
-    class Model:
-        def generate(self, messages):
-            spans = []
-            for i in range(1, 11):
-                unit_text = f"fact {i}: Critical data point {i} with value {i * 100}"
-                spans.append({
-                    "unit_id": f"u{i:02d}",
-                    "start": 0,
-                    "end": len(unit_text),
-                })
-            return SimpleNamespace(content=json.dumps(spans))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    output = compressor(DreamingCompressionRequest(
-        raw_content=raw_content,
-        units=units,
-        max_chars=10_000,
-        attempt=1,
-    ))
-
-    assert output.metadata["covered_fact_ids"] == output.metadata["all_fact_ids"]
-    assert len(output.metadata["covered_fact_ids"]) >= 10
-    for i in range(1, 11):
-        assert f"fact {i}" in output.content
-        assert str(i * 100) in output.content
-
-    from nexent.memory.dreaming.version_builder import _critical_literals, _validate_compression
-    literals = _critical_literals(raw_content)
-    required_evidence = {str(i) for i in range(1, 11)}
-    feedback = _validate_compression(
-        output,
-        required_evidence=required_evidence,
-        required_literals=literals,
-        max_chars=10_000,
-    )
-    assert not any("missing_critical_literals" in f for f in feedback)
-
-
-def test_strip_json_fence_no_newline():
-    assert _strip_json_fence("```json") == "```json"
-
-
-def test_strip_json_fence_none_input():
-    assert _strip_json_fence(None) == ""
-
-
-def test_validate_spans_empty_fact_text():
-    units = [{"unit_id": "u1", "text": "   ", "evidence_ids": ["1"]}]
-    spans = [{"unit_id": "u1", "start": 0, "end": 3}]
-    facts, feedback = TenantDreamingCompressor._validate_spans(spans, "   ", units)
-    assert any("empty_text" in f for f in feedback)
-
-
-def test_require_source_coverage_empty_source():
-    facts = []
-    units = []
-    TenantDreamingCompressor._require_source_coverage(facts, units)
-
-
-def test_lossless_formatter_rejects_non_list_response():
-    class Model:
-        def generate(self, _messages):
-            return SimpleNamespace(content=json.dumps({"facts": "not a list"}))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.model = Model()
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "fact one",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        }
-    ]
-    with pytest.raises(ValueError, match="must contain a facts list"):
-        compressor._lossless_formatting(facts, 10, ["1"])
-
-
-def test_lossless_formatter_rejects_duplicate_fact_ids():
-    class Model:
-        def generate(self, _messages):
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "facts": [
-                            {"fact_id": "f001", "text": "first"},
-                            {"fact_id": "f001", "text": "duplicate"},
-                        ]
-                    }
-                )
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.model = Model()
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "fact one",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        }
-    ]
-    with pytest.raises(ValueError, match="duplicate fact_ids"):
-        compressor._lossless_formatting(facts, 10, ["1"])
-
-
-def test_lossless_formatter_rejects_empty_fact_text():
-    class Model:
-        def generate(self, _messages):
-            return SimpleNamespace(
-                content=json.dumps(
-                    {"facts": [{"fact_id": "f001", "text": "   "}]}
-                )
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.model = Model()
-    facts = [
-        {
-            "fact_id": "f001",
-            "text": "fact one",
-            "unit_ids": ["u1"],
-            "evidence_ids": ["1"],
-        }
-    ]
-    with pytest.raises(ValueError, match="empty fact"):
-        compressor._lossless_formatting(facts, 10, ["1"])
-
-
-def test_span_validation_rejects_missing_unit_id_with_legacy():
-    spans = [{"start": 0, "end": 5, "unit_ids": ["u1", "u2"]}]
-    units = [{"unit_id": "u1", "text": "Hello", "evidence_ids": ["1"]}]
-    _, feedback = TenantDreamingCompressor._validate_spans(spans, "Hello", units)
-    assert any("invalid_unit" in f or "missing_offsets" in f for f in feedback)
-
-
-def test_fact_coverage_too_low_raises_in_main_path():
-    class Model:
-        def generate(self, messages):
-            return SimpleNamespace(
-                content=json.dumps([{"unit_id": "u1", "start": 0, "end": 5}])
-            )
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    units = [
-        DreamingMemoryUnit(unit_id="u1", content="Hello world", evidence_ids=["1"]),
-        DreamingMemoryUnit(unit_id="u2", content="Another fact", evidence_ids=["2"]),
-    ]
-
-    with pytest.raises(ValueError, match="Source unit coverage too low"):
-        compressor(
-            DreamingCompressionRequest(
-                raw_content="- Hello world\n- Another fact",
-                units=units,
-                max_chars=10_000,
-                attempt=1,
-            )
-        )
-
-
-def test_json_parse_error_in_extraction_raises_value_error():
-    """Verify that JSON parse errors in span extraction are wrapped in ValueError."""
-
-    class Model:
-        def generate(self, messages):
-            return SimpleNamespace(content="This is not valid JSON")
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    request = DreamingCompressionRequest(
-        raw_content="Test content",
-        units=[
-            DreamingMemoryUnit(
-                unit_id="test:1",
-                content="Test content",
-                evidence_ids=["1"],
-            )
-        ],
-        max_chars=10,
-        attempt=1,
-    )
-
-    with pytest.raises(ValueError, match="JSON parse error"):
-        compressor(request)
-
-
-def test_json_parse_error_in_lossless_formatting_raises_value_error():
-    """Verify that JSON parse errors in lossless formatting are wrapped in ValueError."""
-
-    class Model:
-        def generate(self, messages):
-            system_content = messages[0]["content"]
-            if "information extraction" in system_content.lower():
-                raw = "Test content that is very long and needs formatting to fit within the limit"
-                return SimpleNamespace(
-                    content=json.dumps([
-                        {"unit_id": "test:1", "start": 0, "end": len(raw)}
-                    ])
-                )
-            else:
-                return SimpleNamespace(content="This is not valid JSON")
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 40_000
-
-    request = DreamingCompressionRequest(
-        raw_content="Test content that is very long and needs formatting to fit within the limit",
-        units=[
-            DreamingMemoryUnit(
-                unit_id="test:1",
-                content="Test content that is very long and needs formatting to fit within the limit",
-                evidence_ids=["1"],
-            )
-        ],
-        max_chars=10,
-        attempt=1,
-    )
-
-    with pytest.raises(ValueError, match="JSON parse error"):
-        compressor(request)
-
-
-def test_map_reduce_chunk_failure_does_not_abort():
-    """Verify that map-reduce continues processing even if one chunk fails."""
-    call_count = [0]
-
-    class Model:
-        def generate(self, messages):
-            system_content = messages[0]["content"]
-            if "lossless formatter" in system_content:
-                unit_ids = re.findall(r'\[f(\d+)\]', messages[1]["content"])
-                facts = [
-                    {"fact_id": f"f{fid}", "text": "x"}
-                    for fid in unit_ids
-                ]
-                return SimpleNamespace(content=json.dumps({"facts": facts}))
-
-            call_count[0] += 1
-            if call_count[0] == 2:
-                raise ValueError("Simulated chunk failure")
-            unit_ids = re.findall(
-                r'"unit_id": "([^"]+)", "text":', messages[1]["content"]
-            )
-            spans = []
-            for uid in unit_ids:
-                spans.append({"unit_id": uid, "start": 0, "end": 10})
-            return SimpleNamespace(content=json.dumps(spans))
-
-    compressor = TenantDreamingCompressor.__new__(TenantDreamingCompressor)
-    compressor.tenant_id = "t"
-    compressor.user_id = "u"
-    compressor.model = Model()
-    compressor.max_compression_input_chars = 800
-
-    units = [
-        DreamingMemoryUnit(
-            unit_id=f"test:{i}",
-            content=f"Content for unit {i}" * 100,
-            evidence_ids=[str(i)],
-        )
-        for i in range(1, 15)
-    ]
-
-    request = DreamingCompressionRequest(
-        raw_content="Very long content" * 1000,
-        units=units,
-        max_chars=100,
-        attempt=1,
-    )
-
-    result = compressor(request)
-    assert result is not None
+            task_modes.append(next(line for line in prompt.splitlines() if line.startswith("Task mode:")))
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.02)
+            with lock: active -= 1
+            if "Map Summary" in prompt:
+                reduce_prompt = prompt
+                return SimpleNamespace(content="<summary>## Combined Preferences\n\n- final</summary>")
+            marker = "".join(code for text, code in (("alpha", "A"), ("beta", "B"), ("charlie", "C")) if text in prompt) or "P"
+            return SimpleNamespace(content=f"<summary>## Topic {marker}\n\n- {marker}</summary>")
+
+    units = [DreamingMemoryUnit(unit_id=str(i), content=text * 20, is_new=True)
+             for i, text in enumerate(("alpha", "beta", "charlie"), 1)]
+    result = _summarizer(Model(), limit=100)(_request(units))
+    assert result.metadata["mode"] == "map_reduce"
+    assert result.metadata["chunk_count"] == 3
+    assert maximum <= 3
+    assert task_modes.count("Task mode: map") == 3
+    assert task_modes.count("Task mode: reduce") == 1
+    assert reduce_prompt.index("## Map Summary 1") < reduce_prompt.index("## Map Summary 2") < reduce_prompt.index("## Map Summary 3")
+    assert reduce_prompt.index("- A") < reduce_prompt.index("- B") < reduce_prompt.index("C", reduce_prompt.index("- B"))
+    assert result.markdown.endswith("- final")
+
+
+def test_ac059_prompt_is_yaml_driven_and_forbids_json_and_evidence_ids():
+    prompt = _load_prompt()
+    assert prompt["output"]["format"] == "summary_envelope"
+    assert "Do not output JSON" in prompt["system"]
+    assert "evidence IDs" in prompt["system"]
+    assert "no level-one heading" in prompt["system"]
+    assert "Task mode: {task_mode}" in prompt["user"]

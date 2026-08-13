@@ -94,7 +94,7 @@ def _schedule_to_dict(row: MemoryDreamingSchedule) -> Dict[str, Any]:
         "min_unique_queries": row.min_unique_queries,
         "source_limit": row.source_limit,
         "long_term_max_chars": row.long_term_max_chars,
-        "compression_max_attempts": row.compression_max_attempts,
+        "summarization_max_attempts": row.summarization_max_attempts,
     }
 
 
@@ -133,7 +133,7 @@ def upsert_schedule(
     min_unique_queries: Optional[int] = None,
     source_limit: Optional[int] = None,
     long_term_max_chars: Optional[int] = None,
-    compression_max_attempts: Optional[int] = None,
+    summarization_max_attempts: Optional[int] = None,
 ) -> Dict[str, Any]:
     with get_db_session() as session:
         row = (
@@ -170,7 +170,7 @@ def upsert_schedule(
         row.min_unique_queries = min_unique_queries
         row.source_limit = source_limit
         row.long_term_max_chars = long_term_max_chars
-        row.compression_max_attempts = compression_max_attempts
+        row.summarization_max_attempts = summarization_max_attempts
         row.updated_by = actor_user_id
         session.flush()
         return _schedule_to_dict(row)
@@ -188,7 +188,7 @@ def get_thresholds(
                 MemoryDreamingSchedule.min_unique_queries,
                 MemoryDreamingSchedule.source_limit,
                 MemoryDreamingSchedule.long_term_max_chars,
-                MemoryDreamingSchedule.compression_max_attempts,
+                MemoryDreamingSchedule.summarization_max_attempts,
             )
             .filter(
                 MemoryDreamingSchedule.tenant_id == tenant_id,
@@ -206,7 +206,7 @@ def get_thresholds(
             "min_unique_queries": row.min_unique_queries,
             "source_limit": row.source_limit,
             "long_term_max_chars": row.long_term_max_chars,
-            "compression_max_attempts": row.compression_max_attempts,
+            "summarization_max_attempts": row.summarization_max_attempts,
         }
         # Return None if ALL thresholds are unset
         if all(v is None for v in result.values()):
@@ -309,11 +309,11 @@ def create_and_activate_version(
     config_snapshot: Dict[str, Any],
     raw_char_count: int,
     published_char_count: int,
-    compression_status: str,
-    compression_attempts: int,
+    summarization_status: str,
+    summarization_attempts: int,
     omitted_evidence_ids: List[str],
     mechanical_truncation: bool,
-    compression_audit: List[Dict[str, Any]],
+    summarization_audit: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Atomically append and activate a version for one locked scope."""
     with get_db_session() as session:
@@ -360,11 +360,11 @@ def create_and_activate_version(
             config_snapshot=config_snapshot,
             raw_char_count=raw_char_count,
             published_char_count=published_char_count,
-            compression_status=compression_status,
-            compression_attempts=compression_attempts,
+            summarization_status=summarization_status,
+            summarization_attempts=summarization_attempts,
             omitted_evidence_ids=omitted_evidence_ids,
             mechanical_truncation=mechanical_truncation,
-            compression_audit=compression_audit,
+            summarization_audit=summarization_audit,
             created_by="dreaming",
         )
         session.add(row)
@@ -577,11 +577,11 @@ def _version_to_dict(row: MemoryDreamingVersion) -> Dict[str, Any]:
         "config_snapshot": row.config_snapshot or {},
         "raw_char_count": row.raw_char_count,
         "published_char_count": row.published_char_count,
-        "compression_status": row.compression_status,
-        "compression_attempts": row.compression_attempts,
+        "summarization_status": row.summarization_status,
+        "summarization_attempts": row.summarization_attempts,
         "omitted_evidence_ids": row.omitted_evidence_ids or [],
         "mechanical_truncation": row.mechanical_truncation,
-        "compression_audit": row.compression_audit or [],
+        "summarization_audit": row.summarization_audit or [],
         "created_at": row.create_time.isoformat() if row.create_time else None,
     }
 
@@ -624,6 +624,17 @@ def finish_audit(run_id: int, *, status: str, **values: Any) -> bool:
     return update_audit(run_id, payload)
 
 
+def _utc_isoformat(value: Optional[datetime]) -> Optional[str]:
+    """Serialize UTC values stored in timestamp-without-time-zone columns unambiguously."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
+
+
 def list_audits(
     tenant_id: str,
     user_id: str,
@@ -651,9 +662,9 @@ def list_audits(
                 "agent_id": row.agent_id,
                 "trigger_source": row.trigger_source,
                 "status": row.status,
-                "current_phase": row.current_phase,
-                "started_at": row.started_at.isoformat() if row.started_at else None,
-                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "current_phase": "summarization" if row.current_phase == "compression" else row.current_phase,
+                "started_at": _utc_isoformat(row.started_at),
+                "finished_at": _utc_isoformat(row.finished_at),
                 "light_count": row.light_count,
                 "rem_count": row.rem_count,
                 "promoted_count": row.promoted_count,

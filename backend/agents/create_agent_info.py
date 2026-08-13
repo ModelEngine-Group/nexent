@@ -108,7 +108,7 @@ def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
             )
             normalized = str(content or "").strip()
             if normalized:
-                entries.append(f"- {normalized}")
+                entries.append(normalized)
         if entries:
             sections.append("\n".join((heading, *entries)))
     return "\n\n".join(sections)

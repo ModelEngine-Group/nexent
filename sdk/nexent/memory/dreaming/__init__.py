@@ -9,8 +9,8 @@ from .models import (
 from .scoring import compute_metrics, score_candidate, select_candidates
 from .service import analyze_rem_content, build_candidate
 from .version_builder import (
-    DreamingCompressionOutput,
-    DreamingCompressionRequest,
+    DreamingSummarizationOutput,
+    DreamingSummarizationRequest,
     DreamingMemoryUnit,
     DreamingVersionBuildResult,
     build_dreaming_version,
@@ -23,8 +23,8 @@ __all__ = [
     "DreamingDecision",
     "DreamingMetrics",
     "DreamingThresholds",
-    "DreamingCompressionOutput",
-    "DreamingCompressionRequest",
+    "DreamingSummarizationOutput",
+    "DreamingSummarizationRequest",
     "DreamingMemoryUnit",
     "DreamingVersionBuildResult",
     "analyze_rem_content",

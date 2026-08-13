@@ -611,8 +611,8 @@ def test_list_audits_with_filters(monkeypatch):
     assert len(result) == 1
     assert result[0]["run_id"] == 1
     assert result[0]["status"] == "completed"
-    assert result[0]["started_at"] is not None
-    assert result[0]["finished_at"] is not None
+    assert result[0]["started_at"] == "2026-07-25T00:00:00Z"
+    assert result[0]["finished_at"] == "2026-07-25T01:00:00Z"
 
 
 def test_list_audits_no_optional_filters(monkeypatch):

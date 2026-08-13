@@ -880,8 +880,7 @@ class MemoryUserConfig(TableBase):
 class MemoryRecord(TableBase):
     """Internal memory records persisted in PostgreSQL.
 
-    This is the authoritative store for tenant/user/agent memory. Tenant and
-    user long-term memories live here exclusively; agent short-term memory
+    This is the authoritative store for agent short-term memory, which
     additionally mirrors the content into Elasticsearch (managed by
     ``services.memory_index_service``).
 
@@ -978,6 +977,68 @@ class MemoryRecord(TableBase):
                            doc="Last Light Sleep timestamp.")
     last_rem_at = Column(TIMESTAMP(timezone=False), nullable=True,
                          doc="Last REM Sleep timestamp.")
+
+
+class MemoryLongTermVersion(TableBase):
+    """Immutable Markdown long-term memory shared by tenant and user scopes."""
+
+    __tablename__ = "memory_long_term_version_t"
+    __table_args__ = (
+        CheckConstraint("scope IN ('tenant', 'user')", name="ck_memory_long_term_scope"),
+        Index(
+            "uq_memory_long_term_version_scope_no",
+            "tenant_id", "scope", "subject_id", "version_no", unique=True,
+        ),
+        Index(
+            "uq_memory_long_term_active_scope",
+            "tenant_id", "scope", "subject_id", unique=True,
+            postgresql_where=text("is_active AND delete_flag = 'N'"),
+        ),
+        Index("uq_memory_long_term_run", "dreaming_run_id", unique=True,
+              postgresql_where=text("dreaming_run_id IS NOT NULL")),
+        {"schema": SCHEMA},
+    )
+
+    version_id = Column(BigInteger, Sequence(
+        "memory_long_term_version_t_version_id_seq", schema=SCHEMA), primary_key=True)
+    tenant_id = Column(String(100), nullable=False)
+    scope = Column(String(20), nullable=False)
+    subject_id = Column(String(100), nullable=False)
+    version_no = Column(Integer, nullable=False)
+    parent_version_id = Column(BigInteger)
+    is_active = Column(Boolean, nullable=False, default=False)
+    content = Column(Text, nullable=False)
+    source = Column(String(20), nullable=False)
+    author_user_id = Column(String(100), nullable=False)
+    editor_user_id = Column(String(100), nullable=False)
+    authored_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    dreaming_run_id = Column(BigInteger)
+    character_count = Column(Integer, nullable=False)
+    raw_dreaming_input = Column(Text)
+    generation_audit = Column(JSONB, nullable=False, default=dict)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
+    fallback_details = Column(JSONB, nullable=False, default=dict)
+    omission_details = Column(JSONB, nullable=False, default=dict)
+
+
+class MemoryLongTermActivationAudit(TableBase):
+    """Append-only active pointer changes for every long-term memory source."""
+
+    __tablename__ = "memory_long_term_activation_audit_t"
+    __table_args__ = (
+        Index("idx_memory_long_term_activation_scope", "tenant_id", "scope", "subject_id", "create_time"),
+        {"schema": SCHEMA},
+    )
+
+    activation_id = Column(BigInteger, Sequence(
+        "memory_long_term_activation_audit_t_activation_id_seq", schema=SCHEMA), primary_key=True)
+    tenant_id = Column(String(100), nullable=False)
+    scope = Column(String(20), nullable=False)
+    subject_id = Column(String(100), nullable=False)
+    actor_user_id = Column(String(100), nullable=False)
+    from_version_id = Column(BigInteger)
+    to_version_id = Column(BigInteger, nullable=False)
+    action = Column(String(30), nullable=False)
 
 
 class MemoryRetrievalHit(TableBase):
@@ -1120,7 +1181,7 @@ class MemoryDreamingSchedule(TableBase):
     min_unique_queries = Column(Integer, nullable=True)
     source_limit = Column(Integer, nullable=True)
     long_term_max_chars = Column(Integer, nullable=True)
-    compression_max_attempts = Column(Integer, nullable=True)
+    summarization_max_attempts = Column(Integer, nullable=True)
 
 
 class MemoryDreamingVersion(TableBase):
@@ -1168,9 +1229,9 @@ class MemoryDreamingVersion(TableBase):
     config_snapshot = Column(JSONB, nullable=False, default=dict)
     raw_char_count = Column(Integer, nullable=False)
     published_char_count = Column(Integer, nullable=False)
-    compression_status = Column(String(30), nullable=False)
-    compression_attempts = Column(Integer, nullable=False, default=0)
-    compression_audit = Column(JSONB, nullable=False, default=list)
+    summarization_status = Column(String(30), nullable=False)
+    summarization_attempts = Column(Integer, nullable=False, default=0)
+    summarization_audit = Column(JSONB, nullable=False, default=list)
     omitted_evidence_ids = Column(JSONB, nullable=False, default=list)
     mechanical_truncation = Column(Boolean, nullable=False, default=False)
 

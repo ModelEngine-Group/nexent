@@ -250,8 +250,8 @@ def test_automation_tool_policy_is_required_platform_context():
 
 def test_long_term_memory_prompt_is_a_required_system_item():
     context = (
-        "### Tenant Long-term Memory\n- Follow company policy\n\n"
-        "### User Long-term Memory\n- Prefers concise answers"
+        "### Tenant Long-term Memory\nFollow company policy\n\n"
+        "### User Long-term Memory\nPrefers concise answers"
     )
 
     items = build_context_inputs(

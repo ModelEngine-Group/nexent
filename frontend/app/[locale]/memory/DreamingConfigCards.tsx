@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   App,
+  Badge,
   Button,
   Card,
   Flex,
@@ -17,7 +18,10 @@ import dayjs from "dayjs";
 
 import {
   fetchDreamingSchedule,
+  fetchDreamingAudits,
+  runDreaming,
   saveDreamingSchedule,
+  type DreamingAudit,
   type DreamingSchedule,
 } from "@/services/memoryService";
 
@@ -31,7 +35,16 @@ const DEFAULT_VALUES = {
   min_unique_queries: 3,
   source_limit: 10,
   long_term_max_chars: 10000,
-  compression_max_attempts: 2,
+  summarization_max_attempts: 2,
+} as const;
+
+const INPUT_RANGES = {
+  minScore: { min: 0, max: 1 },
+  minRecallCount: { min: 0, max: 100 },
+  minUniqueQueries: { min: 0, max: 50 },
+  sourceLimit: { min: 1, max: 100 },
+  longTermMaxChars: { min: 100, max: 1_000_000 },
+  summarizationMaxAttempts: { min: 0, max: 10 },
 } as const;
 
 function parseCronExpr(
@@ -66,6 +79,8 @@ export function DreamingConfigCards() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [latestRun, setLatestRun] = useState<DreamingAudit | null>(null);
   const [schedule, setSchedule] = useState<DreamingSchedule | null>(null);
 
   const [enabled, setEnabled] = useState(false);
@@ -79,7 +94,7 @@ export function DreamingConfigCards() {
   const [minUniqueQueries, setMinUniqueQueries] = useState<number | null>(null);
   const [sourceLimit, setSourceLimit] = useState<number | null>(null);
   const [longTermMaxChars, setLongTermMaxChars] = useState<number | null>(null);
-  const [compressionMaxAttempts, setCompressionMaxAttempts] = useState<
+  const [summarizationMaxAttempts, setSummarizationMaxAttempts] = useState<
     number | null
   >(null);
 
@@ -114,7 +129,7 @@ export function DreamingConfigCards() {
         setMinUniqueQueries(data.min_unique_queries ?? null);
         setSourceLimit(data.source_limit ?? null);
         setLongTermMaxChars(data.long_term_max_chars ?? null);
-        setCompressionMaxAttempts(data.compression_max_attempts ?? null);
+        setSummarizationMaxAttempts(data.summarization_max_attempts ?? null);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -123,6 +138,33 @@ export function DreamingConfigCards() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refreshLatestRun = async () => {
+      try {
+        const audits = await fetchDreamingAudits(1);
+        if (!active) return;
+        const latest = audits[0] ?? null;
+        setLatestRun(latest);
+        setRunning(latest?.status === "queued" || latest?.status === "running");
+        if (latest?.status === "completed") {
+          window.dispatchEvent(new Event("user-long-term-memory-updated"));
+        }
+        if (latest?.status === "queued" || latest?.status === "running") {
+          timer = setTimeout(refreshLatestRun, 2000);
+        }
+      } catch {
+        if (active) setRunning(false);
+      }
+    };
+    void refreshLatestRun();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [latestRun?.run_id, latestRun?.status]);
 
   const buildSchedulePayload = useCallback((): Omit<
     DreamingSchedule,
@@ -148,7 +190,8 @@ export function DreamingConfigCards() {
       agent_id: base.agent_id,
       enabled,
       rule_type: ruleType,
-      timezone: base.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone:
+        base.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       start_at: base.start_at,
       cron_expr: cronExpr,
       interval_seconds: intervalSeconds,
@@ -159,7 +202,7 @@ export function DreamingConfigCards() {
       min_unique_queries: minUniqueQueries,
       source_limit: sourceLimit,
       long_term_max_chars: longTermMaxChars,
-      compression_max_attempts: compressionMaxAttempts,
+      summarization_max_attempts: summarizationMaxAttempts,
     };
   }, [
     schedule,
@@ -173,7 +216,7 @@ export function DreamingConfigCards() {
     minUniqueQueries,
     sourceLimit,
     longTermMaxChars,
-    compressionMaxAttempts,
+    summarizationMaxAttempts,
   ]);
 
   const handleSaveSchedule = async () => {
@@ -206,6 +249,25 @@ export function DreamingConfigCards() {
     }
   };
 
+  const handleRunNow = async () => {
+    setRunning(true);
+    try {
+      const queued = await runDreaming(schedule?.agent_id ?? "__user__");
+      setLatestRun({
+        run_id: queued.run_id,
+        status: queued.status,
+        light_count: 0,
+        rem_count: 0,
+        promoted_count: 0,
+        deferred_count: 0,
+      });
+      message.success(t("dreaming.run.queued"));
+    } catch {
+      setRunning(false);
+      message.error(t("dreaming.error.trigger"));
+    }
+  };
+
   const weekdayOptions = Array.from({ length: 7 }, (_, i) => ({
     value: i,
     label: t(`dreaming.schedule.weekday.${i}`),
@@ -216,6 +278,32 @@ export function DreamingConfigCards() {
     { value: "weekly", label: t("dreaming.schedule.weekly") },
     { value: "interval", label: t("dreaming.schedule.interval") },
   ];
+
+  const runStatus = (() => {
+    if (!latestRun) {
+      return { status: "default" as const, text: t("dreaming.run.notRunYet") };
+    }
+    if (latestRun.status === "queued") {
+      return { status: "processing" as const, text: t("dreaming.run.queued") };
+    }
+    if (latestRun.status === "running") {
+      const phase = latestRun.current_phase
+        ? t(`dreaming.phase.${latestRun.current_phase}`)
+        : t("dreaming.run.inProgress");
+      return {
+        status: "processing" as const,
+        text: t("dreaming.run.runningPhase", { phase }),
+      };
+    }
+    if (latestRun.status === "completed") {
+      return { status: "success" as const, text: t("dreaming.run.completed") };
+    }
+    if (latestRun.status === "failed") {
+      return { status: "error" as const, text: t("dreaming.run.failed") };
+    }
+    return { status: "warning" as const, text: t("dreaming.run.skipped") };
+  })();
+  const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
 
   if (loading) {
     return (
@@ -238,15 +326,15 @@ export function DreamingConfigCards() {
             <Text strong>{t("dreaming.thresholds.minScore")}</Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={0}
-              max={1}
+              min={INPUT_RANGES.minScore.min}
+              max={INPUT_RANGES.minScore.max}
               step={0.01}
               value={minScore ?? DEFAULT_VALUES.min_score}
               onChange={(val) => setMinScore(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.minScoreHint")}
+              {t("dreaming.thresholds.minScoreHint", INPUT_RANGES.minScore)}
             </Text>
           </div>
 
@@ -254,15 +342,18 @@ export function DreamingConfigCards() {
             <Text strong>{t("dreaming.thresholds.minRecallCount")}</Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={0}
-              max={100}
+              min={INPUT_RANGES.minRecallCount.min}
+              max={INPUT_RANGES.minRecallCount.max}
               step={1}
               value={minRecallCount ?? DEFAULT_VALUES.min_recall_count}
               onChange={(val) => setMinRecallCount(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.minRecallCountHint")}
+              {t(
+                "dreaming.thresholds.minRecallCountHint",
+                INPUT_RANGES.minRecallCount
+              )}
             </Text>
           </div>
 
@@ -270,15 +361,18 @@ export function DreamingConfigCards() {
             <Text strong>{t("dreaming.thresholds.minUniqueQueries")}</Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={0}
-              max={50}
+              min={INPUT_RANGES.minUniqueQueries.min}
+              max={INPUT_RANGES.minUniqueQueries.max}
               step={1}
               value={minUniqueQueries ?? DEFAULT_VALUES.min_unique_queries}
               onChange={(val) => setMinUniqueQueries(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.minUniqueQueriesHint")}
+              {t(
+                "dreaming.thresholds.minUniqueQueriesHint",
+                INPUT_RANGES.minUniqueQueries
+              )}
             </Text>
           </div>
 
@@ -286,15 +380,18 @@ export function DreamingConfigCards() {
             <Text strong>{t("dreaming.thresholds.sourceLimit")}</Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={1}
-              max={100}
+              min={INPUT_RANGES.sourceLimit.min}
+              max={INPUT_RANGES.sourceLimit.max}
               step={1}
               value={sourceLimit ?? DEFAULT_VALUES.source_limit}
               onChange={(val) => setSourceLimit(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.sourceLimitHint")}
+              {t(
+                "dreaming.thresholds.sourceLimitHint",
+                INPUT_RANGES.sourceLimit
+              )}
             </Text>
           </div>
 
@@ -302,31 +399,42 @@ export function DreamingConfigCards() {
             <Text strong>{t("dreaming.thresholds.longTermMaxChars")}</Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={100}
-              max={1000000}
+              min={INPUT_RANGES.longTermMaxChars.min}
+              max={INPUT_RANGES.longTermMaxChars.max}
               step={100}
               value={longTermMaxChars ?? DEFAULT_VALUES.long_term_max_chars}
               onChange={(val) => setLongTermMaxChars(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.longTermMaxCharsHint")}
+              {t(
+                "dreaming.thresholds.longTermMaxCharsHint",
+                INPUT_RANGES.longTermMaxChars
+              )}
             </Text>
           </div>
 
           <div>
-            <Text strong>{t("dreaming.thresholds.compressionMaxAttempts")}</Text>
+            <Text strong>
+              {t("dreaming.thresholds.summarizationMaxAttempts")}
+            </Text>
             <InputNumber
               style={{ width: "100%" }}
-              min={0}
-              max={10}
+              min={INPUT_RANGES.summarizationMaxAttempts.min}
+              max={INPUT_RANGES.summarizationMaxAttempts.max}
               step={1}
-              value={compressionMaxAttempts ?? DEFAULT_VALUES.compression_max_attempts}
-              onChange={(val) => setCompressionMaxAttempts(val)}
+              value={
+                summarizationMaxAttempts ??
+                DEFAULT_VALUES.summarization_max_attempts
+              }
+              onChange={(val) => setSummarizationMaxAttempts(val)}
               className="mt-1"
             />
             <Text type="secondary" className="block mt-1 text-xs">
-              {t("dreaming.thresholds.compressionMaxAttemptsHint")}
+              {t(
+                "dreaming.thresholds.summarizationMaxAttemptsHint",
+                INPUT_RANGES.summarizationMaxAttempts
+              )}
             </Text>
           </div>
         </div>
@@ -345,7 +453,7 @@ export function DreamingConfigCards() {
       <Card
         className="memory-config-card"
         style={{ flex: 1 }}
-        title={t("dreaming.schedule.title")}
+        title={t("dreaming.execution.title")}
       >
         <Flex vertical gap={16}>
           <Flex align="center" justify="space-between">
@@ -358,80 +466,97 @@ export function DreamingConfigCards() {
 
           {enabled ? (
             <>
-              <div>
-                <Text strong className="block mb-1">
-                  {t("dreaming.schedule.frequency")}
-                </Text>
-                <Select
-                  style={{ width: "100%" }}
-                  value={frequency}
-                  onChange={(val) => setFrequency(val)}
-                  options={frequencyOptions}
-                />
-              </div>
-
-              {frequency === "interval" ? (
+              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
                 <div>
                   <Text strong className="block mb-1">
-                    {t("dreaming.schedule.hours")}
+                    {t("dreaming.schedule.frequency")}
                   </Text>
-                  <InputNumber
+                  <Select
                     style={{ width: "100%" }}
-                    min={1}
-                    max={168}
-                    step={1}
-                    value={intervalHours}
-                    onChange={(val) => setIntervalHours(val ?? 6)}
-                    addonAfter={t("dreaming.schedule.hours")}
+                    value={frequency}
+                    onChange={(val) => setFrequency(val)}
+                    options={frequencyOptions}
                   />
                 </div>
-              ) : (
-                <>
-                  {frequency === "weekly" && (
-                    <div>
-                      <Select
-                        style={{ width: "100%" }}
-                        value={weekday}
-                        onChange={(val) => setWeekday(val)}
-                        options={weekdayOptions}
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <TimePicker
+
+                <div>
+                  <Text strong className="block mb-1">
+                    {frequency === "interval"
+                      ? t("dreaming.schedule.hours")
+                      : t("dreaming.schedule.executionTime")}
+                  </Text>
+                  {frequency === "interval" ? (
+                    <InputNumber
                       style={{ width: "100%" }}
-                      format="HH:mm"
-                      value={time}
-                      onChange={(val) => {
-                        if (val) setTime(val);
-                      }}
-                      needConfirm={false}
+                      min={1}
+                      max={168}
+                      step={1}
+                      value={intervalHours}
+                      onChange={(val) => setIntervalHours(val ?? 6)}
+                      addonAfter={t("dreaming.schedule.hours")}
                     />
-                  </div>
-                </>
-              )}
+                  ) : (
+                    <Flex gap={8}>
+                      {frequency === "weekly" && (
+                        <Select
+                          style={{ width: "100%" }}
+                          value={weekday}
+                          onChange={(val) => setWeekday(val)}
+                          options={weekdayOptions}
+                        />
+                      )}
+                      <TimePicker
+                        style={{ width: "100%" }}
+                        format="HH:mm"
+                        value={time}
+                        onChange={(val) => {
+                          if (val) setTime(val);
+                        }}
+                        needConfirm={false}
+                      />
+                    </Flex>
+                  )}
+                </div>
+                <Button
+                  type="primary"
+                  loading={saving}
+                  onClick={handleSaveSchedule}
+                >
+                  {t("dreaming.schedule.save")}
+                </Button>
+              </div>
 
-              <Button
-                type="primary"
-                loading={saving}
-                onClick={handleSaveSchedule}
-              >
-                {t("dreaming.schedule.save")}
-              </Button>
-
-              {schedule?.next_fire_at && (
-                <Text type="secondary" className="text-xs">
-                  {t("dreaming.schedule.nextFire", {
-                    time: dayjs(schedule.next_fire_at).format(
-                      "YYYY-MM-DD HH:mm"
-                    ),
-                  })}
-                </Text>
-              )}
+              <Text type="secondary" className="text-xs text-center">
+                {t("dreaming.schedule.nextFire", {
+                  time: schedule?.next_fire_at
+                    ? dayjs(schedule.next_fire_at).format("YYYY-MM-DD HH:mm")
+                    : "--",
+                })}
+              </Text>
             </>
           ) : (
             <Text type="secondary">{t("dreaming.schedule.disabledHint")}</Text>
           )}
+
+          <Button type="primary" loading={running} onClick={handleRunNow} block>
+            {t("dreaming.run.executeNow")}
+          </Button>
+
+          <Flex vertical align="center" gap={4} className="text-center">
+            <Badge status={runStatus.status} text={runStatus.text} />
+            <Text type="secondary" className="text-xs">
+              {t("dreaming.schedule.lastFire", {
+                time: lastRunAt
+                  ? dayjs(lastRunAt).format("YYYY-MM-DD HH:mm")
+                  : t("dreaming.schedule.neverRun"),
+              })}
+            </Text>
+            {latestRun?.status === "failed" && latestRun.error && (
+              <Text type="danger" className="text-xs">
+                {latestRun.error}
+              </Text>
+            )}
+          </Flex>
         </Flex>
       </Card>
     </Flex>

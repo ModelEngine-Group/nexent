@@ -24,7 +24,7 @@ from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemorySearchRequest, MemorySearchResult
 from nexent.memory.policy import MemoryRetrievalPolicy
 
-from database import memory_dreaming_db, memory_record_db, memory_retrieval_hit_db
+from database import memory_long_term_db, memory_record_db, memory_retrieval_hit_db
 from services.memory_index_service import (
     MemoryIndexService,
     get_memory_index_service,
@@ -79,24 +79,25 @@ def _serialize_record_as_result(
     )
 
 
-def _serialize_dreaming_version_as_result(
+def _serialize_long_term_version_as_result(
     version: Dict[str, Any],
 ) -> MemorySearchResult:
+    layer = MemoryLayer(version["scope"])
     return MemorySearchResult(
         memory_id=None,
-        external_id=f"dreaming-version:{version['version_id']}",
-        content=version.get("published_content", ""),
+        external_id=f"long-term-version:{version['version_id']}",
+        content=version.get("content", ""),
         score=1.0,
-        layer=MemoryLayer.USER,
-        source="dreaming",
+        layer=layer,
+        source=version.get("source", "manual"),
         is_external=False,
         metadata={
-            "source_type": "dreaming",
+            "source_type": version.get("source"),
             "memory_type": "long_term",
             "status": "active",
-            "dreaming_version_id": version.get("version_id"),
-            "dreaming_version_no": version.get("version_no"),
-            "source_evidence_ids": version.get("source_evidence_ids") or [],
+            "version_id": version.get("version_id"),
+            "version_no": version.get("version_no"),
+            "source_evidence_ids": version.get("evidence_ids") or [],
         },
     )
 
@@ -231,24 +232,11 @@ class MemoryRetrievalService:
         request: MemorySearchRequest,
         layer: str,
     ) -> List[MemorySearchResult]:
-        rows = self.record_service.list_memories(
-            tenant_id=request.tenant_id,
-            user_id=request.user_id,
-            layer=layer,
-            memory_type="long_term",
-            status="active",
-            limit=1000,
-        )
-        results = [_serialize_record_as_result(row, score=1.0) for row in rows]
-        if layer == MemoryLayer.USER.value:
-            active_version = memory_dreaming_db.get_active_version(
-                request.tenant_id,
-                request.user_id,
-                request.agent_id or "__user__",
-            )
-            if active_version:
-                results.append(_serialize_dreaming_version_as_result(active_version))
-        return results
+        subject_id = request.tenant_id if layer == MemoryLayer.TENANT.value else request.user_id
+        active_version = memory_long_term_db.get_active(request.tenant_id, layer, subject_id)
+        if not active_version or not active_version.get("content", "").strip():
+            return []
+        return [_serialize_long_term_version_as_result(active_version)]
 
     def _vector_search(
         self,

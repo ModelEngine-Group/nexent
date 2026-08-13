@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from consts.const import (
-    DREAMING_COMPRESSION_BACKOFF_BASE_SECONDS,
-    DREAMING_COMPRESSION_MAX_ATTEMPTS,
-    DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS,
+    DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS,
+    DREAMING_SUMMARIZATION_MAX_ATTEMPTS,
     DREAMING_LONG_TERM_MAX_CHARS,
     DREAMING_MAX_AGE_DAYS,
     DREAMING_SOURCE_LIMIT,
@@ -20,7 +18,7 @@ from consts.const import (
     MIN_UNIQUE_QUERIES,
     RECENCY_HALF_LIFE_DAYS,
 )
-from database import memory_dreaming_db, memory_record_db, memory_retrieval_hit_db
+from database import memory_dreaming_db, memory_long_term_db, memory_record_db, memory_retrieval_hit_db
 from nexent.memory.dreaming import (
     DreamingMemoryUnit,
     DreamingThresholds,
@@ -48,9 +46,9 @@ class DreamingConflictError(RuntimeError):
 
 
 class MemoryDreamingService:
-    def __init__(self, record_service: Any = None, compressor: Any = None):
+    def __init__(self, record_service: Any = None, summarizer: Any = None):
         self.record_service = record_service or get_memory_record_service()
-        self.compressor = compressor
+        self.summarizer = summarizer
 
     def _run_light(
         self, tenant_id: str, user_id: str, agent_id: str, window_days: int
@@ -132,11 +130,14 @@ class MemoryDreamingService:
         decisions: List[Any],
         config_snapshot: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        active = memory_dreaming_db.get_active_version(tenant_id, user_id, agent_id)
-        parent_units = [
-            DreamingMemoryUnit.model_validate(unit)
-            for unit in (active or {}).get("published_units", [])
-        ]
+        active = memory_long_term_db.get_active(tenant_id, "user", user_id)
+        parent_units = []
+        if active and active.get("content", "").strip():
+            parent_units.append(DreamingMemoryUnit(
+                unit_id=f"long-term-version:{active['version_id']}",
+                content=active["content"], evidence_ids=active.get("evidence_ids") or [],
+                strong_constraint=active.get("source") == "manual",
+            ))
         parent_unit_ids = {unit.unit_id for unit in parent_units}
         parent_evidence_ids = {
             evidence_id for unit in parent_units for evidence_id in unit.evidence_ids
@@ -147,9 +148,9 @@ class MemoryDreamingService:
         effective_long_term_max_chars = (
             (config_snapshot or {}).get("long_term_max_chars") or DREAMING_LONG_TERM_MAX_CHARS
         )
-        effective_compression_max_attempts = (
-            (config_snapshot or {}).get("compression_max_attempts")
-            or DREAMING_COMPRESSION_MAX_ATTEMPTS
+        effective_summarization_max_attempts = (
+            (config_snapshot or {}).get("summarization_max_attempts")
+            or DREAMING_SUMMARIZATION_MAX_ATTEMPTS
         )
         new_units = units_from_decisions(
             decisions,
@@ -168,58 +169,58 @@ class MemoryDreamingService:
             parent_units=parent_units,
             new_units=new_units,
             max_chars=effective_long_term_max_chars,
-            compressor=self.compressor or self._tenant_compressor(tenant_id, user_id),
-            max_attempts=effective_compression_max_attempts,
+            summarizer=self.summarizer or self._tenant_summarizer(tenant_id, user_id),
+            prior_source=(active or {}).get("source", "none"),
+            max_attempts=effective_summarization_max_attempts,
             run_id=run_id,
             agent_id=agent_id,
-            backoff_base_seconds=DREAMING_COMPRESSION_BACKOFF_BASE_SECONDS,
+            backoff_base_seconds=DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS,
         )
-        return memory_dreaming_db.create_and_activate_version(
+        version = memory_long_term_db.create_and_activate(
             tenant_id=tenant_id,
-            user_id=user_id,
-            agent_id=agent_id,
-            run_id=run_id,
-            parent_version_id=(active or {}).get("version_id"),
-            raw_content=result.raw_content,
-            published_content=result.published_content,
-            published_units=[
-                unit.model_dump(mode="json") for unit in result.published_units
-            ],
-            source_evidence_ids=sorted(
+            scope="user",
+            subject_id=user_id,
+            content=result.published_content,
+            source="dreaming",
+            actor_user_id=user_id,
+            expected_active_version_id=(active or {}).get("version_id"),
+            dreaming_run_id=run_id,
+            raw_dreaming_input=result.raw_content,
+            generation_audit={
+                "status": result.summarization_status,
+                "attempts": result.summarization_attempts,
+                "attempt_audit": result.summarization_audit,
+            },
+            evidence_ids=sorted(
                 {
                     evidence_id
                     for unit in [*parent_units, *new_units]
                     for evidence_id in unit.evidence_ids
                 }
             ),
-            config_snapshot=config_snapshot
-            or {
-                "source_limit": effective_source_limit,
-                "long_term_max_chars": effective_long_term_max_chars,
-                "compression_max_attempts": effective_compression_max_attempts,
+            fallback_details={
+                "used": result.summarization_status == "mechanical_fallback",
+                "mechanical_truncation": result.mechanical_truncation,
             },
-            raw_char_count=result.raw_char_count,
-            published_char_count=result.published_char_count,
-            compression_status=result.compression_status,
-            compression_attempts=result.compression_attempts,
-            omitted_evidence_ids=result.omitted_evidence_ids,
-            mechanical_truncation=result.mechanical_truncation,
-            compression_audit=result.compression_audit,
+            omission_details={"evidence_ids": result.omitted_evidence_ids},
         )
+        if version is None:
+            raise DreamingConflictError("active version changed during Dreaming")
+        return version
 
     @staticmethod
-    def _tenant_compressor(tenant_id: str, user_id: str):
+    def _tenant_summarizer(tenant_id: str, user_id: str):
         instance = None
 
-        def compress(request):
+        def summarize(request):
             nonlocal instance
             if instance is None:
-                from services.memory_dreaming_compressor import TenantDreamingCompressor
+                from services.memory_dreaming_compressor import TenantDreamingSummarizer
 
-                instance = TenantDreamingCompressor(tenant_id, user_id)
+                instance = TenantDreamingSummarizer(tenant_id, user_id)
             return instance(request)
 
-        return compress
+        return summarize
 
     def run(
         self,
@@ -282,7 +283,7 @@ class MemoryDreamingService:
                 effective_min_queries = min_unique_queries
                 effective_source_limit = DREAMING_SOURCE_LIMIT
                 effective_long_term_max_chars = DREAMING_LONG_TERM_MAX_CHARS
-                effective_compression_max_attempts = DREAMING_COMPRESSION_MAX_ATTEMPTS
+                effective_summarization_max_attempts = DREAMING_SUMMARIZATION_MAX_ATTEMPTS
                 if user_thresholds:
                     if user_thresholds.get("min_score") is not None:
                         effective_min_score = user_thresholds["min_score"]
@@ -294,8 +295,8 @@ class MemoryDreamingService:
                         effective_source_limit = user_thresholds["source_limit"]
                     if user_thresholds.get("long_term_max_chars") is not None:
                         effective_long_term_max_chars = user_thresholds["long_term_max_chars"]
-                    if user_thresholds.get("compression_max_attempts") is not None:
-                        effective_compression_max_attempts = user_thresholds["compression_max_attempts"]
+                    if user_thresholds.get("summarization_max_attempts") is not None:
+                        effective_summarization_max_attempts = user_thresholds["summarization_max_attempts"]
 
                 decisions = select_candidates(
                     candidates,
@@ -307,7 +308,7 @@ class MemoryDreamingService:
                     recency_half_life_days=RECENCY_HALF_LIFE_DAYS,
                 )
                 memory_dreaming_db.update_audit(
-                    run_id, {"current_phase": "compression"}
+                    run_id, {"current_phase": "summarization"}
                 )
                 config_snapshot = {
                     "window_days": window_days,
@@ -316,33 +317,19 @@ class MemoryDreamingService:
                     "min_unique_queries": effective_min_queries,
                     "source_limit": effective_source_limit,
                     "long_term_max_chars": effective_long_term_max_chars,
-                    "compression_max_attempts": effective_compression_max_attempts,
+                    "summarization_max_attempts": effective_summarization_max_attempts,
                 }
-                executor = ThreadPoolExecutor(max_workers=1)
-                try:
-                    future = executor.submit(
-                        self._build_version,
-                        tenant_id,
-                        user_id,
-                        agent_id,
-                        run_id,
-                        decisions,
-                        config_snapshot,
-                    )
-                    try:
-                        version = future.result(
-                            timeout=DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS
-                        )
-                    except FuturesTimeoutError:
-                        logger.warning(
-                            "Compression phase timed out after %d seconds for run=%s, cancelling task",
-                            DREAMING_COMPRESSION_PHASE_TIMEOUT_SECONDS,
-                            run_id,
-                        )
-                        future.cancel()
-                        version = None
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+                # The model client owns request timeouts. Running the builder inline lets
+                # its retry/fallback contract handle timeout exceptions and prevents an
+                # uncancellable executor thread from outliving a completed audit.
+                version = self._build_version(
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    run_id,
+                    decisions,
+                    config_snapshot,
+                )
                 results = [
                     {
                         "memory_id": decision.candidate.memory_id,
@@ -406,45 +393,6 @@ class MemoryDreamingService:
             run_id=run_id,
             limit=limit,
         )
-
-    def list_versions(
-        self, tenant_id: str, user_id: str, *, agent_id: str, limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        return memory_dreaming_db.list_versions(
-            tenant_id, user_id, agent_id=agent_id, limit=limit
-        )
-
-    def activate_version(
-        self,
-        tenant_id: str,
-        user_id: str,
-        *,
-        agent_id: str,
-        version_id: int,
-        actor_user_id: Optional[str] = None,
-        expected_active_version_id: Optional[int] = None,
-    ) -> Optional[Dict[str, Any]]:
-        with memory_dreaming_db.try_scope_lock(
-            tenant_id, user_id, agent_id
-        ) as acquired:
-            if not acquired:
-                raise DreamingConflictError("Dreaming scope is busy")
-            active = memory_dreaming_db.get_active_version(tenant_id, user_id, agent_id)
-            if (
-                expected_active_version_id is not None
-                and (active or {}).get("version_id") != expected_active_version_id
-            ):
-                raise DreamingConflictError(
-                    "Active Dreaming version changed; refresh and retry"
-                )
-            return memory_dreaming_db.activate_version(
-                tenant_id,
-                user_id,
-                agent_id,
-                version_id,
-                actor_user_id=actor_user_id,
-            )
-
 
 _service: Optional[MemoryDreamingService] = None
 

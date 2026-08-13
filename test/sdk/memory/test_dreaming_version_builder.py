@@ -1,478 +1,117 @@
 from datetime import datetime
 
-import pytest
-
 from nexent.memory.dreaming import (
-    DreamingCandidate,
-    DreamingCompressionOutput,
     DreamingMemoryUnit,
-    DreamingThresholds,
+    DreamingSummarizationOutput,
     build_dreaming_version,
-    select_candidates,
-    units_from_decisions,
 )
 
 
-def candidate(**overrides):
-    values = {
-        "memory_id": 1,
-        "tenant_id": "tenant",
-        "user_id": "user",
-        "agent_id": "agent",
-        "content": "durable fact",
-        "recall_count": 3,
-        "daily_count": 2,
-        "grounded_count": 1,
-        "total_retrieval_score": 4.2,
-        "query_hashes": ["q1", "q2"],
-        "recall_days": ["2026-07-20", "2026-07-22"],
-        "last_recalled_at": datetime(2026, 7, 22),
-    }
-    values.update(overrides)
-    return DreamingCandidate(**values)
+def _unit(unit_id, content, *, new=False, evidence=None, constraint=False):
+    return DreamingMemoryUnit(unit_id=unit_id, content=content, evidence_ids=evidence or [unit_id],
+                              is_new=new, strong_constraint=constraint, source_updated_at=datetime(2026, 8, 13))
 
 
-def test_ac027_limit_is_applied_after_deterministic_ranking():
-    decisions = select_candidates(
-        [
-            candidate(memory_id=1, total_retrieval_score=1),
-            candidate(memory_id=2, total_retrieval_score=9),
-            candidate(memory_id=3, total_retrieval_score=5),
-        ],
-        thresholds=DreamingThresholds(
-            min_score=0,
-            min_recall_count=0,
-            min_unique_queries=0,
-        ),
-        now=datetime(2026, 7, 23),
-    )
-
-    units = units_from_decisions(decisions, source_limit=2)
-
-    assert [unit.unit_id for unit in units] == ["short-term:2", "short-term:3"]
-
-
-def test_ac038_source_metadata_is_preserved_and_legacy_units_remain_compatible():
-    decisions = select_candidates(
-        [
-            candidate(
-                conversation_id="conversation-1",
-                source_created_at=datetime(2026, 7, 20, 9),
-                source_updated_at=datetime(2026, 7, 22, 10),
-            )
-        ],
-        thresholds=DreamingThresholds(
-            min_score=0,
-            min_recall_count=0,
-            min_unique_queries=0,
-        ),
-        now=datetime(2026, 7, 23),
-    )
-
-    unit = units_from_decisions(decisions, source_limit=1)[0]
-    result = build_dreaming_version(
-        parent_units=[],
-        new_units=[unit],
-        max_chars=100,
-    )
-    serialized = result.published_units[0].model_dump(mode="json")
-
-    assert serialized["source_agent_id"] == "agent"
-    assert serialized["source_conversation_id"] == "conversation-1"
-    assert serialized["source_created_at"] == "2026-07-20T09:00:00"
-    assert serialized["source_updated_at"] == "2026-07-22T10:00:00"
-
-    legacy = DreamingMemoryUnit.model_validate(
-        {
-            "unit_id": "legacy:1",
-            "content": "legacy fact",
-            "evidence_ids": ["1"],
-        }
-    )
-    assert legacy.source_agent_id is None
-    assert legacy.source_conversation_id is None
-    assert legacy.source_created_at is None
-    assert legacy.source_updated_at is None
-
-
-def test_ac023_boundary_and_parent_are_preserved_without_model_call():
+def test_ac057_builder_calls_model_once_for_under_limit_and_inherits_evidence_ids():
     calls = []
-    parent = DreamingMemoryUnit(
-        unit_id="parent:1",
-        content="old fact",
-        evidence_ids=["old"],
-    )
-    new = DreamingMemoryUnit(
-        unit_id="short-term:2",
-        content="new fact",
-        evidence_ids=["2"],
-        is_new=True,
-    )
-
     result = build_dreaming_version(
-        parent_units=[parent],
-        new_units=[new],
-        max_chars=len("- old fact\n- new fact"),
-        compressor=lambda request: calls.append(request),
+        parent_units=[_unit("old", "manual rule 7", constraint=True)],
+        new_units=[_unit("new", "account ABC-42", new=True)], max_chars=500, prior_source="manual",
+        summarizer=lambda request: calls.append(request) or DreamingSummarizationOutput(
+            markdown="## Operating Constraints\n\n- manual rule 7\n\n## Account Details\n\n- account ABC-42"),
     )
+    assert len(calls) == 1
+    assert calls[0].prior_source == "manual"
+    assert "E0001" in calls[0].new_evidence_markdown
+    assert result.summarization_status == "summarized"
+    assert result.published_units[0].evidence_ids == ["new", "old"]
 
-    assert result.compression_status == "not_needed"
-    assert result.published_content == "- old fact\n- new fact"
-    assert calls == []
 
-
-def test_ac024_semantic_compression_retries_with_validation_feedback():
-    requests = []
-
-    def compressor(request):
-        requests.append(request)
+def test_ac060_retries_validation_then_accepts():
+    calls = []
+    def summarize(request):
+        calls.append(request)
         if request.attempt == 1:
-            return DreamingCompressionOutput(
-                content="x" * 30,
-                evidence_ids=["new"],
-                metadata={
-                    "all_fact_ids": ["f001"],
-                    "covered_fact_ids": ["f001"],
-                    "fact_to_units_map": {"f001": ["new"]},
-                },
-            )
-        return DreamingCompressionOutput(
-            content="old and new",
-            evidence_ids=["old", "new"],
-            metadata={
-                "all_fact_ids": ["f001", "f002"],
-                "covered_fact_ids": ["f001", "f002"],
-                "fact_to_units_map": {"f001": ["parent"], "f002": ["new"]},
-            },
-        )
+            return DreamingSummarizationOutput(markdown="bad")
+        return DreamingSummarizationOutput(markdown="## Measured Value\n\n- value 7")
+    result = build_dreaming_version(parent_units=[], new_units=[_unit("n", "value 7", new=True)],
+                                    max_chars=100, summarizer=summarize, backoff_base_seconds=0)
+    assert len(calls) == 2
+    assert "first_line_must_be_section_heading" in calls[1].validation_feedback
+    assert result.summarization_attempts == 2
 
+
+def test_ac061_invalid_markup_missing_literal_and_timeout_error_use_fallback():
+    for output in (
+        DreamingSummarizationOutput(markdown="## Contact Details\n\n```x```"),
+        DreamingSummarizationOutput(markdown="## Contact Details\n\n- omitted"),
+    ):
+        result = build_dreaming_version(parent_units=[], new_units=[_unit("n", "email a@example.com rule 7", new=True)],
+                                        max_chars=120, summarizer=lambda _: output, max_attempts=1)
+        assert result.summarization_status == "mechanical_fallback"
+        assert result.summarization_audit[0]["outcome"] == "rejected"
+
+    result = build_dreaming_version(parent_units=[], new_units=[_unit("n", "value", new=True)], max_chars=80,
+                                    summarizer=lambda _: (_ for _ in ()).throw(TimeoutError()), max_attempts=1)
+    assert result.summarization_status == "mechanical_fallback"
+    assert result.summarization_audit[0]["outcome"] == "model_error"
+
+
+def test_ac062_no_new_evidence_skips_model_and_preserves_active_content():
+    calls = []
+    parent = _unit("old", "## Existing Preference\n\n- unchanged")
+    result = build_dreaming_version(parent_units=[parent], new_units=[], summarizer=lambda req: calls.append(req))
+    assert calls == []
+    assert result.summarization_status == "no_new_evidence"
+
+
+def test_ac063_fallback_prioritizes_manual_constraint_and_records_omissions():
     result = build_dreaming_version(
-        parent_units=[
-            DreamingMemoryUnit(
-                unit_id="parent",
-                content="old " * 20,
-                evidence_ids=["old"],
-            )
-        ],
-        new_units=[
-            DreamingMemoryUnit(
-                unit_id="new",
-                content="new " * 20,
-                evidence_ids=["new"],
-                is_new=True,
-            )
-        ],
-        max_chars=20,
-        compressor=compressor,
+        parent_units=[_unit("manual", "must keep", constraint=True)],
+        new_units=[_unit("new", "new information", new=True), _unit("extra", "extra information", new=True)],
+        max_chars=65, summarizer=None,
     )
-
-    assert result.compression_status == "semantic"
-    assert result.published_content == "old and new"
-    assert result.compression_attempts == 2
-    assert "missing_evidence:old" in requests[1].validation_feedback
-    assert result.compression_audit == [
-        {
-            "attempt": 1,
-            "outcome": "rejected",
-            "validation": [
-                "content_over_limit:10",
-                "missing_evidence:old",
-                "fact_coverage_too_low:1/2=0.50",
-            ],
-        },
-        {"attempt": 2, "outcome": "accepted", "validation": []},
-    ]
+    assert result.summarization_status == "mechanical_fallback"
+    assert "must keep" in result.published_content
+    assert result.omitted_evidence_ids
+    assert result.published_char_count <= 90
 
 
-def test_ac025_mechanical_fallback_prioritizes_new_content_and_records_omissions():
-    result = build_dreaming_version(
-        parent_units=[
-            DreamingMemoryUnit(
-                unit_id="parent",
-                content="old information",
-                evidence_ids=["old"],
-            )
-        ],
-        new_units=[
-            DreamingMemoryUnit(
-                unit_id="new",
-                content="new information",
-                evidence_ids=["new"],
-                is_new=True,
-            )
-        ],
-        max_chars=len("- new information"),
-        compressor=lambda _request: DreamingCompressionOutput(
-            content="still too long" * 10,
-            evidence_ids=[],
-        ),
-        max_attempts=2,
+def test_ac069_requires_topical_unique_sections_with_bullets_and_no_h1():
+    invalid_values = (
+        "# User Memory\n\n## Projects\n\n- alpha",
+        "## Facts\n\n- alpha",
+        "## Projects\n\n- alpha\n\n## Projects\n\n- beta",
+        "## Projects\n\nA paragraph without bullets",
+        "## E0001\n\n- alpha",
+        "## Map Summary 1\n\n- alpha",
     )
-
-    assert result.compression_status == "mechanical_fallback"
-    assert result.published_content == "- new information"
-    assert result.omitted_evidence_ids == ["old"]
-    assert result.published_char_count <= len("- new information")
-    assert [row["outcome"] for row in result.compression_audit] == [
-        "rejected",
-        "rejected",
-    ]
-
-
-def test_ac025_single_oversized_unit_uses_marked_sentence_boundary_fallback():
-    result = build_dreaming_version(
-        parent_units=[],
-        new_units=[
-            DreamingMemoryUnit(
-                unit_id="new",
-                content="First durable fact. Second durable fact is much longer.",
-                evidence_ids=["new"],
-                is_new=True,
-            )
-        ],
-        max_chars=48,
-    )
-
-    assert result.mechanical_truncation is True
-    assert "[mechanically truncated]" in result.published_content
-    assert result.published_char_count <= 48
-
-
-def test_ac017_semantic_compression_rejects_missing_fact_literals():
-    requests = []
-
-    def compressor(request):
-        requests.append(request)
-        return DreamingCompressionOutput(
-            content="Keep the API latency below the agreed threshold.",
-            evidence_ids=["new"],
-        )
-
-    result = build_dreaming_version(
-        parent_units=[],
-        new_units=[
-            DreamingMemoryUnit(
-                unit_id="new",
-                content=(
-                    "Keep API latency below 250ms and notify ops@example.com. " * 3
-                ),
-                evidence_ids=["new"],
-                is_new=True,
-            )
-        ],
-        max_chars=80,
-        compressor=compressor,
-    )
-
-    assert len(requests) == 2
-    assert result.compression_status == "mechanical_fallback"
-    assert "missing_critical_literals:250ms,ops@example.com" in (
-        requests[1].validation_feedback
-    )
-
-
-def test_ac035_named_pattern_literal_extraction():
-    from nexent.memory.dreaming.version_builder import _critical_literals
-    literals = _critical_literals("Follow pattern 10 and rule 3 for step 7")
-    assert "pattern 10" in literals
-    assert "rule 3" in literals
-    assert "step 7" in literals
-
-
-def test_ac043_coverage_validation_rejection():
-    from nexent.memory.dreaming.version_builder import _validate_compression
-    output = DreamingCompressionOutput(
-        content="some content",
-        evidence_ids=["1", "2", "3"],
-    )
-    source_unit_ids = {"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9", "u10"}
-    fact_to_units_map = {
-        "f001": ["u1"], "f002": ["u2"], "f003": ["u3"],
-        "f004": ["u4"], "f005": ["u5"], "f006": ["u6"],
-        "f007": ["u7"], "f008": ["u8"],
-    }
-    compressed_fact_ids = ["f001", "f002", "f003", "f004", "f005", "f006", "f007", "f008"]
-
-    feedback = _validate_compression(
-        output,
-        required_evidence={"1", "2", "3"},
-        required_literals=set(),
-        max_chars=10_000,
-        source_unit_ids=source_unit_ids,
-        fact_to_units_map=fact_to_units_map,
-        compressed_fact_ids=compressed_fact_ids,
-    )
-    assert any("fact_coverage_too_low" in f for f in feedback)
-
-
-def test_ac044_coverage_validation_acceptance():
-    from nexent.memory.dreaming.version_builder import _validate_compression
-    output = DreamingCompressionOutput(
-        content="some content",
-        evidence_ids=["1", "2", "3"],
-    )
-    source_unit_ids = {"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9", "u10"}
-    fact_to_units_map = {f"f{i:03d}": [f"u{i}"] for i in range(1, 11)}
-    compressed_fact_ids = [f"f{i:03d}" for i in range(1, 11)]
-
-    feedback = _validate_compression(
-        output,
-        required_evidence={"1", "2", "3"},
-        required_literals=set(),
-        max_chars=10_000,
-        source_unit_ids=source_unit_ids,
-        fact_to_units_map=fact_to_units_map,
-        compressed_fact_ids=compressed_fact_ids,
-    )
-    assert not any("fact_coverage" in f for f in feedback)
-
-
-def test_units_from_decisions_negative_source_limit():
-    with pytest.raises(ValueError, match="non-negative"):
-        units_from_decisions([], source_limit=-1)
-
-
-def test_units_from_decisions_zero_source_limit():
-    decisions = select_candidates(
-        [candidate(memory_id=1)],
-        thresholds=DreamingThresholds(
-            min_score=0, min_recall_count=0, min_unique_queries=0
-        ),
-        now=datetime(2026, 7, 23),
-    )
-    result = units_from_decisions(decisions, source_limit=0)
-    assert result == []
-
-
-def test_build_dreaming_version_invalid_max_chars():
-    with pytest.raises(ValueError, match="positive"):
-        build_dreaming_version(parent_units=[], new_units=[], max_chars=0)
-
-
-def test_build_dreaming_version_negative_max_attempts():
-    with pytest.raises(ValueError, match="non-negative"):
-        build_dreaming_version(parent_units=[], new_units=[], max_chars=100, max_attempts=-1)
-
-
-def test_build_dreaming_version_compressor_exception():
-    def failing_compressor(request):
-        raise RuntimeError("model unavailable")
-
-    result = build_dreaming_version(
-        parent_units=[],
-        new_units=[
-            DreamingMemoryUnit(
-                unit_id="new",
-                content="important fact " * 20,
-                evidence_ids=["1"],
-                is_new=True,
-            )
-        ],
-        max_chars=20,
-        compressor=failing_compressor,
-        max_attempts=2,
-    )
-
-    assert result.compression_status == "mechanical_fallback"
-    assert result.compression_audit[0]["outcome"] == "model_error"
-    assert "compressor_error" in result.compression_audit[0]["validation"][0]
-
-
-def test_validate_compression_empty_content():
-    from nexent.memory.dreaming.version_builder import _validate_compression
-
-    output = DreamingCompressionOutput(
-        content="   ",
-        evidence_ids=["1"],
-    )
-    feedback = _validate_compression(
-        output,
-        required_evidence={"1"},
-        required_literals=set(),
-        max_chars=10_000,
-    )
-    assert "content_empty" in feedback
-
-
-def test_truncate_at_sentence_short_text():
-    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
-
-    assert _truncate_at_sentence("short", 100) == "short"
-
-
-def test_truncate_at_sentence_zero_limit():
-    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
-
-    assert _truncate_at_sentence("some text", 0) == ""
-
-
-def test_truncate_at_sentence_word_boundary():
-    from nexent.memory.dreaming.version_builder import _truncate_at_sentence
-
-    text = "This is a long sentence without period marks"
-    result = _truncate_at_sentence(text, 30)
-    assert len(result) <= 30
-    assert result == "This is a long sentence"
-
-
-def test_backoff_between_retries():
-    """Verify that backoff delay is applied between retry attempts."""
-    from unittest.mock import patch
-
-    # Mock compressor that fails on first attempt, succeeds on second
-    call_count = [0]
-
-    def mock_compressor(request):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            raise ValueError("Simulated failure")
-        # Return valid output on second attempt
-        return DreamingCompressionOutput(
-            content="- Fact 1\n- Fact 2",
-            metadata={
-                "fact_to_units_map": {},
-                "covered_fact_ids": [],
-            },
-        )
-
-    # Create test units
-    units = [
-        DreamingMemoryUnit(
-            unit_id="test:1",
-            content="Test content that exceeds limit",
-            evidence_ids=["1"],
-        )
-    ]
-
-    # Patch time.sleep in the version_builder module to track calls
-    with patch("nexent.memory.dreaming.version_builder.time.sleep") as mock_sleep:
+    for value in invalid_values:
         result = build_dreaming_version(
-            parent_units=[],
-            new_units=units,
-            max_chars=10,  # Force compression
-            compressor=mock_compressor,
-            max_attempts=2,
-            backoff_base_seconds=1.0,
+            parent_units=[], new_units=[_unit("n", "alpha", new=True)], max_chars=200,
+            summarizer=lambda _request, value=value: DreamingSummarizationOutput(markdown=value),
+            max_attempts=1,
         )
-
-        # Verify sleep was called once (between attempt 1 and 2)
-        assert mock_sleep.call_count == 1
-        # Verify it was called with backoff_base_seconds * (attempt - 1) = 1.0 * 1 = 1.0
-        mock_sleep.assert_called_once_with(1.0)
+        assert result.summarization_status == "mechanical_fallback"
 
 
-def test_default_parameters_updated():
-    """Verify that default promotion parameters match OpenClaw calibration."""
-    from consts.const import DREAMING_MAX_AGE_DAYS, MIN_PROMOTION_SCORE, MIN_UNIQUE_QUERIES
+def test_ac071_preserves_high_value_ids_and_manual_numbers_but_not_narrative_numbers():
+    accepted = DreamingSummarizationOutput(
+        markdown="## Account Access\n\n- Use ABC-42 at a@example.com\n- Manual limit is 7"
+    )
+    result = build_dreaming_version(
+        parent_units=[_unit("manual", "Manual limit is 7", constraint=True)],
+        new_units=[_unit("story", "Chapter 12 used account ABC-42 and a@example.com", new=True)],
+        max_chars=300, summarizer=lambda _request: accepted,
+    )
+    assert result.summarization_status == "summarized"
+    assert "Chapter 12" not in result.published_content
 
-    assert MIN_PROMOTION_SCORE == 0.75, "MIN_PROMOTION_SCORE should be 0.75 per OpenClaw 3x3 rule"
-    assert MIN_UNIQUE_QUERIES == 3, "MIN_UNIQUE_QUERIES should be 3 per OpenClaw 3x3 rule"
-    assert DREAMING_MAX_AGE_DAYS == 30, "DREAMING_MAX_AGE_DAYS should be 30"
 
-
-def test_max_age_days_constant_exists():
-    """Verify that DREAMING_MAX_AGE_DAYS constant is defined."""
-    from consts.const import DREAMING_MAX_AGE_DAYS
-
-    assert isinstance(DREAMING_MAX_AGE_DAYS, int)
-    assert DREAMING_MAX_AGE_DAYS > 0
+def test_ac072_fallback_has_one_safe_section_and_no_document_title():
+    result = build_dreaming_version(
+        parent_units=[], new_units=[_unit("n", "用户偏好简洁回答", new=True)],
+        max_chars=100, summarizer=None,
+    )
+    assert result.published_content.startswith("## 未分类记忆\n\n-")
+    assert "# User Memory" not in result.published_content

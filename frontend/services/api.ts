@@ -496,6 +496,16 @@ export const API_ENDPOINTS = {
       delete: (memoryId: string | number) =>
         `${API_BASE_URL}/memory/records/${memoryId}`,
     },
+    longTerm: {
+      active: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}`,
+      versions: (scope: "tenant" | "user") =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions`,
+      detail: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}`,
+      activate: (scope: "tenant" | "user", versionId: number) =>
+        `${API_BASE_URL}/memory/long-term/${scope}/versions/${versionId}/activate`,
+    },
 
     // ---------------- Memory CRUD ----------------
     entry: {
@@ -511,11 +521,6 @@ export const API_ENDPOINTS = {
       schedule: `${API_BASE_URL}/memory/dreaming/schedule`,
       run: `${API_BASE_URL}/memory/dreaming/run`,
       audits: `${API_BASE_URL}/memory/dreaming/audit`,
-      versions: `${API_BASE_URL}/memory/dreaming/versions`,
-      activate: (versionId: string | number) =>
-        `${API_BASE_URL}/memory/dreaming/versions/${versionId}/activate`,
-      clear: `${API_BASE_URL}/memory/dreaming/versions/clear`,
-      undoClear: `${API_BASE_URL}/memory/dreaming/versions/undo-clear`,
     },
   },
   agentRepository: {
@@ -658,11 +663,13 @@ export const API_ENDPOINTS = {
   quota: {
     // Tenant-level quota
     config: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota`,
-    usage: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
+    usage: (tenantId: string) =>
+      `${API_BASE_URL}/tenants/${tenantId}/quota/usage`,
     // Platform-level quota (SU/ASSET_OWNER/SPEED only)
     platformOverview: `${API_BASE_URL}/platform/quota/overview`,
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
-    platformTenantQuota: (tenantId: string) => `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    platformTenantQuota: (tenantId: string) =>
+      `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
@@ -794,7 +801,10 @@ export const fetchWithErrorHandling = async (
         try {
           const errorData = JSON.parse(errorText);
           if (errorData?.error === "TenantStorageFull") {
-            throw new ApiError(413, errorData.message || "Tenant storage limit reached");
+            throw new ApiError(
+              413,
+              errorData.message || "Tenant storage limit reached"
+            );
           }
         } catch (error) {
           if (error instanceof ApiError) {

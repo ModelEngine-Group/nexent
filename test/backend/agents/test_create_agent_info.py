@@ -4962,15 +4962,16 @@ class TestAdditionalAgentInfoCoverage:
     def test_format_long_term_memory_prompt_supports_dict_and_object_entries(self):
         context = types.SimpleNamespace(
             tenant_long_term=[{"content": " tenant preference "}, {"content": ""}],
-            user_long_term=[types.SimpleNamespace(content="user preference")],
+            user_long_term=[types.SimpleNamespace(content="## Answer Preferences\n\n- concise")],
         )
 
         result = create_agent_info_module._format_long_term_memory_prompt(context, "en")
 
         assert result == (
-            "### Tenant Long-term Memory\n- tenant preference\n\n"
-            "### User Long-term Memory\n- user preference"
+            "### Tenant Long-term Memory\ntenant preference\n\n"
+            "### User Long-term Memory\n## Answer Preferences\n\n- concise"
         )
+        assert "- ## Answer Preferences" not in result
 
     def test_normalize_tool_params_rejects_non_object_payload(self):
         with pytest.raises(ValidationError, match="must be an object"):

@@ -16,8 +16,8 @@ sys.path.insert(
 
 # Stub database
 database_pkg = types.ModuleType("database")
-database_pkg.memory_dreaming_db = MagicMock(name="memory_dreaming_db")
-database_pkg.memory_dreaming_db.get_active_version.return_value = None
+database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
+database_pkg.memory_long_term_db.get_active.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
@@ -199,6 +199,10 @@ def service(fake_record_service, fake_index_service):
 
 
 def test_search_returns_full_context_memories(service):
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = {
+        "version_id": 1, "version_no": 1, "scope": "tenant", "content": "tenant memory",
+        "source": "manual", "evidence_ids": [],
+    }
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn",
         user_id="u1",
@@ -216,16 +220,18 @@ def test_search_returns_full_context_memories(service):
     )
 
     assert len(results) == 1
-    assert results[0].memory_id == 1
+    assert results[0].external_id == "long-term-version:1"
     assert results[0].layer == memory_retrieval_service.MemoryLayer.TENANT
 
 
-def test_ac039_user_context_combines_records_and_active_dreaming_version(service):
-    memory_retrieval_service.memory_dreaming_db.get_active_version.return_value = {
+def test_ac047_user_context_returns_exactly_one_active_document(service):
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = {
         "version_id": 8,
         "version_no": 2,
-        "published_content": "dreaming long-term memory",
-        "source_evidence_ids": ["46", "47"],
+        "scope": "user",
+        "content": "dreaming long-term memory",
+        "source": "dreaming",
+        "evidence_ids": ["46", "47"],
     }
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn",
@@ -243,17 +249,17 @@ def test_ac039_user_context_combines_records_and_active_dreaming_version(service
         service.search(request, write_hits=False)
     )
 
-    assert len(results) == 2
-    dreaming = results[1]
+    assert len(results) == 1
+    dreaming = results[0]
     assert dreaming.content == "dreaming long-term memory"
     assert dreaming.layer == memory_retrieval_service.MemoryLayer.USER
     assert dreaming.source == "dreaming"
-    assert dreaming.metadata["dreaming_version_id"] == 8
+    assert dreaming.metadata["version_id"] == 8
     assert dreaming.metadata["source_evidence_ids"] == ["46", "47"]
-    memory_retrieval_service.memory_dreaming_db.get_active_version.assert_called_with(
-        "tn", "u1", "a1"
+    memory_retrieval_service.memory_long_term_db.get_active.assert_called_with(
+        "tn", "user", "u1"
     )
-    memory_retrieval_service.memory_dreaming_db.get_active_version.return_value = None
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = None
 
 
 def test_search_returns_vector_results(service):

@@ -39,7 +39,7 @@ import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
 import { DreamingConfigCards } from "./DreamingConfigCards";
-import { DreamingPanel } from "./DreamingPanel";
+import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
 import {
   loadMemoryConfig,
   setDreamingConfig,
@@ -60,7 +60,7 @@ import {
 
 const { Text, Title, Paragraph } = Typography;
 
-type TabKey = "base" | "dreaming" | MemoryScope;
+type TabKey = "base" | MemoryScope;
 type MemoryForm = {
   memory_type: MemoryType;
   status: MemoryStatus;
@@ -69,20 +69,20 @@ type MemoryForm = {
 
 const scopeMeta: Record<
   MemoryScope,
-  { label: string; description: string; icon: typeof Building2 }
+  { labelKey: string; description: string; icon: typeof Building2 }
 > = {
   tenant: {
-    label: "Tenant",
+    labelKey: "memory.longTerm.scope.tenant",
     description: "组织范围内共享的全局记忆",
     icon: Building2,
   },
   user: {
-    label: "User",
+    labelKey: "memory.longTerm.scope.user",
     description: "与当前用户偏好相关的记忆",
     icon: UserRound,
   },
   agent: {
-    label: "Agent",
+    labelKey: "memory.longTerm.scope.agent",
     description: "由智能体运行过程生成的记忆",
     icon: Bot,
   },
@@ -141,8 +141,7 @@ export function MemoryManager() {
   const [editing, setEditing] = useState<MemoryRecord | null>(null);
   const [form] = Form.useForm<MemoryForm>();
 
-  const scope =
-    activeTab === "base" || activeTab === "dreaming" ? null : activeTab;
+  const scope = activeTab === "base" ? null : activeTab;
   const records = scope ? recordsByScope[scope] : [];
 
   const refreshRecords = useCallback(
@@ -185,7 +184,7 @@ export function MemoryManager() {
   }, []);
 
   useEffect(() => {
-    void Promise.all(memoryScopes.map((item) => refreshRecords(item)));
+    void refreshRecords("agent");
   }, [refreshRecords]);
 
   const visibleRecords = useMemo(() => {
@@ -286,7 +285,9 @@ export function MemoryManager() {
       const saved = await setDreamingConfig(enabled, deleteHistory);
       if (!saved) throw new Error("save failed");
       setConfig((current) => ({ ...current, dreamingEnabled: enabled }));
-      message.success(enabled ? t("dreaming.config.enabled") : t("dreaming.config.disabled"));
+      message.success(
+        enabled ? t("dreaming.config.enabled") : t("dreaming.config.disabled")
+      );
     } catch {
       message.error(t("dreaming.config.updateFailed"));
     } finally {
@@ -301,8 +302,7 @@ export function MemoryManager() {
     }
     Modal.confirm({
       title: t("dreaming.config.disableTitle"),
-      content:
-        t("dreaming.config.disableConfirm"),
+      content: t("dreaming.config.disableConfirm"),
       okText: t("dreaming.config.disableWithHistory"),
       okButtonProps: { danger: true },
       cancelText: t("dreaming.config.disableKeepHistory"),
@@ -507,7 +507,9 @@ export function MemoryManager() {
   const renderBaseSettings = () => (
     <div className="memory-config-content">
       <Title level={4}>{t("memoryManageModal.baseSettings")}</Title>
-      <Text type="secondary">{t("memoryManageModal.baseSettingsDescription")}</Text>
+      <Text type="secondary">
+        {t("memoryManageModal.baseSettingsDescription")}
+      </Text>
       <Card className="memory-config-card" loading={configLoading}>
         <Flex align="center" justify="space-between" gap={24}>
           <Flex align="center" gap={12}>
@@ -561,7 +563,7 @@ export function MemoryManager() {
           className="scope-intro"
         >
           <div>
-            <Title level={4}>{meta.label} 记忆</Title>
+            <Title level={4}>{t(meta.labelKey)} 记忆</Title>
             <Text type="secondary">{meta.description}</Text>
           </div>
           {scope === "user" && (
@@ -675,7 +677,13 @@ export function MemoryManager() {
   };
 
   return (
-    <div className="memory-panel">
+    <div
+      className={`memory-panel ${
+        activeTab === "tenant" || activeTab === "user"
+          ? "memory-panel-long-term"
+          : ""
+      }`}
+    >
       <Tabs
         activeKey={activeTab}
         onChange={(key) => {
@@ -703,30 +711,22 @@ export function MemoryManager() {
               label: (
                 <span className="tab-label">
                   <Icon size={17} aria-hidden="true" />
-                  {scopeMeta[key].label}
-                  <span className="tab-count">
-                    {loadingByScope[key] ? "…" : recordsByScope[key].length}
-                  </span>
+                  {t(scopeMeta[key].labelKey)}
+                  {key === "agent" && (
+                    <span className="tab-count">
+                      {loadingByScope.agent ? "…" : recordsByScope.agent.length}
+                    </span>
+                  )}
                 </span>
               ),
             };
           }),
-          {
-            key: "dreaming",
-            label: (
-              <span className="tab-label">
-                <Brain size={17} aria-hidden="true" />
-                {t("dreaming.title")}
-              </span>
-            ),
-            disabled: !config.memoryEnabled || !config.dreamingEnabled,
-          },
         ]}
       />
       {activeTab === "base" ? (
         renderBaseSettings()
-      ) : activeTab === "dreaming" ? (
-        <DreamingPanel />
+      ) : activeTab === "tenant" || activeTab === "user" ? (
+        <LongTermMemoryPanel scope={activeTab} />
       ) : (
         renderRecordTable()
       )}
