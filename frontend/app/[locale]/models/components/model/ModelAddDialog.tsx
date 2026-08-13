@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+﻿import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -664,14 +664,7 @@ export const ModelAddDialog = ({
 
       let connectivity = false;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        connectivity = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name,
-          modelType
-        );
-      } else if (form.type === MODEL_TYPES.STT) {
+      if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
         const sttConfig: any = {
           modelType: modelType,
