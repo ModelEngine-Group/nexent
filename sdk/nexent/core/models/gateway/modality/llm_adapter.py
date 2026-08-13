@@ -1,16 +1,4 @@
-"""LLM adapter.
-
-LLM is the CoreAgent primary reasoning model. smolagents reaches it through
-``model.__call__()`` / ``model.client`` / ``model.model_id`` / ``model.temperature``
-etc. Because ``__call__`` is a Python special method it bypasses
-``__getattr__`` and must be forwarded explicitly; every other attribute is
-auto-forwarded to ``_model`` via ``__getattr__`` for zero-maintenance smolagents
-compat (new attributes added upstream keep working).
-
-LLM is the *only* modality that keeps ``__getattr__`` — it is contract
-compliance (smolagents treats the adapter as its Model), not a bypass of the
-uniform :meth:`invoke` / :meth:`stream` interface.
-"""
+"""LLM adapter — forwards to a wrapped OpenAIModel for smolagents compat."""
 
 from __future__ import annotations
 
@@ -21,8 +9,8 @@ from typing import Any, AsyncIterator, Dict, List
 
 from ...openai_llm import OpenAIModel
 from ...openai_long_context_model import OpenAILongContextModel
-from ..adapter import ModelInfo, MultimodalAdapter
-from ..context import ModelContext
+from ..multimodal_adapter import ModelInfo, MultimodalAdapter
+from ..model_context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin
 
@@ -31,8 +19,9 @@ from ..transport import HttpTransportMixin
 class LLMRequest:
     """Batch LLM request: messages plus forward kwargs.
 
-    Holds the conversation ``messages`` and the per-call forwarding ``kwargs``
-    for an LLM invocation.
+    Attributes:
+        messages: The conversation messages to send.
+        kwargs: Per-call arguments forwarded to the wrapped model.
     """
 
     messages: List[Dict[str, Any]]
@@ -48,6 +37,10 @@ class LLMAdapter(MultimodalAdapter):
     explicit (Python special methods bypass ``__getattr__``); every other
     attribute auto-forwards to ``_model``. This is contract compliance, not a
     bypass of the uniform interface.
+
+    Attributes:
+        modality: ``"llm"``.
+        _model: The wrapped :class:`OpenAIModel` (or subclass), built lazily.
     """
 
     modality = "llm"
@@ -68,6 +61,11 @@ class LLMAdapter(MultimodalAdapter):
         """
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[Any]:
+        """Streaming is not supported by the LLM base adapter.
+
+        Raises:
+            NotImplementedError: Always; concrete subclasses override.
+        """
         raise NotImplementedError(f"{self.modality} adapter does not support streaming")
 
     def __call__(self, messages: List[Dict[str, Any]], **kwargs) -> Any:
@@ -112,11 +110,7 @@ class LLMAdapter(MultimodalAdapter):
         raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
 
     def _build_model(self) -> None:
-        """Construct the wrapped existing-model instance on first use.
-
-        Subclasses override to instantiate their vendor/model class per its
-        real constructor signature, reading from :attr:`_context`.
-        """
+        """Construct the wrapped model instance on first use."""
         raise NotImplementedError(
             f"{type(self).__name__} must implement _build_model"
         )
@@ -124,7 +118,12 @@ class LLMAdapter(MultimodalAdapter):
 
 @register_adapter("openai", "llm")
 class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
-    """Wraps :class:`nexent.core.models.openai_llm.OpenAIModel`."""
+    """Wraps :class:`nexent.core.models.openai_llm.OpenAIModel`.
+
+    Attributes:
+        modality: ``"llm"``.
+        factory: ``"openai"``.
+    """
 
     factory = "openai"
 
@@ -139,6 +138,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         )
 
     def _build_model(self) -> None:
+        """Construct the wrapped :class:`OpenAIModel` on first use."""
         # Keep the existing OpenAIModel construction path so the adapter remains
         # compatible with smolagents and preserves existing model configuration.
         extras = self._context.extra
@@ -161,6 +161,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         self._model = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
+        """Return a smolagents ChatMessage, offloaded to a worker thread."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(
@@ -180,11 +181,13 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         return await self._model.client.chat.completions.create(**completion_kwargs)
 
     async def health_check(self) -> bool:
+        """Probe the wrapped model's connectivity."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` advertising text + tool_calling capabilities."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -203,11 +206,16 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
 
     Reuses the standard OpenAI LLM adapter behavior and overrides only
     model construction and long-context metadata.
+
+    Attributes:
+        modality: ``"llm_long_context"`` (overrides the base ``"llm"``).
+        factory: ``"openai"`` (inherited).
     """
 
     modality = "llm_long_context"
 
     def _build_model(self) -> None:
+        """Construct the wrapped :class:`OpenAILongContextModel` on first use."""
         extras = self._context.extra
         self._model = OpenAILongContextModel(
             observer=self._context.observer,
@@ -225,6 +233,7 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
         )
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` advertising ``long_context=True``."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",

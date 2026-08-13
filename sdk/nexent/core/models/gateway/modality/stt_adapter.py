@@ -1,17 +1,4 @@
-"""STT (speech-to-text) adapter — protocol implementation sunk in.
-
-The WebSocket speech-to-text protocols (Ali DashScope Realtime JSON-over-WS and
-Volc SAUC binary-gzip frames) live directly in the adapters. The old
-``ali_stt_model.py`` / ``volc_stt_model.py`` / ``stt_model.py`` (BaseSTTModel)
-classes are deleted; the adapters ARE the implementation.
-
-ModelEngine STT is different: it is HTTP REST, turning audio into base64 and
-reusing the OpenAI Chat Completions protocol, so its ``_model`` is
-:class:`OpenAIModel` (kept — see §3.16 LLM exception), not a dedicated STT
-class. The audio↔base64 conversion lives in the adapter's ``invoke``. This
-proves the transport Mixin is orthogonal: an HTTP-only STT vendor needs no
-WebSocket plumbing.
-"""
+"""STT (speech-to-text) adapter — Ali/Volc WebSocket + ModelEngine HTTP."""
 
 from __future__ import annotations
 
@@ -35,8 +22,8 @@ import aiofiles
 import websockets
 
 from ...openai_llm import OpenAIModel
-from ..adapter import ModelInfo, MultimodalAdapter
-from ..context import ModelContext
+from ..multimodal_adapter import ModelInfo, MultimodalAdapter
+from ..model_context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin, WebSocketTransportMixin
 
@@ -45,24 +32,33 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class STTRequest:
-    """Batch STT request: transcribe a whole audio file."""
+    """Batch STT request: transcribe a whole audio file.
+
+    Attributes:
+        audio_path: Path to the audio file to transcribe.
+    """
 
     audio_path: str
 
 
 @dataclass
 class STTStreamRequest:
-    """Real-time STT request over an existing websocket."""
+    """Real-time STT request over an existing websocket.
+
+    Attributes:
+        websocket: The client websocket to receive audio from and send results to.
+        config_received: Ali-specific flag (ignored by Volc).
+    """
 
     websocket: Any
     config_received: bool = True  # Ali-specific; ignored by Volc
 
 
 class STTAdapter(MultimodalAdapter):
-    """STT adapter root.
+    """STT adapter root; carries shared result-inspection helpers for concrete adapters.
 
-    Carries the shared STT result-inspection helpers that previously lived on
-    the deleted ``BaseSTTModel`` ABC, so concrete WS adapters inherit them.
+    Attributes:
+        modality: ``"stt"``.
     """
 
     modality = "stt"
@@ -125,10 +121,6 @@ class STTAdapter(MultimodalAdapter):
         return f"Unknown error in result: {result}"
 
 
-# ============================================================================
-# Ali STT — DashScope Realtime (JSON over WebSocket)
-# ============================================================================
-
 class AliSTTConfig:
     """Configuration for Ali STT model (Qwen Realtime API protocol)."""
 
@@ -178,7 +170,14 @@ class AliSTTConfig:
 
 
 class TranscriptionResult:
-    """Container for transcription results."""
+    """Container for transcription results.
+
+    Attributes:
+        text: Accumulated transcription text.
+        is_final: Whether the final result has been received.
+        error: Optional error message.
+        vad: Optional VAD event marker.
+    """
 
     def __init__(self):
         self.text: str = ""
@@ -193,6 +192,12 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     Protocol (session.update / input_audio_buffer.append|commit / session.finish,
     VAD events, transcription text/completed events) lives here.
+
+    Attributes:
+        factory: ``"ali"``.
+        _config: The :class:`AliSTTConfig` for this adapter.
+        _audio_file_path: Path to the connectivity-test audio file.
+        _transcription: Reusable :class:`TranscriptionResult` accumulator.
     """
 
     factory = "ali"
@@ -362,7 +367,18 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return False
 
     def parse_response(self, response: Any) -> Dict[str, Any]:
-        """Parse the response from the STT service."""
+        """Normalize a raw server response into an event-keyed dict.
+
+        Accepts a JSON string (parsed; unparseable strings become an
+        ``unknown`` event), a dict, or any other object (coerced to ``str``).
+
+        Args:
+            response: A JSON string, a dict, or a raw object from the server.
+
+        Returns:
+            A dict keyed by ``event`` plus ``text`` / ``vad`` / ``error`` /
+            ``session_id`` / ... fields as applicable.
+        """
         if isinstance(response, str):
             try:
                 response = json.loads(response)
@@ -801,9 +817,11 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
                 pass
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
+        """Transcribe ``request.audio_path``; returns ``{"text": ...}`` or ``{"error": ...}``."""
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
+        """Run the streaming session to completion (no incremental yields)."""
         await self.start_streaming_session(
             request.websocket, config_received=request.config_received
         )
@@ -811,9 +829,11 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         yield  # pragma: no cover  (marks as async generator)
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`check_connectivity`."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with audio + realtime capabilities."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -821,10 +841,6 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             capabilities={"audio": True, "realtime": True},
         )
 
-
-# ============================================================================
-# Volc STT — proprietary binary-frame WebSocket (SAUC, gzip compressed)
-# ============================================================================
 
 # Protocol constants
 PROTOCOL_VERSION = 0b0001
@@ -916,6 +932,12 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     The full binary protocol (header/payload construction, sequence numbers,
     gzip framing, response parsing) lives here.
+
+    Attributes:
+        factory: ``"volc"``.
+        _config: The :class:`VolcSTTConfig` for this adapter.
+        _audio_file_path: Path to the connectivity-test audio file.
+        success_code: The Volc success status code (``1000``).
     """
 
     factory = "volc"
@@ -1472,17 +1494,21 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
+        """Transcribe ``request.audio_path``; returns ``{"text": ...}`` or ``{"error": ...}``."""
         return await self.recognize_file(request.audio_path)
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
+        """Run the streaming session to completion (no incremental yields)."""
         await self.start_streaming_session(request.websocket)
         return
         yield  # pragma: no cover
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`check_connectivity`."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with audio + realtime capabilities."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1491,19 +1517,13 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         )
 
 
-# ============================================================================
-# ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
-# _model is OpenAIModel (kept per §3.16 LLM exception); audio↔base64 conversion
-# lives in the adapter's invoke.
-# ============================================================================
-
 @register_adapter("modelengine", "stt")
 class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
     """ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
 
-    Unlike Ali/Volc: inherits :class:`HttpTransportMixin` (not WS) and reuses
-    :class:`OpenAIModel` as ``_model`` (no dedicated STT class). The audio↔base64
-    protocol conversion is the adapter's responsibility.
+    Attributes:
+        factory: ``"modelengine"``.
+        _model: The wrapped :class:`OpenAIModel`, built lazily.
     """
 
     factory = "modelengine"
@@ -1520,6 +1540,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
+        """Construct the wrapped :class:`OpenAIModel` on first use."""
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
@@ -1532,7 +1553,7 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: STTRequest) -> Dict[str, Any]:
-        """Transcribe an audio file via HTTP Chat Completions."""
+        """Transcribe ``request.audio_path`` via HTTP Chat Completions; returns ``{"text": ..., "raw": ...}``."""
         if self._model is None:
             self._build_model()
         audio_bytes = open(request.audio_path, "rb").read()
@@ -1552,21 +1573,24 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         return {"text": getattr(result, "content", str(result)), "raw": result}
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
-        """Stream real-time transcription over HTTP SSE.
+        """Real-time streaming is not supported by ModelEngine STT.
+
+        ModelEngine STT is non-realtime file transcription (``realtime: False``);
+        the WebSocket duplex mic contract cannot be served over Chat Completions.
 
         Raises:
-            NotImplementedError: ModelEngine STT streaming is a Phase 2 deliverable.
+            NotImplementedError: Always; this adapter does not stream.
         """
-        # ModelEngine realtime STT = Chat Completions stream=True over HTTP (SSE),
-        # feeding PCM chunks incrementally. Scaffold; full SSE parsing in Phase 2.
-        raise NotImplementedError("ModelEngine STT streaming is a Phase 2 deliverable")
+        raise NotImplementedError("ModelEngine STT is non-realtime; streaming is not supported")
 
     async def health_check(self) -> bool:
+        """Probe the wrapped model's connectivity."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with audio capability (no realtime)."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",

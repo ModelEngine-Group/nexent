@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Tuple, Type
 
-from .adapter import MultimodalAdapter
+from .multimodal_adapter import MultimodalAdapter
 
 logger = logging.getLogger("adapter_registry")
 
