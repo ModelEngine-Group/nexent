@@ -118,10 +118,6 @@ class TTSAdapter(MultimodalAdapter):
         return f"Unknown error in result: {result}"
 
 
-# ============================================================================
-# Ali TTS — CosyVoice / Qwen Realtime (JSON over WebSocket)
-# ============================================================================
-
 class AliTTSError(Exception):
     """Exception raised when Ali TTS API returns an error."""
 
@@ -960,10 +956,6 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         )
 
 
-# ============================================================================
-# Volc TTS — proprietary binary-frame WebSocket
-# ============================================================================
-
 @dataclass
 class VolcTTSConfig:
     """Configuration for Volcano Engine TTS model.
@@ -1211,12 +1203,6 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             capabilities={"audio": True, "realtime": True},
         )
 
-
-# ============================================================================
-# ModelEngine TTS — HTTP REST, text → Chat Completions → base64 audio in the
-# response content array → decoded to bytes. _model is OpenAIModel (kept per
-# §3.16 LLM exception); audio↔base64 conversion lives in the adapter.
-# ============================================================================
 
 @register_adapter("modelengine", "tts")
 class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):

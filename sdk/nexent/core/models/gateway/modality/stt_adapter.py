@@ -124,10 +124,6 @@ class STTAdapter(MultimodalAdapter):
         return f"Unknown error in result: {result}"
 
 
-# ============================================================================
-# Ali STT — DashScope Realtime (JSON over WebSocket)
-# ============================================================================
-
 class AliSTTConfig:
     """Configuration for Ali STT model (Qwen Realtime API protocol)."""
 
@@ -849,10 +845,6 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         )
 
 
-# ============================================================================
-# Volc STT — proprietary binary-frame WebSocket (SAUC, gzip compressed)
-# ============================================================================
-
 # Protocol constants
 PROTOCOL_VERSION = 0b0001
 DEFAULT_HEADER_SIZE = 0b0001
@@ -1527,12 +1519,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             capabilities={"audio": True, "realtime": True},
         )
 
-
-# ============================================================================
-# ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
-# _model is OpenAIModel (kept per §3.16 LLM exception); audio↔base64 conversion
-# lives in the adapter's invoke.
-# ============================================================================
 
 @register_adapter("modelengine", "stt")
 class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
