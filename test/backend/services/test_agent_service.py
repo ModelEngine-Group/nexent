@@ -228,6 +228,7 @@ def mock_convert_list_to_string(items):
         run_agent_stream,
         stop_agent_tasks,
         _resolve_user_tenant_language,
+        _inject_user_timezone_time,
         _apply_duplicate_name_availability_rules,
         _check_single_model_availability,
         _normalize_language_key,
@@ -394,6 +395,7 @@ from backend.services.agent_service import (
         run_agent_stream,
         stop_agent_tasks,
         _resolve_user_tenant_language,
+        _inject_user_timezone_time,
         _apply_duplicate_name_availability_rules,
         _check_single_model_availability,
         _normalize_language_key,
@@ -16962,3 +16964,42 @@ def test_resolve_user_tenant_language_honors_explicit_identity(
 def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
     assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
     mock_query_group_ids.assert_called_once_with("user-1")
+
+
+def test_inject_user_timezone_time_with_valid_timezone():
+    """Should prepend [Current time: ...] when X-User-Timezone header is present."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result.startswith("[Current time:")
+    assert "What time is it?" in result
+
+
+def test_inject_user_timezone_time_without_header():
+    """Should return query unchanged when X-User-Timezone header is absent."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result == "What time is it?"
+
+
+def test_inject_user_timezone_time_with_existing_prefix():
+    """Should not double-inject when query already has [Current time:] prefix."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    result = _inject_user_timezone_time(prefixed, request)
+    assert result == prefixed
+
+
+def test_inject_user_timezone_time_with_invalid_timezone():
+    """Should return query unchanged when timezone is invalid."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Invalid/Timezone"}
+    result = _inject_user_timezone_time("What time is it?", request)
+    assert result == "What time is it?"
+

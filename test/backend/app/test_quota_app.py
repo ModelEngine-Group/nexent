@@ -255,6 +255,75 @@ class TestGetTenantQuotaUsage:
         assert data["usage_pct"] == pytest.approx(50.0)
         assert data["tenant_warning_level"] == "normal"
 
+    def test_returns_composite_values_without_component_fields(
+        self, client, mock_auth_admin, mock_quota_service
+    ):
+        composite_bytes = 500 * 1024 * 1024
+        mock_quota_service.get_usage.return_value = {
+            "total_bytes": composite_bytes,
+            "total_readable": "500.0 MB",
+            "kb_count": 1,
+            "file_count": 1,
+            "hard_limit_bytes": GB,
+            "hard_limit_readable": "1.0 GB",
+            "available_bytes": GB - composite_bytes,
+            "available_readable": "524.0 MB",
+            "usage_pct": 48.83,
+            "tenant_warning_level": "normal",
+            "warning_enabled": True,
+            "warning_threshold_pct": 80,
+            "critical_threshold_pct": 95,
+            "breakdown": [{
+                "knowledge_id": 1,
+                "knowledge_name": "Composite KB",
+                "index_name": "composite-kb",
+                "soft_quota_bytes": GB,
+                "soft_quota_readable": "1.0 GB",
+                "actual_bytes": composite_bytes,
+                "actual_readable": "500.0 MB",
+                "usage_pct": 48.83,
+                "file_count": 1,
+                "kb_warning_level": "normal",
+            }],
+        }
+
+        response = client.get("/api/tenants/test-tenant/quota/usage?detail=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_bytes"] == composite_bytes
+        assert data["breakdown"][0]["actual_bytes"] == composite_bytes
+        assert "minio_bytes" not in data
+        assert "es_bytes" not in data
+
+    def test_unlimited_tenant_preserves_null_limit_fields(
+        self, client, mock_auth_admin, mock_quota_service
+    ):
+        mock_quota_service.get_usage.return_value = {
+            "total_bytes": 300,
+            "total_readable": "300 B",
+            "kb_count": 1,
+            "file_count": 0,
+            "hard_limit_bytes": None,
+            "hard_limit_readable": None,
+            "available_bytes": None,
+            "available_readable": None,
+            "usage_pct": None,
+            "tenant_warning_level": "normal",
+            "warning_enabled": True,
+            "warning_threshold_pct": 80,
+            "critical_threshold_pct": 95,
+        }
+
+        response = client.get("/api/tenants/test-tenant/quota/usage")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_bytes"] == 300
+        assert data["hard_limit_bytes"] is None
+        assert data["available_bytes"] is None
+        assert data["usage_pct"] is None
+
     def test_detail_includes_breakdown(self, client, mock_auth_admin, mock_quota_service):
         mock_quota_service.get_usage.return_value = {
             "total_bytes": 50 * GB,

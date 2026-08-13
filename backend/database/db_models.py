@@ -1,7 +1,24 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Float,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    Sequence,
+    String,
+    Text,
+    TIMESTAMP,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
+
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -742,6 +759,80 @@ class KnowledgeRecord(TableBase):
     quota_limit_bytes = Column(
         BigInteger, nullable=True,
         doc="Per-KB soft storage quota in bytes. NULL means no per-KB limit (shares tenant pool freely)."
+    )
+
+
+class KnowledgeStorageObject(TableBase):
+    """Durable ownership and accounting record for one KB source object."""
+
+    __tablename__ = "knowledge_storage_object_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_name",
+            "object_name",
+            name="uq_knowledge_storage_object_bucket_object",
+        ),
+        CheckConstraint(
+            "raw_bytes >= 0",
+            name="ck_knowledge_storage_object_raw_bytes_nonnegative",
+        ),
+        CheckConstraint(
+            "status IN ('COMMITTED', 'DELETED')",
+            name="ck_knowledge_storage_object_status",
+        ),
+        Index(
+            "idx_knowledge_storage_object_tenant_active",
+            "tenant_id",
+            postgresql_where=text("delete_flag = 'N' AND status = 'COMMITTED'"),
+        ),
+        Index(
+            "idx_knowledge_storage_object_kb_active",
+            "tenant_id",
+            "knowledge_id",
+            postgresql_where=text("delete_flag = 'N' AND status = 'COMMITTED'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    storage_object_id = Column(
+        BigInteger,
+        Sequence("knowledge_storage_object_t_storage_object_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Storage object ledger ID",
+    )
+    create_time = Column(
+        TIMESTAMP(timezone=False),
+        nullable=False,
+        server_default=func.now(),
+        doc="Creation time",
+    )
+    update_time = Column(
+        TIMESTAMP(timezone=False),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Update time",
+    )
+    delete_flag = Column(
+        String(1),
+        nullable=False,
+        default="N",
+        server_default=text("'N'"),
+        doc="Whether it is deleted. Optional values: Y/N",
+    )
+    tenant_id = Column(String(100), nullable=False, doc="Tenant isolation key")
+    knowledge_id = Column(BigInteger, nullable=False, doc="Owning knowledge base ID")
+    index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index name")
+    bucket_name = Column(String(255), nullable=False, doc="MinIO bucket name")
+    object_name = Column(String(1024), nullable=False, doc="MinIO object name")
+    raw_bytes = Column(BigInteger, nullable=False, doc="Authoritative MinIO object size in bytes")
+    status = Column(
+        String(20),
+        nullable=False,
+        default="COMMITTED",
+        server_default=text("'COMMITTED'"),
+        doc="Accounting lifecycle status: COMMITTED or DELETED",
     )
 
 
@@ -1843,6 +1934,8 @@ class EvaluationSet(TableBase):
 
     source_filename = Column(String(255), doc="Original uploaded filename")
     case_count = Column(Integer, default=0, doc="Total number of cases")
+    generation_status = Column(String(20), default="IDLE", doc="IDLE / GENERATING / DONE / FAILED")
+    generation_progress = Column(Integer, default=0, doc="Generation progress 0-100")
 
     __table_args__ = (
         Index("ix_eval_set_tenant_id", "tenant_id"),
@@ -1874,6 +1967,8 @@ class EvaluationSetCase(TableBase):
     label = Column(JSONB, nullable=False, doc="Case label JSON")
 
     order_no = Column(Integer, default=0, doc="Case order in the set")
+    session_id = Column(String(128), nullable=True, doc="Multi-turn session identifier")
+    turn_order = Column(Integer, default=0, doc="Turn order within a session (1-based)")
 
     __table_args__ = (
         Index("ix_eval_set_case_set_id", "evaluation_set_id"),
@@ -1924,6 +2019,11 @@ class AgentEvaluation(TableBase):
     score_overall = Column(Float, doc="Overall score (0-1)")
 
     error_message = Column(Text, doc="Failure reason")
+    pass_count = Column(Integer, default=0, doc="Number of passed cases")
+    fail_count = Column(Integer, default=0, doc="Number of failed cases")
+    evaluator_config = Column(JSONB, doc="Multi-evaluator config: {evaluator_ids, field_mappings}")
+    analysis_report = Column(JSONB, doc="AI-generated analysis report")
+    annotation_schema_ids = Column(JSONB, default=[], doc="Enabled annotation schema IDs")
 
     __table_args__ = (
         Index("ix_agent_eval_tenant_id", "tenant_id"),
@@ -1957,7 +2057,7 @@ class AgentEvaluationCase(TableBase):
     label = Column(JSONB, nullable=False, doc="Case label snapshot (cleared to {answer:''} for pass cases)")
     predict = Column(JSONB, doc="Predict JSON (answer/raw); NULL for pass cases")
 
-    score = Column(Float, doc="Case score (0-1)")
+    score = Column(JSONB, doc="Case score (float or dict for multi-evaluator)")
     reason = Column(Text, doc="Judge reason; NULL for pass cases")
     pass_status = Column(
         String(16),
@@ -1971,6 +2071,8 @@ class AgentEvaluationCase(TableBase):
         doc="Case status: PENDING/RUNNING/COMPLETED/FAILED",
     )
     error_message = Column(Text, doc="Per-case failure reason")
+    session_id = Column(String(128), nullable=True, doc="Multi-turn session identifier")
+    turn_order = Column(Integer, default=0, doc="Turn order within a session (0-indexed)")
 
     __table_args__ = (
         Index("ix_agent_eval_case_eval_id", "agent_evaluation_id"),
@@ -1978,6 +2080,70 @@ class AgentEvaluationCase(TableBase):
         Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
         {"schema": SCHEMA},
     )
+
+
+class Evaluator(TableBase):
+    """Evaluator definition for agent evaluation tasks."""
+
+    __tablename__ = "evaluator_t"
+    __table_args__ = (
+        Index("ix_evaluator_tenant", "tenant_id", "delete_flag"),
+        Index("ix_evaluator_status", "tenant_id", "status", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    evaluator_id = Column(
+        BigInteger,
+        Sequence("evaluator_t_evaluator_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False, default="", doc="Tenant ID; empty = system builtin")
+    name = Column(String(255), nullable=False, doc="Evaluator name (zh)")
+    description = Column(Text, doc="Evaluator description (zh)")
+    name_en = Column(String(255), doc="Evaluator name (en)")
+    description_en = Column(Text, doc="Evaluator description (en)")
+    evaluator_type = Column(String(20), nullable=False, default="llm", doc="llm / code")
+    source = Column(String(20), nullable=False, default="custom", doc="builtin / custom")
+    prompt = Column(Text, doc="LLM evaluator prompt template (zh)")
+    code = Column(Text, doc="Code/runtime evaluator Python function")
+    score_range_min = Column(Float, default=0.0)
+    score_range_max = Column(Float, default=1.0)
+    pass_threshold = Column(Float, default=0.5, doc="Score >= threshold = pass")
+    input_fields = Column(JSONB, nullable=False, default=[], doc='[{name, type, required}]')
+    status = Column(String(20), nullable=False, default="DRAFT", doc="DRAFT / PUBLISHED")
+    version_no = Column(Integer, nullable=False, default=1)
+    version_group_id = Column(BigInteger, doc="Groups versions of the same evaluator; NULL until first publish")
+    is_current = Column(Boolean, default=True, doc="True if this is the current active version")
+    model_id = Column(Integer, doc="LLM model ID; NULL = use task-level judge")
+
+
+class EvaluationAnnotationSchema(TableBase):
+    """Label/annotation template for evaluation cases."""
+
+    __tablename__ = "evaluation_annotation_schema_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    schema_id = Column(BigInteger, Sequence("evaluation_annotation_schema_t_schema_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, default="")
+    name = Column(String(50), nullable=False)
+    description = Column(String(200))
+    annotation_type = Column(String(20), nullable=False, default="classification", doc="classification/boolean/number/text")
+    options = Column(JSONB, doc="For classification: [{\"label\":\"正确\"},...]")
+
+
+class EvaluationAnnotation(TableBase):
+    """Single annotation value for an evaluation case."""
+
+    __tablename__ = "evaluation_annotation_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    annotation_id = Column(BigInteger, Sequence("evaluation_annotation_t_annotation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, default="")
+    agent_evaluation_id = Column(BigInteger, nullable=True, doc="Denormalized for efficient cascade-delete")
+    case_id = Column(BigInteger, nullable=False)
+    schema_id = Column(BigInteger, nullable=False)
+    value = Column(Text)
 
 
 class Notification(TableBase):
