@@ -63,9 +63,13 @@ def test_repeat_aggregate_exposes_per_item_stability():
     assert result["items"][1]["outcomes"] == ["fail", "fail", "pass"]
 
 
+def test_repeat_aggregate_rejects_mismatched_item_sets():
+    with pytest.raises(ValueError, match="exact targeted item set"):
+        aggregate_repeat_results(["a"], [{"b": True}])
+
+
 def test_repeat_command_adds_item_filter_and_gaia_diagnostics():
     command = build_repeat_command(
-        python_executable=Path("/venv/python"),
         dataset_name="gaia",
         run_name="repeat-r01",
         item_ids=["b", "c"],
@@ -74,7 +78,7 @@ def test_repeat_command_adds_item_filter_and_gaia_diagnostics():
     )
 
     assert command[:2] == [
-        "/venv/python",
+        sys.executable,
         str(
             Path(__file__).resolve().parents[3]
             / "sdk/benchmark/generic/run_benchmark.py"
@@ -147,8 +151,6 @@ def test_main_repeats_baseline_failures_and_writes_stability_report(
             "2",
             "--max-items",
             "2",
-            "--python",
-            "/venv/python",
             "--runner-args",
             "--temperature",
             "0",
@@ -158,10 +160,37 @@ def test_main_repeats_baseline_failures_and_writes_stability_report(
     repeat_module.main()
 
     assert len(commands) == 2
+    assert all(command[0][0] == sys.executable for command in commands)
     assert written["report"]["run_names"] == ["repeat-r01", "repeat-r02"]
     assert written["report"]["target_item_ids"] == ["b", "c"]
     assert written["report"]["aggregate"]["total_passes"] == 2
     assert written["prefix"] == "repeat"
+
+
+def test_main_rejects_python_executable_override(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_failed_item_repeats.py",
+            "--dataset",
+            "gaia",
+            "--baseline-run",
+            "baseline",
+            "--run-prefix",
+            "repeat",
+            "--python",
+            "/tmp/untrusted-python",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        repeat_module.main()
+
+
+def test_runner_args_reject_controlled_options():
+    with pytest.raises(ValueError, match="--dataset is controlled"):
+        repeat_module._validate_runner_args(["--temperature", "0", "--dataset=other"])
 
 
 def test_write_report_exclusive_creates_json_and_markdown(monkeypatch, tmp_path):

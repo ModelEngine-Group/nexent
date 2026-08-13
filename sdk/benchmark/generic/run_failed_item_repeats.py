@@ -88,7 +88,6 @@ def baseline_failed_item_ids(
 
 def build_repeat_command(
     *,
-    python_executable: Path,
     dataset_name: str,
     run_name: str,
     item_ids: list[str],
@@ -97,7 +96,7 @@ def build_repeat_command(
 ) -> list[str]:
     """Build one isolated run containing only baseline failures."""
     command = [
-        str(python_executable),
+        sys.executable,
         str(GENERIC_DIR / "run_benchmark.py"),
         "--dataset",
         dataset_name,
@@ -222,12 +221,6 @@ def main() -> None:
     parser.add_argument("--max-items", type=int)
     parser.add_argument("--primary-evaluator", default="gaia_exact_match")
     parser.add_argument(
-        "--python",
-        type=Path,
-        default=Path(sys.executable),
-        help="Python executable for run_benchmark.py",
-    )
-    parser.add_argument(
         "--runner-args",
         nargs=argparse.REMAINDER,
         default=[],
@@ -267,7 +260,6 @@ def main() -> None:
     repeat_results = []
     for run_name in run_names:
         command = build_repeat_command(
-            python_executable=args.python,
             dataset_name=args.dataset,
             run_name=run_name,
             item_ids=item_ids,
