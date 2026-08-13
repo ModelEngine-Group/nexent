@@ -12,11 +12,11 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
-from .....monitor.monitoring import record_model_call
-from ..multimodal_adapter import ModelInfo, MultimodalAdapter
-from ..model_context import ModelContext
-from ..registry import register_adapter
-from ..transport import HttpTransportMixin
+from nexent.monitor import record_model_call
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
+from ...model_context import ModelContext
+from ...registry import register_adapter
+from ...transport import HttpTransportMixin
 
 logger = logging.getLogger(__name__)
 

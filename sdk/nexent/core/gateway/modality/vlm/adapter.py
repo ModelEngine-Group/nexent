@@ -10,11 +10,11 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Dict, List, Optional, Union
 
-from ...openai_llm import OpenAIModel
-from ..multimodal_adapter import ModelInfo, MultimodalAdapter
-from ..model_context import ModelContext
-from ..registry import register_adapter
-from ..transport import HttpTransportMixin
+from nexent.core.models import OpenAIModel
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
+from ...model_context import ModelContext
+from ...registry import register_adapter
+from ...transport import HttpTransportMixin
 
 logger = logging.getLogger(__name__)
 

@@ -20,8 +20,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from nexent import MessageObserver
-from nexent.core.models.gateway import ModelContext, get_gateway
-from nexent.core.models.gateway.registry import get_registry
+from nexent.core.gateway import ModelContext, get_gateway
+from nexent.core.gateway.registry import get_registry
 from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
 from database.model_management_db import get_model_by_model_id, get_model_records
 from utils.config_utils import get_model_name_from_config, tenant_config_manager

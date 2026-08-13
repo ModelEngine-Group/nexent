@@ -7,7 +7,7 @@ from smolagents.tools import Tool
 from urllib.parse import urlparse
 
 from ...vector_database import DataMateCore
-from ..models.gateway.modality.rerank_adapter import RerankAdapter
+from ..gateway.modality.rerank import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
