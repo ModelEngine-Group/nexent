@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | 智能问答",
   "mainPage.layout.titleTemplate": "%s | {productName} 智能问答",
@@ -4043,7 +4043,7 @@
   "project.config.about.us.close": "隐藏",
   "project.config.logo.change": "更换图标",
   "project.config.logo.upload.new": "上传新图标",
-  "project.config.logo.format": "图片格式不正确，只支持png格式图片",
+  "project.config.logo.format": "图片格式不正确，只支持png、jpg格式图片",
   "project.config.logo.size": "图片大小不超过200KB",
   "project.config.update.success": "更新配置成功，刷新页面后生效",
   "project.config.page.subtitle": "子标题",
