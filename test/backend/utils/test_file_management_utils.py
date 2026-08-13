@@ -7,13 +7,12 @@ import pytest
 
 
 class _ProcessParams:
-    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str], model_id: Optional[int] = 42,
+    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str],
         tenant_id: Optional[str] = "tenant-1"):
         self.authorization = authorization
         self.source_type = source_type
         self.chunking_strategy = chunking_strategy
         self.index_name = index_name
-        self.model_id = model_id  
         self.tenant_id = tenant_id
 
 
@@ -191,8 +190,7 @@ async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypat
         lambda query=None: {"embedding_model_id": 42, "index_name": "idx"},
     )
 
-    # model_id on params should be ignored; value comes from knowledge_record
-    params = _ProcessParams("tok", "local", "basic", "idx", model_id=999)
+    params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
     out = await fmu.trigger_data_process(files, params)
     assert out == {"task_id": "t1"}
@@ -203,7 +201,7 @@ async def test_trigger_data_process_single_success_with_embedding(fmu, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_trigger_data_process_uses_db_embedding_over_params_model_id(fmu, monkeypatch):
+async def test_trigger_data_process_queries_knowledge_record_by_index(fmu, monkeypatch):
     fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
     fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
     monkeypatch.setattr(fmu, "httpx", fake_httpx)
@@ -216,7 +214,7 @@ async def test_trigger_data_process_uses_db_embedding_over_params_model_id(fmu, 
 
     monkeypatch.setattr(fmu, "get_knowledge_record", _fake_get_knowledge_record)
 
-    params = _ProcessParams("tok", "local", "basic", "idx", model_id=11)
+    params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
     out = await fmu.trigger_data_process(files, params)
     assert out == {"task_id": "t1"}
@@ -232,7 +230,39 @@ async def test_trigger_data_process_missing_embedding_model_id_sends_none(fmu, m
     monkeypatch.setattr(fmu, "httpx", fake_httpx)
     monkeypatch.setattr(fmu, "get_knowledge_record", lambda query=None: {})
 
-    params = _ProcessParams("tok", "local", "basic", "idx", model_id=42)
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert fake_client.last_post["json"]["embedding_model_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_knowledge_record_none_sends_none(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+    monkeypatch.setattr(fmu, "get_knowledge_record", lambda query=None: None)
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
+    files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
+    out = await fmu.trigger_data_process(files, params)
+    assert out == {"task_id": "t1"}
+    assert fake_client.last_post["json"]["embedding_model_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_data_process_knowledge_record_raises_sends_none(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(201, {"task_id": "t1"}))
+    fake_httpx = types.SimpleNamespace(AsyncClient=lambda: fake_client, RequestError=_FakeRequestError)
+    monkeypatch.setattr(fmu, "httpx", fake_httpx)
+
+    def _raise_get_knowledge_record(query=None):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(fmu, "get_knowledge_record", _raise_get_knowledge_record)
+
+    params = _ProcessParams("tok", "local", "basic", "idx")
     files = [{"path_or_url": "/data/a.txt", "filename": "a.txt"}]
     out = await fmu.trigger_data_process(files, params)
     assert out == {"task_id": "t1"}
