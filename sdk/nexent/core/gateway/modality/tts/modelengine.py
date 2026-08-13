@@ -7,11 +7,13 @@ import base64
 from typing import Any, AsyncIterator
 
 from nexent.core.models import OpenAIModel
-from ...multimodal_adapter import MultimodalAdapter, ModelInfo
+
 from ...model_context import TTSContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
-from .base import TTSAdapter, TTSRequest
+from .tts_adapter import TTSAdapter, TTSRequest
+
 
 @register_adapter("modelengine", "tts")
 class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):

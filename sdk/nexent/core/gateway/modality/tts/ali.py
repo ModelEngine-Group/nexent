@@ -5,17 +5,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import traceback
 import uuid
-import websockets
-import logging
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Union
 
-from ...multimodal_adapter import MultimodalAdapter, ModelInfo
+import websockets
+
 from ...model_context import TTSContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import WebSocketTransportMixin
-from .base import TTSAdapter, TTSRequest
+from .tts_adapter import TTSAdapter, TTSRequest
+
 
 logger = logging.getLogger(__name__)
 

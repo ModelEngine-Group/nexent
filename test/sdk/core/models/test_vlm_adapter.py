@@ -14,7 +14,7 @@ import base64
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from nexent.core.gateway.modality.vlm import OpenAIVLMAdapter
+from nexent.core.gateway.modality import OpenAIVLMAdapter
 
 
 @pytest.fixture()
@@ -281,7 +281,7 @@ def test_analyze_video_calls_prepare_media_message(vlm_adapter):
 def test_invoke_sync_dispatches_by_media_type(vlm_adapter):
     """invoke_sync routes to the adapter's own analyze_* via _METHOD_MAP."""
     with patch.object(vlm_adapter, "analyze_image", return_value="img-result") as mock_analyze:
-        from nexent.core.gateway.modality.vlm import VLMRequest
+        from nexent.core.gateway.modality import VLMRequest
         result = vlm_adapter.invoke_sync(
             VLMRequest(media_type="image", media_input=b"bytes", prompt="p", stream=False)
         )

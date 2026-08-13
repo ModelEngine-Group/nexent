@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, Optional
 
 from ...multimodal_adapter import MultimodalAdapter
 
+
 @dataclass
 class STTRequest:
     """Batch STT request: transcribe a whole audio file.

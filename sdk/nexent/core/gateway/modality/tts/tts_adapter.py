@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Optional
 
 from ...multimodal_adapter import MultimodalAdapter
 
+
 @dataclass
 class TTSRequest:
     """TTS request: synthesize ``text`` to audio.

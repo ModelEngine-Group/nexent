@@ -8,11 +8,13 @@ import mimetypes
 from typing import Any, AsyncIterator, Dict
 
 from nexent.core.models import OpenAIModel
-from ...multimodal_adapter import MultimodalAdapter, ModelInfo
+
 from ...model_context import STTContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
-from .base import STTAdapter, STTRequest, STTStreamRequest
+from .stt_adapter import STTAdapter, STTRequest, STTStreamRequest
+
 
 @register_adapter("modelengine", "stt")
 class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):

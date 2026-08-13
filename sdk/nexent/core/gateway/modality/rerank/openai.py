@@ -1,57 +1,18 @@
-"""Rerank adapter — document reranking via HTTP REST."""
+"""OpenAI-compatible rerank adapter (flat OpenAI or DashScope wrapper format)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from abc import abstractmethod
-from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...model_context import ModelContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RerankRequest:
-    """Rerank request.
-
-    Attributes:
-        query: The query to rerank documents against.
-        documents: The documents to rerank.
-        top_n: Optional limit on the number of returned documents.
-    """
-
-    query: str
-    documents: List[str]
-    top_n: Optional[int] = None
-
-
-class RerankAdapter(MultimodalAdapter):
-    """Rerank adapter root.
-
-    Attributes:
-        modality: ``"rerank"``.
-    """
-
-    modality = "rerank"
-
-    @abstractmethod
-    async def invoke(self, request: RerankRequest) -> List[Dict[str, Any]]:
-        """Reranks ``request.documents`` for ``request.query``.
-
-        Args:
-            request: The rerank request containing the query and documents.
-
-        Returns:
-            The reranked result list.
-        """
+from .rerank_adapter import RerankAdapter, RerankRequest
 
 
 @register_adapter("openai", "rerank")
@@ -251,49 +212,3 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
             provider=self.factory,
             capabilities={"rerank": True},
         )
-
-
-def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> ModelContext:
-    """Return a context with default base_url/model applied when they are unset.
-
-    Non-mutating: returns a shallow :func:`dataclasses.replace` copy so a
-    shared (e.g. cached) context is never rewritten in place by one vendor's
-    defaults.
-    """
-    if not context.base_url or not context.model_name:
-        return replace(
-            context,
-            base_url=context.base_url or base_url,
-            model_name=context.model_name or model_name,
-        )
-    return context
-
-
-@register_adapter("jina", "rerank")
-class JinaRerankAdapter(OpenAICompatibleRerankAdapter):
-    """Jina AI rerank — default base_url/model applied when the cfg omits them.
-
-    Attributes:
-        factory: ``"jina"``.
-    """
-
-    factory = "jina"
-
-    def __init__(self, context: ModelContext) -> None:
-        context = _apply_defaults(context, "https://api.jina.ai/v1/rerank", "jina-rerank-v2-base")
-        super().__init__(context)
-
-
-@register_adapter("cohere", "rerank")
-class CohereRerankAdapter(OpenAICompatibleRerankAdapter):
-    """Cohere rerank — default base_url/model applied when the cfg omits them.
-
-    Attributes:
-        factory: ``"cohere"``.
-    """
-
-    factory = "cohere"
-
-    def __init__(self, context: ModelContext) -> None:
-        context = _apply_defaults(context, "https://api.cohere.ai/v1/rerank", "rerank-multilingual-v3.0")
-        super().__init__(context)

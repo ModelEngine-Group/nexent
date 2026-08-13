@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from ..core.gateway.modality.embedding import OpenAICompatibleEmbeddingAdapter
+from ..core.gateway.modality import OpenAICompatibleEmbeddingAdapter
 from ..core.gateway import EmbeddingContext
 
 logger = logging.getLogger("memory_embedding_model")
