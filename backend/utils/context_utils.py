@@ -90,9 +90,9 @@ def _build_header_text(
     current time is injected on the user-message side instead (see CoreAgent.run).
     """
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}"
+        content = f"### Basic Information\nYou are {app_name}, {app_description}\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
 
     return content
 

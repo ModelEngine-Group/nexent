@@ -10,6 +10,7 @@ import types
 from typing import Any, AsyncGenerator, Dict, List
 
 import pytest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -44,7 +45,11 @@ async def _stub_get_file_url_impl(object_name: str, expires: int):
 async def _stub_get_file_stream_impl(object_name: str):
     return AsyncMock(), "application/octet-stream"
 
-async def _stub_delete_file_impl(object_name: str):
+async def _stub_delete_file_impl(
+    object_name: str,
+    tenant_id: str | None = None,
+    updated_by: str | None = None,
+):
     return {"success": True}
 
 async def _stub_list_files_impl(prefix: str, limit: int | None = None):
@@ -730,7 +735,10 @@ async def test_get_storage_file_allows_knowledge_base_access(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_remove_storage_file_success(monkeypatch):
-    async def ok_delete(object_name):
+    calls = []
+
+    async def ok_delete(object_name, tenant_id=None, updated_by=None):
+        calls.append((object_name, tenant_id, updated_by))
         return {"success": True}
 
     monkeypatch.setattr(file_management_app, "delete_file_impl", ok_delete)
@@ -739,6 +747,7 @@ async def test_remove_storage_file_success(monkeypatch):
         authorization=MOCK_AUTH
     )
     assert result["success"] is True
+    assert calls == [("attachments/user1/x", "tenant1", "user1")]
 
 
 @pytest.mark.asyncio
@@ -762,7 +771,7 @@ async def test_remove_storage_file_access_denied(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_remove_storage_file_error(monkeypatch):
-    async def boom_delete(object_name):
+    async def boom_delete(object_name, tenant_id=None, updated_by=None):
         raise RuntimeError("nope")
 
     monkeypatch.setattr(file_management_app, "delete_file_impl", boom_delete)
@@ -772,6 +781,22 @@ async def test_remove_storage_file_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "Failed to delete file" in str(ei.value) or "Remove storage file error" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_remove_storage_file_maps_tenant_ownership_failure_to_forbidden(monkeypatch):
+    async def deny_delete(object_name, tenant_id=None, updated_by=None):
+        raise PermissionError("not owned by tenant")
+
+    monkeypatch.setattr(file_management_app, "delete_file_impl", deny_delete)
+    with pytest.raises(HTTPException) as exc_info:
+        await file_management_app.remove_storage_file(
+            object_name="knowledge_base/private.pdf",
+            authorization=MOCK_AUTH,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "not owned by tenant"
 
 
 # --- get_storage_file_batch_urls tests ---

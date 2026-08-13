@@ -168,9 +168,7 @@ export function MineAgentsView({
           );
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({
-              queryKey: [AGENTS_LIST_QUERY_KEY],
-            }),
+            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
           ]);
         } catch (error) {
           log.error("Failed to delete agent:", error);
@@ -186,7 +184,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`);
+    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {
@@ -558,7 +556,9 @@ export function MineAgentsView({
           setImportWizardData(null);
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
           ]);
         }}
       />
