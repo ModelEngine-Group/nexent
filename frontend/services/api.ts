@@ -174,12 +174,22 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
-    create: `${API_BASE_URL}/evaluation-sets`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
+    export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
     delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+  },
+  evaluators: {
+    list: `${API_BASE_URL}/evaluators`,
+    create: `${API_BASE_URL}/evaluators`,
+    detail: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    delete: (id: number) => `${API_BASE_URL}/evaluators/${id}`,
+    publish: (id: number) => `${API_BASE_URL}/evaluators/${id}/publish`,
+    export: `${API_BASE_URL}/evaluators/export`,
+    import: `${API_BASE_URL}/evaluators/import`,
+    generate: `${API_BASE_URL}/evaluators/generate`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,

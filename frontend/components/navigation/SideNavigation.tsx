@@ -16,6 +16,7 @@ import {
   Building2,
   Zap,
   CalendarClock,
+  LineChart,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -112,33 +113,40 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 7,
     parentKey: "/agent-dev",
   },
+  {
+    path: "/space/evaluation",
+    Icon: LineChart,
+    labelKey: "sidebar.agentEvaluation",
+    order: 8,
+    parentKey: "/agent-dev",
+  },
   // Resource Space submenu
   {
     path: "/resource-space",
     Icon: Globe,
     labelKey: "sidebar.resourceSpace",
-    order: 8,
+    order: 9,
     parentKey: null,
   },
   {
     path: "/agent-space",
     Icon: Bot,
     labelKey: "sidebar.agentSpace",
-    order: 9,
+    order: 10,
     parentKey: "/resource-space",
   },
   {
     path: "/mcp-space",
     Icon: Puzzle,
     labelKey: "sidebar.mcpSpace",
-    order: 10,
+    order: 11,
     parentKey: "/resource-space",
   },
   {
     path: "/skill-space",
     Icon: Zap,
     labelKey: "sidebar.skillSpace",
-    order: 11,
+    order: 12,
     parentKey: "/resource-space",
   },
   // Management menus
@@ -146,14 +154,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/resource-manage",
     Icon: Building2,
     labelKey: "sidebar.resourceManage",
-    order: 12,
+    order: 13,
     parentKey: null,
   },
   {
     path: "/owner-manage",
     Icon: Building2,
     labelKey: "sidebar.ownerManage",
-    order: 13,
+    order: 14,
     parentKey: null,
   },
 ];
