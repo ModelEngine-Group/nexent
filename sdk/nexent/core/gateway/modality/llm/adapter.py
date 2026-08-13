@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Dict, List
 
 from nexent.core.models import OpenAIModel, OpenAILongContextModel
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
-from ...model_context import ModelContext
+from ...model_context import LLMContext, LLMSampling
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
 
@@ -44,7 +44,7 @@ class LLMAdapter(MultimodalAdapter):
 
     modality = "llm"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: LLMContext) -> None:
         super().__init__(context)
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
@@ -126,21 +126,21 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
 
     factory = "openai"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: LLMContext) -> None:
         LLMAdapter.__init__(self, context)
         HttpTransportMixin.__init__(
             self,
             base_url=context.base_url,
             api_key=context.api_key,
             ssl_verify=context.ssl_verify,
-            timeout=context.extra.get("timeout_seconds", 30.0),
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
         )
 
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAIModel` on first use."""
         # Keep the existing OpenAIModel construction path so the adapter remains
         # compatible with smolagents and preserves existing model configuration.
-        extras = self._context.extra
+        s = self._context.sampling or LLMSampling()
         kwargs = dict(
             observer=self._context.observer,
             model_id=self._context.model_name,
@@ -149,14 +149,17 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            timeout_seconds=extras.get("timeout_seconds"),
-            extra_body=extras.get("extra_body"),
-            max_output_tokens=extras.get("max_output_tokens"),
+            timeout_seconds=self._context.timeout_seconds,
+            extra_body=s.extra_body,
+            max_output_tokens=s.max_output_tokens,
         )
         # Only override model defaults when the caller explicitly provides them.
-        for opt in ("temperature", "top_p", "stream"):
-            if extras.get(opt) is not None:
-                kwargs[opt] = extras.get(opt)
+        if s.temperature is not None:
+            kwargs["temperature"] = s.temperature
+        if s.top_p is not None:
+            kwargs["top_p"] = s.top_p
+        if s.stream is not None:
+            kwargs["stream"] = s.stream
         self._model = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
@@ -215,20 +218,20 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
 
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAILongContextModel` on first use."""
-        extras = self._context.extra
+        s = self._context.sampling or LLMSampling()
         self._model = OpenAILongContextModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
             api_base=self._base_url,
             api_key=self._api_key,
-            max_context_tokens=extras.get("max_tokens", 128000),
-            truncation_strategy=extras.get("truncation_strategy", "start"),
+            max_context_tokens=s.max_tokens if s.max_tokens is not None else 128000,
+            truncation_strategy=s.truncation_strategy if s.truncation_strategy is not None else "start",
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            timeout_seconds=extras.get("timeout_seconds"),
-            extra_body=extras.get("extra_body"),
-            max_output_tokens=extras.get("max_output_tokens"),
+            timeout_seconds=self._context.timeout_seconds,
+            extra_body=s.extra_body,
+            max_output_tokens=s.max_output_tokens,
         )
 
     def get_model_info(self) -> ModelInfo:

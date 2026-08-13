@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -76,7 +76,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
             base_url=context.base_url,
             api_key=context.api_key,
             ssl_verify=context.ssl_verify,
-            timeout=context.extra.get("timeout_seconds", 30.0),
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
         )
         self._headers = {
             "Content-Type": "application/json",
@@ -253,12 +253,20 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         )
 
 
-def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> None:
-    """Apply default base_url/model to ``context`` in place when they are unset."""
-    if not context.base_url:
-        context.base_url = base_url
-    if not context.model_name:
-        context.model_name = model_name
+def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> ModelContext:
+    """Return a context with default base_url/model applied when they are unset.
+
+    Non-mutating: returns a shallow :func:`dataclasses.replace` copy so a
+    shared (e.g. cached) context is never rewritten in place by one vendor's
+    defaults.
+    """
+    if not context.base_url or not context.model_name:
+        return replace(
+            context,
+            base_url=context.base_url or base_url,
+            model_name=context.model_name or model_name,
+        )
+    return context
 
 
 @register_adapter("jina", "rerank")
@@ -272,7 +280,7 @@ class JinaRerankAdapter(OpenAICompatibleRerankAdapter):
     factory = "jina"
 
     def __init__(self, context: ModelContext) -> None:
-        _apply_defaults(context, "https://api.jina.ai/v1/rerank", "jina-rerank-v2-base")
+        context = _apply_defaults(context, "https://api.jina.ai/v1/rerank", "jina-rerank-v2-base")
         super().__init__(context)
 
 
@@ -287,5 +295,5 @@ class CohereRerankAdapter(OpenAICompatibleRerankAdapter):
     factory = "cohere"
 
     def __init__(self, context: ModelContext) -> None:
-        _apply_defaults(context, "https://api.cohere.ai/v1/rerank", "rerank-multilingual-v3.0")
+        context = _apply_defaults(context, "https://api.cohere.ai/v1/rerank", "rerank-multilingual-v3.0")
         super().__init__(context)

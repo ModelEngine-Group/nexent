@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator
 
 from nexent.core.models import OpenAIModel
 from ...multimodal_adapter import MultimodalAdapter, ModelInfo
-from ...model_context import ModelContext
+from ...model_context import TTSContext
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
 from .base import TTSAdapter, TTSRequest
@@ -26,14 +26,14 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
 
     factory = "modelengine"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: TTSContext) -> None:
         MultimodalAdapter.__init__(self, context)
         HttpTransportMixin.__init__(
             self,
             base_url=context.base_url,
             api_key=context.api_key,
             ssl_verify=context.ssl_verify,
-            timeout=context.extra.get("timeout_seconds", 30.0),
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
         )
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
@@ -47,7 +47,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            timeout_seconds=self._context.extra.get("timeout_seconds"),
+            timeout_seconds=self._context.timeout_seconds,
         )
 
     async def invoke(self, request: TTSRequest) -> bytes:

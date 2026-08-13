@@ -20,7 +20,13 @@ import logging
 from typing import Any, Dict, Optional
 
 from nexent import MessageObserver
-from nexent.core.gateway import ModelContext, get_gateway
+from nexent.core.gateway import (
+    LLMSampling,
+    ModelContext,
+    WSTransport,
+    build_context,
+    get_gateway,
+)
 from nexent.core.gateway.registry import get_registry
 from consts.const import MODEL_CONFIG_MAPPING, TEST_PCM_PATH
 from database.model_management_db import get_model_by_model_id, get_model_records
@@ -84,11 +90,14 @@ def _config_to_context(
     tenant_id: Optional[str],
     **construct_extras: Any,
 ) -> ModelContext:
-    """Build a :class:`ModelContext` from a DB model-config dict + per-call extras.
+    """Build a modality-specific :class:`ModelContext` from a DB config + per-call extras.
 
     ``construct_extras`` carries per-call-site tuning (temperature, top_p,
-    max_output_tokens, stream, observer, display_name, timeout_seconds, ws_url,
-    max_tokens, truncation_strategy, ...) so construction is behavior-preserving.
+    max_output_tokens, stream, observer, display_name, timeout_seconds,
+    language, speed_ratio, ...) so construction is behavior-preserving. Known
+    keys are mapped to typed sub-objects / subclass fields; any leftover
+    (e.g. the STT-Ali ``timeout`` key) falls through to the residual ``extra``
+    dict, matching the prior behavior.
     """
     cfg = cfg or {}
     factory = _normalize_factory(cfg.get("model_factory"), modality)
@@ -97,24 +106,9 @@ def _config_to_context(
     if needs_observer and observer is None:
         observer = MessageObserver()
 
-    extra: Dict[str, Any] = {}
-    # cfg-level construction params
-    for k in ("timeout_seconds", "max_tokens", "truncation_strategy", "extra_body"):
-        if cfg.get(k) is not None:
-            extra[k] = cfg.get(k)
-    # STT/TTS WS url is carried in base_url by the services; expose as ws_url.
-    if modality in ("stt", "tts") and cfg.get("base_url"):
-        extra["ws_url"] = cfg.get("base_url")
-    # per-call-site extras (override)
-    for k, v in list(construct_extras.items()):
-        if v is not None:
-            extra[k] = v if k != "ws_url" else v
-    # ws_url passed explicitly as kwarg
-    if construct_extras.get("ws_url"):
-        extra["ws_url"] = construct_extras["ws_url"]
-
-    return ModelContext(
-        model_name=construct_extras.get("model_name") or get_model_name_from_config(cfg) or "",
+    # ---- base kwargs (通用 + cross-cutting) ----
+    base: Dict[str, Any] = dict(
+        model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
         base_url=cfg.get("base_url", ""),
         api_key=cfg.get("api_key", ""),
         modality=modality,
@@ -122,18 +116,60 @@ def _config_to_context(
         tenant_id=tenant_id,
         slot=slot,
         ssl_verify=cfg.get("ssl_verify", True),
-        embedding_dim=cfg.get("max_tokens", 1024) if modality in ("embedding", "multi_embedding") else None,
-        model_type=cfg.get("model_type") if modality in ("embedding", "multi_embedding") else None,
-        model_appid=cfg.get("model_appid"),
-        access_token=cfg.get("access_token"),
-        speed_ratio=float(construct_extras.get("speed_ratio") or cfg.get("speed_ratio", 1.0)) if modality == "tts" else 1.0,
-        voice=construct_extras.get("voice") or (cfg.get("voice") if modality == "tts" else None),
-        language=construct_extras.get("language", "zh") if modality == "stt" else "zh",
-        audio_file_path=TEST_PCM_PATH if modality == "stt" else None,
         observer=observer,
-        display_name=construct_extras.get("display_name") or cfg.get("display_name"),
-        extra=extra,
+        display_name=construct_extras.pop("display_name", None) or cfg.get("display_name"),
+        timeout_seconds=construct_extras.pop("timeout_seconds", None) or cfg.get("timeout_seconds"),
     )
+
+    # ---- modality-specific sub-objects / fields ----
+    if modality in ("llm", "llm_long_context", "vlm"):
+        # Sampling params: per-call extras override; cfg-level keys (max_tokens,
+        # truncation_strategy, frequency_penalty, extra_body) for long-context/VLM.
+        base["sampling"] = LLMSampling(
+            temperature=construct_extras.pop("temperature", None) or cfg.get("temperature"),
+            top_p=construct_extras.pop("top_p", None) or cfg.get("top_p"),
+            stream=construct_extras.pop("stream", None),
+            max_output_tokens=construct_extras.pop("max_output_tokens", None) or cfg.get("max_output_tokens"),
+            max_tokens=cfg.get("max_tokens"),
+            truncation_strategy=cfg.get("truncation_strategy"),
+            frequency_penalty=cfg.get("frequency_penalty"),
+            extra_body=cfg.get("extra_body"),
+        )
+        if modality == "vlm":
+            caps = construct_extras.pop("capabilities", None)
+            if caps is not None:
+                base["capabilities"] = caps
+    elif modality in ("stt", "tts"):
+        # WS endpoint carried in base_url by the voice services; HTTP-vendor
+        # (ModelEngine) STT/TTS ignore `ws` and read base_url/timeout_seconds.
+        ws_url = construct_extras.pop("ws_url", None) or cfg.get("base_url")
+        if ws_url:
+            base["ws"] = WSTransport(
+                ws_url=ws_url,
+                auth_headers=construct_extras.pop("auth_headers", None),
+            )
+        base["model_appid"] = cfg.get("model_appid")
+        base["access_token"] = cfg.get("access_token")
+        if modality == "stt":
+            base["language"] = construct_extras.pop("language", "zh") or "zh"
+            base["audio_file_path"] = construct_extras.pop("audio_file_path", None) or TEST_PCM_PATH
+        else:  # tts
+            base["speed_ratio"] = float(
+                construct_extras.pop("speed_ratio", None) or cfg.get("speed_ratio", 1.0)
+            )
+            base["voice"] = construct_extras.pop("voice", None) or cfg.get("voice")
+            base["audio_file_path"] = construct_extras.pop("audio_file_path", None)
+    elif modality in ("embedding", "multi_embedding"):
+        base["embedding_dim"] = cfg.get("max_tokens", 1024)
+        base["model_type"] = cfg.get("model_type")
+
+    # ---- residual: unmapped per-call extras → extra (behavior-preserving) ----
+    # e.g. the STT-Ali `timeout` key (distinct from `timeout_seconds`) falls
+    # through here and is read by the Ali STT adapter's defaulted extra.get.
+    if construct_extras:
+        base["extra"] = {k: v for k, v in construct_extras.items() if v is not None}
+
+    return build_context(**base)
 
 
 def get_adapter_from_config(

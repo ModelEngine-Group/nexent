@@ -12,7 +12,7 @@ from typing import Any, BinaryIO, Dict, List, Optional, Union
 
 from nexent.core.models import OpenAIModel
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
-from ...model_context import ModelContext
+from ...model_context import LLMSampling, VLMContext
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
 
@@ -73,22 +73,22 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
     factory = "openai"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: VLMContext) -> None:
         MultimodalAdapter.__init__(self, context)
         HttpTransportMixin.__init__(
             self,
             base_url=context.base_url,
             api_key=context.api_key,
             ssl_verify=context.ssl_verify,
-            timeout=context.extra.get("timeout_seconds", 30.0),
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
         )
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAIModel` with VLM sampling defaults."""
-        extras = self._context.extra
+        s = self._context.sampling or LLMSampling()
         # Preserve the VLM sampling defaults that OpenAIVLModel used to set on
-        # its own instance; allow per-call-site overrides via context.extra.
+        # its own instance; allow per-call-site overrides via context.sampling.
         #
         # NOTE: frequency_penalty must NOT be passed to OpenAIModel(). The
         # smolagents base stores unknown __init__ kwargs in ``self.kwargs``,
@@ -106,11 +106,11 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
             display_name=self._context.display_name,
-            temperature=extras.get("temperature", 0.7),
-            top_p=extras.get("top_p", 0.7),
-            max_tokens=extras.get("max_tokens", 512),
+            temperature=s.temperature if s.temperature is not None else 0.7,
+            top_p=s.top_p if s.top_p is not None else 0.7,
+            max_tokens=s.max_tokens if s.max_tokens is not None else 512,
         )
-        self._model.frequency_penalty = extras.get("frequency_penalty", 0.5)
+        self._model.frequency_penalty = s.frequency_penalty if s.frequency_penalty is not None else 0.5
 
     # ---- VLM protocol (moved from openai_vlm.py) --------------------------
 

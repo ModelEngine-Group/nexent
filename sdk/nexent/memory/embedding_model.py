@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from ..core.gateway.modality.embedding import OpenAICompatibleEmbeddingAdapter
-from ..core.gateway import ModelContext
+from ..core.gateway import EmbeddingContext
 
 logger = logging.getLogger("memory_embedding_model")
 
@@ -120,7 +120,7 @@ def get_embedding_client(
         # Form the fully-qualified model name the API expects.
         full_model_name = f"{model_repo}/{model_name}" if model_repo else model_name
         _embedding_client_cache[cache_key] = OpenAICompatibleEmbeddingAdapter(
-            ModelContext(
+            EmbeddingContext(
                 model_name=full_model_name,
                 base_url=base_url,
                 api_key=api_key,

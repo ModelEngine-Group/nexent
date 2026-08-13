@@ -12,7 +12,7 @@ import logging
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Union
 
 from ...multimodal_adapter import MultimodalAdapter, ModelInfo
-from ...model_context import ModelContext
+from ...model_context import TTSContext
 from ...registry import register_adapter
 from ...transport import WebSocketTransportMixin
 from .base import TTSAdapter, TTSRequest
@@ -118,12 +118,12 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     factory = "ali"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: TTSContext) -> None:
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.extra.get("ws_url"),
-            auth_headers=context.extra.get("auth_headers"),
+            ws_url=context.ws.ws_url if context.ws else None,
+            auth_headers=context.ws.auth_headers if context.ws else None,
         )
         extras = context.extra
         self._config = AliTTSConfig(
