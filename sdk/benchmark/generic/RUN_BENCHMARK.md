@@ -31,9 +31,9 @@ Important options:
 | `--agent-config` | YAML agent snapshot |
 | `--evaluators` | One or more registered evaluators |
 | `--context-processing-mode` | `passthrough` or `adaptive_compact` |
-| `--soft-input-budget` | Adaptive-compaction trigger budget |
-| `--hard-input-budget` | Non-negotiable input ceiling |
-| `--context-window-tokens` | Provider/model context window |
+| `--soft-input-budget` | Adaptive-compaction trigger budget; defaults to 32,768 |
+| `--hard-input-budget` | Non-negotiable input ceiling; legacy default is 36,044 |
+| `--context-window-tokens` | Provider/model context window; defaults to 32,768 |
 | `--budget-profile` | Budget provenance label |
 | `--experiment-time` | Frozen prompt time shared by comparison arms |
 | `--dry-run` | Validate configuration without running the dataset |
@@ -42,7 +42,10 @@ Legacy `--enable-context-manager` and `--disable-context-manager` flags are
 compatibility aliases. New commands should use `--context-processing-mode`.
 
 CLI arguments override YAML values. Missing values fall back to the runner
-defaults.
+defaults. The default legacy threshold is 32,768 tokens, so the effective soft
+budget is 32,768 and the hard guard is `int(32768 * 1.1)`, or 36,044. This hard
+guard is not a provider-capacity calculation; formal experiments should still
+pass model-appropriate soft and hard budgets explicitly.
 
 ## Rescoring
 

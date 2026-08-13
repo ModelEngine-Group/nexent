@@ -94,18 +94,22 @@ agent_config:
 | `--context-processing-mode adaptive_compact` | 启用 adaptive compaction |
 | `--enable-context-manager` | 兼容别名，映射为 `adaptive_compact` |
 | `--disable-context-manager` | 兼容别名，映射为 `passthrough` |
-| `--token-threshold` | 压缩阈值 |
-| `--soft-input-budget` | 显式 soft input budget |
-| `--hard-input-budget` | 显式 hard input budget |
+| `--token-threshold` | 压缩阈值；Benchmark 默认 32,768 |
+| `--soft-input-budget` | 显式 soft input budget；默认跟随 threshold，即 32,768 |
+| `--hard-input-budget` | 显式 hard input budget；默认是 threshold 的 1.1 倍，即 36,044 |
 | `--budget-profile` | 预算来源/实验意图分类，只写入 manifest，不改变预算计算 |
-| `--context-window-tokens` | 记录到 ContextManager 的 context-window 值；当前不会执行完整生产容量解析 |
+| `--context-window-tokens` | 记录到 ContextManager 的 context-window 值；默认 32,768，当前不会执行完整生产容量解析 |
 
 预算解析规则：
 
 - 显式传入 `--soft-input-budget` / `--hard-input-budget` 时，ContextManager 直接使用这两个值；
-- 未显式传入时，soft 使用 `--token-threshold`，hard 使用 `token_threshold * 1.1`；
+- 未显式传入时，Benchmark 使用 Nexent 的 32K legacy fallback：threshold/soft 为 32,768，
+  hard 为 `int(32768 * 1.1)`，即 36,044；显式修改 threshold 时，soft/hard 继续按
+  threshold 和 `threshold * 1.1` 派生；
 - `--context-window-tokens` 当前不会根据模型的 `max_input_tokens`、输出预留和 uncertainty
   reserve 自动推导 soft/hard，因此已经显式传入预算时通常不需要再传它；
+- 默认 hard 是 legacy threshold guard，并不是根据 provider 容量计算的安全输入上限；正式实验仍应
+  根据模型容量显式传入 soft/hard；
 - P (`passthrough`) 仍执行 hard-budget 防护；超过 hard 后会报错，而不是无限制调用模型；
 - C (`adaptive_compact`) 压缩后仍超过 hard 时会报
   `Context input remains over the model hard budget after compaction`。

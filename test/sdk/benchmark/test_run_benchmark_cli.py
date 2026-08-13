@@ -10,6 +10,7 @@ from sdk.benchmark.generic.run_benchmark import (
     load_agent_config,
     non_negative_int,
     positive_int,
+    resolve_context_budget_defaults,
     select_dataset_items,
 )
 
@@ -29,6 +30,34 @@ def test_non_negative_int_rejects_negative_values(value):
 def test_cli_integer_validators_accept_boundaries():
     assert positive_int("1") == 1
     assert non_negative_int("0") == 0
+
+
+def test_context_budget_defaults_match_nexent_legacy_fallback():
+    assert resolve_context_budget_defaults(
+        token_threshold=None,
+        soft_input_budget=None,
+        hard_input_budget=None,
+        context_window_tokens=None,
+    ) == {
+        "token_threshold": 32_768,
+        "soft_input_budget_tokens": 32_768,
+        "hard_input_budget_tokens": 36_044,
+        "context_window_tokens": 32_768,
+    }
+
+
+def test_context_budget_defaults_follow_threshold_and_explicit_overrides():
+    assert resolve_context_budget_defaults(
+        token_threshold=20_000,
+        soft_input_budget=None,
+        hard_input_budget=25_000,
+        context_window_tokens=30_000,
+    ) == {
+        "token_threshold": 20_000,
+        "soft_input_budget_tokens": 20_000,
+        "hard_input_budget_tokens": 25_000,
+        "context_window_tokens": 30_000,
+    }
 
 
 def test_load_agent_config_resolves_strict_environment_references(
@@ -122,6 +151,7 @@ def test_select_dataset_items_rejects_conflicts_and_duplicates():
             ["--soft-input-budget", "20", "--hard-input-budget", "10"],
             "cannot exceed",
         ),
+        (["--soft-input-budget", "40000"], "cannot exceed"),
     ],
 )
 def test_main_rejects_invalid_argument_combinations(monkeypatch, capsys, extra_args, message):

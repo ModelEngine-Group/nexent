@@ -84,6 +84,41 @@ load_dotenv()
 load_dotenv(Path(__file__).parent.parent.parent.parent / ".env")
 
 
+DEFAULT_CONTEXT_WINDOW_TOKENS = 32_768
+DEFAULT_TOKEN_THRESHOLD = DEFAULT_CONTEXT_WINDOW_TOKENS
+DEFAULT_SOFT_INPUT_BUDGET_TOKENS = DEFAULT_TOKEN_THRESHOLD
+DEFAULT_HARD_INPUT_BUDGET_TOKENS = int(DEFAULT_TOKEN_THRESHOLD * 1.1)
+
+
+def resolve_context_budget_defaults(
+    *,
+    token_threshold: int | None,
+    soft_input_budget: int | None,
+    hard_input_budget: int | None,
+    context_window_tokens: int | None,
+) -> dict[str, int]:
+    """Resolve benchmark defaults using Nexent's 32K legacy fallback."""
+    resolved_threshold = token_threshold or DEFAULT_TOKEN_THRESHOLD
+    return {
+        "token_threshold": resolved_threshold,
+        "soft_input_budget_tokens": (
+            soft_input_budget
+            if soft_input_budget is not None
+            else resolved_threshold
+        ),
+        "hard_input_budget_tokens": (
+            hard_input_budget
+            if hard_input_budget is not None
+            else int(resolved_threshold * 1.1)
+        ),
+        "context_window_tokens": (
+            context_window_tokens
+            if context_window_tokens is not None
+            else DEFAULT_CONTEXT_WINDOW_TOKENS
+        ),
+    }
+
+
 def load_agent_config(config_path: str) -> dict:
     """Load YAML agent configuration and resolve strict environment references."""
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -639,12 +674,30 @@ def main():
                                help="Deprecated alias for --context-processing-mode adaptive_compact")
     context_group.add_argument("--disable-context-manager", action="store_true",
                                help="Deprecated alias for --context-processing-mode passthrough")
-    parser.add_argument("--token-threshold", type=positive_int,
-                        help="Context manager token threshold (SDK default: 10000)")
-    parser.add_argument("--soft-input-budget", type=positive_int,
-                        help="Explicit soft input budget in tokens")
-    parser.add_argument("--hard-input-budget", type=positive_int,
-                        help="Explicit hard input budget in tokens")
+    parser.add_argument(
+        "--token-threshold",
+        type=positive_int,
+        help=(
+            "Context manager token threshold "
+            f"(benchmark default: {DEFAULT_TOKEN_THRESHOLD})"
+        ),
+    )
+    parser.add_argument(
+        "--soft-input-budget",
+        type=positive_int,
+        help=(
+            "Explicit soft input budget in tokens "
+            f"(default: threshold, {DEFAULT_SOFT_INPUT_BUDGET_TOKENS})"
+        ),
+    )
+    parser.add_argument(
+        "--hard-input-budget",
+        type=positive_int,
+        help=(
+            "Explicit hard input budget in tokens "
+            f"(default: threshold * 1.1, {DEFAULT_HARD_INPUT_BUDGET_TOKENS})"
+        ),
+    )
     parser.add_argument(
         "--budget-profile",
         choices=(
@@ -655,8 +708,14 @@ def main():
         ),
         help="Budget provenance/classification recorded in the run manifest",
     )
-    parser.add_argument("--context-window-tokens", type=positive_int,
-                        help="Model context-window capacity recorded by ContextManager")
+    parser.add_argument(
+        "--context-window-tokens",
+        type=positive_int,
+        help=(
+            "Model context-window capacity recorded by ContextManager "
+            f"(default: {DEFAULT_CONTEXT_WINDOW_TOKENS})"
+        ),
+    )
     parser.add_argument("--keep-recent-steps", type=non_negative_int,
                         help="Keep N recent action steps from compression (SDK default: 4)")
     parser.add_argument("--keep-recent-pairs", type=non_negative_int,
@@ -704,6 +763,12 @@ def main():
                         help="List available evaluators and exit")
 
     args = parser.parse_args()
+    resolved_context_budgets = resolve_context_budget_defaults(
+        token_threshold=args.token_threshold,
+        soft_input_budget=args.soft_input_budget,
+        hard_input_budget=args.hard_input_budget,
+        context_window_tokens=args.context_window_tokens,
+    )
     if args.item_limit is not None and args.item_id:
         parser.error("--item-limit cannot be combined with --item-id")
     if args.exa_cache_mode != "off" and not args.exa_cache_path:
@@ -770,9 +835,8 @@ def main():
                 f"{', '.join(removed_args)} were removed by the unified ContextItems runtime"
             )
         if (
-            args.soft_input_budget is not None
-            and args.hard_input_budget is not None
-            and args.soft_input_budget > args.hard_input_budget
+            resolved_context_budgets["soft_input_budget_tokens"]
+            > resolved_context_budgets["hard_input_budget_tokens"]
         ):
             parser.error("--soft-input-budget cannot exceed --hard-input-budget")
 
@@ -859,18 +923,11 @@ def main():
 
     from nexent.core.agents.context import ContextManagerConfig, PolicyLayers
     cm_kwargs = {
+        **resolved_context_budgets,
         "policy_layers": PolicyLayers(
             platform={"processing_mode": processing_mode}
         )
     }
-    if args.token_threshold is not None:
-        cm_kwargs["token_threshold"] = args.token_threshold
-    if args.soft_input_budget is not None:
-        cm_kwargs["soft_input_budget_tokens"] = args.soft_input_budget
-    if args.hard_input_budget is not None:
-        cm_kwargs["hard_input_budget_tokens"] = args.hard_input_budget
-    if args.context_window_tokens is not None:
-        cm_kwargs["context_window_tokens"] = args.context_window_tokens
     if args.keep_recent_steps is not None:
         cm_kwargs["keep_recent_steps"] = args.keep_recent_steps
     cm_config = ContextManagerConfig(**cm_kwargs)
