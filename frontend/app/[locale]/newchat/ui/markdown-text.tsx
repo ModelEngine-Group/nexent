@@ -135,72 +135,99 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
 }
 
 /**
- * A citation belongs to the Markdown section immediately before it, rather
- * than to the entire assistant response. A section can include a paragraph
- * followed by a table. A preceding citation or heading starts a new section,
- * so separately cited answer sections cannot affect each other.
+ * Highlight terms are taken from the original Markdown answer instead of the
+ * rendered DOM. Markdown tables and code blocks are represented by several
+ * nested elements after rendering, so the DOM can lose their association with
+ * a citation immediately before them.
  */
-function getCitationScopeText(citationElement: HTMLElement | null): string {
-  if (!citationElement) return "";
-
-  const markdownRoot = citationElement.closest(".aui-md");
-  if (!markdownRoot) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
-  let currentBlock: HTMLElement = citationElement;
-  while (
-    currentBlock.parentElement &&
-    currentBlock.parentElement !== markdownRoot
-  ) {
-    currentBlock = currentBlock.parentElement;
-  }
-
-  if (currentBlock.parentElement !== markdownRoot) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
-  const blocks = Array.from(markdownRoot.children) as HTMLElement[];
-  const currentBlockIndex = blocks.indexOf(currentBlock);
-  if (currentBlockIndex < 0) {
-    return citationElement.closest("p, li, td")?.textContent || "";
-  }
-
-  const citationsInCurrentBlock = Array.from(
-    currentBlock.querySelectorAll<HTMLElement>("[data-citation-marker]"),
-  );
-  const citationIndex = citationsInCurrentBlock.indexOf(citationElement);
-  const currentBlockRange = document.createRange();
-  currentBlockRange.selectNodeContents(currentBlock);
-  if (citationIndex > 0) {
-    currentBlockRange.setStartAfter(citationsInCurrentBlock[citationIndex - 1]);
-  }
-  if (citationIndex >= 0) {
-    currentBlockRange.setEndBefore(citationElement);
-  }
-  const currentBlockText = currentBlockRange.toString().trim();
-
-  if (citationIndex > 0) return currentBlockText;
-
-  let sectionStartIndex = 0;
-  for (let index = currentBlockIndex - 1; index >= 0; index -= 1) {
-    const block = blocks[index];
-    const startsNewSection = /^H[1-6]$/.test(block.tagName);
-    const hasEarlierCitation = Boolean(
-      block.querySelector("[data-citation-marker]"),
-    );
-    if (startsNewSection || hasEarlierCitation) {
-      sectionStartIndex = index + 1;
-      break;
-    }
-  }
-
-  return blocks
-    .slice(sectionStartIndex, currentBlockIndex)
-    .map((block) => block.textContent?.trim() || "")
-    .filter(Boolean)
-    .concat(currentBlockText ? [currentBlockText] : [])
+function getCitationScopeText(
+  content: readonly MessageSourcePart[],
+  citekey: string,
+  citationElement: HTMLElement | null,
+): string {
+  const answerText = content
+    .filter(
+      (part) => part.type === "text" && typeof part.text === "string",
+    )
+    .map((part) => part.text)
     .join("\n");
+  if (!answerText) return "";
+
+  const normalizedKey = citekey.trim().toLowerCase();
+  const markers = Array.from(answerText.matchAll(/\[\[([^\]]+)\]\]/g));
+  const matchingMarkers = markers.filter(
+    (marker) => marker[1].trim().toLowerCase() === normalizedKey,
+  );
+  if (!matchingMarkers.length) return "";
+
+  const renderedMarkers = citationElement
+    ? Array.from(
+        citationElement
+          .closest(".aui-md")
+          ?.querySelectorAll<HTMLElement>("[data-citekey]") || [],
+      ).filter((marker) => marker.dataset.citekey === normalizedKey)
+    : [];
+  const occurrence = Math.max(0, renderedMarkers.indexOf(citationElement!));
+  const selectedMarker =
+    matchingMarkers[Math.min(occurrence, matchingMarkers.length - 1)];
+  const selectedMarkerIndex = markers.indexOf(selectedMarker);
+  if (selectedMarker.index === undefined || selectedMarkerIndex < 0) return "";
+
+  let groupStart = selectedMarkerIndex;
+  while (
+    groupStart > 0 &&
+    !answerText
+      .slice(
+        (markers[groupStart - 1].index || 0) + markers[groupStart - 1][0].length,
+        markers[groupStart].index,
+      )
+      .trim()
+  ) {
+    groupStart -= 1;
+  }
+  let groupEnd = selectedMarkerIndex;
+  while (
+    groupEnd < markers.length - 1 &&
+    !answerText
+      .slice(
+        (markers[groupEnd].index || 0) + markers[groupEnd][0].length,
+        markers[groupEnd + 1].index,
+      )
+      .trim()
+  ) {
+    groupEnd += 1;
+  }
+
+  const groupStartOffset = markers[groupStart].index || 0;
+  const groupEndOffset =
+    (markers[groupEnd].index || 0) + markers[groupEnd][0].length;
+  const previousParagraphOffset = answerText.lastIndexOf("\n\n", groupStartOffset);
+  let scopeStart = previousParagraphOffset < 0 ? 0 : previousParagraphOffset + 2;
+
+  const precedingHeading = Array.from(
+    answerText.slice(0, groupStartOffset).matchAll(/^#{1,6}\s.*$/gm),
+  ).at(-1);
+  if (precedingHeading?.index !== undefined) {
+    scopeStart = Math.max(scopeStart, precedingHeading.index);
+  }
+
+  const citationTail = answerText.slice(groupEndOffset);
+  const introducesStructuredContent = /^\s*[：:]/.test(citationTail);
+  if (!introducesStructuredContent) {
+    return answerText.slice(scopeStart, groupStartOffset).trim();
+  }
+
+  const nextHeading = Array.from(
+    citationTail.matchAll(/\n#{1,6}\s/g),
+  )[0];
+  const nextMarker = markers[groupEnd + 1];
+  const nextHeadingOffset =
+    nextHeading?.index === undefined
+      ? answerText.length
+      : groupEndOffset + nextHeading.index;
+  const nextMarkerOffset = nextMarker?.index ?? answerText.length;
+  const scopeEnd = Math.min(nextHeadingOffset, nextMarkerOffset);
+  return answerText.slice(scopeStart, scopeEnd).trim();
 }
 
 /**
@@ -239,9 +266,7 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
         web: t("chat.sources.web"),
         source: t("chat.sources.source"),
       }) : `${t("chat.sources.source")} ${resolvedCiteIndex}`}
-      url={source?.url}
       title={source?.title ?? `Source ${resolvedCiteIndex}`}
-      text={source?.text}
       loading={!source}
       onClick={
         source && messageId
@@ -252,7 +277,11 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
                 sources,
                 images,
                 selectedCitationKey: citationKey,
-                citationContext: getCitationScopeText(citationElement),
+                citationContext: getCitationScopeText(
+                  content,
+                  citekey,
+                  citationElement,
+                ),
               })
           : undefined
       }

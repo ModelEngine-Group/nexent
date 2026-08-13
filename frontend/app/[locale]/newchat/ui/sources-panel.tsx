@@ -259,6 +259,9 @@ const extractHighlightTerms = (
   for (const value of answerContext.match(/[A-Za-z_][A-Za-z0-9_.\/-]{2,}/g) || []) {
     addIfPresent(value);
   }
+  for (const value of answerContext.match(/\b[A-Za-z]{1,4}\d{1,4}\b/g) || []) {
+    addIfPresent(value);
+  }
   for (const phrase of answerContext.match(/[\u4e00-\u9fff]{3,}/g) || []) {
     for (let start = 0; start <= phrase.length - 3;) {
       let matched = "";
