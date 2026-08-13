@@ -138,8 +138,35 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
  * Highlight terms are taken from the original Markdown answer instead of the
  * rendered DOM. Markdown tables and code blocks are represented by several
  * nested elements after rendering, so the DOM can lose their association with
- * a citation immediately before them.
+ * a citation immediately before them. A marker in a Markdown heading cites
+ * that heading's local section, including the following paragraphs or table.
  */
+function getHeadingLevelAt(text: string, offset: number): number | undefined {
+  const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+  const heading = text
+    .slice(lineStart, offset)
+    .match(/^\s{0,3}(#{1,6})\s/);
+  return heading?.[1].length;
+}
+
+function getNextHeadingOffset(
+  text: string,
+  startOffset: number,
+  maxHeadingLevel?: number,
+): number {
+  for (const heading of text
+    .slice(startOffset)
+    .matchAll(/\n\s{0,3}(#{1,6})\s/g)) {
+    if (
+      maxHeadingLevel === undefined ||
+      heading[1].length <= maxHeadingLevel
+    ) {
+      return startOffset + (heading.index || 0);
+    }
+  }
+  return text.length;
+}
+
 function getCitationScopeText(
   content: readonly MessageSourcePart[],
   citekey: string,
@@ -212,19 +239,21 @@ function getCitationScopeText(
   }
 
   const citationTail = answerText.slice(groupEndOffset);
-  const introducesStructuredContent = /^\s*[：:]/.test(citationTail);
-  if (!introducesStructuredContent) {
+  const introducesStructuredContent = /^\s*[:\uFF1A]/.test(citationTail);
+  const headingLevel = getHeadingLevelAt(answerText, groupStartOffset);
+  const shouldIncludeFollowingContent =
+    introducesStructuredContent ||
+    headingLevel !== undefined;
+  if (!shouldIncludeFollowingContent) {
     return answerText.slice(scopeStart, groupStartOffset).trim();
   }
 
-  const nextHeading = Array.from(
-    citationTail.matchAll(/\n#{1,6}\s/g),
-  )[0];
   const nextMarker = markers[groupEnd + 1];
-  const nextHeadingOffset =
-    nextHeading?.index === undefined
-      ? answerText.length
-      : groupEndOffset + nextHeading.index;
+  const nextHeadingOffset = getNextHeadingOffset(
+    answerText,
+    groupEndOffset,
+    headingLevel,
+  );
   const nextMarkerOffset = nextMarker?.index ?? answerText.length;
   const scopeEnd = Math.min(nextHeadingOffset, nextMarkerOffset);
   return answerText.slice(scopeStart, scopeEnd).trim();
