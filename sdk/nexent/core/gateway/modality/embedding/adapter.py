@@ -14,7 +14,7 @@ import requests
 
 from nexent.monitor import record_model_call
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
-from ...model_context import ModelContext
+from ...model_context import EmbeddingContext
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
 
@@ -81,7 +81,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
         """
         ...
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: EmbeddingContext) -> None:
         """Initialize the shared HTTP session and auth headers."""
         MultimodalAdapter.__init__(self, context)
         HttpTransportMixin.__init__(
@@ -89,7 +89,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
             base_url=context.base_url,
             api_key=context.api_key,
             ssl_verify=context.ssl_verify,
-            timeout=context.extra.get("timeout_seconds", 30.0),
+            timeout=context.timeout_seconds if context.timeout_seconds is not None else 30.0,
         )
         self._session = requests.Session()
         self._session.trust_env = False

@@ -301,10 +301,10 @@ def test_build_model_does_not_send_frequency_penalty():
     frequency_penalty=0.5 to the VLM API. The original OpenAIVLModel set it
     only as a dead instance attribute (never forwarded, never read).
     """
-    from nexent.core.gateway.model_context import ModelContext
+    from nexent.core.gateway.model_context import VLMContext
     from nexent.core.utils.observer import MessageObserver
 
-    adapter = OpenAIVLMAdapter(ModelContext(
+    adapter = OpenAIVLMAdapter(VLMContext(
         modality="vlm",
         factory="openai",
         model_name="qwen-vl-max",
@@ -335,9 +335,9 @@ def test_build_model_does_not_send_frequency_penalty():
 
 
 def _make_vlm(model_name, base_url, **ctx_overrides):
-    from nexent.core.gateway.model_context import ModelContext
+    from nexent.core.gateway.model_context import VLMContext
 
-    return OpenAIVLMAdapter(ModelContext(
+    return OpenAIVLMAdapter(VLMContext(
         modality="vlm",
         factory="openai",
         model_name=model_name,
@@ -381,9 +381,9 @@ def test_model_info_non_siliconflow_keeps_audio():
 def test_model_info_explicit_capability_overrides_heuristic():
     """An explicit audio=True in context.capabilities wins over the
     SiliconFlow heuristic — the config author declared the capability."""
-    from nexent.core.gateway.model_context import ModelContext
+    from nexent.core.gateway.model_context import VLMContext
 
-    adapter = OpenAIVLMAdapter(ModelContext(
+    adapter = OpenAIVLMAdapter(VLMContext(
         modality="vlm",
         factory="openai",
         model_name="Qwen/Qwen3-VL-32B-Instruct",

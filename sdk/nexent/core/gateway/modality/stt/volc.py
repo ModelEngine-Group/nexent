@@ -17,7 +17,7 @@ from io import BytesIO
 from typing import Any, AsyncIterator, Dict
 
 from ...multimodal_adapter import MultimodalAdapter, ModelInfo
-from ...model_context import ModelContext
+from ...model_context import STTContext
 from ...registry import register_adapter
 from ...transport import WebSocketTransportMixin
 from .base import STTAdapter, STTRequest, STTStreamRequest
@@ -124,12 +124,12 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
     factory = "volc"
 
-    def __init__(self, context: ModelContext) -> None:
+    def __init__(self, context: STTContext) -> None:
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.extra.get("ws_url"),
-            auth_headers=context.extra.get("auth_headers"),
+            ws_url=context.ws.ws_url if context.ws else None,
+            auth_headers=context.ws.auth_headers if context.ws else None,
         )
         self._config = VolcSTTConfig(
             appid=context.model_appid or "",
