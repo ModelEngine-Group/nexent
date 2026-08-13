@@ -105,6 +105,10 @@ RedisService = MagicMock()
 # Import routes and services
 from backend.apps.vectordatabase_app import router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from consts.exceptions import (
+    PersonalKbQuotaExceededError,
+    PersonalKbQuotaUnavailableError,
+)
 
 # Create test client
 app = FastAPI()
@@ -172,7 +176,7 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
@@ -198,6 +202,7 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         assert called_kwargs["embedding_dim"] == 768
         assert called_kwargs["user_id"] == auth_data["user_id"]
         assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        assert called_kwargs["user_role"] == "ADMIN"
 
 
 @pytest.mark.asyncio
@@ -208,7 +213,7 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
@@ -233,6 +238,7 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
         assert called_kwargs["embedding_dim"] == 768
         assert called_kwargs["user_id"] == auth_data["user_id"]
         assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        assert called_kwargs["user_role"] == "ADMIN"
         # Verify group permissions were passed
         assert called_kwargs["ingroup_permission"] == "EDIT"
         assert called_kwargs["group_ids"] == [1, 2, 3]
@@ -245,7 +251,7 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
@@ -265,12 +271,13 @@ async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, au
         called_kwargs = mock_create.call_args[1]
         assert called_kwargs["ingroup_permission"] == "READ_ONLY"
         assert called_kwargs["group_ids"] is None
+        assert called_kwargs["user_role"] == "ADMIN"
 
 
 @pytest.mark.asyncio
 async def test_create_new_index_passes_embedding_model_id(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         mock_create.return_value = {"status": "success", "index_name": auth_data["index_name"]}
@@ -284,6 +291,7 @@ async def test_create_new_index_passes_embedding_model_id(vdb_core_mock, auth_da
         assert response.status_code == 200
         called_kwargs = mock_create.call_args[1]
         assert called_kwargs["embedding_model_id"] == 202
+        assert called_kwargs["user_role"] == "ADMIN"
 
 
 @pytest.mark.asyncio
@@ -1571,7 +1579,7 @@ async def test_update_index_success(auth_data):
     Verifies that the endpoint returns the expected response when update succeeds.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
 
         mock_update.return_value = True
@@ -1599,7 +1607,8 @@ async def test_update_index_success(auth_data):
             ingroup_permission="EDIT",
             group_ids=[1, 2, 3],
             tenant_id=auth_data["tenant_id"],
-            user_id=auth_data["user_id"]
+            user_id=auth_data["user_id"],
+            user_role="ADMIN"
         )
 
 
@@ -1610,7 +1619,7 @@ async def test_update_index_partial_update(auth_data):
     Verifies that the endpoint handles partial updates correctly.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
 
         mock_update.return_value = True
@@ -1633,14 +1642,15 @@ async def test_update_index_partial_update(auth_data):
             ingroup_permission=None,
             group_ids=None,
             tenant_id=auth_data["tenant_id"],
-            user_id=auth_data["user_id"]
+            user_id=auth_data["user_id"],
+            user_role="ADMIN"
         )
 
 
 @pytest.mark.asyncio
 async def test_update_index_clear_quota(auth_data):
     """Test that an explicit null quota removes the knowledge base limit."""
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
         mock_update.return_value = True
 
@@ -1658,6 +1668,7 @@ async def test_update_index_clear_quota(auth_data):
             group_ids=None,
             tenant_id=auth_data["tenant_id"],
             user_id=auth_data["user_id"],
+            user_role="ADMIN",
             quota_limit_bytes=None
         )
 
@@ -1669,7 +1680,7 @@ async def test_update_index_value_error(auth_data):
     Verifies that the endpoint returns 400 BAD_REQUEST for invalid permission.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
 
         mock_update.side_effect = ValueError(
@@ -1697,7 +1708,7 @@ async def test_update_index_not_found(auth_data):
     Verifies that the endpoint returns 404 NOT_FOUND when knowledge base doesn't exist.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
 
         mock_update.return_value = False  # Knowledge base not found
@@ -1724,7 +1735,7 @@ async def test_update_index_exception(auth_data):
     Verifies that the endpoint returns 500 INTERNAL_SERVER_ERROR on error.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+    with patch("backend.apps.vectordatabase_app.get_current_user_context", return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
 
         mock_update.side_effect = Exception("Database error")
@@ -1751,7 +1762,7 @@ async def test_update_index_auth_exception(auth_data):
     Verifies that the endpoint returns 500 INTERNAL_SERVER_ERROR when auth fails.
     """
     # Setup mocks
-    with patch("backend.apps.vectordatabase_app.get_current_user_id") as mock_get_user:
+    with patch("backend.apps.vectordatabase_app.get_current_user_context") as mock_get_user:
 
         mock_get_user.side_effect = Exception("Invalid authorization token")
 
@@ -2977,3 +2988,105 @@ async def test_hybrid_search_checks_all_indices(vdb_core_mock, auth_data):
         # Should have checked allowed_kb, then forbidden_kb (stopped there)
         assert call_log == ["allowed_kb", "forbidden_kb"]
         mock_search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_personal_kb_quota_exceeded(
+    vdb_core_mock, auth_data
+):
+    """PRIVATE KB uploads fail closed with 403 when personal quota is exceeded."""
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
+        "backend.apps.vectordatabase_app.get_knowledge_record",
+        return_value={"ingroup_permission": "PRIVATE"},
+    ), patch(
+        "backend.apps.vectordatabase_app.QuotaService.check_personal_kb_quota",
+        side_effect=PersonalKbQuotaExceededError("quota exceeded"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.index_documents"
+    ) as mock_index:
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 403
+    assert "quota exceeded" in response.json()["detail"]
+    mock_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_personal_kb_quota_unavailable(
+    vdb_core_mock, auth_data
+):
+    """PRIVATE KB uploads return 503 when ES usage cannot be verified."""
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
+        "backend.apps.vectordatabase_app.get_knowledge_record",
+        return_value={"ingroup_permission": "PRIVATE"},
+    ), patch(
+        "backend.apps.vectordatabase_app.QuotaService.check_personal_kb_quota",
+        side_effect=PersonalKbQuotaUnavailableError("es down"),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.index_documents"
+    ) as mock_index:
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 503
+    assert "service unavailable" in response.json()["detail"]
+    mock_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_index_documents_skips_personal_quota_for_shared_kb(
+    vdb_core_mock, auth_data
+):
+    """Non-PRIVATE KB uploads must not invoke the personal quota check."""
+    with patch(
+        "backend.apps.vectordatabase_app.get_vector_db_core",
+        return_value=vdb_core_mock,
+    ), patch(
+        "backend.apps.vectordatabase_app.get_current_user_id",
+        return_value=(auth_data["user_id"], auth_data["tenant_id"]),
+    ), patch(
+        "backend.apps.vectordatabase_app.get_knowledge_record",
+        return_value={"ingroup_permission": "PUBLIC"},
+    ), patch(
+        "backend.apps.vectordatabase_app.QuotaService"
+    ) as mock_quota_class, patch(
+        "backend.apps.vectordatabase_app.get_embedding_model_by_id",
+        return_value=MagicMock(),
+    ), patch(
+        "backend.apps.vectordatabase_app.ElasticSearchService.index_documents"
+    ) as mock_index:
+        mock_index.return_value = IndexingResponse(
+            success=True,
+            message="Documents indexed successfully",
+            total_indexed=1,
+            total_submitted=1,
+        )
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/documents",
+            json=[{"id": 1, "text": "test doc"}],
+            headers=auth_data["auth_header"],
+        )
+
+    assert response.status_code == 200
+    mock_quota_class.assert_not_called()
+    mock_index.assert_called_once()

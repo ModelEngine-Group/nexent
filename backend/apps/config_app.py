@@ -41,7 +41,11 @@ from apps.agent_evaluation_app import router as agent_evaluation_router
 from apps.cas_app import router as cas_router
 from apps.memory_config_app import router as memory_config_router
 from apps.memory_record_app import router as memory_record_router
-from apps.quota_app import tenant_quota_router, platform_quota_router
+from apps.quota_app import (
+    tenant_quota_router,
+    platform_quota_router,
+    personal_quota_router,
+)
 from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
@@ -123,3 +127,4 @@ app.include_router(memory_config_router)
 app.include_router(memory_record_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
+app.include_router(personal_quota_router)

@@ -69,6 +69,16 @@ def user_credentials():
     return "test_user", "test_tenant"
 
 
+@pytest.fixture(autouse=True)
+def admin_rbac(mocker):
+    """Grant model mutation permissions by default for legacy endpoint tests."""
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_context",
+        return_value=("test_user", "test_tenant", "ADMIN"),
+    )
+    mocker.patch("backend.apps.model_managment_app.has_permission", return_value=True)
+
+
 @pytest.fixture
 def sample_model_data():
     """Provide sample model data for testing."""
@@ -288,6 +298,23 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
     data = response.json()
     assert "Model created successfully" in data.get("message", "")
     mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_model_forbidden_without_permission(client, auth_header, sample_model_data, mocker):
+    """Users without model:create must receive 403 before the service is called."""
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_context",
+        return_value=("test_user", "test_tenant", "USER"),
+    )
+    mocker.patch("backend.apps.model_managment_app.has_permission", return_value=False)
+    mock_create = mocker.patch("backend.apps.model_managment_app.create_model_for_tenant")
+
+    response = client.post("/model/create", json=sample_model_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "model:create" in response.json()["detail"]
+    mock_create.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -557,6 +584,25 @@ async def test_delete_model_success(client, auth_header, user_credentials, mocke
     assert "Model deleted successfully" in data.get("message", "")
     assert data.get("data") == "Test Model"
     mock_del.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_model_forbidden_without_permission(client, auth_header, mocker):
+    """Users without model:delete must receive 403 before the service is called."""
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_context",
+        return_value=("test_user", "test_tenant", "USER"),
+    )
+    mocker.patch("backend.apps.model_managment_app.has_permission", return_value=False)
+    mock_del = mocker.patch("backend.apps.model_managment_app.delete_model_for_tenant")
+
+    response = client.post(
+        "/model/delete", params={"display_name": "Test Model"}, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "model:delete" in response.json()["detail"]
+    mock_del.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -841,6 +887,37 @@ async def test_update_single_model_success(client, auth_header, user_credentials
         "Updated Test Model",
         update_data,
     )
+
+
+@pytest.mark.asyncio
+async def test_update_single_model_forbidden_without_permission(client, auth_header, mocker):
+    """Users without model:update must receive 403 before the service is called."""
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_context",
+        return_value=("test_user", "test_tenant", "USER"),
+    )
+    mocker.patch("backend.apps.model_managment_app.has_permission", return_value=False)
+    mock_update = mocker.patch("backend.apps.model_managment_app.update_single_model_for_tenant")
+
+    update_data = {
+        "model_id": "test_model_id",
+        "model_name": "huggingface/llama",
+        "display_name": "Updated Test Model",
+        "base_url": "http://localhost:8001",
+        "api_key": "updated_key",
+        "model_type": "llm",
+        "provider": "huggingface",
+    }
+    response = client.post(
+        "/model/update",
+        params={"display_name": "Updated Test Model"},
+        json=update_data,
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "model:update" in response.json()["detail"]
+    mock_update.assert_not_called()
 
 
 @pytest.mark.asyncio

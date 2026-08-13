@@ -133,6 +133,65 @@ export interface UpdateTenantHardQuotaPayload {
   hard_limit_mb?: number | null;
 }
 
+// Personal KB capacity management (ADMIN/SU)
+export type PersonalQuotaSource = "individual" | "default" | "unlimited";
+
+export interface PersonalCapacityUser {
+  user_id: string;
+  user_name: string;
+  email: string | null;
+  kb_count: number;
+  total_bytes: number;
+  total_readable: string | null;
+  quota_limit_bytes: number | null;
+  quota_limit_readable: string | null;
+  effective_quota_bytes: number | null;
+  effective_quota_readable: string | null;
+  quota_source: PersonalQuotaSource;
+}
+
+export interface PersonalCapacityUsersResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  items: PersonalCapacityUser[];
+}
+
+export interface PersonalKnowledgeBaseItem {
+  kb_id: number | string;
+  knowledge_id: number | string;
+  index_name: string;
+  name: string;
+  source: string | null;
+  doc_count: number;
+  chunk_count: number;
+  store_size: string | null;
+  store_size_bytes: number;
+  quota_limit_bytes: number | null;
+  quota_limit_readable: string | null;
+  updated_at: string | null;
+}
+
+export interface PersonalKbDetailResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  kbs: PersonalKnowledgeBaseItem[];
+}
+
+export interface PersonalQuotaPayload {
+  quota_limit_bytes?: number | null;
+  unlimited?: boolean;
+}
+
+export interface PersonalDefaultQuota {
+  quota_limit_bytes: number | null;
+  quota_limit_readable: string | null;
+  unlimited: boolean;
+}
+
 // ── Error types ──────────────────────────────────────────────
 
 const QUOTA_CONFLICT_TRANSLATION_KEYS: Record<string, string> = {

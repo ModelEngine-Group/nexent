@@ -58,7 +58,8 @@ from services.model_management_service import (
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
 )
-from utils.auth_utils import get_current_user_id
+from permissions.rbac import has_permission
+from utils.auth_utils import get_current_user_context, get_current_user_id
 
 
 router = APIRouter(prefix="/model")
@@ -121,6 +122,16 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
         return None
 
 
+def _require_model_permission(authorization: Optional[str], permission: str) -> None:
+    """Reject model mutations when the authenticated role lacks the permission."""
+    _, _, user_role = get_current_user_context(authorization)
+    if not has_permission(user_role, permission):
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=f"Missing required permission: {permission}",
+        )
+
+
 @router.post("/create")
 async def create_model(request: ModelRequest, authorization: Optional[str] = Header(None)):
     """Create a single model record for the current tenant.
@@ -135,6 +146,7 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         request: Model configuration payload.
         authorization: Bearer token header used to derive `user_id` and `tenant_id`.
     """
+    _require_model_permission(authorization, "model:create")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         model_data = request.model_dump()
@@ -317,6 +329,7 @@ async def update_single_model(
         HTTPException: 404 if model not found, 409 if new `display_name` conflicts,
                        500 for unexpected errors.
     """
+    _require_model_permission(authorization, "model:update")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         accept_signal = pop_capacity_accept_signal(request)
@@ -374,6 +387,7 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
         display_name: Display name of the model to delete (unique key).
         authorization: Bearer token header used to derive identity context.
     """
+    _require_model_permission(authorization, "model:delete")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         logger.info(

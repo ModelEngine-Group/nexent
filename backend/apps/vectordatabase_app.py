@@ -8,6 +8,10 @@ from fastapi.responses import JSONResponse
 import re
 
 from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
+from consts.exceptions import (
+    PersonalKbQuotaExceededError,
+    PersonalKbQuotaUnavailableError,
+)
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
@@ -19,8 +23,9 @@ from services.vectordatabase_service import (
     KnowledgeBaseNeedsModelConfigError,
 )
 from services.file_management_service import check_file_access
+from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_context, get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
@@ -86,7 +91,7 @@ def create_new_index(
 ):
     """Create a new vector index and store it in the knowledge table"""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id, user_role = get_current_user_context(authorization)
 
         # Extract optional fields from request body
         ingroup_permission = None
@@ -116,6 +121,7 @@ def create_new_index(
             embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
             quota_limit_bytes=quota_limit_bytes,
+            user_role=user_role,
         )
     except HTTPException:
         raise
@@ -159,7 +165,7 @@ async def update_index(
 ):
     """Update knowledge base information (name, group permission, group assignments)."""
     try:
-        user_id, auth_tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, user_role = get_current_user_context(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         tenant_id = request.get("tenant_id") or auth_tenant_id
         require_knowledge_base_edit_permission(index_name, user_id, auth_tenant_id)
@@ -176,6 +182,7 @@ async def update_index(
             "group_ids": group_ids,
             "tenant_id": tenant_id,
             "user_id": user_id,
+            "user_role": user_role,
         }
         if "quota_limit_bytes" in request:
             update_kwargs["quota_limit_bytes"] = request["quota_limit_bytes"]
@@ -485,6 +492,33 @@ def create_index_documents(
         if knowledge_record:
             saved_embedding_model_id = knowledge_record.get(
                 'embedding_model_id')
+
+        if knowledge_record and knowledge_record.get("ingroup_permission") == "PRIVATE":
+            try:
+                QuotaService(tenant_id, user_id).check_personal_kb_quota(
+                    tenant_id,
+                    user_id,
+                    QuotaService.sum_upload_bytes(data),
+                    kb_record=knowledge_record,
+                )
+            except PersonalKbQuotaExceededError as exc:
+                raise HTTPException(
+                    status_code=HTTPStatus.FORBIDDEN,
+                    detail=f"Personal KB quota exceeded: {str(exc)}",
+                )
+            except PersonalKbQuotaUnavailableError as exc:
+                raise HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail=f"Personal KB quota service unavailable: {str(exc)}",
+                )
+            except Exception as exc:
+                logger.error(
+                    "Personal KB quota check failed for %s: %s", index_name, exc
+                )
+                raise HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail=f"Personal KB quota service unavailable: {str(exc)}",
+                )
 
         # Use the saved model from knowledge base by model_id
         embedding_model, _ = get_embedding_model_by_id(

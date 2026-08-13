@@ -12,13 +12,17 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    DEFAULT_TENANT_ID,
+from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from consts.exceptions import (
+    PersonalKbQuotaExceededError,
+    PersonalKbQuotaUnavailableError,
+    PlatformQuotaConflictError,
+    QuotaExceededError,
 )
-from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
 from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
+    get_private_knowledge_info_by_creator,
+    get_private_knowledge_info_by_tenant_id,
     update_knowledge_record,
 )
 from database.tenant_config_db import (
@@ -27,6 +31,7 @@ from database.tenant_config_db import (
     insert_config,
     update_config_by_tenant_config_id,
 )
+from database.user_tenant_db import get_user_email_map
 from services.knowledge_storage_service import (
     get_committed_bytes_by_kb,
     get_tenant_committed_source_bytes,
@@ -41,6 +46,12 @@ KEY_WARNING_THRESHOLD_PCT = "KB_QUOTA_WARNING_THRESHOLD_PCT"
 KEY_CRITICAL_THRESHOLD_PCT = "KB_QUOTA_CRITICAL_THRESHOLD_PCT"
 KEY_HARD_LIMIT_EDITABLE = "KB_QUOTA_HARD_LIMIT_EDITABLE"
 KEY_PLATFORM_CAPACITY_BYTES = "PLATFORM_KB_STORAGE_CAPACITY_BYTES"
+KEY_PERSONAL_KB_QUOTA_DEFAULT = "PERSONAL_KB_QUOTA_DEFAULT"
+
+
+def _personal_quota_key(user_id: str) -> str:
+    """Return the tenant config key for a user's personal KB quota."""
+    return f"PERSONAL_KB_QUOTA_{user_id}"
 
 
 def _is_displayable_tenant_id(
@@ -284,6 +295,358 @@ class QuotaService:
         return result
 
     # ── Quota Summary (task 2.4) ───────────────────────────────────────
+
+    # Personal KB capacity methods (tasks 4.1-4.2)
+
+    @staticmethod
+    def _parse_quota_value(raw: Any) -> Optional[int]:
+        """Parse a quota config value; invalid values are treated as zero."""
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    def get_personal_user_quota(self, user_id: str) -> Optional[int]:
+        """Return a user's individual personal KB quota in bytes, or None."""
+        return self._parse_quota_value(
+            self._get_tenant_config(_personal_quota_key(user_id))
+        )
+
+    def set_personal_user_quota(
+        self,
+        user_id: str,
+        quota_limit_bytes: Optional[int] = None,
+        unlimited: bool = False,
+    ) -> Dict[str, Any]:
+        """Set or clear a user's individual personal KB quota."""
+        if unlimited or quota_limit_bytes is None:
+            self._delete_tenant_config(_personal_quota_key(user_id))
+            return {
+                "user_id": user_id,
+                "quota_limit_bytes": None,
+                "quota_limit_readable": None,
+            }
+
+        quota_limit_bytes = int(quota_limit_bytes)
+        usage_data = self._get_personal_usage_data(self.tenant_id)
+        user_usage_bytes = sum(
+            usage_data["stats"].get(kb.get("index_name", ""), 0)
+            for kb in usage_data["kbs"]
+            if kb.get("created_by") == user_id
+        )
+        if quota_limit_bytes < user_usage_bytes:
+            raise ValueError(
+                f"Personal KB quota {_bytes_to_readable(quota_limit_bytes)} is below "
+                f"current usage {_bytes_to_readable(user_usage_bytes)}"
+            )
+
+        self._set_tenant_config(_personal_quota_key(user_id), str(quota_limit_bytes))
+        return {
+            "user_id": user_id,
+            "quota_limit_bytes": quota_limit_bytes,
+            "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
+        }
+
+    def get_personal_default_quota(self) -> Optional[int]:
+        """Return the tenant default personal KB quota in bytes, or None."""
+        return self._parse_quota_value(
+            self._get_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT)
+        )
+
+    def set_personal_default_quota(
+        self,
+        quota_limit_bytes: Optional[int] = None,
+        unlimited: bool = False,
+    ) -> Dict[str, Any]:
+        """Set or clear the tenant default personal KB quota."""
+        if unlimited or quota_limit_bytes is None:
+            self._delete_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT)
+            return {"quota_limit_bytes": None, "quota_limit_readable": None}
+
+        quota_limit_bytes = int(quota_limit_bytes)
+        self._set_tenant_config(KEY_PERSONAL_KB_QUOTA_DEFAULT, str(quota_limit_bytes))
+        return {
+            "quota_limit_bytes": quota_limit_bytes,
+            "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
+        }
+
+    def _get_personal_effective_quota(
+        self, user_id: str
+    ) -> Tuple[Optional[int], str]:
+        """Return effective personal KB quota and its source for a user."""
+        individual = self.get_personal_user_quota(user_id)
+        if individual is not None:
+            return individual, "individual"
+        default = self.get_personal_default_quota()
+        if default is not None:
+            return default, "default"
+        return None, "unlimited"
+
+    def _get_personal_usage_data(
+        self, tenant_id: str, strict: bool = False
+    ) -> Dict[str, Any]:
+        """Aggregate PRIVATE KB storage from ES store_size.
+
+        Non-strict mode degrades ES failures to zero usage so admin capacity
+        views stay available. Upload quota checks always use strict mode and
+        fail closed when usage cannot be verified.
+        """
+        kb_list = get_private_knowledge_info_by_tenant_id(tenant_id)
+        index_names = [
+            kb.get("index_name") for kb in kb_list if kb.get("index_name")
+        ]
+        stats: Dict[str, int] = {}
+        details: Dict[str, Dict[str, Any]] = {}
+
+        if index_names:
+            try:
+                from services.vectordatabase_service import get_vector_db_core
+
+                vdb_core = get_vector_db_core()
+                indices_detail = vdb_core.get_indices_detail(index_names) or {}
+            except Exception as exc:
+                if strict:
+                    raise PersonalKbQuotaUnavailableError(
+                        f"Failed to query ES index stats: {exc}"
+                    ) from exc
+                logger.warning(
+                    "Failed to query ES index stats for personal KB capacity",
+                    exc_info=True,
+                )
+                indices_detail = {}
+
+            for index_name, raw_detail in indices_detail.items():
+                detail = raw_detail if isinstance(raw_detail, dict) else {}
+                if strict and (
+                    not isinstance(raw_detail, dict) or "error" in detail
+                ):
+                    raise PersonalKbQuotaUnavailableError(
+                        f"ES index stats unavailable for {index_name}"
+                    )
+                if "error" in detail:
+                    continue
+                base_info = (
+                    detail.get("base_info")
+                    if isinstance(detail.get("base_info"), dict)
+                    else {}
+                )
+                store_bytes = self._parse_store_size(base_info.get("store_size"))
+                stats[index_name] = store_bytes
+                details[index_name] = {
+                    "store_size_bytes": store_bytes,
+                    "store_size": base_info.get("store_size"),
+                    "doc_count": base_info.get("doc_count", 0) or 0,
+                    "chunk_count": base_info.get("chunk_count", 0) or 0,
+                }
+
+        return {
+            "kbs": kb_list,
+            "stats": stats,
+            "details": details,
+            "total_bytes": sum(stats.values()),
+        }
+
+    def list_personal_capacity_users(
+        self,
+        tenant_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "total_bytes",
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
+        """List personal KB storage aggregated by creator with pagination."""
+        usage_data = self._get_personal_usage_data(tenant_id)
+        kb_list = usage_data["kbs"]
+        user_ids = sorted(
+            {kb.get("created_by") for kb in kb_list if kb.get("created_by")}
+        )
+        email_map = get_user_email_map(user_ids)
+
+        items = []
+        for user_id in user_ids:
+            user_kbs = [
+                kb for kb in kb_list if kb.get("created_by") == user_id
+            ]
+            total_bytes = sum(
+                usage_data["stats"].get(kb.get("index_name", ""), 0)
+                for kb in user_kbs
+            )
+            quota_limit_bytes, quota_source = self._get_personal_effective_quota(
+                user_id
+            )
+            items.append({
+                "user_id": user_id,
+                "user_name": email_map.get(user_id) or user_id,
+                "email": email_map.get(user_id),
+                "kb_count": len(user_kbs),
+                "total_bytes": total_bytes,
+                "total_readable": _bytes_to_readable(total_bytes),
+                "quota_limit_bytes": quota_limit_bytes,
+                "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
+                "effective_quota_bytes": quota_limit_bytes,
+                "effective_quota_readable": _bytes_to_readable(quota_limit_bytes),
+                "quota_source": quota_source,
+            })
+
+        sort_keys = {
+            "user_name": lambda item: str(item["user_name"]).lower(),
+            "kb_count": lambda item: item["kb_count"],
+            "total_bytes": lambda item: item["total_bytes"],
+            "quota_limit_bytes": lambda item: (
+                item["quota_limit_bytes"]
+                if item["quota_limit_bytes"] is not None
+                else -1
+            ),
+        }
+        key_func = sort_keys.get(sort_by, sort_keys["total_bytes"])
+        items.sort(key=key_func, reverse=sort_order.lower() != "asc")
+
+        total = len(items)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+        start = (page - 1) * page_size
+        paged = items[start : start + page_size] if page_size > 0 else items
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "items": paged,
+        }
+
+    def get_personal_kb_details(
+        self,
+        tenant_id: str,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """List a user's personal KB records with ES storage details."""
+        usage_data = self._get_personal_usage_data(tenant_id)
+        kb_list = [
+            kb for kb in usage_data["kbs"] if kb.get("created_by") == user_id
+        ]
+        kb_list.sort(
+            key=lambda kb: str(
+                kb.get("last_doc_update_time") or kb.get("update_time") or ""
+            ),
+            reverse=True,
+        )
+
+        total = len(kb_list)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+        start = (page - 1) * page_size
+        paged = kb_list[start : start + page_size] if page_size > 0 else kb_list
+
+        kbs = []
+        for kb in paged:
+            index_name = kb.get("index_name", "")
+            detail = usage_data["details"].get(index_name, {})
+            quota_limit_bytes = kb.get("quota_limit_bytes")
+            kbs.append({
+                "kb_id": kb.get("knowledge_id"),
+                "knowledge_id": kb.get("knowledge_id"),
+                "index_name": index_name,
+                "name": kb.get("knowledge_name") or index_name,
+                "source": kb.get("knowledge_sources"),
+                "doc_count": detail.get("doc_count", 0),
+                "chunk_count": detail.get("chunk_count", 0),
+                "store_size": detail.get("store_size"),
+                "store_size_bytes": detail.get("store_size_bytes", 0),
+                "quota_limit_bytes": quota_limit_bytes,
+                "quota_limit_readable": _bytes_to_readable(quota_limit_bytes),
+                "updated_at": (
+                    kb.get("last_doc_update_time") or kb.get("update_time")
+                ),
+            })
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "kbs": kbs,
+        }
+
+    @staticmethod
+    def sum_upload_bytes(data: List[Dict[str, Any]]) -> int:
+        """Sum numeric file_size fields from an indexing payload."""
+        total = 0
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                value = int(item.get("file_size"))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                total += value
+        return total
+
+    def check_personal_kb_quota(
+        self,
+        tenant_id: str,
+        user_id: str,
+        upload_bytes: int,
+        kb_record: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Enforce tenant/user/KB personal KB quotas before indexing.
+
+        Raises PersonalKbQuotaExceededError when a finite quota would be
+        exceeded and PersonalKbQuotaUnavailableError when ES usage cannot be
+        verified so uploads fail closed.
+        """
+        usage_data = self._get_personal_usage_data(tenant_id, strict=True)
+        total_tenant_bytes = usage_data["total_bytes"]
+
+        hard_limit_bytes = self.get_hard_limit().get("hard_limit_bytes")
+        if hard_limit_bytes is not None:
+            projected_bytes = total_tenant_bytes + upload_bytes
+            if projected_bytes > hard_limit_bytes:
+                raise PersonalKbQuotaExceededError(
+                    f"Tenant personal KB storage full: "
+                    f"{_bytes_to_readable(projected_bytes)} exceeds hard limit of "
+                    f"{_bytes_to_readable(hard_limit_bytes)}"
+                )
+
+        user_kbs = [
+            kb for kb in usage_data["kbs"] if kb.get("created_by") == user_id
+        ]
+        user_usage_bytes = sum(
+            usage_data["stats"].get(kb.get("index_name", ""), 0)
+            for kb in user_kbs
+        )
+        effective_quota, quota_source = self._get_personal_effective_quota(user_id)
+        if effective_quota is not None:
+            if effective_quota <= 0:
+                if upload_bytes > 0:
+                    raise PersonalKbQuotaExceededError(
+                        f"Personal KB quota is disabled (0 bytes) for user {user_id}"
+                    )
+            elif user_usage_bytes + upload_bytes > effective_quota:
+                raise PersonalKbQuotaExceededError(
+                    f"Personal KB quota exceeded: "
+                    f"{_bytes_to_readable(user_usage_bytes + upload_bytes)} exceeds "
+                    f"{quota_source} quota of {_bytes_to_readable(effective_quota)}"
+                )
+
+        if kb_record:
+            kb_quota = self._parse_quota_value(kb_record.get("quota_limit_bytes"))
+            if kb_quota is not None:
+                index_name = kb_record.get("index_name", "")
+                kb_usage_bytes = usage_data["stats"].get(index_name, 0)
+                if kb_quota <= 0:
+                    if upload_bytes > 0:
+                        raise PersonalKbQuotaExceededError(
+                            f"KB quota is disabled (0 bytes) for {index_name}"
+                        )
+                elif kb_usage_bytes + upload_bytes > kb_quota:
+                    raise PersonalKbQuotaExceededError(
+                        f"KB quota exceeded for {index_name}: "
+                        f"{_bytes_to_readable(kb_usage_bytes + upload_bytes)} exceeds "
+                        f"{_bytes_to_readable(kb_quota)}"
+                    )
 
     def get_quota_summary(self) -> Dict[str, Any]:
         """Return quota allocation summary with oversubscription ratio."""

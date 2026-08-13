@@ -644,6 +644,13 @@ export const API_ENDPOINTS = {
     platformCapacity: `${API_BASE_URL}/platform/quota/capacity`,
     platformTenantQuota: (tenantId: string) =>
       `${API_BASE_URL}/platform/quota/tenants/${tenantId}`,
+    // Personal KB capacity (ADMIN/SU)
+    personalUsers: `${API_BASE_URL}/capacity/personal/users`,
+    personalUserKbs: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/kbs`,
+    personalUserQuota: (userId: string) =>
+      `${API_BASE_URL}/capacity/personal/users/${userId}/quota`,
+    personalDefaultQuota: `${API_BASE_URL}/capacity/personal/default-quota`,
   },
   users: {
     list: `${API_BASE_URL}/users/list`,

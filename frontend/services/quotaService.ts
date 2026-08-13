@@ -11,6 +11,10 @@ import type {
   PlatformQuotaOverview,
   UpdatePlatformCapacityPayload,
   UpdateTenantHardQuotaPayload,
+  PersonalCapacityUsersResponse,
+  PersonalDefaultQuota,
+  PersonalKbDetailResponse,
+  PersonalQuotaPayload,
 } from "@/types/quota";
 
 class QuotaService {
@@ -184,6 +188,149 @@ class QuotaService {
       );
     }
     emitQuotaUsageChanged();
+  }
+
+  // ── Personal KB Capacity (ADMIN/SU) ────────────────────────────────
+
+  private buildPersonalCapacityUrl(
+    base: string,
+    params: Record<string, string | number | null | undefined>
+  ): string {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") {
+        query.set(key, String(value));
+      }
+    }
+    const queryString = query.toString();
+    return queryString ? `${base}?${queryString}` : base;
+  }
+
+  async listPersonalCapacityUsers(params: {
+    tenantId?: string | null;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: string;
+  }): Promise<PersonalCapacityUsersResponse> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalUsers,
+      {
+        tenant_id: params.tenantId,
+        page: params.page,
+        page_size: params.page_size,
+        sort_by: params.sort_by,
+        sort_order: params.sort_order,
+      }
+    );
+    const response = await fetch(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message || data.detail || "Failed to list personal KB capacity"
+      );
+    }
+    return data;
+  }
+
+  async getPersonalKbDetails(
+    userId: string,
+    tenantId?: string | null,
+    page?: number,
+    page_size?: number
+  ): Promise<PersonalKbDetailResponse> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalUserKbs(userId),
+      {
+        tenant_id: tenantId,
+        page,
+        page_size,
+      }
+    );
+    const response = await fetch(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message || data.detail || "Failed to get personal KB details"
+      );
+    }
+    return data;
+  }
+
+  async setPersonalUserQuota(
+    userId: string,
+    tenantId: string | null,
+    payload: PersonalQuotaPayload
+  ): Promise<any> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalUserQuota(userId),
+      { tenant_id: tenantId }
+    );
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message || data.detail || "Failed to set personal KB quota"
+      );
+    }
+    return data;
+  }
+
+  async getPersonalDefaultQuota(
+    tenantId?: string | null
+  ): Promise<PersonalDefaultQuota> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalDefaultQuota,
+      { tenant_id: tenantId }
+    );
+    const response = await fetch(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message || data.detail || "Failed to get personal KB default quota"
+      );
+    }
+    return data;
+  }
+
+  async setPersonalDefaultQuota(
+    tenantId: string | null,
+    payload: PersonalQuotaPayload
+  ): Promise<any> {
+    const url = this.buildPersonalCapacityUrl(
+      API_ENDPOINTS.quota.personalDefaultQuota,
+      { tenant_id: tenantId }
+    );
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(
+        data.error || response.status,
+        data.message || data.detail || "Failed to set personal KB default quota"
+      );
+    }
+    return data;
   }
 }
 
