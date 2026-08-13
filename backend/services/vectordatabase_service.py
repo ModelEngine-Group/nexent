@@ -2315,8 +2315,15 @@ class ElasticSearchService:
                 document = dict(item.get("document", {}))
                 document["score"] = item.get("score")
                 document["index"] = item.get("index")
+                score_details = dict(document.get("score_details") or {})
                 if "scores" in item:
-                    document["score_details"] = item["scores"]
+                    score_details.update(item["scores"])
+                if item.get("highlight_terms"):
+                    score_details["retrieval_highlight_terms"] = item[
+                        "highlight_terms"
+                    ]
+                if score_details:
+                    document["score_details"] = score_details
                 formatted_results.append(document)
 
             return {

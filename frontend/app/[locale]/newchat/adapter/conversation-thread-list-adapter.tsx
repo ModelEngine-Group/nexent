@@ -133,6 +133,15 @@ const parseImageMetadata = (value: unknown) => {
   }
 };
 
+const getRetrievalHighlightTerms = (scoreDetails: unknown): string[] => {
+  if (!scoreDetails || typeof scoreDetails !== "object") return [];
+  const terms = (scoreDetails as { retrieval_highlight_terms?: unknown })
+    .retrieval_highlight_terms;
+  return Array.isArray(terms)
+    ? terms.filter((term): term is string => typeof term === "string")
+    : [];
+};
+
 const toToolSearchItem = (value: unknown) => {
   if (typeof value !== "object" || value === null) return null;
 
@@ -168,6 +177,7 @@ const toToolSearchItem = (value: unknown) => {
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
+        retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
       }
     : null;
 };
@@ -399,6 +409,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 imageKey:
                   (item.image_key as string | undefined) ||
                   (isImage ? derivedImageKey : undefined),
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details,
+                ),
               });
             }
           }
@@ -947,6 +960,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 objectName: item.object_name as string | undefined,
                 citeIndex,
                 toolSign: item.tool_sign as string | undefined,
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details,
+                ),
                 messageId,
               });
             }

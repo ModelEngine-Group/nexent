@@ -1408,6 +1408,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
             "score_overall": 0.95,
             "score_accuracy": 0.90,
             "score_semantic": 0.88,
+            "retrieval_highlight_terms": ["RFT-2026-042"],
         },
         user_id="actor",
     )
@@ -1415,6 +1416,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
     assert search_id == 89
     assert fresh_insert_mock["score_overall"] == 0.95
     assert fresh_insert_mock["score_accuracy"] == 0.90
+    assert fresh_insert_mock["retrieval_highlight_terms"] == ["RFT-2026-042"]
 
 
 # =============================================================================

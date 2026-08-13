@@ -51,6 +51,7 @@ interface MessageSourcePart {
   toolSign?: string;
   isImage?: boolean;
   imageKey?: string;
+  retrievalHighlightTerms?: string[];
 }
 
 function normalizeCiteIndex(value: unknown): number | undefined {
@@ -81,6 +82,7 @@ function resolveCiteSources(
       toolSign: part.toolSign,
       isImage: part.isImage,
       imageKey: part.imageKey,
+      retrievalHighlightTerms: part.retrievalHighlightTerms,
     }];
   });
 
@@ -131,6 +133,7 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     citeIndex: source.citeIndex,
     toolSign: source.toolSign,
     isImage: source.isImage,
+    retrievalHighlightTerms: source.retrievalHighlightTerms,
   };
 }
 

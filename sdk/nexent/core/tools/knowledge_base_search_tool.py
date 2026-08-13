@@ -485,9 +485,18 @@ class KnowledgeBaseSearchTool(Tool):
 
             formatted_results = []
             for result in results:
-                doc = result["document"]
+                doc = dict(result["document"])
                 doc["score"] = result["score"]
                 doc["index"] = result["index"]
+                score_details = dict(doc.get("score_details") or {})
+                if result.get("scores"):
+                    score_details.update(result["scores"])
+                if result.get("highlight_terms"):
+                    score_details["retrieval_highlight_terms"] = result[
+                        "highlight_terms"
+                    ]
+                if score_details:
+                    doc["score_details"] = score_details
                 formatted_results.append(doc)
 
             return {
@@ -507,9 +516,15 @@ class KnowledgeBaseSearchTool(Tool):
 
             formatted_results = []
             for result in results:
-                doc = result["document"]
+                doc = dict(result["document"])
                 doc["score"] = result["score"]
                 doc["index"] = result["index"]
+                if result.get("highlight_terms"):
+                    score_details = dict(doc.get("score_details") or {})
+                    score_details["retrieval_highlight_terms"] = result[
+                        "highlight_terms"
+                    ]
+                    doc["score_details"] = score_details
                 formatted_results.append(doc)
 
             return {
@@ -615,4 +630,3 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Return the final list to the caller
         return final_filtered_images
-

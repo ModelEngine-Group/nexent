@@ -40,6 +40,7 @@ class SearchRecord(TypedDict):
     score_overall: Optional[float]
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
+    retrieval_highlight_terms: Optional[List[str]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -1131,6 +1132,7 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             - score_overall: Overall relevance score
             - score_accuracy: Accuracy score
             - score_semantic: Semantic relevance score
+            - retrieval_highlight_terms: Exact lexical terms returned by retrieval
             - published_date: Publication date
         user_id: Reserved parameter for created_by and updated_by fields
 
@@ -1168,6 +1170,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data["score_accuracy"] = search_data['score_accuracy']
         if 'score_semantic' in search_data:
             data["score_semantic"] = search_data['score_semantic']
+        if 'retrieval_highlight_terms' in search_data:
+            data["retrieval_highlight_terms"] = search_data[
+                'retrieval_highlight_terms'
+            ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
         if user_id:

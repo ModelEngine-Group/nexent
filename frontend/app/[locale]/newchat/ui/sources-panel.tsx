@@ -40,6 +40,7 @@ export interface PanelSourceItem {
   isImage?: boolean;
   citeIndex?: number;
   toolSign?: string;
+  retrievalHighlightTerms?: string[];
 }
 
 export function getCitationKey(item: Pick<PanelSourceItem, "citeIndex" | "toolSign">): string | undefined {
@@ -290,7 +291,11 @@ const extractHighlightTerms = (
     .slice(0, 8);
 };
 
-const HighlightedChunkText: FC<{ text: string; terms: string[] }> = ({ text, terms }) => {
+const HighlightedChunkText: FC<{
+  text: string;
+  terms: string[];
+  retrievalTerms?: string[];
+}> = ({ text, terms, retrievalTerms = [] }) => {
   if (!terms.length) return <>{text}</>;
 
   const matcher = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "gi");
@@ -300,8 +305,17 @@ const HighlightedChunkText: FC<{ text: string; terms: string[] }> = ({ text, ter
         const isMatch = terms.some(
           (term) => part.toLowerCase() === term.toLowerCase(),
         );
+        const isRetrievalMatch = retrievalTerms.some(
+          (term) => part.toLowerCase() === term.toLowerCase(),
+        );
         return isMatch ? (
-          <mark key={`${part}-${index}`} className="rounded-sm bg-yellow-200 px-0.5 text-inherit">
+          <mark
+            key={`${part}-${index}`}
+            className={cn(
+              "rounded-sm px-0.5 text-inherit",
+              isRetrievalMatch ? "bg-blue-200" : "bg-yellow-200",
+            )}
+          >
             {part}
           </mark>
         ) : (
@@ -316,7 +330,8 @@ const SourceSummary: FC<{
   text?: string;
   highlighted?: boolean;
   highlightTerms?: string[];
-}> = ({ text, highlighted = false, highlightTerms = [] }) => {
+  retrievalHighlightTerms?: string[];
+}> = ({ text, highlighted = false, highlightTerms = [], retrievalHighlightTerms = [] }) => {
   const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
@@ -336,7 +351,11 @@ const SourceSummary: FC<{
     return (
       <div className="mt-2">
         <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
-          <HighlightedChunkText text={text} terms={highlightTerms} />
+          <HighlightedChunkText
+            text={text}
+            terms={highlightTerms}
+            retrievalTerms={retrievalHighlightTerms}
+          />
         </p>
       </div>
     );
@@ -434,10 +453,36 @@ const SourceListItem: FC<{
   const selectedClassName = selected
     ? "border-[#1677ff] bg-white shadow-none"
     : "border-slate-200 bg-white hover:border-slate-300";
-  const highlightTerms = useMemo(
-    () => selected ? extractHighlightTerms(citationContext || "", item.text || "") : [],
-    [citationContext, item.text, selected],
-  );
+  const retrievalHighlightTerms = useMemo(() => {
+    if (!selected) return [];
+
+    const sourceText = item.text || "";
+    return (item.retrievalHighlightTerms || [])
+      .map((term) => term.trim())
+      .filter(
+        (term, index, terms) =>
+          term.length >= 2 &&
+          sourceText.toLowerCase().includes(term.toLowerCase()) &&
+          terms.indexOf(term) === index,
+      );
+  }, [item.retrievalHighlightTerms, item.text, selected]);
+  const highlightTerms = useMemo(() => {
+    if (!selected) return [];
+
+    const sourceText = item.text || "";
+    return Array.from(
+      new Set([
+        ...retrievalHighlightTerms,
+        ...extractHighlightTerms(citationContext || "", sourceText),
+      ]),
+    )
+      .sort((left, right) => right.length - left.length)
+      .filter(
+        (term, index, terms) =>
+          !terms.slice(0, index).some((kept) => kept.includes(term)),
+      )
+      .slice(0, 8);
+  }, [citationContext, retrievalHighlightTerms, item.text, selected]);
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
@@ -466,7 +511,12 @@ const SourceListItem: FC<{
                 )}
               </div>
               {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
-              <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+              <SourceSummary
+                text={item.text}
+                highlighted={selected}
+                highlightTerms={highlightTerms}
+                retrievalHighlightTerms={retrievalHighlightTerms}
+              />
               <SourceFooter item={item} sourceLabel="来源: Nexent" />
             </div>
           </button>
@@ -515,7 +565,12 @@ const SourceListItem: FC<{
             {item.publishedDate ? (
               <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>
             ) : <span className="block truncate text-xs text-muted-foreground">{domain}</span>}
-            <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+            <SourceSummary
+              text={item.text}
+              highlighted={selected}
+              highlightTerms={highlightTerms}
+              retrievalHighlightTerms={retrievalHighlightTerms}
+            />
             <SourceFooter item={item} sourceLabel={`来源: ${domain}`} />
           </div>
         </a>
@@ -535,7 +590,12 @@ const SourceListItem: FC<{
         )}
       </div>
       {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
-      <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+      <SourceSummary
+        text={item.text}
+        highlighted={selected}
+        highlightTerms={highlightTerms}
+        retrievalHighlightTerms={retrievalHighlightTerms}
+      />
       <SourceFooter item={item} sourceLabel="来源: Nexent" />
     </li>
   );

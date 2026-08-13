@@ -1427,6 +1427,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
                 {"unit_id": 10, "message_id": 2, "source_title": "Doc 1", "source_content": "Content",
                  "source_type": "web", "source_location": "http://x.com", "published_date": "2023-01-01",
                  "score_overall": 0.9, "score_accuracy": 0.8, "score_semantic": 0.7,
+                 "retrieval_highlight_terms": ["Content"],
                  "cite_index": 1, "search_type": "web", "tool_sign": "search"}
             ],
             "image_records": []
@@ -1439,6 +1440,10 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
         self.assertIn("search", msg)
         self.assertEqual(len(msg["search"]), 1)
         self.assertEqual(msg["search"][0]["title"], "Doc 1")
+        self.assertEqual(
+            msg["search"][0]["score_details"]["retrieval_highlight_terms"],
+            ["Content"],
+        )
 
         # Check searchByUnitId
         self.assertIn("searchByUnitId", msg)

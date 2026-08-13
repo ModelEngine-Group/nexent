@@ -109,9 +109,11 @@ const extractHighlightTerms = (
 function HighlightedChunkText({
   text,
   terms,
+  retrievalTerms = [],
 }: {
   text: string;
   terms: string[];
+  retrievalTerms?: string[];
 }) {
   if (!terms.length) return <>{text}</>;
 
@@ -122,10 +124,15 @@ function HighlightedChunkText({
         const isMatch = terms.some(
           (term) => part.toLowerCase() === term.toLowerCase()
         );
+        const isRetrievalMatch = retrievalTerms.some(
+          (term) => part.toLowerCase() === term.toLowerCase()
+        );
         return isMatch ? (
           <mark
             key={`${part}-${index}`}
-            className="rounded-sm bg-yellow-200 px-0.5 text-inherit"
+            className={`rounded-sm px-0.5 text-inherit ${
+              isRetrievalMatch ? "bg-blue-200" : "bg-yellow-200"
+            }`}
           >
             {part}
           </mark>
@@ -170,9 +177,34 @@ function SearchResultItem({
     result.score_details?.datamate_base_url ||
     result.score_details?.datamate_baseUrl ||
     result.score_details?.base_url;
+  const retrievalHighlightTerms = useMemo(() => {
+    if (!selected) return [];
+
+    const sourceLower = text.toLowerCase();
+    const rawTerms = result.score_details?.retrieval_highlight_terms;
+    return Array.isArray(rawTerms)
+      ? rawTerms
+          .filter((term): term is string => typeof term === "string")
+          .map((term) => term.trim())
+          .filter(
+            (term, index, terms) =>
+              term.length >= 2 &&
+              sourceLower.includes(term.toLowerCase()) &&
+              terms.indexOf(term) === index
+          )
+      : [];
+  }, [result.score_details?.retrieval_highlight_terms, selected, text]);
   const highlightTerms = useMemo(
-    () => (selected ? extractHighlightTerms(answerContext, text) : []),
-    [answerContext, selected, text]
+    () =>
+      selected
+        ? Array.from(
+            new Set([
+              ...retrievalHighlightTerms,
+              ...extractHighlightTerms(answerContext, text),
+            ])
+          )
+        : [],
+    [answerContext, retrievalHighlightTerms, selected, text]
   );
 
   useEffect(() => {
@@ -386,7 +418,11 @@ function SearchResultItem({
                   : "line-clamp-3"
             }`}
           >
-            <HighlightedChunkText text={text} terms={highlightTerms} />
+            <HighlightedChunkText
+              text={text}
+              terms={highlightTerms}
+              retrievalTerms={retrievalHighlightTerms}
+            />
           </p>
         </div>
 

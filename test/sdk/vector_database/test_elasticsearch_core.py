@@ -1485,6 +1485,8 @@ def test_accurate_search_builds_multi_index_query(elasticsearch_core_instance):
         assert index_pattern == "index_a,index_b"
         assert search_query["size"] == 7
         assert search_query["_source"]["excludes"] == ["embedding"]
+        assert search_query["highlight"]["fields"]["title"]["number_of_fragments"] == 0
+        assert search_query["highlight"]["fields"]["content"]["number_of_fragments"] == 3
 
 
 def test_semantic_search_success(elasticsearch_core_instance):
@@ -1576,7 +1578,8 @@ def test_hybrid_search_success(elasticsearch_core_instance):
             {
                 "score": 10.0,
                 "document": {"id": "doc1", "content": "Test doc 1"},
-                "index": "test_index"
+                "index": "test_index",
+                "highlight_terms": ["Test"],
             }
         ]
 
@@ -1604,6 +1607,7 @@ def test_hybrid_search_success(elasticsearch_core_instance):
         assert len(result) == 2
         assert all("score" in r for r in result)
         assert all("document" in r for r in result)
+        assert result[0]["highlight_terms"] == ["Test"]
         mock_accurate.assert_called_once()
         mock_semantic.assert_called_once()
 
@@ -1760,7 +1764,12 @@ def test_exec_query_returns_formatted_results(elasticsearch_core_instance):
                     {
                         "_score": 10.5,
                         "_source": {"content": "Test document 1", "id": "doc1"},
-                        "_index": "test_index"
+                        "_index": "test_index",
+                        "highlight": {
+                            "content": [
+                                "__nexent_hit_start__Test__nexent_hit_end__ document"
+                            ]
+                        },
                     },
                     {
                         "_score": 8.3,
@@ -1778,6 +1787,7 @@ def test_exec_query_returns_formatted_results(elasticsearch_core_instance):
         assert result[0]["document"]["content"] == "Test document 1"
         assert result[0]["document"]["id"] == "doc1"
         assert result[0]["index"] == "test_index"
+        assert result[0]["highlight_terms"] == ["Test"]
         assert result[1]["score"] == 8.3
         assert result[1]["document"]["content"] == "Test document 2"
         assert result[1]["document"]["id"] == "doc2"

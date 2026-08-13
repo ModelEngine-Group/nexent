@@ -577,6 +577,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 search_item["score_details"]["accuracy"] = record["score_accuracy"]
             if record["score_semantic"] is not None:
                 search_item["score_details"]["semantic"] = record["score_semantic"]
+            if record.get("retrieval_highlight_terms"):
+                search_item["score_details"]["retrieval_highlight_terms"] = record[
+                    "retrieval_highlight_terms"
+                ]
 
             # Group by unit_id (for frontend matching by unit_id)
             if unit_id is not None:
@@ -829,6 +833,10 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
                     search_item["score_details"]["accuracy"] = record["score_accuracy"]
                 if record["score_semantic"] is not None:
                     search_item["score_details"]["semantic"] = record["score_semantic"]
+                if record.get("retrieval_highlight_terms"):
+                    search_item["score_details"]["retrieval_highlight_terms"] = record[
+                        "retrieval_highlight_terms"
+                    ]
 
                 if conversation_id and not message_id:
                     search_item["message_id"] = record["message_id"]

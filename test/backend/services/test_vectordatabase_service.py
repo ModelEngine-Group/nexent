@@ -2611,7 +2611,8 @@ class TestElasticSearchService(unittest.TestCase):
                 "document": {"title": "Doc1", "content": "Content1"},
                 "score": 0.90,
                 "index": "test_index",
-                "scores": {"accurate": 0.85, "semantic": 0.95}
+                "scores": {"accurate": 0.85, "semantic": 0.95},
+                "highlight_terms": ["Content1"],
             }
         ]
         mock_get_embedding_by_index.return_value = (self.mock_embedding, 1, {"status": "ok", "message": "OK"})
@@ -2636,6 +2637,10 @@ class TestElasticSearchService(unittest.TestCase):
                          ["score_details"]["accurate"], 0.85)
         self.assertEqual(result["results"][0]
                          ["score_details"]["semantic"], 0.95)
+        self.assertEqual(
+            result["results"][0]["score_details"]["retrieval_highlight_terms"],
+            ["Content1"],
+        )
         self.mock_vdb_core.hybrid_search.assert_called_once_with(
             index_names=["test_index"],
             query_text="test query",

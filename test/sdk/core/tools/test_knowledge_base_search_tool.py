@@ -321,6 +321,7 @@ class TestKnowledgeBaseSearchTool:
         """Test successful hybrid search"""
         # Mock search results
         mock_results = create_mock_search_result(3)
+        mock_results[0]["highlight_terms"] = ["Test Document"]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
@@ -336,6 +337,10 @@ class TestKnowledgeBaseSearchTool:
             assert "score" in doc
             assert "index" in doc
             assert doc["title"] == f"Test Document {i}"
+
+        assert result["results"][0]["score_details"][
+            "retrieval_highlight_terms"
+        ] == ["Test Document"]
 
         # Verify vdb_core was called correctly
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
