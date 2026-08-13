@@ -60,6 +60,10 @@ Nexent 在 `official-skills-zip` 目录中提供了一组可直接安装的官�
 
 官方技能的具体参数和调用约束以对应技能包中的 `SKILL.md` 为准。
 
+## 自定义文件生成 Skill
+
+如需基于官方 `create-docx` 扩展 Word 文档能力，或开发用于生成 Markdown、PDF、表格、演示文稿等文件的自定义 Skill，请参阅[自定义文件生成 Skill 指南](./custom-file-generation-skill.md)。
+
 ## 相关文档
 
 - [Skill 仓库](./skill-repository.md)
