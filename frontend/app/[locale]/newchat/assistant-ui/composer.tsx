@@ -459,10 +459,6 @@ export const Composer: FC<ComposerProps> = ({
               await onKnowledgeScopeChange?.(scope, preview);
               setKnowledgeModalOpen(false);
             }}
-            onRestoreDefault={async () => {
-              await onKnowledgeScopeChange?.(null);
-              setKnowledgeModalOpen(false);
-            }}
           />
         )}
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>

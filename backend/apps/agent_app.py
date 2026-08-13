@@ -85,7 +85,7 @@ async def get_agent_knowledge_capabilities_api(
 ):
     """Return knowledge source capabilities across the resolved agent tree."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         return {
             "code": 0,
             "message": "success",
@@ -93,6 +93,7 @@ async def get_agent_knowledge_capabilities_api(
                 agent_id=agent_id,
                 tenant_id=tenant_id,
                 version_no=version_no,
+                user_id=user_id,
             ),
         }
     except ValueError as exc:

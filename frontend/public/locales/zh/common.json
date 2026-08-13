@@ -171,6 +171,7 @@
   "chat.knowledgeScope.aidpTab": "AIDP 知识库",
   "chat.knowledgeScope.empty": "暂无可用知识库",
   "chat.knowledgeScope.noTool": "当前智能体未启用知识库工具",
+  "chat.knowledgeScope.sourceConflict": "当前智能体同时启用了本地和 AIDP 知识库检索，请先修正智能体配置",
   "chat.knowledgeScope.listLoadFailed": "知识库列表加载失败",
   "chat.knowledgeScope.saveFailed": "知识库配置保存失败",
   "chat.knowledgeScope.embeddingMismatch": "本地知识库必须使用相同的向量化模型",

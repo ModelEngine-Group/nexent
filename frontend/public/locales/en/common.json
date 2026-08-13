@@ -171,6 +171,7 @@
   "chat.knowledgeScope.aidpTab": "AIDP knowledge bases",
   "chat.knowledgeScope.empty": "No knowledge bases available",
   "chat.knowledgeScope.noTool": "This agent has no knowledge retrieval tool enabled",
+  "chat.knowledgeScope.sourceConflict": "This agent enables both local and AIDP retrieval; update the agent configuration first",
   "chat.knowledgeScope.listLoadFailed": "Failed to load knowledge bases",
   "chat.knowledgeScope.saveFailed": "Failed to save the knowledge scope",
   "chat.knowledgeScope.embeddingMismatch": "Selected local knowledge bases must use the same embedding model",

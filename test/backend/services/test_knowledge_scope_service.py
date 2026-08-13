@@ -97,12 +97,31 @@ def test_disabled_projects_deny_all_whitelists(_mock_tree):
 
 @patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
 @patch("backend.services.knowledge_scope_service.resolve_root_version", return_value=3)
-def test_capabilities_include_stable_revision(_mock_version, _mock_tree):
-    first = get_agent_knowledge_capabilities(7, "tenant", None)
-    second = get_agent_knowledge_capabilities(7, "tenant", None)
+@patch(
+    "backend.services.knowledge_scope_service.get_knowledge_info_by_tenant_id",
+    return_value=[{
+        "knowledge_id": 12,
+        "index_name": "default-index",
+    }],
+)
+@patch(
+    "backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    return_value=["default-index"],
+)
+@patch(
+    "backend.services.knowledge_scope_service._filter_accessible_aidp_ids",
+    return_value=["default-kds"],
+)
+def test_capabilities_include_stable_revision(
+    _mock_aidp, _mock_accessible, _mock_records, _mock_version, _mock_tree
+):
+    first = get_agent_knowledge_capabilities(7, "tenant", None, user_id="user")
+    second = get_agent_knowledge_capabilities(7, "tenant", None, user_id="user")
 
     assert first["sources"]["local"]["max_select"] == 50
     assert first["sources"]["aidp"]["max_select"] == 10
+    assert first["sources"]["local"]["default_knowledge_ids"] == ["12"]
+    assert first["sources"]["local"]["default_range_values"] == ["default-index"]
     assert first["capability_revision"] == second["capability_revision"]
     assert len(first["capability_revision"]) == 16
     assert first["legacy_prompt_warning"]["detected"] is False

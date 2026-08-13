@@ -19,6 +19,7 @@ from database.agent_db import (
 from database.agent_version_db import query_current_version_no
 from database.knowledge_db import (
     get_knowledge_info_by_ids_and_tenant,
+    get_knowledge_info_by_tenant_id,
     get_knowledge_name_map_by_index_names,
 )
 from services.vectordatabase_service import ElasticSearchService
@@ -94,6 +95,21 @@ def _tool_identifier(tool: Dict[str, Any]) -> str:
     return str(tool.get("name") or tool.get("class_name"))
 
 
+def _filter_accessible_aidp_ids(
+    kds_ids: Iterable[str],
+    user_id: str,
+    tenant_id: str,
+) -> List[str]:
+    """Filter AIDP IDs lazily so the core service remains extension-safe."""
+    from ext_components.aidp.services import aidp_permission_service
+
+    return aidp_permission_service.filter_accessible_kds(
+        list(kds_ids),
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
 def _walk_agent_tree(
     agent_id: int,
     tenant_id: str,
@@ -143,6 +159,7 @@ def get_agent_knowledge_capabilities(
     tenant_id: str,
     version_no: Optional[int],
     is_debug: bool = False,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
     agent_tree = _walk_agent_tree(agent_id, tenant_id, resolved_version)
@@ -156,6 +173,47 @@ def get_agent_knowledge_capabilities(
         for node in agent_tree
         for tool in node["tools"]
     )
+    local_default_indices = list(dict.fromkeys(
+        index_name
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == LOCAL_TOOL_CLASS
+        for index_name in _tool_default(tool, LOCAL_RANGE_PARAM)
+    ))
+    aidp_default_ids = list(dict.fromkeys(
+        kds_id
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == AIDP_TOOL_CLASS
+        for kds_id in _tool_default(tool, AIDP_RANGE_PARAM)
+    ))
+    if user_id:
+        local_default_indices = ElasticSearchService.filter_accessible_indices(
+            local_default_indices,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if aidp_default_ids:
+            aidp_default_ids = _filter_accessible_aidp_ids(
+                aidp_default_ids,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+    local_records = (
+        get_knowledge_info_by_tenant_id(tenant_id)
+        if user_id and local_default_indices
+        else []
+    )
+    local_id_by_index = {
+        str(record.get("index_name")): str(record.get("knowledge_id"))
+        for record in local_records
+        if record.get("index_name") and record.get("knowledge_id") is not None
+    }
+    local_default_ids = [
+        local_id_by_index[index_name]
+        for index_name in local_default_indices
+        if index_name in local_id_by_index
+    ]
     affected_agent_ids = [
         node["agent_id"]
         for node in agent_tree
@@ -167,11 +225,15 @@ def get_agent_knowledge_capabilities(
             "max_select": LOCAL_MAX_SELECT,
             "requires_same_embedding_model": True,
             "default_summary": "Follow each agent's default configuration",
+            "default_knowledge_ids": local_default_ids,
+            "default_range_values": local_default_indices,
         },
         "aidp": {
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
             "default_summary": "Follow each agent's default configuration",
+            "default_knowledge_ids": aidp_default_ids,
+            "default_range_values": aidp_default_ids,
         },
     }
     revision_payload = json.dumps(

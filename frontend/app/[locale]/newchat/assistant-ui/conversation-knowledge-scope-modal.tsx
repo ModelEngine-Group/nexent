@@ -3,25 +3,18 @@
 import { useEffect, useMemo, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Empty,
-  Modal,
-  Radio,
-  Spin,
-  message,
-} from "antd";
+import { Alert, Button, Checkbox, Empty, Modal, Spin, message } from "antd";
 
+import { Can } from "@/components/permission/Can";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import { useGroupList } from "@/hooks/group/useGroupList";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
-  KnowledgeScopeMode,
 } from "@/types/knowledgeScope";
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 
@@ -34,7 +27,6 @@ interface ConversationKnowledgeScopeModalProps {
     scope: ConversationKnowledgeScope,
     preview: KnowledgeScopeEffectivePreview
   ) => Promise<void> | void;
-  onRestoreDefault: () => Promise<void> | void;
 }
 
 const copyScope = (
@@ -53,6 +45,20 @@ const normalizeScopeForSource = (
   if (scope.local.mode === "disabled" && scope.aidp.mode === "disabled") {
     return scope;
   }
+  if (source === "local" && scope.local.mode === "inherit") {
+    return {
+      schema_version: 1,
+      local: { mode: "inherit", knowledge_ids: [] },
+      aidp: { mode: "disabled", kds_ids: [] },
+    };
+  }
+  if (source === "aidp" && scope.aidp.mode === "inherit") {
+    return {
+      schema_version: 1,
+      local: { mode: "disabled", knowledge_ids: [] },
+      aidp: { mode: "inherit", kds_ids: [] },
+    };
+  }
   if (source === "local" && scope.local.mode === "override") {
     return {
       ...scope,
@@ -70,15 +76,31 @@ const normalizeScopeForSource = (
 
 export const ConversationKnowledgeScopeModal: FC<
   ConversationKnowledgeScopeModalProps
-> = ({ open, value, capabilities, onCancel, onConfirm, onRestoreDefault }) => {
+> = ({ open, value, capabilities, onCancel, onConfirm }) => {
   const { t } = useTranslation();
   const router = useRouter();
-  const configuredSource: "local" | "aidp" | null = capabilities?.sources.local
-    .enabled
-    ? "local"
-    : capabilities?.sources.aidp.enabled
-      ? "aidp"
-      : null;
+  const { user } = useAuthorizationContext();
+  const { data: groupListData } = useGroupList(user?.tenantId ?? null);
+  const groupNameById = useMemo(
+    () =>
+      new Map(
+        (groupListData?.groups ?? []).map((group) => [
+          group.group_id,
+          group.group_name,
+        ])
+      ),
+    [groupListData]
+  );
+  const hasSourceConflict = Boolean(
+    capabilities?.sources.local.enabled && capabilities.sources.aidp.enabled
+  );
+  const configuredSource: "local" | "aidp" | null = hasSourceConflict
+    ? null
+    : capabilities?.sources.local.enabled
+      ? "local"
+      : capabilities?.sources.aidp.enabled
+        ? "aidp"
+        : null;
   const [draft, setDraft] = useState<ConversationKnowledgeScope>(() =>
     normalizeScopeForSource(value, configuredSource)
   );
@@ -90,10 +112,20 @@ export const ConversationKnowledgeScopeModal: FC<
   );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [initialSelectedIds, setInitialSelectedIds] = useState<string[]>([]);
+  const [initialSelectionWasFiltered, setInitialSelectionWasFiltered] =
+    useState(false);
+  const [defaultSelectedIds, setDefaultSelectedIds] = useState<string[]>([]);
+  const [selectionTouched, setSelectionTouched] = useState(false);
+  const [restoreDefaultClicked, setRestoreDefaultClicked] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setDraft(normalizeScopeForSource(value, configuredSource));
+    const normalized = normalizeScopeForSource(value, configuredSource);
+    setDraft(normalized);
+    setInitialSelectionWasFiltered(false);
+    setSelectionTouched(false);
+    setRestoreDefaultClicked(false);
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -106,16 +138,68 @@ export const ConversationKnowledgeScopeModal: FC<
     ])
       .then(([localResult, aidpResult]) => {
         if (cancelled) return;
-        setLocalKnowledgeBases(
-          (localResult.knowledgeBases || []).filter(
-            (kb: KnowledgeBase) =>
-              kb.knowledge_id !== undefined && kb.knowledge_id !== null
-          )
+        const localItems = (localResult.knowledgeBases || []).filter(
+          (kb: KnowledgeBase) =>
+            kb.knowledge_id !== undefined && kb.knowledge_id !== null
         );
-        setAidpKnowledgeBases(
+        const aidpItems =
           knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
             aidpResult.value || []
-          )
+          );
+        setLocalKnowledgeBases(localItems);
+        setAidpKnowledgeBases(aidpItems);
+        const availableIds = new Set(
+          configuredSource === "local"
+            ? localItems.map((kb: KnowledgeBase) => String(kb.knowledge_id))
+            : aidpItems.map((kb: KnowledgeBase) => String(kb.id))
+        );
+        const defaults =
+          (configuredSource
+            ? capabilities?.sources[configuredSource].default_knowledge_ids
+            : []
+          )?.filter((id) => availableIds.has(String(id))) ?? [];
+        const selected =
+          configuredSource === "local"
+            ? normalized.local.mode === "override"
+              ? normalized.local.knowledge_ids
+              : normalized.local.mode === "disabled"
+                ? []
+                : defaults
+            : configuredSource === "aidp"
+              ? normalized.aidp.mode === "override"
+                ? normalized.aidp.kds_ids
+                : normalized.aidp.mode === "disabled"
+                  ? []
+                  : defaults
+              : [];
+        const visibleSelected = selected.filter((id) =>
+          availableIds.has(String(id))
+        );
+        setDefaultSelectedIds(defaults.map(String));
+        setInitialSelectedIds(visibleSelected.map(String));
+        setInitialSelectionWasFiltered(
+          selected.length !== visibleSelected.length
+        );
+        setDraft(
+          configuredSource === "local"
+            ? {
+                ...normalized,
+                local: {
+                  mode: "override",
+                  knowledge_ids: visibleSelected.map(String),
+                },
+                aidp: { mode: "disabled", kds_ids: [] },
+              }
+            : configuredSource === "aidp"
+              ? {
+                  ...normalized,
+                  local: { mode: "disabled", knowledge_ids: [] },
+                  aidp: {
+                    mode: "override",
+                    kds_ids: visibleSelected.map(String),
+                  },
+                }
+              : normalized
         );
       })
       .catch(() => {
@@ -127,7 +211,7 @@ export const ConversationKnowledgeScopeModal: FC<
     return () => {
       cancelled = true;
     };
-  }, [open, value, configuredSource, t]);
+  }, [open, value, configuredSource, capabilities, t]);
 
   const localOptions = useMemo(
     () =>
@@ -150,42 +234,6 @@ export const ConversationKnowledgeScopeModal: FC<
     [aidpKnowledgeBases]
   );
 
-  const overallMode: KnowledgeScopeMode =
-    draft.local.mode === "override" || draft.aidp.mode === "override"
-      ? "override"
-      : draft.local.mode === "disabled" && draft.aidp.mode === "disabled"
-        ? "disabled"
-        : "inherit";
-
-  const updateOverallMode = (mode: KnowledgeScopeMode) => {
-    setDraft((current) => {
-      if (mode === "inherit") {
-        return copyScope(null);
-      }
-      if (mode === "disabled") {
-        return {
-          schema_version: 1,
-          local: { mode: "disabled", knowledge_ids: [] },
-          aidp: { mode: "disabled", kds_ids: [] },
-        };
-      }
-      if (current.local.mode === "override") return current;
-      if (current.aidp.mode === "override") return current;
-      if (configuredSource === "local") {
-        return {
-          schema_version: 1,
-          local: { mode: "override", knowledge_ids: [] },
-          aidp: { mode: "disabled", kds_ids: [] },
-        };
-      }
-      return {
-        schema_version: 1,
-        local: { mode: "disabled", knowledge_ids: [] },
-        aidp: { mode: "override", kds_ids: [] },
-      };
-    });
-  };
-
   const getKnowledgeBaseId = (
     source: "local" | "aidp",
     knowledgeBase: KnowledgeBase
@@ -200,6 +248,8 @@ export const ConversationKnowledgeScopeModal: FC<
     );
 
   const updateSelectedValues = (source: "local" | "aidp", values: string[]) => {
+    setSelectionTouched(true);
+    setRestoreDefaultClicked(false);
     setDraft((current) =>
       source === "local"
         ? {
@@ -214,6 +264,67 @@ export const ConversationKnowledgeScopeModal: FC<
           }
     );
   };
+
+  const sameSelection = (left: string[], right: string[]) => {
+    const rightIds = new Set(right);
+    return (
+      left.length === right.length &&
+      new Set(left).size === rightIds.size &&
+      left.every((id) => rightIds.has(id))
+    );
+  };
+
+  const buildScopeForSelection = (
+    source: "local" | "aidp",
+    selectedIds: string[]
+  ): ConversationKnowledgeScope => {
+    if (selectedIds.length === 0) {
+      return {
+        schema_version: 1,
+        local: { mode: "disabled", knowledge_ids: [] },
+        aidp: { mode: "disabled", kds_ids: [] },
+      };
+    }
+    if (sameSelection(selectedIds, defaultSelectedIds)) {
+      return source === "local"
+        ? {
+            schema_version: 1,
+            local: { mode: "inherit", knowledge_ids: [] },
+            aidp: { mode: "disabled", kds_ids: [] },
+          }
+        : {
+            schema_version: 1,
+            local: { mode: "disabled", knowledge_ids: [] },
+            aidp: { mode: "inherit", kds_ids: [] },
+          };
+    }
+    return source === "local"
+      ? {
+          schema_version: 1,
+          local: { mode: "override", knowledge_ids: selectedIds },
+          aidp: { mode: "disabled", kds_ids: [] },
+        }
+      : {
+          schema_version: 1,
+          local: { mode: "disabled", knowledge_ids: [] },
+          aidp: { mode: "override", kds_ids: selectedIds },
+        };
+  };
+
+  const buildInheritScope = (
+    source: "local" | "aidp"
+  ): ConversationKnowledgeScope =>
+    source === "local"
+      ? {
+          schema_version: 1,
+          local: { mode: "inherit", knowledge_ids: [] },
+          aidp: { mode: "disabled", kds_ids: [] },
+        }
+      : {
+          schema_version: 1,
+          local: { mode: "disabled", knowledge_ids: [] },
+          aidp: { mode: "inherit", kds_ids: [] },
+        };
 
   const toggleKnowledgeBase = (source: "local" | "aidp", id: string) => {
     const currentValues =
@@ -254,16 +365,21 @@ export const ConversationKnowledgeScopeModal: FC<
   };
 
   const handleConfirm = async () => {
+    if (!configuredSource) return;
+    const selectedIds =
+      configuredSource === "local"
+        ? draft.local.knowledge_ids
+        : draft.aidp.kds_ids;
+    let nextScope = buildScopeForSelection(configuredSource, selectedIds);
     if (
-      draft.local.mode === "override" &&
-      draft.local.knowledge_ids.length === 0
+      !initialSelectionWasFiltered &&
+      !selectionTouched &&
+      sameSelection(selectedIds, initialSelectedIds)
     ) {
-      message.warning(t("chat.knowledgeScope.selectLocal"));
-      return;
+      nextScope = normalizeScopeForSource(value, configuredSource);
     }
-    if (draft.aidp.mode === "override" && draft.aidp.kds_ids.length === 0) {
-      message.warning(t("chat.knowledgeScope.selectAidp"));
-      return;
+    if (restoreDefaultClicked) {
+      nextScope = buildInheritScope(configuredSource);
     }
     if (!validateLocalEmbeddingModels()) return;
     const localNamesById = new Map(
@@ -274,28 +390,31 @@ export const ConversationKnowledgeScopeModal: FC<
     );
     const preview: KnowledgeScopeEffectivePreview = {
       local: {
-        disabled: draft.local.mode === "disabled",
+        disabled: nextScope.local.mode === "disabled",
         knowledge_ids:
-          draft.local.mode === "override" ? draft.local.knowledge_ids : [],
+          nextScope.local.mode === "override"
+            ? nextScope.local.knowledge_ids
+            : [],
         display_names:
-          draft.local.mode === "override"
-            ? draft.local.knowledge_ids.map(
+          nextScope.local.mode === "override"
+            ? nextScope.local.knowledge_ids.map(
                 (id) => localNamesById.get(id) ?? id
               )
             : [],
       },
       aidp: {
-        disabled: draft.aidp.mode === "disabled",
-        kds_ids: draft.aidp.mode === "override" ? draft.aidp.kds_ids : [],
+        disabled: nextScope.aidp.mode === "disabled",
+        kds_ids:
+          nextScope.aidp.mode === "override" ? nextScope.aidp.kds_ids : [],
         display_names:
-          draft.aidp.mode === "override"
-            ? draft.aidp.kds_ids.map((id) => aidpNamesById.get(id) ?? id)
+          nextScope.aidp.mode === "override"
+            ? nextScope.aidp.kds_ids.map((id) => aidpNamesById.get(id) ?? id)
             : [],
       },
     };
     setSaving(true);
     try {
-      await onConfirm(draft, preview);
+      await onConfirm(nextScope, preview);
     } finally {
       setSaving(false);
     }
@@ -453,6 +572,9 @@ export const ConversationKnowledgeScopeModal: FC<
                 Boolean(modelIdentity) &&
                 modelIdentity !== selectedLocalModel;
               const name = knowledgeBase.display_name || knowledgeBase.name;
+              const groupNames = (knowledgeBase.group_ids ?? [])
+                .map((groupId) => groupNameById.get(groupId))
+                .filter((groupName): groupName is string => Boolean(groupName));
               return (
                 <div
                   role="button"
@@ -498,71 +620,71 @@ export const ConversationKnowledgeScopeModal: FC<
                     >
                       {name}
                     </div>
-                    {source === "aidp" ? (
-                      <>
-                        <div
-                          className="mt-1 truncate text-xs text-muted-foreground"
-                          title={
-                            knowledgeBase.description ||
-                            t("aidpKnowledge.noDescription")
-                          }
-                        >
-                          {knowledgeBase.description ||
-                            t("aidpKnowledge.noDescription")}
-                        </div>
-                        <div
-                          className={`flex items-center ${KB_LAYOUT.TAG_MARGIN}`}
-                        >
-                          <span
-                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                          >
-                            {knowledgeBase.createdAt
-                              ? t("aidpKnowledge.createdAt", {
-                                  date: new Date(
-                                    knowledgeBase.createdAt
-                                  ).toLocaleDateString(),
-                                })
-                              : t("aidpKnowledge.createdAtUnknown")}
-                          </span>
-                        </div>
-                      </>
-                    ) : (
+                    {source === "aidp" && (
                       <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                        className="mt-1 line-clamp-2 text-xs text-muted-foreground"
+                        title={
+                          knowledgeBase.description ||
+                          t("aidpKnowledge.noDescription")
+                        }
                       >
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                        >
-                          {t("knowledgeBase.tag.documents", {
-                            count: knowledgeBase.documentCount || 0,
-                          })}
-                        </span>
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                        >
-                          {t("knowledgeBase.tag.chunks", {
-                            count: knowledgeBase.chunkCount || 0,
-                          })}
-                        </span>
-                        {knowledgeBase.embeddingModel &&
-                          knowledgeBase.embeddingModel !== "unknown" && (
-                            <span
-                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model}`}
-                            >
-                              {t("knowledgeBase.tag.model", {
-                                model: knowledgeBase.embeddingModel,
-                              })}
-                            </span>
-                          )}
-                        {knowledgeBase.is_multimodal && (
-                          <span
-                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red}`}
-                          >
-                            multimodal
-                          </span>
-                        )}
+                        {knowledgeBase.description ||
+                          t("aidpKnowledge.noDescription")}
                       </div>
                     )}
+                    <div
+                      className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                    >
+                      {source === "local" &&
+                        knowledgeBase.embeddingModel &&
+                        knowledgeBase.embeddingModel !== "unknown" && (
+                          <span
+                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model}`}
+                          >
+                            {t("knowledgeBase.tag.model", {
+                              model: knowledgeBase.embeddingModel,
+                            })}
+                          </span>
+                        )}
+                      {source === "aidp" && (
+                        <span
+                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                        >
+                          {knowledgeBase.createdAt
+                            ? t("aidpKnowledge.createdAt", {
+                                date: new Date(
+                                  knowledgeBase.createdAt
+                                ).toLocaleDateString(),
+                              })
+                            : t("aidpKnowledge.createdAtUnknown")}
+                        </span>
+                      )}
+                      {knowledgeBase.ingroup_permission === "PRIVATE" ? (
+                        <span
+                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
+                        >
+                          {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                        </span>
+                      ) : (
+                        <Can permission="group:read">
+                          {groupNames.map((groupName) => (
+                            <span
+                              key={groupName}
+                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
+                            >
+                              {groupName}
+                            </span>
+                          ))}
+                        </Can>
+                      )}
+                      {knowledgeBase.is_multimodal && (
+                        <span
+                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red}`}
+                        >
+                          multimodal
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -588,7 +710,30 @@ export const ConversationKnowledgeScopeModal: FC<
           <button
             type="button"
             className="text-sm text-muted-foreground hover:text-foreground"
-            onClick={() => void onRestoreDefault()}
+            onClick={() => {
+              if (!configuredSource) return;
+              setDraft(
+                configuredSource === "local"
+                  ? {
+                      schema_version: 1,
+                      local: {
+                        mode: "override",
+                        knowledge_ids: defaultSelectedIds,
+                      },
+                      aidp: { mode: "disabled", kds_ids: [] },
+                    }
+                  : {
+                      schema_version: 1,
+                      local: { mode: "disabled", knowledge_ids: [] },
+                      aidp: {
+                        mode: "override",
+                        kds_ids: defaultSelectedIds,
+                      },
+                    }
+              );
+              setSelectionTouched(true);
+              setRestoreDefaultClicked(true);
+            }}
           >
             {t("chat.knowledgeScope.restoreDefault")}
           </button>
@@ -637,35 +782,13 @@ export const ConversationKnowledgeScopeModal: FC<
       )}
       <Spin spinning={loading}>
         {configuredSource ? (
-          <div className="space-y-4 py-2">
-            <Radio.Group
-              value={overallMode}
-              onChange={(event) =>
-                updateOverallMode(event.target.value as KnowledgeScopeMode)
-              }
-              className="flex flex-col gap-2"
-            >
-              <Radio value="inherit">
-                {t("chat.knowledgeScope.modeInherit")}
-              </Radio>
-              <Radio value="override">
-                {t("chat.knowledgeScope.modeOverride")}
-              </Radio>
-              <Radio value="disabled">
-                {t("chat.knowledgeScope.modeDisabled")}
-              </Radio>
-            </Radio.Group>
-            {overallMode === "override" && (
-              <div className="space-y-3">{renderSource(configuredSource)}</div>
-            )}
-            {overallMode === "disabled" && (
-              <Alert
-                type="warning"
-                showIcon
-                message={t("chat.knowledgeScope.allDisabledMessage")}
-              />
-            )}
-          </div>
+          <div className="space-y-3 py-2">{renderSource(configuredSource)}</div>
+        ) : hasSourceConflict ? (
+          <Alert
+            type="error"
+            showIcon
+            message={t("chat.knowledgeScope.sourceConflict")}
+          />
         ) : (
           <Empty description={t("chat.knowledgeScope.noTool")} />
         )}

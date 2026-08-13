@@ -27,11 +27,15 @@ export interface KnowledgeCapabilities {
       max_select: number;
       requires_same_embedding_model: boolean;
       default_summary: string;
+      default_knowledge_ids: string[];
+      default_range_values: string[];
     };
     aidp: {
       enabled: boolean;
       max_select: number;
       default_summary: string;
+      default_knowledge_ids: string[];
+      default_range_values: string[];
     };
   };
 }

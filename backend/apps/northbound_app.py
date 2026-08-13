@@ -19,6 +19,7 @@ from services.northbound_service import (
     stop_chat,
     get_agent_info_list,
     get_agent_info_by_name_for_northbound,
+    get_agent_knowledge_bases_for_northbound,
     update_conversation_title,
     upload_files_for_northbound,
 )
@@ -373,6 +374,43 @@ async def get_agent_by_name(
         logging.error(f"Failed to get agent by name: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.get("/agents/{agent_name}/knowledge-bases")
+async def get_agent_knowledge_bases(
+    request: Request,
+    agent_name: str,
+):
+    """List knowledge bases the current northbound caller may use with an agent."""
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+        return await get_agent_knowledge_bases_for_northbound(ctx, agent_name)
+    except ValueError as exc:
+        status = (
+            HTTPStatus.CONFLICT
+            if "both local and AIDP" in str(exc)
+            else HTTPStatus.BAD_REQUEST
+        )
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except LimitExceededError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail="Too Many Requests: rate limit exceeded",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error(
+            "Failed to list northbound agent knowledge bases: %s",
+            exc,
+            exc_info=exc,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        ) from exc
 
 
 @router.get("/conversations")
