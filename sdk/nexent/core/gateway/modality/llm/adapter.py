@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Dict, List
 
 from nexent.core.models import OpenAIModel, OpenAILongContextModel
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
-from ...model_context import LLMContext, LLMSampling
+from ...model_context import LLMContext
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
 
@@ -138,28 +138,25 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
 
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAIModel` on first use."""
-        # Keep the existing OpenAIModel construction path so the adapter remains
-        # compatible with smolagents and preserves existing model configuration.
-        s = self._context.sampling or LLMSampling()
+        ctx = self._context
         kwargs = dict(
-            observer=self._context.observer,
-            model_id=self._context.model_name,
+            observer=ctx.observer,
+            model_id=ctx.model_name,
             api_base=self._base_url,
             api_key=self._api_key,
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
-            display_name=self._context.display_name,
-            timeout_seconds=self._context.timeout_seconds,
-            extra_body=s.extra_body,
-            max_output_tokens=s.max_output_tokens,
+            display_name=ctx.display_name,
+            timeout_seconds=ctx.timeout_seconds,
+            extra_body=ctx.extra_body,
+            max_output_tokens=ctx.max_output_tokens,
         )
-        # Only override model defaults when the caller explicitly provides them.
-        if s.temperature is not None:
-            kwargs["temperature"] = s.temperature
-        if s.top_p is not None:
-            kwargs["top_p"] = s.top_p
-        if s.stream is not None:
-            kwargs["stream"] = s.stream
+        if ctx.temperature is not None:
+            kwargs["temperature"] = ctx.temperature
+        if ctx.top_p is not None:
+            kwargs["top_p"] = ctx.top_p
+        if ctx.stream is not None:
+            kwargs["stream"] = ctx.stream
         self._model = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
@@ -218,20 +215,20 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
 
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAILongContextModel` on first use."""
-        s = self._context.sampling or LLMSampling()
+        ctx = self._context
         self._model = OpenAILongContextModel(
-            observer=self._context.observer,
-            model_id=self._context.model_name,
+            observer=ctx.observer,
+            model_id=ctx.model_name,
             api_base=self._base_url,
             api_key=self._api_key,
-            max_context_tokens=s.max_tokens if s.max_tokens is not None else 128000,
-            truncation_strategy=s.truncation_strategy if s.truncation_strategy is not None else "start",
+            max_context_tokens=ctx.max_tokens if ctx.max_tokens is not None else 128000,
+            truncation_strategy=ctx.truncation_strategy if ctx.truncation_strategy is not None else "start",
             ssl_verify=self._ssl_verify,
             model_factory=self.factory,
-            display_name=self._context.display_name,
-            timeout_seconds=self._context.timeout_seconds,
-            extra_body=s.extra_body,
-            max_output_tokens=s.max_output_tokens,
+            display_name=ctx.display_name,
+            timeout_seconds=ctx.timeout_seconds,
+            extra_body=ctx.extra_body,
+            max_output_tokens=ctx.max_output_tokens,
         )
 
     def get_model_info(self) -> ModelInfo:

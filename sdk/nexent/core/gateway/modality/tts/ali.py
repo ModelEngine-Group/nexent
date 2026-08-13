@@ -122,18 +122,17 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.ws.ws_url if context.ws else None,
-            auth_headers=context.ws.auth_headers if context.ws else None,
+            ws_url=context.ws_url,
+            auth_headers=context.auth_headers,
         )
-        extras = context.extra
         self._config = AliTTSConfig(
             api_key=context.api_key,
             model=context.model_name,
             voice=context.voice or "Cherry",
             speech_rate=context.speed_ratio,
             ws_url=self._ws_url,
-            format=extras.get("format", "mp3"),
-            sample_rate=extras.get("sample_rate", 16000),
+            format=context.format,
+            sample_rate=context.sample_rate,
         )
         self._audio_file_path = context.audio_file_path
         self._is_realtime = self._config.is_realtime_api() or "qwen" in self._config.model.lower()
