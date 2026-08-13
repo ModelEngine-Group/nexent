@@ -41,12 +41,12 @@ class SkillLoader:
         if not frontmatter:
             raise ValueError("SKILL.md must have YAML frontmatter")
 
-        # Try to parse with yaml.safe_load first
+        # Preserve the existing scalar compatibility behavior. Structured
+        # fields such as tags are left untouched by _fix_yaml_frontmatter.
         meta = None
         try:
-            # Fix YAML parsing to handle special characters in values
-            frontmatter = cls._fix_yaml_frontmatter(frontmatter)
-            meta = yaml.safe_load(frontmatter)
+            fixed_frontmatter = cls._fix_yaml_frontmatter(frontmatter)
+            meta = yaml.safe_load(fixed_frontmatter)
         except yaml.YAMLError as e:
             logger.warning(f"YAML parse error, falling back to regex extraction: {e}")
 
@@ -66,11 +66,18 @@ class SkillLoader:
             "name": filtered_meta.get("name"),
             "description": filtered_meta.get("description", ""),
             "allowed_tools": filtered_meta.get("allowed-tools", []),
-            "tags": filtered_meta.get("tags", []),
+            "tags": cls._normalize_tags(filtered_meta.get("tags")),
             "script_outputs": filtered_meta.get("script_outputs", {}),
             "content": body.strip(),
             "source_path": source_path
         }
+
+    @staticmethod
+    def _normalize_tags(tags: Any) -> list[str]:
+        """Return only non-empty string tags from parsed frontmatter."""
+        if not isinstance(tags, list):
+            return []
+        return [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
 
     @classmethod
     def _fix_yaml_frontmatter(cls, frontmatter: str) -> str:
@@ -111,6 +118,11 @@ class SkillLoader:
 
                 # Skip YAML list items (lines starting with '-')
                 if key == '' or line.strip().startswith('-'):
+                    fixed_lines.append(line)
+                    continue
+
+                # Do not turn structured metadata into quoted scalars.
+                if key in {"tags", "allowed-tools"}:
                     fixed_lines.append(line)
                     continue
 
