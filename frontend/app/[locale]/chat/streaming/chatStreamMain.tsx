@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+import { A2UIRenderer, parseA2UIMessage, mightContainA2UI } from '@/lib/a2ui';
+
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
 import { Checkbox } from "antd";
@@ -165,39 +167,59 @@ export function ChatStreamMain({
     message: ChatMessageType,
     index: number,
     shareSelected = false
-  ) => (
-    <>
-      <ChatStreamFinalMessage
-        message={message}
-        onSelectMessage={onSelectMessage}
-        isSelected={message.id === selectedMessageId}
-        searchResultsCount={message?.searchResults?.length || 0}
-        imagesCount={message?.images?.length || 0}
-        onImageClick={onImageClick}
-        onOpinionChange={onOpinionChange}
-        readOnly={readOnly}
-        index={index}
-        currentConversationId={currentConversationId}
-        onCitationHover={onCitationHover}
-        shareSelected={shareSelected}
-      />
-      {message.role === MESSAGE_ROLES.ASSISTANT &&
-        getHistorySummaryMessages(message).length > 0 && (
-          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
-            <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
-          </div>
-        )}
-      {message.role === MESSAGE_ROLES.USER &&
-        processedMessages.conversationGroups.has(message.id!) && (
-          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
-            <TaskWindow
-              messages={processedMessages.conversationGroups.get(message.id!) || []}
-              isStreaming={isStreaming && lastUserMessageIdRef.current === message.id}
-            />
-          </div>
-        )}
-    </>
-  );
+  ) => {
+    const rawContent = message.finalAnswer || message.content || "";
+    const hasA2UI = mightContainA2UI(rawContent);
+    if (hasA2UI && message.role === MESSAGE_ROLES.ASSISTANT) {
+      return (
+        <>
+          <A2UIRenderer
+            content={rawContent}
+            className="a2ui-streaming-message"
+          />
+          {message.role === MESSAGE_ROLES.ASSISTANT &&
+            getHistorySummaryMessages(message).length > 0 && (
+              <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+                <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
+              </div>
+            )}
+        </>
+      );
+    }
+    return (
+      <>
+        <ChatStreamFinalMessage
+          message={message}
+          onSelectMessage={onSelectMessage}
+          isSelected={message.id === selectedMessageId}
+          searchResultsCount={message?.searchResults?.length || 0}
+          imagesCount={message?.images?.length || 0}
+          onImageClick={onImageClick}
+          onOpinionChange={onOpinionChange}
+          readOnly={readOnly}
+          index={index}
+          currentConversationId={currentConversationId}
+          onCitationHover={onCitationHover}
+          shareSelected={shareSelected}
+        />
+        {message.role === MESSAGE_ROLES.ASSISTANT &&
+          getHistorySummaryMessages(message).length > 0 && (
+            <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+              <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
+            </div>
+          )}
+        {message.role === MESSAGE_ROLES.USER &&
+          processedMessages.conversationGroups.has(message.id!) && (
+            <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+              <TaskWindow
+                messages={processedMessages.conversationGroups.get(message.id!) || []}
+                isStreaming={isStreaming && lastUserMessageIdRef.current === message.id}
+              />
+            </div>
+          )}
+      </>
+    );
+  };
 
   // Extract latest token metrics from the most recent assistant step
   const latestMetrics = useMemo<TokenMetrics | null>(() => {

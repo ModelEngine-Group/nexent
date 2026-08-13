@@ -1,5 +1,6 @@
 import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType } from "@/types/chat";
+import { parseA2UIMessage, mightContainA2UI } from '@/lib/a2ui';
 
 /**
  * Transform chat messages to task messages for TaskWindow rendering
@@ -67,6 +68,18 @@ export function transformMessagesToTaskMessages(
                     ? { search: message.searchResults }
                     : undefined,
             } as any;
+
+            // A2UI transformation
+            if (mightContainA2UI(content.content)) {
+              const parsed = parseA2UIMessage(content.content);
+              if (parsed.isA2UI) {
+                Object.assign(taskMsg, {
+                  isA2UI: true,
+                  a2uiSchema: parsed.schema,
+                  a2uiBlocks: parsed.blocks,
+                });
+              }
+            }
 
             // Handle truncation messages specially - buffer them instead of adding immediately
             if (content.type === "truncation") {

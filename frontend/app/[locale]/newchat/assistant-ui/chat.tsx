@@ -7,6 +7,7 @@ import { Thread } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import { A2UIRenderer, mightContainA2UI } from '@/lib/a2ui';
 
 export interface ChatProps {
   generatedTitle?: string;

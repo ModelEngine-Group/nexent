@@ -44,6 +44,7 @@ class ProcessType(Enum):
 
     SUBAGENT_START = "subagent_start"  # sub-agent invocation boundary, opens a nested group on the frontend
     SUBAGENT_END = "subagent_end"  # sub-agent invocation boundary, closes the nested group
+    A2UI = "a2ui"  # A2UI (Agent-to-User Interface) structured UI content
 
 
 # message transformer base class
@@ -224,6 +225,7 @@ class MessageObserver:
             ProcessType.PLAN: default_transformer,
             ProcessType.PLAN_STEP_UPDATE: default_transformer,
             ProcessType.AUTOMATION_PROPOSAL: default_transformer,
+            ProcessType.A2UI: default_transformer,
         }
 
     def _active_subagent(self) -> tuple | None:

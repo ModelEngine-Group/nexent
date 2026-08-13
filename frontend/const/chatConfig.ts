@@ -149,6 +149,7 @@ export const chatConfig = {
     PREPROCESS: "preprocess" as const,
     SKILL_FILES: "skill_files" as const,
     HISTORY_SUMMARY: "history_summary" as const,
+    A2UI: "a2ui" as const,
   },
 
   // Content type constants for last content type tracking

@@ -21,6 +21,12 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 
+from ..a2ui.integration import is_a2ui_enabled, get_a2ui_system_prompt
+from ..a2ui.parser import may_contain_a2ui_content
+from ..a2ui.finalizer import A2UIResponseFinalizer, should_finalize_a2ui_content
+from ..a2ui.validator import validate_a2ui_response
+from ..a2ui.constants import A2UI_OPEN_TAG
+
 if TYPE_CHECKING:
     from .context import ContextItemInput
     from .subagent_wrapper import SubAgentToolWrapper
@@ -197,6 +203,7 @@ class NexentAgent:
         self.user_id = user_id
 
         self.agent = None
+        self._last_query: str = ""
 
     def create_model(self, model_cite_name: str):
         """create a model instance"""
@@ -690,6 +697,14 @@ class NexentAgent:
                 self._sandbox_scope = self.sandbox_config.scope.value
 
             # Create the agent
+            a2ui_instructions = agent_config.instructions or ""
+            if is_a2ui_enabled():
+                a2ui_prompt = get_a2ui_system_prompt(self.observer.lang)
+                if a2ui_instructions:
+                    a2ui_instructions = f"{a2ui_instructions}\n\n{a2ui_prompt}"
+                else:
+                    a2ui_instructions = a2ui_prompt
+
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,
@@ -701,7 +716,7 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
-                instructions=agent_config.instructions,
+                instructions=a2ui_instructions,
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
@@ -761,6 +776,7 @@ class NexentAgent:
 
         self.agent._history_step_count = len(self.agent.memory.steps)
     def agent_run_with_observer(self, query: str, reset=True):
+        self._last_query = query
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
@@ -893,6 +909,39 @@ class NexentAgent:
                     # Remove thinking prefix content (until two newlines)
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    
+                    # A2UI finalization: validate and repair structured UI content
+                    if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
+                        try:
+                            a2ui_validation = validate_a2ui_response(final_answer_str)
+                            if a2ui_validation.valid:
+                                # Valid A2UI content - emit as A2UI type for frontend
+                                observer.add_message(
+                                    self.agent.agent_name,
+                                    ProcessType.A2UI,
+                                    final_answer_str,
+                                )
+                            else:
+                                # Attempt repair
+                                finalizer = A2UIResponseFinalizer()
+                                import asyncio
+                                import inspect as insp
+                                async def _noop_repair(prompt):
+                                    return None
+                                loop = asyncio.get_event_loop()
+                                result = loop.run_until_complete(
+                                    finalizer.finalize_result(
+                                        final_answer_str,
+                                        user_query=self._last_query or "",
+                                        request_id=str(id(self)),
+                                        repair_call=None,
+                                        max_repair_attempts=1,
+                                    )
+                                )
+                                final_answer_str = result.content
+                        except Exception as a2ui_err:
+                            logger.warning("A2UI finalization error: %s", a2ui_err)
+                    
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,
