@@ -52,7 +52,15 @@ def _detect_image_mime(img_bytes: bytes) -> str:
 
 @dataclass
 class EmbeddingRequest:
-    """Embedding request payload: text or multimodal inputs."""
+    """Embedding request payload: text or multimodal inputs.
+
+    Attributes:
+        inputs: A string, a list of strings, or a list of multimodal item dicts.
+        with_metadata: If True, return the raw provider response instead of vectors.
+        timeout: Per-request timeout; ``None`` uses ``retry_timeout_step``.
+        retries: Number of retries on timeout (total attempts = ``retries + 1``).
+        retry_timeout_step: Seconds added to the timeout per retry.
+    """
 
     inputs: Union[str, List[str], List[Dict[str, Any]]]
     with_metadata: bool = False
@@ -62,14 +70,27 @@ class EmbeddingRequest:
 
 
 class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
-    """Base embedding adapter — shared HTTP session + retry loop."""
+    """Base embedding adapter — shared HTTP session + retry loop.
+
+    Attributes:
+        _session: Shared ``requests.Session`` (``trust_env`` disabled).
+        _headers: HTTP auth headers built from the API key.
+    """
 
     @abstractmethod
     async def invoke(self, request: EmbeddingRequest):
-        """Embeds the inputs in the given request."""
+        """Embed the request's inputs.
+
+        Args:
+            request: The embedding request (text or multimodal inputs).
+
+        Returns:
+            A list of embedding vectors, or the raw response with metadata.
+        """
         ...
 
     def __init__(self, context: ModelContext) -> None:
+        """Initialize the shared HTTP session and auth headers."""
         MultimodalAdapter.__init__(self, context)
         HttpTransportMixin.__init__(
             self,
@@ -87,6 +108,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
 
     @property
     def _model_name(self) -> str:
+        """The model name from the construction context."""
         return self._context.model_name
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -165,7 +187,18 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         ...
 
     def get_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        """Embed text inputs by delegating to the multimodal embedding path."""
+        """Embed text inputs by delegating to the multimodal embedding path.
+
+        Args:
+            inputs: A string or list of strings to embed.
+            with_metadata: If True, return the raw provider response.
+            timeout: Per-request timeout; ``None`` uses ``retry_timeout_step``.
+            retries: Number of retries on timeout.
+            retry_timeout_step: Seconds added to the timeout per retry.
+
+        Returns:
+            A list of embedding vectors, or the raw response with metadata.
+        """
         if isinstance(inputs, str):
             mm = [{"text": inputs}]
         else:
@@ -173,7 +206,18 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         return self.get_multimodal_embeddings(mm, with_metadata, timeout, retries, retry_timeout_step)
 
     def get_multimodal_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        """Embed multimodal items via the provider's multimodal endpoint."""
+        """Embed multimodal items via the provider's multimodal endpoint.
+
+        Args:
+            inputs: A list of multimodal item dicts (``{"text": ...}`` / ``{"image": ...}``).
+            with_metadata: If True, return the raw provider response.
+            timeout: Per-request timeout; ``None`` uses ``retry_timeout_step``.
+            retries: Number of retries on timeout.
+            retry_timeout_step: Seconds added to the timeout per retry.
+
+        Returns:
+            A list of embedding vectors, or the raw response with metadata.
+        """
         with record_model_call("multi_embedding", self._model_name, display_name=self._model_name):
             data = self._prepare_multimodal_input(inputs)
             base_timeout = timeout if timeout is not None else retry_timeout_step
@@ -188,7 +232,14 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
             return self._retry(attempts, base_timeout, retry_timeout_step, _do, type(self).__name__)
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
-        """Connectivity check using sample multimodal inputs; returns [] on failure."""
+        """Connectivity check using sample multimodal inputs.
+
+        Args:
+            timeout: Timeout in seconds for the check.
+
+        Returns:
+            The embedding vectors from the sample request, or ``[]`` on failure.
+        """
         try:
             return await asyncio.to_thread(self.get_multimodal_embeddings, self._test_inputs(), timeout=timeout)
         except requests.exceptions.Timeout:
@@ -202,7 +253,7 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
             return []
 
     async def invoke(self, request: EmbeddingRequest):
-        """Embeds the request via the multimodal or text embedding path."""
+        """Embed ``request.inputs`` via the multimodal or text path, offloaded to a thread."""
         if _is_multimodal(request.inputs):
             return await asyncio.to_thread(
                 self.get_multimodal_embeddings, request.inputs,
@@ -221,11 +272,16 @@ def _is_multimodal(inputs: Any) -> bool:
 
 @register_adapter("jina", "multi_embedding")
 class JinaEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """Jina multimodal embedding adapter."""
+    """Jina multimodal embedding adapter.
+
+    Attributes:
+        factory: ``"jina"``.
+    """
 
     factory = "jina"
 
     def _prepare_multimodal_input(self, inputs):
+        """Build the Jina multimodal request body."""
         prepared = []
         for item in inputs:
             if "text" in item:
@@ -241,9 +297,11 @@ class JinaEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         return {"model": self._model_name, "input": prepared, "truncate": True}
 
     def _extract_embeddings(self, response):
+        """Extract embedding vectors from a Jina response."""
         return [item["embedding"] for item in response["data"]]
 
     def _test_inputs(self):
+        """Return sample text + image inputs for connectivity checks."""
         test_image_path = os.path.join(ASSETS_DIR, "test.png")
         with open(test_image_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
@@ -253,17 +311,22 @@ class JinaEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         ]
 
     def get_model_info(self) -> ModelInfo:
-        """Returns the model's metadata."""
+        """Return ``ModelInfo`` with text + multimodal capabilities."""
         return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
 
 
 @register_adapter("dashscope", "multi_embedding")
 class DashScopeEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """DashScope multimodal embedding adapter."""
+    """DashScope multimodal embedding adapter.
+
+    Attributes:
+        factory: ``"dashscope"``.
+    """
 
     factory = "dashscope"
 
     def _prepare_multimodal_input(self, inputs):
+        """Build the DashScope multimodal request body."""
         normalized = []
         for item in inputs:
             if "image" in item:
@@ -276,9 +339,11 @@ class DashScopeEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         return {"model": self._model_name, "input": {"contents": normalized}}
 
     def _extract_embeddings(self, response):
+        """Extract embedding vectors from a DashScope response."""
         return [item["embedding"] for item in response["output"]["embeddings"]]
 
     def _test_inputs(self):
+        """Return sample text + image inputs for connectivity checks."""
         test_image_path = os.path.join(ASSETS_DIR, "test.png")
         with open(test_image_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
@@ -288,17 +353,22 @@ class DashScopeEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         ]
 
     def get_model_info(self) -> ModelInfo:
-        """Returns the model's metadata."""
+        """Return ``ModelInfo`` with text + multimodal capabilities."""
         return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
 
 
 @register_adapter("siliconflow", "multi_embedding")
 class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """SiliconFlow multimodal embedding adapter."""
+    """SiliconFlow multimodal embedding adapter.
+
+    Attributes:
+        factory: ``"siliconflow"``.
+    """
 
     factory = "siliconflow"
 
     def _prepare_multimodal_input(self, inputs):
+        """Build the SiliconFlow multimodal request body."""
         prepared = []
         for item in inputs:
             if "text" in item:
@@ -314,9 +384,11 @@ class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         return {"model": self._model_name, "input": prepared}
 
     def _extract_embeddings(self, response):
+        """Extract embedding vectors from a SiliconFlow response."""
         return [item["embedding"] for item in response["data"]]
 
     def _test_inputs(self):
+        """Return sample text + raw image-bytes inputs for connectivity checks."""
         test_image_path = os.path.join(ASSETS_DIR, "test.png")
         with open(test_image_path, "rb") as f:
             image_data = f.read()
@@ -326,7 +398,7 @@ class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
         ]
 
     def get_model_info(self) -> ModelInfo:
-        """Returns the model's metadata."""
+        """Return ``ModelInfo`` with text + multimodal capabilities."""
         return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
 
 
@@ -334,7 +406,11 @@ class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
 
 @register_adapter("openai", "embedding")
 class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
-    """OpenAI-compatible text embedding adapter."""
+    """OpenAI-compatible text embedding adapter.
+
+    Attributes:
+        factory: ``"openai"``.
+    """
 
     factory = "openai"
 
@@ -396,12 +472,12 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
             return []
 
     async def invoke(self, request: EmbeddingRequest):
-        """Embeds the request's text inputs."""
+        """Embed ``request.inputs`` (text), offloaded to a worker thread."""
         return await asyncio.to_thread(
             self.get_embeddings, request.inputs,
             with_metadata=request.with_metadata, timeout=request.timeout,
         )
 
     def get_model_info(self) -> ModelInfo:
-        """Returns the model's metadata."""
+        """Return ``ModelInfo`` with text capability (no multimodal)."""
         return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": False})

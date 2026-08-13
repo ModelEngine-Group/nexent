@@ -32,7 +32,15 @@ _METHOD_MAP = {"image": "analyze_image", "audio": "analyze_audio", "video": "ana
 
 @dataclass
 class VLMRequest:
-    """VLM understanding request."""
+    """VLM understanding request.
+
+    Attributes:
+        media_type: ``"image"`` | ``"audio"`` | ``"video"``.
+        media_input: A file path or a binary file-like object of the media.
+        prompt: System prompt guiding the analysis.
+        stream: Whether to stream the response.
+        kwargs: Extra arguments forwarded to the ``analyze_*`` method.
+    """
 
     media_type: str  # "image" | "audio" | "video"
     media_input: Union[str, BinaryIO]
@@ -42,7 +50,11 @@ class VLMRequest:
 
 
 class VLMAdapter(MultimodalAdapter):
-    """VLM adapter root."""
+    """VLM adapter root.
+
+    Attributes:
+        modality: ``"vlm"``.
+    """
 
     modality = "vlm"
 
@@ -52,12 +64,21 @@ class VLMAdapter(MultimodalAdapter):
 
         Args:
             request: The VLM request describing the media and prompt to use.
+
+        Returns:
+            A smolagents ``ChatMessage`` for the analyzed media.
         """
 
 
 @register_adapter("openai", "vlm")
 class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
-    """OpenAI-compatible VLM. Protocol lives here; delegates chat to ``OpenAIModel``."""
+    """OpenAI-compatible VLM. Protocol lives here; delegates chat to ``OpenAIModel``.
+
+    Attributes:
+        modality: ``"vlm"``.
+        factory: ``"openai"``.
+        _model: The wrapped :class:`OpenAIModel`, built lazily.
+    """
 
     factory = "openai"
 
@@ -73,6 +94,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
+        """Construct the wrapped :class:`OpenAIModel` with VLM sampling defaults."""
         extras = self._context.extra
         # Preserve the VLM sampling defaults that OpenAIVLModel used to set on
         # its own instance; allow per-call-site overrides via context.extra.
@@ -102,7 +124,14 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     # ---- VLM protocol (moved from openai_vlm.py) --------------------------
 
     def encode_image(self, image_input: Union[str, BinaryIO]) -> str:
-        """Encode an image file or stream into a base64 string."""
+        """Encode an image file or stream into a base64 string.
+
+        Args:
+            image_input: A file path or a binary file-like object.
+
+        Returns:
+            The base64-encoded image bytes as a string.
+        """
         if isinstance(image_input, str):
             with open(image_input, "rb") as image_file:
                 return base64.b64encode(image_file.read()).decode('utf-8')
@@ -110,7 +139,18 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
     def prepare_image_message(self, image_input: Union[str, BinaryIO],
                              system_prompt: str = "Describe this picture.") -> List[Dict[str, Any]]:
-        """Build OpenAI-compatible chat messages embedding an encoded image."""
+        """Build OpenAI-compatible chat messages embedding an encoded image.
+
+        When ``image_input`` is a path, the image format is sniffed from the
+        file extension (defaulting to ``jpeg``).
+
+        Args:
+            image_input: A file path or a binary file-like object.
+            system_prompt: System prompt guiding the analysis.
+
+        Returns:
+            A two-message list (system + user) with the image as a data URL.
+        """
         base64_image = self.encode_image(image_input)
 
         image_format = "jpeg"
@@ -131,6 +171,15 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def prepare_media_message(self, media_input: Union[str, BinaryIO], media_type: str,
                               content_type: str, system_prompt: str) -> List[Dict[str, Any]]:
         """Build an OpenAI-compatible multimodal message for audio or video.
+
+        Args:
+            media_input: A file path or a binary file-like object.
+            media_type: ``"audio"`` or ``"video"``.
+            content_type: MIME content type, e.g. ``"audio/mpeg"``.
+            system_prompt: System prompt guiding the analysis.
+
+        Returns:
+            A user message list with the media as a data URL.
 
         Raises:
             ValueError: If ``media_type`` is not "audio" or "video".
@@ -158,7 +207,17 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_image(self, image_input: Union[str, BinaryIO],
                       system_prompt: str = "Please describe this picture concisely and carefully, within 200 words.",
                       stream: bool = True, **kwargs) -> Any:
-        """Analyze image content and return a smolagents ChatMessage."""
+        """Analyze image content and return a smolagents ChatMessage.
+
+        Args:
+            image_input: A file path or a binary file-like object.
+            system_prompt: System prompt guiding the analysis.
+            stream: Whether to stream the response.
+            **kwargs: Additional arguments forwarded to the wrapped model.
+
+        Returns:
+            A smolagents ``ChatMessage`` with the image analysis.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_image_message(image_input, system_prompt)
@@ -168,7 +227,17 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_audio(self, audio_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this audio carefully.",
                       content_type: str = "audio/mpeg", **kwargs) -> Any:
-        """Analyze audio content and return a smolagents ChatMessage."""
+        """Analyze audio content and return a smolagents ChatMessage.
+
+        Args:
+            audio_input: A file path or a binary file-like object.
+            system_prompt: System prompt guiding the analysis.
+            content_type: MIME content type, e.g. ``"audio/mpeg"``.
+            **kwargs: Additional arguments forwarded to the wrapped model.
+
+        Returns:
+            A smolagents ``ChatMessage`` with the audio analysis.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_media_message(audio_input, "audio", content_type, system_prompt)
@@ -177,7 +246,17 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     def analyze_video(self, video_input: Union[str, BinaryIO],
                       system_prompt: str = "Please analyze this video carefully.",
                       content_type: str = "video/mp4", **kwargs) -> Any:
-        """Analyze video content and return a smolagents ChatMessage."""
+        """Analyze video content and return a smolagents ChatMessage.
+
+        Args:
+            video_input: A file path or a binary file-like object.
+            system_prompt: System prompt guiding the analysis.
+            content_type: MIME content type, e.g. ``"video/mp4"``.
+            **kwargs: Additional arguments forwarded to the wrapped model.
+
+        Returns:
+            A smolagents ``ChatMessage`` with the video analysis.
+        """
         if self._model is None:
             self._build_model()
         messages = self.prepare_media_message(video_input, "video", content_type, system_prompt)
@@ -186,8 +265,11 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     async def check_connectivity(self) -> bool:
         """Check VLM connectivity by sending a test image + text prompt.
 
-        VLM APIs (especially DashScope qwen-vl) require content as a list with
-        'image_url' and 'text' objects.
+        Probes with the local ``assets/git-flow.png`` asset, falling back to a
+        hardcoded DashScope URL when the asset is missing.
+
+        Returns:
+            True if the probe succeeds, False on any exception.
         """
         if self._model is None:
             self._build_model()
@@ -226,10 +308,20 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
     # ---- Adapter contract ------------------------------------------------
 
     async def invoke(self, request: VLMRequest) -> Any:
+        """Dispatch to the matching ``analyze_*`` method and return a ChatMessage."""
         return self.invoke_sync(request)
 
     def invoke_sync(self, request: VLMRequest) -> Any:
-        """Dispatch the request to the matching ``analyze_*`` method."""
+        """Dispatch the request to the matching ``analyze_*`` method.
+
+        Args:
+            request: The VLM request; ``media_type`` selects the method,
+                ``prompt`` becomes ``system_prompt``, and ``kwargs`` are merged
+                into the forwarded call.
+
+        Returns:
+            A smolagents ``ChatMessage`` from the dispatched ``analyze_*`` call.
+        """
         method = getattr(self, _METHOD_MAP[request.media_type])
         call_kwargs: Dict[str, Any] = {"stream": request.stream}
         if request.prompt:
@@ -239,6 +331,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         return method(request.media_input, **call_kwargs)
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`check_connectivity`."""
         return await self.check_connectivity()
 
     def _is_siliconflow_non_omni(self) -> bool:
@@ -258,6 +351,7 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         )
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with image/audio/video capabilities."""
         # Explicit capability overrides from context win; defaults assume a
         # capable VLM. Provider-specific limitations are computed here so the
         # capability dict, not the caller's URL-sniffing, is the source of truth.
@@ -277,6 +371,10 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
 
 @register_adapter("modelengine", "vlm")
 class ModelEngineVLMAdapter(OpenAIVLMAdapter):
-    """ModelEngine VLM — protocol identical to OpenAI; only ``factory`` differs."""
+    """ModelEngine VLM — protocol identical to OpenAI; only ``factory`` differs.
+
+    Attributes:
+        factory: ``"modelengine"``.
+    """
 
     factory = "modelengine"

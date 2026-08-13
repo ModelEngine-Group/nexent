@@ -25,6 +25,29 @@ class ModelContext:
 
     ``slot`` mirrors ``MODEL_CONFIG_MAPPING`` keys (``llm``/``vlm``/``vlm2``/
     ``vlm3``/``stt``/``tts``/...) so the gateway can distinguish the VLM slots.
+
+    Attributes:
+        model_name: Provider model identifier passed to the API.
+        base_url: HTTP or WebSocket endpoint base URL.
+        api_key: Authorization credential.
+        modality: Capability family (see above).
+        factory: Normalized provider name (see above).
+        tenant_id: Optional tenant scope.
+        slot: Optional config-mapping slot key; disambiguates VLM slots.
+        ssl_verify: Whether to verify TLS certificates.
+        display_name: Optional human-readable label.
+        observer: Optional smolagents Observer for LLM/VLM streaming.
+        embedding_dim: Optional embedding vector dimension.
+        model_type: ``"embedding"`` | ``"multi_embedding"``.
+        language: STT language code (default ``"zh"``).
+        audio_file_path: Optional STT/TTS audio file path.
+        speed_ratio: TTS speech-rate multiplier.
+        voice: Optional TTS voice id.
+        model_appid: Volc STT/TTS app id.
+        access_token: Volc STT/TTS access token.
+        capabilities: Per-capability flags, e.g. ``{"audio": True}``.
+        extra: Protocol-specific extensions (WS URL, format, rate,
+            max_tokens, truncation_strategy, timeout_seconds, extra_body, ...).
     """
 
     # ---- 通用 ----

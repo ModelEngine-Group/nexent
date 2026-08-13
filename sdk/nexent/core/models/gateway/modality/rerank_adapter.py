@@ -26,7 +26,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RerankRequest:
-    """Rerank request."""
+    """Rerank request.
+
+    Attributes:
+        query: The query to rerank documents against.
+        documents: The documents to rerank.
+        top_n: Optional limit on the number of returned documents.
+    """
 
     query: str
     documents: List[str]
@@ -34,7 +40,11 @@ class RerankRequest:
 
 
 class RerankAdapter(MultimodalAdapter):
-    """Rerank adapter root."""
+    """Rerank adapter root.
+
+    Attributes:
+        modality: ``"rerank"``.
+    """
 
     modality = "rerank"
 
@@ -56,6 +66,11 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
     DashScope is auto-detected by URL (``dashscope`` in base_url) and uses the
     ``input``/``parameters`` wrapper; otherwise the flat OpenAI format is used.
+
+    Attributes:
+        modality: ``"rerank"``.
+        factory: ``"openai"``.
+        _headers: HTTP auth headers built from the API key.
     """
 
     factory = "openai"
@@ -78,6 +93,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
     @property
     def _model_name(self) -> str:
+        """The model name from the construction context."""
         return self._context.model_name
 
     def _prepare_request(
@@ -129,6 +145,14 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         retried with increasing timeouts (30s base, +10s per attempt, up to 4
         attempts); other request errors fail immediately.
 
+        Args:
+            query: The query to rerank documents against.
+            documents: The documents to rerank.
+            top_n: Optional limit on the number of returned documents.
+
+        Returns:
+            A list of ``{"index", "relevance_score", "document"}`` dicts.
+
         Raises:
             requests.exceptions.Timeout: If all timeout retries are exhausted.
             requests.exceptions.RequestException: If the request fails.
@@ -177,11 +201,27 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     async def rerank_async(
         self, query: str, documents: List[str], top_n: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Rerank documents against a query, offloaded to a worker thread."""
+        """Rerank documents against a query, offloaded to a worker thread.
+
+        Args:
+            query: The query to rerank documents against.
+            documents: The documents to rerank.
+            top_n: Optional limit on the number of returned documents.
+
+        Returns:
+            A list of rerank result dicts (see :meth:`rerank`).
+        """
         return await asyncio.to_thread(self.rerank, query, documents, top_n)
 
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
-        """Verify the rerank endpoint is reachable with a probe rerank call."""
+        """Verify the rerank endpoint is reachable with a probe rerank call.
+
+        Args:
+            timeout: Timeout in seconds for the probe.
+
+        Returns:
+            True if the probe succeeds, False on timeout/connection/other error.
+        """
         try:
             await asyncio.to_thread(
                 self.rerank, "test query", ["test document"], top_n=1
@@ -200,14 +240,17 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
     # ---- adapter interface ----
 
     async def invoke(self, request: RerankRequest) -> List[Dict[str, Any]]:
+        """Rerank ``request.documents`` offloaded to a worker thread."""
         return await asyncio.to_thread(
             self.rerank, request.query, request.documents, request.top_n
         )
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`connectivity_check`."""
         return await self.connectivity_check()
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` with the ``rerank`` capability."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -217,7 +260,7 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
 
 def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> None:
-    """Apply default base_url/model to the context when they are unset."""
+    """Apply default base_url/model to ``context`` in place when they are unset."""
     if not context.base_url:
         context.base_url = base_url
     if not context.model_name:
@@ -226,7 +269,11 @@ def _apply_defaults(context: ModelContext, base_url: str, model_name: str) -> No
 
 @register_adapter("jina", "rerank")
 class JinaRerankAdapter(OpenAICompatibleRerankAdapter):
-    """Jina AI rerank — default base_url/model applied when the cfg omits them."""
+    """Jina AI rerank — default base_url/model applied when the cfg omits them.
+
+    Attributes:
+        factory: ``"jina"``.
+    """
 
     factory = "jina"
 
@@ -237,7 +284,11 @@ class JinaRerankAdapter(OpenAICompatibleRerankAdapter):
 
 @register_adapter("cohere", "rerank")
 class CohereRerankAdapter(OpenAICompatibleRerankAdapter):
-    """Cohere rerank — default base_url/model applied when the cfg omits them."""
+    """Cohere rerank — default base_url/model applied when the cfg omits them.
+
+    Attributes:
+        factory: ``"cohere"``.
+    """
 
     factory = "cohere"
 

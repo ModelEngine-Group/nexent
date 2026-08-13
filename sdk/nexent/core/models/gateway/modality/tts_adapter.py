@@ -47,6 +47,12 @@ class TTSRequest:
 
     ``stream`` selects streaming vs. non-streaming output; ``voice`` and
     ``speed_ratio`` optionally tune the synthesis.
+
+    Attributes:
+        text: The text to synthesize.
+        stream: Whether to yield audio chunks as they are generated.
+        voice: Optional voice id override.
+        speed_ratio: Speech rate multiplier (1.0 = normal).
     """
 
     text: str
@@ -60,6 +66,9 @@ class TTSAdapter(MultimodalAdapter):
 
     Carries the shared TTS result-inspection helpers that previously lived on
     the deleted ``BaseTTSModel`` ABC, so concrete WS adapters inherit them.
+
+    Attributes:
+        modality: ``"tts"``.
     """
 
     modality = "tts"
@@ -154,6 +163,21 @@ class AliTTSConfig:
             sample_rate: int = 16000,
             workspace_id: Optional[str] = None
     ):
+        """Initialize Ali TTS configuration.
+
+        Args:
+            api_key: DashScope API key (Bearer auth on the WS connection).
+            model: CosyVoice / Qwen Realtime model id.
+            voice: Voice id; ``None`` lets the provider default apply.
+            speech_rate: Speech rate multiplier (1.0 = normal).
+            pitch_rate: Pitch multiplier (1.0 = normal).
+            volume: Output volume (0–100).
+            ws_url: Explicit WS URL override; ``None`` selects the default
+                based on the model (Qwen Realtime vs CosyVoice).
+            format: Audio format (``"mp3"``, ``"wav"`` ...).
+            sample_rate: Output sample rate in Hz.
+            workspace_id: Optional DashScope workspace id.
+        """
         self.api_key = api_key
         self.model = model
         self.voice = voice
@@ -193,6 +217,13 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     Both sub-protocols (CosyVoice run/continue/finish-task and Qwen Realtime
     session.update / input_text_buffer / response.audio.delta) live here.
+
+    Attributes:
+        modality: ``"tts"`` (inherited).
+        factory: ``"ali"``.
+        _config: The :class:`AliTTSConfig` built from the construction context.
+        _audio_file_path: Optional path for persisted audio output.
+        _is_realtime: True when the Qwen Realtime sub-protocol is selected.
     """
 
     factory = "ali"
@@ -917,17 +948,21 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
+        """Return the full synthesized audio bytes for ``request.text``."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
+        """Yield audio chunks for ``request.text`` from the streaming API."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`check_connectivity`."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` advertising audio + realtime capabilities."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -942,7 +977,21 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
 @dataclass
 class VolcTTSConfig:
-    """Configuration for Volcano Engine TTS model."""
+    """Configuration for Volcano Engine TTS model.
+
+    Attributes:
+        appid: Volcano Engine app id.
+        token: Access token (used for Bearer + X-Api headers).
+        speed_ratio: Speech rate multiplier.
+        ws_url: WebSocket endpoint for the binary TTS API.
+        host: Host header value.
+        encoding: Audio encoding (``"mp3"``, ...).
+        volume_ratio: Volume multiplier.
+        pitch_ratio: Pitch multiplier.
+        cluster: Volcano TTS cluster id.
+        resource_id: Resource id for the voice model.
+        voice_type: Voice id to synthesize with.
+    """
     appid: str
     token: str
     speed_ratio: float
@@ -967,6 +1016,13 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 
     The full binary protocol (DEFAULT_HEADER framing, gzip-compressed JSON
     payload, response parsing for audio-only / error message types) lives here.
+
+    Attributes:
+        modality: ``"tts"`` (inherited).
+        factory: ``"volc"``.
+        _config: The :class:`VolcTTSConfig` built from the construction context.
+        _audio_file_path: Optional path for persisted audio output.
+        _request_template: Base request dict deep-copied per synthesis call.
     """
 
     factory = "volc"
@@ -1038,7 +1094,21 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         return bytes(full_request)
 
     def _parse_response(self, res: bytes, buffer: Optional[io.BytesIO] = None) -> tuple[bool, Optional[bytes]]:
-        """Parse a binary response frame from the Volc TTS server."""
+        """Parse a binary response frame from the Volc TTS server.
+
+        Args:
+            res: The raw binary frame received from the server.
+            buffer: Optional accumulator; audio chunks are written into it
+                when provided (non-streaming mode).
+
+        Returns:
+            A ``(done, chunk)`` tuple where ``done`` is True when this is the
+            last frame of the synthesis, and ``chunk`` is the audio bytes
+            (or ``None`` for non-audio frames).
+
+        Raises:
+            Exception: When the frame is an error message (message type 0xf).
+        """
         protocol_version = res[0] >> 4
         header_size = res[0] & 0x0f
         message_type = res[1] >> 4
@@ -1069,7 +1139,16 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         text: str,
         stream: bool = False
     ) -> Union[bytes, AsyncGenerator[bytes, None]]:
-        """Generate speech from text using the Volc TTS API."""
+        """Generate speech from text using the Volc TTS API.
+
+        Args:
+            text: The text to synthesize.
+            stream: Whether to stream audio chunks.
+
+        Returns:
+            Complete audio bytes when ``stream`` is False, otherwise an async
+            generator yielding audio chunks.
+        """
         request = self._prepare_request(text)
         headers = self.get_auth_headers()
         logger.info(f"Volc TTS request prepared, text_len={len(text)}, stream={stream}")
@@ -1100,7 +1179,12 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return audio_generator()
 
     async def check_connectivity(self) -> bool:
-        """Check whether the Volc TTS service is reachable."""
+        """Check whether the Volc TTS service is reachable.
+
+        Returns:
+            True if a short synthesis succeeds and produces audio, False on
+            any exception or empty result.
+        """
         try:
             logger.info("Volc TTS connectivity test started...")
             audio_data = await self.generate_speech("Hello", stream=False)
@@ -1116,17 +1200,21 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
+        """Return the full synthesized audio bytes for ``request.text``."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
+        """Yield audio chunks for ``request.text`` from the streaming API."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
+        """Delegate to :meth:`check_connectivity`."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` advertising audio + realtime capabilities."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1145,6 +1233,11 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
 class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
     """ModelEngine TTS — HTTP REST, text → Chat Completions → base64 audio in
     the response content array → decoded to bytes. Conversion lives here.
+
+    Attributes:
+        modality: ``"tts"`` (inherited).
+        factory: ``"modelengine"``.
+        _model: The wrapped :class:`OpenAIModel`, built lazily.
     """
 
     factory = "modelengine"
@@ -1161,6 +1254,7 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
+        """Construct the wrapped :class:`OpenAIModel` on first use."""
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
@@ -1173,7 +1267,14 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         )
 
     async def invoke(self, request: TTSRequest) -> bytes:
-        """Synthesize audio via the ModelEngine Chat Completions API."""
+        """Synthesize audio via the ModelEngine Chat Completions API.
+
+        Returns:
+            The decoded audio bytes from the response's ``audio_url`` part.
+
+        Raises:
+            ValueError: If the response content has no ``audio_url`` part.
+        """
         if self._model is None:
             self._build_model()
         messages = [
@@ -1191,7 +1292,11 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         raise ValueError("ModelEngine TTS response missing audio_url in content")
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
-        """Stream audio chunks via the ModelEngine Chat Completions API."""
+        """Stream audio chunks via the ModelEngine Chat Completions API.
+
+        Yields:
+            Decoded audio chunks from each streamed ``delta.content``.
+        """
         if self._model is None:
             self._build_model()
         completion_kwargs = {
@@ -1207,11 +1312,13 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
                 yield base64.b64decode(delta.content)
 
     async def health_check(self) -> bool:
+        """Probe the wrapped model's connectivity."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
+        """Return ``ModelInfo`` advertising audio (non-realtime) capability."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
