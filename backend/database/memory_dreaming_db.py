@@ -11,10 +11,9 @@ from sqlalchemy import func, text
 
 from .client import get_db_session
 from .db_models import (
-    MemoryDreamingActivationAudit,
     MemoryDreamingAudit,
     MemoryDreamingSchedule,
-    MemoryDreamingVersion,
+    MemoryLongTermVersion,
 )
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from services.agent_automation.models import ScheduleTrigger
@@ -276,315 +275,6 @@ def materialize_due_schedules(limit: int = 10) -> int:
     return created
 
 
-def get_active_version(
-    tenant_id: str, user_id: str, agent_id: str
-) -> Optional[Dict[str, Any]]:
-    with get_db_session() as session:
-        row = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id.in_((agent_id, "__user__")),
-                MemoryDreamingVersion.is_active.is_(True),
-                MemoryDreamingVersion.delete_flag == "N",
-            )
-            .order_by((MemoryDreamingVersion.agent_id == "__user__").desc())
-            .first()
-        )
-        return _version_to_dict(row) if row else None
-
-
-def create_and_activate_version(
-    *,
-    tenant_id: str,
-    user_id: str,
-    agent_id: str,
-    run_id: int,
-    parent_version_id: Optional[int],
-    raw_content: str,
-    published_content: str,
-    published_units: List[Dict[str, Any]],
-    source_evidence_ids: List[str],
-    config_snapshot: Dict[str, Any],
-    raw_char_count: int,
-    published_char_count: int,
-    summarization_status: str,
-    summarization_attempts: int,
-    omitted_evidence_ids: List[str],
-    mechanical_truncation: bool,
-    summarization_audit: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """Atomically append and activate a version for one locked scope."""
-    with get_db_session() as session:
-        existing = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.run_id == run_id,
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
-                MemoryDreamingVersion.delete_flag == "N",
-            )
-            .first()
-        )
-        if existing is not None:
-            return _version_to_dict(existing)
-        scope = (
-            MemoryDreamingVersion.tenant_id == tenant_id,
-            MemoryDreamingVersion.user_id == user_id,
-            MemoryDreamingVersion.agent_id == agent_id,
-            MemoryDreamingVersion.delete_flag == "N",
-        )
-        next_version = (
-            session.query(func.coalesce(func.max(MemoryDreamingVersion.version_no), 0))
-            .filter(*scope)
-            .scalar()
-            + 1
-        )
-        session.query(MemoryDreamingVersion).filter(
-            *scope, MemoryDreamingVersion.is_active.is_(True)
-        ).update({"is_active": False}, synchronize_session=False)
-        row = MemoryDreamingVersion(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            agent_id=agent_id,
-            version_no=next_version,
-            parent_version_id=parent_version_id,
-            run_id=run_id,
-            is_active=True,
-            raw_content=raw_content,
-            published_content=published_content,
-            published_units=published_units,
-            source_evidence_ids=source_evidence_ids,
-            config_snapshot=config_snapshot,
-            raw_char_count=raw_char_count,
-            published_char_count=published_char_count,
-            summarization_status=summarization_status,
-            summarization_attempts=summarization_attempts,
-            omitted_evidence_ids=omitted_evidence_ids,
-            mechanical_truncation=mechanical_truncation,
-            summarization_audit=summarization_audit,
-            created_by="dreaming",
-        )
-        session.add(row)
-        session.commit()
-        session.refresh(row)
-        return _version_to_dict(row)
-
-
-def list_versions(
-    tenant_id: str,
-    user_id: str,
-    *,
-    agent_id: str,
-    limit: int = 100,
-) -> List[Dict[str, Any]]:
-    with get_db_session() as session:
-        rows = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
-                MemoryDreamingVersion.delete_flag == "N",
-            )
-            .order_by(MemoryDreamingVersion.version_no.desc())
-            .limit(limit)
-            .all()
-        )
-        return [_version_to_dict(row) for row in rows]
-
-
-def activate_version(
-    tenant_id: str,
-    user_id: str,
-    agent_id: str,
-    version_id: int,
-    *,
-    actor_user_id: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Switch the active pointer without modifying immutable version content."""
-    with get_db_session() as session:
-        rows = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
-                MemoryDreamingVersion.delete_flag == "N",
-            )
-            .all()
-        )
-        target = next((row for row in rows if row.version_id == version_id), None)
-        if target is None:
-            return None
-        current = next((row for row in rows if row.is_active), None)
-        if current is not None and current.version_id == version_id:
-            return _version_to_dict(target)
-        actor = actor_user_id or user_id
-        session.query(MemoryDreamingVersion).filter(
-            MemoryDreamingVersion.tenant_id == tenant_id,
-            MemoryDreamingVersion.user_id == user_id,
-            MemoryDreamingVersion.agent_id == agent_id,
-            MemoryDreamingVersion.delete_flag == "N",
-            MemoryDreamingVersion.is_active.is_(True),
-        ).update(
-            {"is_active": False, "updated_by": actor},
-            synchronize_session=False,
-        )
-        session.flush()
-        target.is_active = True
-        target.updated_by = actor
-        session.add(
-            MemoryDreamingActivationAudit(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                actor_user_id=actor,
-                from_version_id=current.version_id if current else None,
-                to_version_id=version_id,
-                reason="user_switch",
-                created_by=actor,
-            )
-        )
-        session.commit()
-        session.refresh(target)
-        return _version_to_dict(target)
-
-
-def deactivate_active_version(
-    tenant_id: str,
-    user_id: str,
-    agent_id: str,
-    *,
-    actor_user_id: Optional[str] = None,
-) -> Optional[int]:
-    """Deactivate the currently active version without deleting it.
-    
-    Returns the version_id of the deactivated version, or None if no active version exists.
-    """
-    with get_db_session() as session:
-        current = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
-                MemoryDreamingVersion.delete_flag == "N",
-                MemoryDreamingVersion.is_active.is_(True),
-            )
-            .first()
-        )
-        if current is None:
-            return None
-        actor = actor_user_id or user_id
-        session.query(MemoryDreamingVersion).filter(
-            MemoryDreamingVersion.tenant_id == tenant_id,
-            MemoryDreamingVersion.user_id == user_id,
-            MemoryDreamingVersion.agent_id == agent_id,
-            MemoryDreamingVersion.delete_flag == "N",
-            MemoryDreamingVersion.is_active.is_(True),
-        ).update(
-            {"is_active": False, "updated_by": actor},
-            synchronize_session=False,
-        )
-        session.add(
-            MemoryDreamingActivationAudit(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                actor_user_id=actor,
-                from_version_id=current.version_id,
-                to_version_id=None,
-                reason="user_clear",
-                created_by=actor,
-            )
-        )
-        session.commit()
-        return current.version_id
-
-
-def reactivate_version(
-    tenant_id: str,
-    user_id: str,
-    agent_id: str,
-    version_id: int,
-    *,
-    actor_user_id: Optional[str] = None,
-) -> bool:
-    """Reactivate a previously deactivated version.
-    
-    Returns True if successful, False if version not found.
-    """
-    with get_db_session() as session:
-        target = (
-            session.query(MemoryDreamingVersion)
-            .filter(
-                MemoryDreamingVersion.tenant_id == tenant_id,
-                MemoryDreamingVersion.user_id == user_id,
-                MemoryDreamingVersion.agent_id == agent_id,
-                MemoryDreamingVersion.version_id == version_id,
-                MemoryDreamingVersion.delete_flag == "N",
-            )
-            .first()
-        )
-        if target is None:
-            return False
-        actor = actor_user_id or user_id
-        session.query(MemoryDreamingVersion).filter(
-            MemoryDreamingVersion.tenant_id == tenant_id,
-            MemoryDreamingVersion.user_id == user_id,
-            MemoryDreamingVersion.agent_id == agent_id,
-            MemoryDreamingVersion.delete_flag == "N",
-            MemoryDreamingVersion.is_active.is_(True),
-        ).update(
-            {"is_active": False, "updated_by": actor},
-            synchronize_session=False,
-        )
-        target.is_active = True
-        target.updated_by = actor
-        session.add(
-            MemoryDreamingActivationAudit(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                actor_user_id=actor,
-                from_version_id=None,
-                to_version_id=version_id,
-                reason="user_undo_clear",
-                created_by=actor,
-            )
-        )
-        session.commit()
-        return True
-
-
-def _version_to_dict(row: MemoryDreamingVersion) -> Dict[str, Any]:
-    return {
-        "version_id": row.version_id,
-        "tenant_id": row.tenant_id,
-        "user_id": row.user_id,
-        "agent_id": row.agent_id,
-        "version_no": row.version_no,
-        "parent_version_id": row.parent_version_id,
-        "run_id": row.run_id,
-        "is_active": row.is_active,
-        "raw_content": row.raw_content,
-        "published_content": row.published_content,
-        "published_units": row.published_units or [],
-        "source_evidence_ids": row.source_evidence_ids or [],
-        "config_snapshot": row.config_snapshot or {},
-        "raw_char_count": row.raw_char_count,
-        "published_char_count": row.published_char_count,
-        "summarization_status": row.summarization_status,
-        "summarization_attempts": row.summarization_attempts,
-        "omitted_evidence_ids": row.omitted_evidence_ids or [],
-        "mechanical_truncation": row.mechanical_truncation,
-        "summarization_audit": row.summarization_audit or [],
-        "created_at": row.create_time.isoformat() if row.create_time else None,
-    }
-
 
 def update_audit(run_id: int, values: Dict[str, Any]) -> bool:
     allowed = {
@@ -595,7 +285,9 @@ def update_audit(run_id: int, values: Dict[str, Any]) -> bool:
         "rem_count",
         "promoted_count",
         "deferred_count",
-        "result_json",
+        "decisions",
+        "published_version_id",
+        "reason",
         "error",
     }
     with get_db_session() as session:
@@ -662,14 +354,16 @@ def list_audits(
                 "agent_id": row.agent_id,
                 "trigger_source": row.trigger_source,
                 "status": row.status,
-                "current_phase": "summarization" if row.current_phase == "compression" else row.current_phase,
+                "current_phase": row.current_phase,
                 "started_at": _utc_isoformat(row.started_at),
                 "finished_at": _utc_isoformat(row.finished_at),
                 "light_count": row.light_count,
                 "rem_count": row.rem_count,
                 "promoted_count": row.promoted_count,
                 "deferred_count": row.deferred_count,
-                "result": row.result_json,
+                "decisions": row.decisions,
+                "published_version_id": row.published_version_id,
+                "reason": row.reason,
                 "error": row.error,
             }
             for row in rows
@@ -787,21 +481,35 @@ def recover_stale() -> int:
 
 
 def delete_user_dreaming_history(tenant_id: str, user_id: str) -> None:
+    """Remove Dreaming state while preserving and restoring manual memory."""
     with get_db_session() as session:
         session.query(MemoryDreamingSchedule).filter(
             MemoryDreamingSchedule.tenant_id == tenant_id,
             MemoryDreamingSchedule.user_id == user_id,
         ).delete(synchronize_session=False)
-        for model in (
-            MemoryDreamingAudit,
-            MemoryDreamingVersion,
-            MemoryDreamingActivationAudit,
-        ):
-            session.query(model).filter(
-                model.tenant_id == tenant_id,
-                model.user_id == user_id,
-                model.delete_flag == "N",
-            ).update(
-                {"delete_flag": "Y", "updated_by": user_id},
-                synchronize_session=False,
+        session.query(MemoryDreamingAudit).filter(
+            MemoryDreamingAudit.tenant_id == tenant_id,
+            MemoryDreamingAudit.user_id == user_id,
+        ).delete(synchronize_session=False)
+        versions = session.query(MemoryLongTermVersion).filter(
+            MemoryLongTermVersion.tenant_id == tenant_id,
+            MemoryLongTermVersion.scope == "user",
+            MemoryLongTermVersion.subject_id == user_id,
+            MemoryLongTermVersion.delete_flag == "N",
+        ).with_for_update().all()
+        active = next((version for version in versions if version.is_active), None)
+        dreamed = [version for version in versions if version.source == "dreaming"]
+        for version in dreamed:
+            version.is_active = False
+            version.delete_flag = "Y"
+            version.updated_by = user_id
+        if active in dreamed:
+            session.flush()
+            manual = max(
+                (version for version in versions if version.source == "manual"),
+                key=lambda version: version.version_no,
+                default=None,
             )
+            if manual is not None:
+                manual.is_active = True
+                manual.updated_by = user_id

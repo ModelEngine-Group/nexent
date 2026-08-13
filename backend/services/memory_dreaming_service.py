@@ -22,7 +22,7 @@ from database import memory_dreaming_db, memory_long_term_db, memory_record_db, 
 from nexent.memory.dreaming import (
     DreamingMemoryUnit,
     DreamingThresholds,
-    build_dreaming_version,
+    build_user_memory_summary,
     build_candidate,
     select_candidates,
     units_from_decisions,
@@ -165,7 +165,7 @@ class MemoryDreamingService:
         ]
         if not new_units:
             return None
-        result = build_dreaming_version(
+        result = build_user_memory_summary(
             parent_units=parent_units,
             new_units=new_units,
             max_chars=effective_long_term_max_chars,
@@ -180,7 +180,7 @@ class MemoryDreamingService:
             tenant_id=tenant_id,
             scope="user",
             subject_id=user_id,
-            content=result.published_content,
+            content=result.markdown,
             source="dreaming",
             actor_user_id=user_id,
             expected_active_version_id=(active or {}).get("version_id"),
@@ -215,7 +215,7 @@ class MemoryDreamingService:
         def summarize(request):
             nonlocal instance
             if instance is None:
-                from services.memory_dreaming_compressor import TenantDreamingSummarizer
+                from services.memory_dreaming_summarizer import TenantDreamingSummarizer
 
                 instance = TenantDreamingSummarizer(tenant_id, user_id)
             return instance(request)
@@ -261,7 +261,7 @@ class MemoryDreamingService:
                     "reason": "lock_busy",
                 }
                 memory_dreaming_db.finish_audit(
-                    run_id, status="skipped", result_json=result
+                    run_id, status="skipped", reason="lock_busy"
                 )
                 return result
             try:
@@ -362,7 +362,10 @@ class MemoryDreamingService:
                     rem_count=len(candidates),
                     promoted_count=promoted_count,
                     deferred_count=len(results) - promoted_count,
-                    result_json=result,
+                    decisions=results,
+                    published_version_id=(
+                        version.get("version_id") if version is not None else None
+                    ),
                 )
                 return result
             except Exception as exc:

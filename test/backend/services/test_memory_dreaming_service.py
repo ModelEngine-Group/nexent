@@ -33,7 +33,7 @@ def test_ac007_lock_busy_skips(monkeypatch):
         tenant_id="t", user_id="u", agent_id="a"
     )
     assert result == {"run_id": 41, "status": "skipped", "reason": "lock_busy"}
-    finish.assert_called_once()
+    finish.assert_called_once_with(41, status="skipped", reason="lock_busy")
 
 
 def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
@@ -70,9 +70,14 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "services.memory_dreaming_service.memory_dreaming_db.update_audit",
         lambda *_args, **_kwargs: True,
     )
+    finish = MagicMock(return_value=True)
     monkeypatch.setattr(
         "services.memory_dreaming_service.memory_dreaming_db.finish_audit",
-        lambda *_args, **_kwargs: True,
+        finish,
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.memory_dreaming_db.get_thresholds",
+        lambda *_args: {},
     )
     monkeypatch.setattr(
         "services.memory_dreaming_service.memory_retrieval_hit_db.aggregate_dreaming_stats",
@@ -107,17 +112,24 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     )
     record_service = MagicMock()
     monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
+        "services.memory_dreaming_service.memory_long_term_db.get_active",
         lambda *_args: None,
     )
     create_version = MagicMock(
         return_value={"version_id": 1, "version_no": 1, "is_active": True}
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.create_and_activate_version",
+        "services.memory_dreaming_service.memory_long_term_db.create_and_activate",
         create_version,
     )
-    result = MemoryDreamingService(record_service=record_service).run(
+    result = MemoryDreamingService(
+        record_service=record_service,
+        summarizer=lambda _request: __import__(
+            "nexent.memory.dreaming", fromlist=["DreamingSummarizationOutput"]
+        ).DreamingSummarizationOutput(
+            markdown="## Transaction Preferences\n\n- Always prefer stable transaction rollback behavior"
+        ),
+    ).run(
         tenant_id="t",
         user_id="u",
         agent_id="a",
@@ -135,24 +147,14 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
     assert light_payload["query_hashes"] == ["q1", "q2"]
     assert result["version"]["version_no"] == 1
     version_payload = create_version.call_args.kwargs
-    assert version_payload["parent_version_id"] is None
-    assert version_payload["published_units"][0]["evidence_ids"] == ["7"]
-    assert version_payload["published_units"][0]["source_agent_id"] == "a"
-    assert (
-        version_payload["published_units"][0]["source_conversation_id"]
-        == "conversation-7"
-    )
-    assert (
-        version_payload["published_units"][0]["source_created_at"]
-        == "2026-07-20T09:00:00"
-    )
-    assert (
-        version_payload["published_units"][0]["source_updated_at"]
-        == "2026-07-23T10:30:00"
-    )
-    assert version_payload["source_evidence_ids"] == ["7"]
-    assert version_payload["config_snapshot"]["min_score"] == 0
-    assert version_payload["config_snapshot"]["source_limit"] == 10
+    assert version_payload["expected_active_version_id"] is None
+    assert version_payload["evidence_ids"] == ["7"]
+    assert version_payload["source"] == "dreaming"
+    assert version_payload["generation_audit"]["status"] == "summarized"
+    finish_payload = finish.call_args.kwargs
+    assert finish_payload["published_version_id"] == 1
+    assert finish_payload["decisions"] == result["decisions"]
+    assert "result_json" not in finish_payload
 
 
 def test_ac008_failure_is_audited(monkeypatch):
@@ -178,32 +180,6 @@ def test_ac008_failure_is_audited(monkeypatch):
     assert finish.call_args.kwargs["status"] == "failed"
     assert "ValueError" in finish.call_args.kwargs["error"]
 
-
-def test_ac022_stale_active_version_switch_is_rejected(monkeypatch):
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
-        lambda *_args: lock(True),
-    )
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
-        lambda *_args: {"version_id": 12},
-    )
-    activate = MagicMock()
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.activate_version",
-        activate,
-    )
-
-    with pytest.raises(DreamingConflictError):
-        MemoryDreamingService(record_service=MagicMock()).activate_version(
-            "t",
-            "u",
-            agent_id="a",
-            version_id=10,
-            expected_active_version_id=11,
-        )
-
-    activate.assert_not_called()
 
 
 def test_run_rejects_empty_ids():
@@ -279,60 +255,7 @@ def test_list_audits_delegates(monkeypatch):
     mock_list.assert_called_once_with("t", "u", agent_id="a", run_id=1, limit=50)
 
 
-def test_list_versions_delegates(monkeypatch):
-    mock_list = MagicMock(return_value=[{"version_id": 2}])
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.list_versions", mock_list
-    )
 
-    service = MemoryDreamingService(record_service=MagicMock())
-    result = service.list_versions("t", "u", agent_id="a", limit=50)
-
-    assert result == [{"version_id": 2}]
-    mock_list.assert_called_once_with("t", "u", agent_id="a", limit=50)
-
-
-def test_activate_version_lock_busy(monkeypatch):
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
-        lambda *_args: lock(False),
-    )
-
-    service = MemoryDreamingService(record_service=MagicMock())
-    with pytest.raises(DreamingConflictError, match="busy"):
-        service.activate_version(
-            "t", "u", agent_id="a", version_id=10
-        )
-
-
-def test_activate_version_success(monkeypatch):
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
-        lambda *_args: lock(True),
-    )
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.get_active_version",
-        lambda *_args: {"version_id": 5},
-    )
-    activate = MagicMock(return_value={"version_id": 10, "is_active": True})
-    monkeypatch.setattr(
-        "services.memory_dreaming_service.memory_dreaming_db.activate_version",
-        activate,
-    )
-
-    service = MemoryDreamingService(record_service=MagicMock())
-    result = service.activate_version(
-        "t", "u",
-        agent_id="a",
-        version_id=10,
-        actor_user_id="admin",
-        expected_active_version_id=5,
-    )
-
-    assert result["version_id"] == 10
-    activate.assert_called_once_with(
-        "t", "u", "a", 10, actor_user_id="admin"
-    )
 
 
 def test_get_memory_dreaming_service_singleton(monkeypatch):
@@ -346,28 +269,3 @@ def test_get_memory_dreaming_service_singleton(monkeypatch):
     assert isinstance(svc1, MemoryDreamingService)
 
     monkeypatch.setattr(mod, "_service", None)
-
-
-def test_tenant_compressor_lazy_init(monkeypatch):
-    mock_compressor_cls = MagicMock()
-    mock_instance = MagicMock(return_value="compressed")
-    mock_compressor_cls.return_value = mock_instance
-
-    import sys
-
-    fake_module = MagicMock()
-    fake_module.TenantDreamingCompressor = mock_compressor_cls
-    monkeypatch.setitem(sys.modules, "services.memory_dreaming_compressor", fake_module)
-
-    service = MemoryDreamingService(record_service=MagicMock())
-    compress = service._tenant_compressor("t", "u")
-
-    request = MagicMock()
-    result = compress(request)
-
-    assert result == "compressed"
-    mock_compressor_cls.assert_called_once_with("t", "u")
-    mock_instance.assert_called_once_with(request)
-
-    result2 = compress(request)
-    assert mock_compressor_cls.call_count == 1

@@ -13,7 +13,7 @@ from .version_builder import (
     DreamingSummarizationRequest,
     DreamingMemoryUnit,
     DreamingVersionBuildResult,
-    build_dreaming_version,
+    build_user_memory_summary,
     units_from_decisions,
 )
 
@@ -30,7 +30,7 @@ __all__ = [
     "analyze_rem_content",
     "build_candidate",
     "compute_metrics",
-    "build_dreaming_version",
+    "build_user_memory_summary",
     "score_candidate",
     "select_candidates",
     "units_from_decisions",

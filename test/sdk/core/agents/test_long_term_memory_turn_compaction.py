@@ -1,142 +1,58 @@
+import json
 from types import SimpleNamespace
 
 from nexent.core.agents.context.config import ContextManagerConfig
 from nexent.core.agents.context.manager import ContextManager
-from nexent.core.agents.context.models import (
-    ContextItem,
-    ContextItemInput,
-    ContextItemType,
-)
+from nexent.core.agents.context.models import ContextItem, ContextItemInput, ContextItemType
+
+
+def _item(item_id, item_type, content, metadata=None):
+    metadata = metadata or {}
+    if item_type == ContextItemType.MEMORY:
+        metadata = {"render_group": "memory", **metadata}
+    return ContextItem.from_input(ContextItemInput(
+        id=item_id, type=item_type, content=content, metadata=metadata,
+    ))
 
 
 class _Model:
     model_id = "test-model"
 
     def __init__(self):
-        self.calls = []
+        self.calls = 0
 
     def __call__(self, messages, stop_sequences):
-        self.calls.append(messages)
-        return SimpleNamespace(content="Only the transaction rollback preference.")
+        self.calls += 1
+        prompt = json.loads(messages[0].content[0]["text"])
+        return SimpleNamespace(content=json.dumps({
+            "selections": {scope: [block["id"] for block in blocks]
+                           for scope, blocks in prompt["blocks"].items()}
+        }))
 
 
-def _item(item_id, item_type, content, metadata=None):
-    return ContextItem.from_input(
-        ContextItemInput(
-            id=item_id,
-            type=item_type,
-            content=content,
-            metadata=metadata or {},
-        )
-    )
-
-
-def test_ac026_long_term_compaction_is_turn_aware_cached_and_run_local():
-    manager = ContextManager(
-        ContextManagerConfig(token_threshold=400, chars_per_token=1.0)
-    )
-    memory = _item(
-        "memory:active",
-        ContextItemType.MEMORY,
-        {
-            "memory": (
-                "The user prefers transaction rollback behavior. "
-                "They also like blue dashboards. "
-            )
-            * 20
-        },
-        {"version_id": 7, "memory_type": "long_term"},
-    )
-    task = _item(
-        "current_task:0",
-        ContextItemType.CURRENT_TASK,
-        {"text": "How should this database transaction be rolled back?"},
-    )
+def test_under_budget_does_not_call_selector():
+    manager = ContextManager(ContextManagerConfig(token_threshold=1000, chars_per_token=1.0))
     model = _Model()
-
-    first = manager._compact_long_term_memory(memory, [memory, task], model=model)
-    second = manager._compact_long_term_memory(memory, [memory, task], model=model)
-
-    assert first.content["memory"] == "Only the transaction rollback preference."
-    assert first.metadata["compact_scope"] == "run_turn"
-    assert first.metadata["version_id"] == 7
-    assert "persisted" not in first.metadata
-    assert second is first
-    assert len(model.calls) == 1
-    assert memory.content["memory"].startswith("The user prefers")
-    records = manager.get_all_compression_stats()["records"]
-    record = records[0]
-    assert record.call_type == "long_term_memory_turn_compact"
-    assert record.details["persisted"] is False
-    assert record.output_tokens <= record.details["target_tokens"]
-    assert records[1].cache_hit is True
+    items = [_item("memory:user", ContextItemType.MEMORY, {"memory": "## P\n\n- concise"},
+                   {"version_id": 1, "memory_type": "long_term", "scope": "user"})]
+    result = manager._compact_to_soft_budget(items, [], [], [], model=model)
+    assert result == items
+    assert model.calls == 0
 
 
-def test_ac026_long_term_compaction_rejects_over_target_output_and_records_failure():
-    manager = ContextManager(
-        ContextManagerConfig(token_threshold=256, chars_per_token=1.0)
-    )
-    memory = _item(
-        "memory:active",
-        ContextItemType.MEMORY,
-        {"memory": "source fact " * 100},
-        {"version_id": 8, "memory_type": "long_term"},
-    )
-    task = _item(
-        "current_task:0",
-        ContextItemType.CURRENT_TASK,
-        {"text": "Find relevant facts"},
-    )
-
-    class _OverTargetModel:
-        model_id = "over-target"
-
-        def __call__(self, messages, stop_sequences):
-            return SimpleNamespace(content="x" * 100)
-
-    compacted = manager._compact_long_term_memory(
-        memory, [memory, task], model=_OverTargetModel()
-    )
-
-    assert compacted is memory
-    record = manager.get_all_compression_stats()["records"][0]
-    assert record.details["outcome"] == "invalid_output"
-    assert record.output_tokens > record.details["target_tokens"]
-
-
-def test_ac026_current_action_changes_turn_cache_key():
-    manager = ContextManager(
-        ContextManagerConfig(token_threshold=400, chars_per_token=1.0)
-    )
-    memory = _item(
-        "memory:active",
-        ContextItemType.MEMORY,
-        {"memory": "stable transaction preference " * 30},
-        {"version_id": 9, "memory_type": "long_term"},
-    )
-    task = _item(
-        "current_task:0",
-        ContextItemType.CURRENT_TASK,
-        {"text": "Manage the transaction"},
-    )
-    first_action = _item(
-        "current_action:0",
-        ContextItemType.CURRENT_ACTION,
-        {"result": "Transaction opened"},
-    )
-    second_action = _item(
-        "current_action:1",
-        ContextItemType.CURRENT_ACTION,
-        {"result": "Rollback requested"},
-    )
+def test_tenant_and_user_use_one_call_and_later_action_hits_task_cache():
+    manager = ContextManager(ContextManagerConfig(token_threshold=80, chars_per_token=1.0, keep_recent_steps=0))
     model = _Model()
-
-    first = manager._compact_long_term_memory(
-        memory, [memory, task, first_action], model=model
-    )
-    second = manager._compact_long_term_memory(
-        memory, [memory, task, first_action, second_action], model=model
-    )
-
-    assert len(model.calls) == 2
-    assert first.metadata["turn_context_hash"] != second.metadata["turn_context_hash"]
+    memories = [
+        _item("memory:tenant", ContextItemType.MEMORY, {"memory": "## Policy\n\n- safe " * 20},
+              {"version_id": 1, "memory_type": "long_term", "scope": "tenant"}),
+        _item("memory:user", ContextItemType.MEMORY, {"memory": "## Preference\n\n- concise " * 20},
+              {"version_id": 2, "memory_type": "long_term", "scope": "user"}),
+    ]
+    task = _item("current_task:0", ContextItemType.CURRENT_TASK, {"text": "answer"})
+    first = manager._compact_to_soft_budget([*memories, task], [], [], [], model=model)
+    action = _item("current_action:0", ContextItemType.CURRENT_ACTION, {"result": "done"})
+    second = manager._compact_to_soft_budget([*memories, task, action], [], [], [], model=model)
+    assert model.calls == 1
+    assert any(item.metadata.get("representation") == "selected_blocks" for item in first)
+    assert any(item.metadata.get("representation") == "selected_blocks" for item in second)

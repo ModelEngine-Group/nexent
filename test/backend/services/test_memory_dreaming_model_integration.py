@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from nexent.memory.dreaming import DreamingMemoryUnit, build_dreaming_version
-from services.memory_dreaming_compressor import TenantDreamingCompressor
+from nexent.memory.dreaming import DreamingMemoryUnit, build_user_memory_summary
+from services.memory_dreaming_summarizer import TenantDreamingSummarizer
 from utils.monitoring import monitoring_manager
 
 
@@ -48,9 +48,9 @@ def test_ac048_ac049_real_model_fact_preservation():
     assert monitoring_manager is not None
     tenant_id = os.environ["DREAMING_TEST_TENANT_ID"]
     user_id = os.environ["DREAMING_TEST_USER_ID"]
-    compressor = TenantDreamingCompressor(tenant_id, user_id)
+    compressor = TenantDreamingSummarizer(tenant_id, user_id)
 
-    result = build_dreaming_version(
+    result = build_user_memory_summary(
         parent_units=[],
         new_units=_ac019_units(),
         max_chars=10_000,
@@ -65,7 +65,7 @@ def test_ac048_ac049_real_model_fact_preservation():
     assert result.published_char_count <= 10_000
     assert result.omitted_evidence_ids == []
     for index in range(1, 36):
-        assert f"pattern {index}" in result.published_content
+        assert f"pattern {index}" in result.markdown
     assert result.compression_audit[-1] == {
         "attempt": result.compression_attempts,
         "outcome": "accepted",

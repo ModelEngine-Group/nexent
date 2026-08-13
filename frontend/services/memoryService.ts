@@ -526,13 +526,7 @@ export async function deleteMemory(
 export interface DreamingAudit {
   run_id: number;
   status: "queued" | "running" | "completed" | "failed" | "skipped";
-  current_phase?:
-    | "light"
-    | "rem"
-    | "deep"
-    | "summarization"
-    | "compression"
-    | null;
+  current_phase?: "light" | "rem" | "deep" | "summarization" | null;
   started_at?: string;
   finished_at?: string;
   light_count: number;
@@ -540,20 +534,19 @@ export interface DreamingAudit {
   promoted_count: number;
   deferred_count: number;
   error?: string | null;
-  result?: {
-    decisions?: Array<{
-      memory_id: number;
-      score: number;
-      noise: boolean;
-      signal_count: number;
-      context_diversity: number;
-      event: "SELECT" | "DEFER";
-      reason: string;
-      evidence_ids?: string[];
-      archive_suggested?: boolean;
-    }>;
-    version?: LongTermMemoryVersion | null;
-  } | null;
+  decisions?: Array<{
+    memory_id: number;
+    score: number;
+    noise: boolean;
+    signal_count: number;
+    context_diversity: number;
+    event: "SELECT" | "DEFER";
+    reason: string;
+    evidence_ids?: string[];
+    archive_suggested?: boolean;
+  }>;
+  published_version_id?: number | null;
+  reason?: string | null;
 }
 
 export interface DreamingParameters {

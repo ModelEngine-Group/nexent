@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.anyio
+
 
 @pytest.fixture
 def mock_consts(monkeypatch):

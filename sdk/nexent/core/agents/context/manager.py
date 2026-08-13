@@ -21,6 +21,7 @@ from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
+from .long_term_memory_selector import select_long_term_memory
 from .models import ContextItem, ContextItemInput, ContextItemType, normalize_context_inputs
 from .policy import ContextProcessingMode, resolve_policy
 from .run_context import ManagedRunContext
@@ -56,7 +57,7 @@ class ContextManager:
         self._previous_stable_fingerprint: str | None = None
         self._previous_stable_items: dict[str, str] = {}
         self._pending_history_summary_event: dict[str, Any] | None = None
-        self._memory_compact_cache: dict[tuple[str, str, int, str], ContextItem] = {}
+        self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
 
     def _soft_input_budget_tokens(self) -> int:
         return self.config.soft_input_budget_tokens or self.config.token_threshold
@@ -283,8 +284,14 @@ class ContextManager:
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
         old_actions = actions[:-keep_recent] if keep_recent else actions
         recent_actions = actions[-keep_recent:] if keep_recent else []
+        long_term_items = [
+            item for item in result
+            if item.type == ContextItemType.MEMORY
+            and (item.metadata.get("version_id") is not None or item.metadata.get("memory_type") == "long_term")
+        ]
         other_items = [
-            item for item in result if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact
+            item for item in result
+            if item.type != ContextItemType.CURRENT_ACTION and item.supports_compact and item not in long_term_items
         ]
         # The stages are intentional: reclaim old current-run execution detail
         # before degrading stable resources or planning/evidence Items. Within a
@@ -294,12 +301,7 @@ class ContextManager:
         for candidates in (old_actions, other_items, recent_actions):
             savings = []
             for item in candidates:
-                if item.type == ContextItemType.MEMORY and (
-                    item.metadata.get("version_id") is not None or item.metadata.get("memory_type") == "long_term"
-                ):
-                    compact = self._compact_long_term_memory(item, result, model=model)
-                else:
-                    compact = item.compact()
+                compact = item.compact()
                 saving = max(0, item.token_estimate - compact.token_estimate)
                 savings.append((saving, item.layout_key, item, compact))
             for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
@@ -310,192 +312,62 @@ class ContextManager:
                     <= self._soft_input_budget_tokens()
                 ):
                     return result
+        if self.config.enable_long_term_memory_selection and long_term_items:
+            return self._select_long_term_memories(result, long_term_items, model=model)
         return result
 
-    def _compact_long_term_memory(self, item, current_items, *, model):
-        """Create a semantic, run-local long-term memory view for this turn."""
-        turn_items = [
-            current
-            for current in current_items
-            if current.type
-            in {
-                ContextItemType.CURRENT_TASK,
-                ContextItemType.CURRENT_PLANNING,
-                ContextItemType.CURRENT_ACTION,
-            }
-        ]
-        turn_context = "\n".join(
-            json.dumps(current.content, ensure_ascii=False, default=str) for current in turn_items
-        )
-        turn_hash = hashlib.sha256(turn_context.encode("utf-8")).hexdigest()
-        target_tokens = max(
-            64,
-            min(
-                max(64, item.token_estimate - 1),
-                max(64, self._soft_input_budget_tokens() // 4),
-            ),
-        )
-        model_id = str(
-            getattr(model, "model_id", None) or getattr(model, "model_name", None) or model.__class__.__name__
-        )
-        version_id = str(item.metadata.get("version_id") or item.id)
-        cache_key = (version_id, turn_hash, target_tokens, model_id)
+    def _select_long_term_memories(self, result, memory_items, *, model):
+        task_item = next((item for item in result if item.type == ContextItemType.CURRENT_TASK), None)
+        task = json.dumps(task_item.content, ensure_ascii=False, default=str) if task_item else ""
+        model_id = str(getattr(model, "model_id", None) or getattr(model, "model_name", None)
+                       or model.__class__.__name__)
+        target_tokens = max(64, self._soft_input_budget_tokens() // 4)
+        versions = tuple(sorted(str(item.metadata.get("version_id") or item.id) for item in memory_items))
+        cache_key = (*versions, task, target_tokens, model_id)
         cached = self._memory_compact_cache.get(cache_key)
         if cached is not None:
-            self._record_compression(
-                [
-                    CompressionCallRecord(
-                        call_type="long_term_memory_turn_compact",
-                        output_chars=len(
-                            str(
-                                cached.content.get("memory")
-                                or cached.content.get("content")
-                                or cached.content.get("text")
-                                or ""
-                            )
-                        ),
-                        output_tokens=cached.token_estimate,
-                        cache_hit=True,
-                        details={
-                            "version_id": version_id,
-                            "turn_context_hash": turn_hash,
-                            "target_tokens": target_tokens,
-                            "model_id": model_id,
-                            "persisted": False,
-                            "outcome": "cache_hit",
-                        },
-                    )
-                ]
-            )
-            return cached
+            replacements = {item.id: item for item in cached}
+            self._record_compression([CompressionCallRecord(
+                call_type="long_term_memory_block_selection", cache_hit=True,
+                details={"version_ids": versions, "target_tokens": target_tokens,
+                         "model_id": model_id, "outcome": "cache_hit"},
+            )])
+            return [replacements.get(item.id, item) for item in result]
 
-        memory_key = next(
-            (key for key in ("memory", "content", "text") if isinstance(item.content.get(key), str)),
-            None,
+        documents: dict[str, str] = {}
+        by_scope: dict[str, ContextItem] = {}
+        for item in memory_items:
+            scope = str(item.metadata.get("scope") or item.content.get("memory_level") or "user")
+            key = next((name for name in ("memory", "content", "text")
+                        if isinstance(item.content.get(name), str)), None)
+            if key and scope not in by_scope:
+                documents[scope] = item.content[key]
+                by_scope[scope] = item
+        selected, audit = select_long_term_memory(
+            documents, task=task, target_tokens=target_tokens, model=model,
+            chars_per_token=self.config.chars_per_token,
         )
-        if memory_key is None:
-            return item.compact()
-        source = item.content[memory_key]
-        prompt = (
-            "Select and semantically compress only the long-term memory facts relevant "
-            f"to the current agent turn. Keep factual constraints intact. Return plain "
-            f"text only, no commentary, within about {target_tokens} tokens.\n\n"
-            f"## Current agent turn\n{turn_context}\n\n"
-            f"## Long-term memory\n{source}"
-        )
-        messages = [
-            ChatMessage(
-                role=MessageRole.SYSTEM,
-                content=[
-                    {
-                        "type": "text",
-                        "text": "You create temporary, turn-specific memory views.",
-                    }
-                ],
-            ),
-            ChatMessage(
-                role=MessageRole.USER,
-                content=[{"type": "text", "text": prompt}],
-            ),
-        ]
-        try:
-            response = model(messages, stop_sequences=[])
-            token_usage = getattr(response, "token_usage", None)
-            output = response.content
-            if isinstance(output, list):
-                output = " ".join(
-                    block.get("text", "")
-                    for block in output
-                    if isinstance(block, dict) and block.get("type") == "text"
-                )
-            compact_text = str(output).strip()
-            compact_tokens = max(1, math.ceil(len(compact_text) / self.config.chars_per_token))
-            if not compact_text or len(compact_text) >= len(source) or compact_tokens > target_tokens:
-                self._record_compression(
-                    [
-                        CompressionCallRecord(
-                            call_type="long_term_memory_turn_compact",
-                            input_chars=len(prompt),
-                            output_chars=len(compact_text),
-                            input_tokens=int(
-                                getattr(token_usage, "input_tokens", 0) or len(prompt) / self.config.chars_per_token
-                            ),
-                            output_tokens=int(
-                                getattr(token_usage, "output_tokens", 0) or (compact_tokens if compact_text else 0)
-                            ),
-                            details={
-                                "version_id": version_id,
-                                "turn_context_hash": turn_hash,
-                                "target_tokens": target_tokens,
-                                "model_id": model_id,
-                                "persisted": False,
-                                "outcome": "invalid_output",
-                            },
-                        )
-                    ]
-                )
-                return item
+        replacements: list[ContextItem] = []
+        for scope, item in by_scope.items():
+            key = next(name for name in ("memory", "content", "text") if isinstance(item.content.get(name), str))
             content = deepcopy(item.content)
-            content[memory_key] = compact_text
+            content[key] = selected.get(scope, "")
             data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
-            metadata = {
-                **deepcopy(item.metadata),
-                "representation": "compact",
-                "compact_scope": "run_turn",
-                "turn_context_hash": turn_hash,
-                "target_tokens": target_tokens,
-                "model_id": model_id,
-            }
-            compact = item.__class__(
-                **data,
-                content=content,
-                metadata=metadata,
-                token_estimate=compact_tokens,
-            )
-            self._memory_compact_cache[cache_key] = compact
-            self._record_compression(
-                [
-                    CompressionCallRecord(
-                        call_type="long_term_memory_turn_compact",
-                        input_chars=len(prompt),
-                        output_chars=len(compact_text),
-                        input_tokens=int(
-                            getattr(token_usage, "input_tokens", 0) or len(prompt) / self.config.chars_per_token
-                        ),
-                        output_tokens=int(getattr(token_usage, "output_tokens", 0) or compact.token_estimate),
-                        details={
-                            "version_id": version_id,
-                            "turn_context_hash": turn_hash,
-                            "target_tokens": target_tokens,
-                            "model_id": model_id,
-                            "persisted": False,
-                            "outcome": "compacted",
-                        },
-                    )
-                ]
-            )
-            return compact
-        except Exception as exc:
-            logger.exception("Turn-aware long-term memory compaction failed")
-            self._record_compression(
-                [
-                    CompressionCallRecord(
-                        call_type="long_term_memory_turn_compact",
-                        input_chars=len(prompt),
-                        input_tokens=int(len(prompt) / self.config.chars_per_token),
-                        details={
-                            "version_id": version_id,
-                            "turn_context_hash": turn_hash,
-                            "target_tokens": target_tokens,
-                            "model_id": model_id,
-                            "persisted": False,
-                            "outcome": "model_error",
-                            "error_type": type(exc).__name__,
-                        },
-                    )
-                ]
-            )
-            return item
+            replacements.append(item.__class__(
+                **data, content=content,
+                metadata={**deepcopy(item.metadata), "representation": "selected_blocks"},
+                token_estimate=max(1, math.ceil(len(content[key]) / self.config.chars_per_token)),
+            ))
+        self._memory_compact_cache[cache_key] = replacements
+        self._record_compression([CompressionCallRecord(
+            call_type="long_term_memory_block_selection",
+            input_chars=int(audit.get("input_chars", 0)), output_chars=sum(len(value) for value in selected.values()),
+            details={**audit, "version_ids": versions, "target_tokens": target_tokens,
+                     "model_id": model_id, "persisted": False},
+        )])
+        replacement_by_id = {item.id: item for item in replacements}
+        return [replacement_by_id.get(item.id, item) for item in result]
+
 
     def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
         projected: list[ContextItem] = []

@@ -492,7 +492,7 @@ render_k8s_runtime_config_values() {
     printf '      celeryWorkerPrefetchMultiplier: %s\n' "$(yaml_quote "$(env_or_default CELERY_WORKER_PREFETCH_MULTIPLIER "1")")"
     printf '      celeryTaskTimeLimit: %s\n' "$(yaml_quote "$(env_or_default CELERY_TASK_TIME_LIMIT "3600")")"
     printf '      elasticsearchRequestTimeout: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_REQUEST_TIMEOUT "30")")"
-    printf '      queues: %s\n' "$(yaml_quote "$(env_or_default QUEUES "process_q,forward_q,dreaming_q")")"
+    printf '      queues: %s\n' "$(yaml_quote "$(env_or_default QUEUES "process_q,forward_q")")"
     printf '      workerName: %s\n' "$(yaml_quote "$(env_or_default WORKER_NAME "")")"
     printf '      workerConcurrency: %s\n' "$(yaml_quote "$(env_or_default WORKER_CONCURRENCY "4")")"
     echo "    oauth:"

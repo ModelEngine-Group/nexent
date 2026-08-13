@@ -1021,26 +1021,6 @@ class MemoryLongTermVersion(TableBase):
     omission_details = Column(JSONB, nullable=False, default=dict)
 
 
-class MemoryLongTermActivationAudit(TableBase):
-    """Append-only active pointer changes for every long-term memory source."""
-
-    __tablename__ = "memory_long_term_activation_audit_t"
-    __table_args__ = (
-        Index("idx_memory_long_term_activation_scope", "tenant_id", "scope", "subject_id", "create_time"),
-        {"schema": SCHEMA},
-    )
-
-    activation_id = Column(BigInteger, Sequence(
-        "memory_long_term_activation_audit_t_activation_id_seq", schema=SCHEMA), primary_key=True)
-    tenant_id = Column(String(100), nullable=False)
-    scope = Column(String(20), nullable=False)
-    subject_id = Column(String(100), nullable=False)
-    actor_user_id = Column(String(100), nullable=False)
-    from_version_id = Column(BigInteger)
-    to_version_id = Column(BigInteger, nullable=False)
-    action = Column(String(30), nullable=False)
-
-
 class MemoryRetrievalHit(TableBase):
     """Per-hit memory retrieval log row, sourced by ``search_memory`` tools.
 
@@ -1132,7 +1112,9 @@ class MemoryDreamingAudit(TableBase):
     rem_count = Column(Integer, nullable=False, default=0)
     promoted_count = Column(Integer, nullable=False, default=0)
     deferred_count = Column(Integer, nullable=False, default=0)
-    result_json = Column(JSONB)
+    decisions = Column(JSONB, nullable=False, default=list)
+    published_version_id = Column(BigInteger)
+    reason = Column(String(100))
     error = Column(Text)
     lock_owner = Column(String(100), nullable=True)
     lock_until = Column(TIMESTAMP(timezone=False), nullable=True)
@@ -1182,88 +1164,6 @@ class MemoryDreamingSchedule(TableBase):
     source_limit = Column(Integer, nullable=True)
     long_term_max_chars = Column(Integer, nullable=True)
     summarization_max_attempts = Column(Integer, nullable=True)
-
-
-class MemoryDreamingVersion(TableBase):
-    """Immutable long-term memory artifact produced by one Dreaming run."""
-
-    __tablename__ = "memory_dreaming_version_t"
-    __table_args__ = (
-        Index(
-            "idx_memory_dreaming_version_scope",
-            "tenant_id",
-            "user_id",
-            "agent_id",
-            "version_no",
-            unique=True,
-        ),
-        Index(
-            "uq_memory_dreaming_version_active_scope",
-            "tenant_id",
-            "user_id",
-            "agent_id",
-            unique=True,
-            postgresql_where=text("is_active AND delete_flag = 'N'"),
-        ),
-        Index("uq_memory_dreaming_version_run", "run_id", unique=True),
-        {"schema": SCHEMA},
-    )
-
-    version_id = Column(
-        BigInteger,
-        Sequence("memory_dreaming_version_t_version_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-    )
-    tenant_id = Column(String(100), nullable=False)
-    user_id = Column(String(100), nullable=False)
-    agent_id = Column(String(100), nullable=False)
-    version_no = Column(Integer, nullable=False)
-    parent_version_id = Column(BigInteger)
-    run_id = Column(BigInteger, nullable=False)
-    is_active = Column(Boolean, nullable=False, default=False)
-    raw_content = Column(Text, nullable=False)
-    published_content = Column(Text, nullable=False)
-    published_units = Column(JSONB, nullable=False, default=list)
-    source_evidence_ids = Column(JSONB, nullable=False, default=list)
-    config_snapshot = Column(JSONB, nullable=False, default=dict)
-    raw_char_count = Column(Integer, nullable=False)
-    published_char_count = Column(Integer, nullable=False)
-    summarization_status = Column(String(30), nullable=False)
-    summarization_attempts = Column(Integer, nullable=False, default=0)
-    summarization_audit = Column(JSONB, nullable=False, default=list)
-    omitted_evidence_ids = Column(JSONB, nullable=False, default=list)
-    mechanical_truncation = Column(Boolean, nullable=False, default=False)
-
-
-class MemoryDreamingActivationAudit(TableBase):
-    """Append-only audit for active-version pointer changes."""
-
-    __tablename__ = "memory_dreaming_activation_audit_t"
-    __table_args__ = (
-        Index(
-            "idx_memory_dreaming_activation_scope",
-            "tenant_id",
-            "user_id",
-            "agent_id",
-            "create_time",
-        ),
-        {"schema": SCHEMA},
-    )
-
-    activation_id = Column(
-        BigInteger,
-        Sequence("memory_dreaming_activation_audit_t_activation_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-    )
-    tenant_id = Column(String(100), nullable=False)
-    user_id = Column(String(100), nullable=False)
-    agent_id = Column(String(100), nullable=False)
-    actor_user_id = Column(String(100), nullable=False)
-    from_version_id = Column(BigInteger)
-    to_version_id = Column(BigInteger, nullable=False)
-    reason = Column(String(100), nullable=False, default="user_switch")
 
 
 class McpRecord(TableBase):

@@ -8,7 +8,7 @@ from nexent.memory.dreaming import (
     DreamingMemoryUnit,
     DreamingSummarizationRequest,
 )
-from services.memory_dreaming_compressor import (
+from services.memory_dreaming_summarizer import (
     TenantDreamingSummarizer,
     _load_prompt,
     _parse_summary_envelope,

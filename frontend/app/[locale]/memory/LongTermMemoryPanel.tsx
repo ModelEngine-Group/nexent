@@ -9,6 +9,7 @@ import {
   Empty,
   Flex,
   Input,
+  Modal,
   Select,
   Space,
   Tag,
@@ -29,7 +30,7 @@ import {
 const { Text, Title } = Typography;
 
 export function LongTermMemoryPanel({ scope }: { scope: LongTermScope }) {
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const { t, i18n } = useTranslation("common");
   const [active, setActive] = useState<LongTermMemoryVersion | null>(null);
   const [selected, setSelected] = useState<LongTermMemoryVersion | null>(null);
@@ -39,6 +40,9 @@ export function LongTermMemoryPanel({ scope }: { scope: LongTermScope }) {
   const [preview, setPreview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [versionToActivate, setVersionToActivate] =
+    useState<LongTermMemoryVersion | null>(null);
+  const [activating, setActivating] = useState(false);
   const dirty = editing && draft !== (active?.content ?? "");
 
   const load = useCallback(async () => {
@@ -96,19 +100,27 @@ export function LongTermMemoryPanel({ scope }: { scope: LongTermScope }) {
       message.error(t("memory.longTerm.concurrentError"));
     }
   };
-  const activate = async () => {
+  const activate = () => {
     if (!selected) return;
-    modal.confirm({
-      title: t("memory.longTerm.activateConfirm"),
-      onOk: async () => {
-        await activateLongTermVersion(
-          scope,
-          selected.version_id,
-          active?.version_id ?? null
-        );
-        await load();
-      },
-    });
+    setVersionToActivate(selected);
+  };
+  const confirmActivation = async () => {
+    if (!versionToActivate || activating) return;
+    setActivating(true);
+    try {
+      await activateLongTermVersion(
+        scope,
+        versionToActivate.version_id,
+        active?.version_id ?? null
+      );
+      setVersionToActivate(null);
+      message.success(t("memory.longTerm.activated"));
+      await load();
+    } catch {
+      message.error(t("memory.longTerm.activateFailed"));
+    } finally {
+      setActivating(false);
+    }
   };
   const controls = (
     <Space>
@@ -151,6 +163,25 @@ export function LongTermMemoryPanel({ scope }: { scope: LongTermScope }) {
 
   return (
     <div className="panel-body long-term-memory-panel">
+      <Modal
+        open={versionToActivate !== null}
+        title={t("memory.longTerm.activateConfirm")}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
+        confirmLoading={activating}
+        onOk={() => void confirmActivation()}
+        onCancel={() => {
+          if (!activating) setVersionToActivate(null);
+        }}
+        closable={!activating}
+        maskClosable={!activating}
+      >
+        <Text>
+          {t("memory.longTerm.activateConfirmDescription", {
+            version: versionToActivate?.version_no,
+          })}
+        </Text>
+      </Modal>
       <Flex justify="space-between" align="center">
         <div>
           <Title level={4}>{t(`memory.longTerm.${scope}.title`)}</Title>

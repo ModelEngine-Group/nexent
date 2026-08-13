@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 
 from .client import get_db_session
-from .db_models import MemoryLongTermActivationAudit, MemoryLongTermVersion
+from .db_models import MemoryLongTermVersion
 
 
 def _serialize(row: MemoryLongTermVersion, *, include_content: bool = True) -> Dict[str, Any]:
@@ -90,6 +90,7 @@ def create_and_activate(*, tenant_id: str, scope: str, subject_id: str, content:
                          .filter(*scope_filter).scalar()) + 1
         if current:
             current.is_active = False
+            session.flush()
         row = MemoryLongTermVersion(
             tenant_id=tenant_id, scope=scope, subject_id=subject_id, version_no=version_no,
             parent_version_id=current_id, is_active=True, content=content, source=source,
@@ -100,12 +101,6 @@ def create_and_activate(*, tenant_id: str, scope: str, subject_id: str, content:
             omission_details=omission_details or {}, created_by=actor_user_id, updated_by=actor_user_id,
         )
         session.add(row); session.flush()
-        session.add(MemoryLongTermActivationAudit(
-            tenant_id=tenant_id, scope=scope, subject_id=subject_id, actor_user_id=actor_user_id,
-            from_version_id=current_id, to_version_id=row.version_id,
-            action="dreaming_publish" if source == "dreaming" else "manual_create",
-            created_by=actor_user_id,
-        ))
         session.commit(); session.refresh(row)
         return _serialize(row)
 
@@ -123,12 +118,12 @@ def activate(tenant_id: str, scope: str, subject_id: str, version_id: int,
         current_id = int(current.version_id) if current else None
         if current_id != expected_active_version_id: return "conflict", None
         if current_id == version_id: return "ok", _serialize(target)
-        if current: current.is_active = False
+        if current:
+            # The partial unique index permits only one active row per scope.
+            # Flush the deactivation first; otherwise SQLAlchemy may batch both
+            # updates with the activation first and transiently violate it.
+            current.is_active = False
+            session.flush()
         target.is_active = True; target.updated_by = actor_user_id
-        session.add(MemoryLongTermActivationAudit(
-            tenant_id=tenant_id, scope=scope, subject_id=subject_id, actor_user_id=actor_user_id,
-            from_version_id=current_id, to_version_id=version_id, action="historical_activate",
-            created_by=actor_user_id,
-        ))
         session.commit(); session.refresh(target)
         return "ok", _serialize(target)

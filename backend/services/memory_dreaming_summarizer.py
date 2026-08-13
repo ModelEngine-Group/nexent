@@ -157,7 +157,3 @@ class TenantDreamingSummarizer:
         result = _parse_summary_envelope(response.content)
         logger.info("Dreaming summary operation=%s chunk=%s input_chars=%d output_chars=%d", operation, chunk_index, len(source), len(result))
         return result
-
-
-# Temporary import compatibility for callers outside the feature branch.
-TenantDreamingCompressor = TenantDreamingSummarizer

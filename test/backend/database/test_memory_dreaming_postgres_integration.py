@@ -81,7 +81,9 @@ def test_ac010_real_postgres_audit_schema_matches_orm_contract():
             "agent_id",
             "status",
             "current_phase",
-            "result_json",
+            "decisions",
+            "published_version_id",
+            "reason",
             "error",
         } <= columns
         assert "idx_memory_dreaming_audit_scope" in indexes

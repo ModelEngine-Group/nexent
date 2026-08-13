@@ -88,6 +88,5 @@ agent_repository_frontend
 .omo/
 .tokensave
 .playwright-mcp/
-frontend/test-results/
 # Added by code-review-graph
 .code-review-graph/

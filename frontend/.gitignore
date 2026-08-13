@@ -2,7 +2,6 @@
 
 # dependencies
 /node_modules
-**/node_modules/
 
 # next.js
 /.next/
@@ -29,7 +28,6 @@ pnpm-lock.yaml
 next-env.d.ts
 
 package-lock.json
-!tests/e2e/package-lock.json
 
 .idea
 

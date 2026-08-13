@@ -4492,9 +4492,12 @@
   "memory.longTerm.empty": "暂无长期记忆",
   "memory.longTerm.loadFailed": "长期记忆加载失败",
   "memory.longTerm.saved": "长期记忆已保存",
+  "memory.longTerm.activated": "历史版本已激活",
+  "memory.longTerm.activateFailed": "历史版本激活失败，请刷新后重试。",
   "memory.longTerm.concurrentError": "记忆已被其他操作修改，请刷新后重试。",
   "memory.longTerm.discardDraft": "放弃未保存的 Markdown 草稿？",
   "memory.longTerm.activateConfirm": "激活此历史版本？",
+  "memory.longTerm.activateConfirmDescription": "版本 v{{version}} 将成为后续会话使用的当前记忆。",
   "memory.longTerm.editorLabel": "Markdown 记忆编辑器",
   "group.deleted": "已删除的用户组"
 }

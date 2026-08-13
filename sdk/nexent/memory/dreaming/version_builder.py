@@ -54,8 +54,8 @@ class DreamingVersionBuildResult(BaseModel):
     """Immutable content and evidence produced for one version."""
 
     raw_content: str
-    published_content: str
-    published_units: List[DreamingMemoryUnit]
+    markdown: str
+    evidence_ids: List[str] = Field(default_factory=list)
     raw_char_count: int
     published_char_count: int
     summarization_status: str
@@ -108,7 +108,7 @@ def units_from_decisions(
     ]
 
 
-def build_dreaming_version(
+def build_user_memory_summary(
     *,
     parent_units: Iterable[DreamingMemoryUnit],
     new_units: Iterable[DreamingMemoryUnit],
@@ -130,11 +130,12 @@ def build_dreaming_version(
     new_units = list(new_units)
     units = _deduplicate_units([*parent_units, *new_units])
     raw_content = _render_units(units)
+    evidence_ids = sorted({evidence_id for unit in units for evidence_id in unit.evidence_ids})
     if not new_units:
         return DreamingVersionBuildResult(
             raw_content=raw_content,
-            published_content=raw_content,
-            published_units=units,
+            markdown=raw_content,
+            evidence_ids=evidence_ids,
             raw_char_count=len(raw_content),
             published_char_count=len(raw_content),
             summarization_status="no_new_evidence",
@@ -190,15 +191,10 @@ def build_dreaming_version(
                         "validation": [],
                     }
                 )
-                compact_unit = DreamingMemoryUnit(
-                    unit_id="summarization",
-                    content=output.markdown,
-                    evidence_ids=sorted(required_evidence),
-                )
                 return DreamingVersionBuildResult(
                     raw_content=raw_content,
-                    published_content=output.markdown,
-                    published_units=[compact_unit],
+                    markdown=output.markdown,
+                    evidence_ids=sorted(required_evidence),
                     raw_char_count=len(raw_content),
                     published_char_count=len(output.markdown),
                     summarization_status="summarized",
@@ -221,14 +217,14 @@ def build_dreaming_version(
             }
         )
 
-    fallback_content, fallback_units, omitted, truncated = _mechanical_fallback(
+    fallback_content, _, omitted, truncated = _mechanical_fallback(
         units,
         max_chars=max_chars,
     )
     return DreamingVersionBuildResult(
         raw_content=raw_content,
-        published_content=fallback_content,
-        published_units=fallback_units,
+        markdown=fallback_content,
+        evidence_ids=evidence_ids,
         raw_char_count=len(raw_content),
         published_char_count=len(fallback_content),
         summarization_status="mechanical_fallback",

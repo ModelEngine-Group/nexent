@@ -6,6 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.anyio
+
+_MODULE_PREFIXES = ("database", "backend.database", "nexent", "services")
+_ORIGINAL_MODULES = {
+    name: module
+    for name, module in sys.modules.items()
+    if name in _MODULE_PREFIXES or name.startswith(tuple(prefix + "." for prefix in _MODULE_PREFIXES))
+}
+
 
 # Path setup
 sys.path.insert(
@@ -154,6 +163,14 @@ sys.modules["services.memory_record_service"] = memory_record_service_mod
 
 
 from backend.services import memory_retrieval_service
+
+# The imported module keeps its boundary doubles; restore global import state
+# immediately so collection order cannot corrupt unrelated service/SDK tests.
+for _name in list(sys.modules):
+    if _name in _MODULE_PREFIXES or _name.startswith(tuple(prefix + "." for prefix in _MODULE_PREFIXES)):
+        if _name not in _ORIGINAL_MODULES:
+            del sys.modules[_name]
+sys.modules.update(_ORIGINAL_MODULES)
 
 
 @pytest.fixture

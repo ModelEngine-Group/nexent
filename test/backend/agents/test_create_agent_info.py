@@ -4959,19 +4959,15 @@ class TestPreparePromptTemplates:
 
 
 class TestAdditionalAgentInfoCoverage:
-    def test_format_long_term_memory_prompt_supports_dict_and_object_entries(self):
+    def test_build_long_term_memory_items_preserves_scope_metadata(self):
         context = types.SimpleNamespace(
-            tenant_long_term=[{"content": " tenant preference "}, {"content": ""}],
-            user_long_term=[types.SimpleNamespace(content="## Answer Preferences\n\n- concise")],
+            tenant_long_term=[{"content": "tenant preference", "metadata": {"version_id": 7}, "source": "manual"}],
+            user_long_term=[types.SimpleNamespace(content="## Preferences\n\n- concise", metadata={"version_id": 8}, source="dreaming")],
         )
-
-        result = create_agent_info_module._format_long_term_memory_prompt(context, "en")
-
-        assert result == (
-            "### Tenant Long-term Memory\ntenant preference\n\n"
-            "### User Long-term Memory\n## Answer Preferences\n\n- concise"
-        )
-        assert "- ## Answer Preferences" not in result
+        result = create_agent_info_module._build_long_term_memory_items(context)
+        assert [item["scope"] for item in result] == ["tenant", "user"]
+        assert [item["version_id"] for item in result] == [7, 8]
+        assert result[1]["source"] == "dreaming"
 
     def test_normalize_tool_params_rejects_non_object_payload(self):
         with pytest.raises(ValidationError, match="must be an object"):
@@ -6771,85 +6767,6 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             # Order should be preserved from original index_names list
             assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
 
-
-class TestFormatLongTermMemoryPrompt:
-    """Coverage for lines 100-109: _format_long_term_memory_prompt with mixed item types."""
-
-    def test_dict_items_with_content(self):
-        """Dict items with content keys are rendered as bullet points."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": "Tenant policy X"},
-                {"content": "Tenant rule Y"},
-            ],
-            user_long_term=[],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- Tenant policy X" in result
-        assert "- Tenant rule Y" in result
-        assert "Tenant Long-term Memory" in result
-
-    def test_object_items_with_content_attr(self):
-        """Object items with a .content attribute are rendered correctly."""
-        item1 = types.SimpleNamespace(content="User preference A")
-        item2 = types.SimpleNamespace(content="User fact B")
-        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[item1, item2])
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- User preference A" in result
-        assert "- User fact B" in result
-        assert "User Long-term Memory" in result
-
-    def test_mixed_dict_and_object_items(self):
-        """Mixed dict and object items (in the same section) are both handled."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": "dict-content"},
-                types.SimpleNamespace(content="obj-content"),
-            ],
-            user_long_term=[],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- dict-content" in result
-        assert "- obj-content" in result
-
-    def test_empty_and_whitespace_content_filtered(self):
-        """Items with empty or whitespace-only content are skipped."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[
-                {"content": ""},
-                {"content": "   "},
-                {"content": "real"},
-            ],
-            user_long_term=[
-                types.SimpleNamespace(content=None),
-                types.SimpleNamespace(content=""),
-            ],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert "- real" in result
-        assert "- " not in result.replace("- real", "").strip()
-
-    def test_both_sections_empty_returns_empty_string(self):
-        """When both sections have no items, returns an empty string."""
-        ctx = types.SimpleNamespace(tenant_long_term=[], user_long_term=[])
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert result == ""
-
-    def test_none_attributes_treated_as_empty(self):
-        """When the attribute is None on the context, it is treated as empty."""
-        ctx = types.SimpleNamespace(tenant_long_term=None, user_long_term=None)
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "en")
-        assert result == ""
-
-    def test_zh_language_headings(self):
-        """Chinese language parameter produces Chinese headings."""
-        ctx = types.SimpleNamespace(
-            tenant_long_term=[{"content": "tenant fact"}],
-            user_long_term=[{"content": "user fact"}],
-        )
-        result = create_agent_info_module._format_long_term_memory_prompt(ctx, "zh")
-        assert "租户长期记忆" in result
-        assert "用户长期记忆" in result
 
 
 class TestCreateAgentConfigMemoryBuildFailure:

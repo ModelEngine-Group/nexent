@@ -4495,9 +4495,12 @@
   "memory.longTerm.empty": "No long-term memory",
   "memory.longTerm.loadFailed": "Long-term memory failed to load",
   "memory.longTerm.saved": "Long-term memory saved",
+  "memory.longTerm.activated": "Historical version activated",
+  "memory.longTerm.activateFailed": "Failed to activate the historical version. Reload and try again.",
   "memory.longTerm.concurrentError": "Memory changed concurrently. Reload and try again.",
   "memory.longTerm.discardDraft": "Discard the unsaved Markdown draft?",
   "memory.longTerm.activateConfirm": "Activate this historical version?",
+  "memory.longTerm.activateConfirmDescription": "Version v{{version}} will become the active memory used in subsequent conversations.",
   "memory.longTerm.editorLabel": "Markdown memory editor",
   "group.deleted": "Deleted user group"
 }

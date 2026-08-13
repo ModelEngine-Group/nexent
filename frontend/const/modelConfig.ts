@@ -115,7 +115,6 @@ export const MEMORY_TAB_KEYS = {
   AGENT_SHARED: "agentShared",
   USER_PERSONAL: "userPersonal",
   USER_AGENT: "userAgent",
-  DREAMING: "dreaming",
 } as const;
 
 // Type for memory tab keys
