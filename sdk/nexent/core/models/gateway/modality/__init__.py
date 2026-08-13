@@ -25,7 +25,7 @@ from .rerank_adapter import (
     RerankAdapter,
     RerankRequest,
 )
-from .stt_adapter import (
+from .stt import (
     AliSTTAdapter,
     ModelEngineSTTAdapter,
     STTAdapter,
@@ -33,7 +33,7 @@ from .stt_adapter import (
     STTStreamRequest,
     VolcSTTAdapter,
 )
-from .tts_adapter import (
+from .tts import (
     AliTTSAdapter,
     ModelEngineTTSAdapter,
     TTSAdapter,
