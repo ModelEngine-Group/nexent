@@ -60,7 +60,6 @@ def test_runner_command_contains_owned_group_configuration():
     group = GroupSpec("P", "passthrough", ("--context-processing-mode", "passthrough"))
 
     command = build_runner_command(
-        python_executable="python",
         dataset="gaia",
         run_name="comparison-formal-r01-b",
         group=group,
@@ -69,7 +68,7 @@ def test_runner_command_contains_owned_group_configuration():
         experiment_time="2026-07-20T00:00:00+00:00",
     )
 
-    assert command[0] == "python"
+    assert command[0] == sys.executable
     assert command[1].endswith("run_benchmark.py")
     assert command.count("--dataset") == 1
     assert command.count("--run-name") == 1
@@ -336,6 +335,24 @@ def test_parse_args_rejects_partial_explicit_budget(monkeypatch):
         parse_args()
 
 
+def test_parse_args_rejects_python_executable_override(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runner",
+            "--dataset",
+            "gaia",
+            "--run-prefix",
+            "run",
+            "--python",
+            "/tmp/untrusted-python",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        parse_args()
+
+
 def test_provider_cache_aggregate_uses_only_explicit_provider_metrics():
     result = aggregate_provider_cache({
         "one": {
@@ -493,7 +510,6 @@ def test_main_runs_both_groups_and_writes_paired_report(
         budget_profile="synthetic_trigger",
         seed=0,
         required_url=[],
-        python="python",
         runner_args=["--evaluators", "exact_match", "f1"],
     )
     monkeypatch.setattr(comparison_module, "parse_args", lambda: args)

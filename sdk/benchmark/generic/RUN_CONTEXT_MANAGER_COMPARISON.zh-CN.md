@@ -83,7 +83,6 @@ backend/.venv/bin/python \
 | `--budget-profile` | `legacy_threshold` | 预算来源/实验意图分类；显式预算必须选择 synthetic profile |
 | `--seed` | `0` | P/C 执行顺序随机种子 |
 | `--required-url NAME=URL` | 无 | 调用模型前做服务可达性预检 |
-| `--python` | 当前解释器 | 子进程 Python |
 | `--runner-args` | 无 | 其后参数原样传给 `run_benchmark.py` |
 
 comparison runner 控制以下参数，不能通过 `--runner-args` 覆盖：

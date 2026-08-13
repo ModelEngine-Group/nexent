@@ -100,7 +100,6 @@ def build_run_name(prefix: str, phase: str, repeat_index: int, group: GroupSpec)
 
 def build_runner_command(
     *,
-    python_executable: str,
     dataset: str,
     run_name: str,
     group: GroupSpec,
@@ -110,7 +109,7 @@ def build_runner_command(
 ) -> list[str]:
     """Build a child runner command while keeping experimental variables owned here."""
     command = [
-        python_executable,
+        sys.executable,
         str(RUNNER),
         "--dataset",
         dataset,
@@ -754,7 +753,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--required-url", action="append", default=[])
-    parser.add_argument("--python", default=sys.executable)
     parser.add_argument(
         "--runner-args",
         nargs=argparse.REMAINDER,
@@ -873,7 +871,6 @@ def main() -> None:
             run_name = build_run_name(args.run_prefix, phase, repeat_index, group)
             run_names[group.key] = run_name
             command = build_runner_command(
-                python_executable=args.python,
                 dataset=args.dataset,
                 run_name=run_name,
                 group=group,
