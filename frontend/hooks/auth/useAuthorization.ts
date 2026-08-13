@@ -179,14 +179,13 @@ export function useAuthorization(): AuthorizationContextType {
   // Share pages are always accessible to any logged-in user (covers /share/...).
   const isSharePage = cleanPath.startsWith("/share/");
 
-  // Agent evaluation page lives at /space/agents/{id}/evaluate but the legacy
-  // /space menu entry was removed during the menu refactor
-  // (v2.2.2_0622_update_left_nav_menu.sql). Grant an explicit allow-list so the
-  // route guard never blocks this page even when the DB migration has not been
-  // applied yet. The actual permission still needs to be granted at the DB
-  // level; this is just a defensive fallback.
+  // Agent evaluation page lives at /space/agents/{id}/evaluate. Grant an
+  // explicit allow-list so the route guard never blocks this page — the
+  // legacy /space menu entry was removed during the menu refactor.
+  // Access is additionally gated by the /agent-space route being in the
+  // user's accessibleRoutes (set in hasAccess below).
   const isAgentEvaluationPage =
-    /^\/[^/]+\/space\/agents\/\d+\/evaluate(?:\/|$)/.test(cleanPath);
+    /^\/space\/agents\/\d+\/evaluate(?:\/|$)/.test(cleanPath);
 
   // Support prefix matching so nested routes such as
   // /space/agents/{id}/evaluate (agent evaluator) are covered by /space.
