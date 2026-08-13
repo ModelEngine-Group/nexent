@@ -40,12 +40,18 @@ def parse_markdown_blocks(scope: str, markdown: str) -> list[MarkdownBlock]:
             paragraph.clear()
 
     for line in markdown.splitlines():
-        heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
-        if heading:
+        stripped = line.strip()
+        marker_length = len(stripped) - len(stripped.lstrip("#"))
+        is_heading = (
+            1 <= marker_length <= 6
+            and len(stripped) > marker_length
+            and stripped[marker_length].isspace()
+            and bool(stripped[marker_length:].strip())
+        )
+        if is_heading:
             flush()
-            level = len(heading.group(1))
-            headings[:] = headings[: level - 1]
-            headings.append(line.strip())
+            headings[:] = headings[: marker_length - 1]
+            headings.append(stripped)
         elif re.match(r"^\s*(?:[-*+] |\d+[.)] )", line):
             flush()
             append(line.strip())

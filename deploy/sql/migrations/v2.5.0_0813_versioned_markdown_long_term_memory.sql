@@ -88,7 +88,9 @@ DROP TABLE IF EXISTS nexent.memory_dreaming_activation_audit_t;
 DROP TABLE IF EXISTS nexent.memory_dreaming_version_t;
 DROP TABLE IF EXISTS nexent.memory_long_term_activation_audit_t;
 
-UPDATE nexent.memory_dreaming_schedule_t SET last_fire_at = NULL, fire_count = 0;
+UPDATE nexent.memory_dreaming_schedule_t
+SET last_fire_at = NULL, fire_count = 0
+WHERE last_fire_at IS NOT NULL OR fire_count <> 0;
 
 CREATE TABLE IF NOT EXISTS nexent.memory_long_term_version_t (
     version_id BIGSERIAL PRIMARY KEY,

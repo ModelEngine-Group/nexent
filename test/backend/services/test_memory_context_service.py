@@ -27,6 +27,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
 
 # ---------------------------------------------------------------------------
 # Path + module stubs (mirror the pattern in test_memory_retrieval_service.py)
@@ -42,6 +49,7 @@ sys.path.insert(
 
 # Stub ``database`` so transitive imports succeed without a real DB.
 database_pkg = types.ModuleType("database")
+database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
 database_pkg.memory_dreaming_db = MagicMock(name="memory_dreaming_db")
 database_pkg.memory_dreaming_db.get_active_version.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
@@ -315,6 +323,7 @@ memory_retrieval_service_mod.reset_memory_retrieval_service = MagicMock(
     name="reset_memory_retrieval_service"
 )
 sys.modules["services.memory_retrieval_service"] = memory_retrieval_service_mod
+sys.modules["backend.services.memory_retrieval_service"] = memory_retrieval_service_mod
 
 
 # Stub ``consts.const`` with the constants the unit under test imports.

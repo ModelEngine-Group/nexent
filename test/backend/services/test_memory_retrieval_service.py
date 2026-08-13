@@ -1,5 +1,6 @@
 """Unit tests for ``backend.services.memory_retrieval_service`` (Phase 2)."""
 
+import importlib
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
@@ -586,8 +587,8 @@ def test_vector_search_returns_empty_when_index_returns_no_hits(service):
 def test_vector_search_hybrid_builds_client(service, monkeypatch):
     embedding_client = object()
     get_client = MagicMock(return_value=embedding_client)
-    embedding_module = sys.modules["nexent.memory.embedding_model"]
-    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    embedding_module = importlib.import_module("nexent.memory.embedding_model")
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         embedding=[0.1], threshold=0.5,
@@ -609,8 +610,8 @@ def test_vector_search_hybrid_builds_client(service, monkeypatch):
 
 def test_vector_search_hybrid_client_failure_falls_back(service, monkeypatch):
     get_client = MagicMock(side_effect=RuntimeError("client failure"))
-    embedding_module = sys.modules["nexent.memory.embedding_model"]
-    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    embedding_module = importlib.import_module("nexent.memory.embedding_model")
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         embedding=[0.1], threshold=0.5,

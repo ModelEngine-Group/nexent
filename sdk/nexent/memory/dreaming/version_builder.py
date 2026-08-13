@@ -263,6 +263,30 @@ def _render_evidence(units: Iterable[DreamingMemoryUnit]) -> str:
     return "\n\n".join(blocks)
 
 
+def _section_heading(line: str) -> Optional[str]:
+    """Return a level-two Markdown heading without regex backtracking."""
+    stripped = line.strip()
+    if not stripped.startswith("##") or stripped.startswith("###"):
+        return None
+    title = stripped[2:].strip()
+    return title or None
+
+
+def _section_parts(markdown: str) -> tuple[List[str], List[str]]:
+    headings: List[str] = []
+    sections: List[List[str]] = []
+    current: Optional[List[str]] = None
+    for line in markdown.splitlines():
+        heading = _section_heading(line)
+        if heading is not None:
+            headings.append(heading)
+            current = []
+            sections.append(current)
+        elif current is not None:
+            current.append(line)
+    return headings, ["\n".join(lines) for lines in sections]
+
+
 def _validate_summary(
     output: DreamingSummarizationOutput,
     *,
@@ -277,7 +301,7 @@ def _validate_summary(
         feedback.append("first_line_must_be_section_heading")
     if re.search(r"(?m)^#\s+\S", output.markdown):
         feedback.append("level_one_heading_forbidden")
-    headings = re.findall(r"(?m)^##\s+(.+?)\s*$", output.markdown)
+    headings, sections = _section_parts(output.markdown)
     normalized_headings = [re.sub(r"[^\w\u4e00-\u9fff]+", " ", value.casefold()).strip() for value in headings]
     if len(normalized_headings) != len(set(normalized_headings)):
         feedback.append("duplicate_section_heading")
@@ -288,12 +312,19 @@ def _validate_summary(
     }
     if any(heading in generic_headings for heading in normalized_headings):
         feedback.append("generic_section_heading")
-    if re.search(r"(?mi)^#{2,3}\s+(?:map summary\s*\d*|e\d{4})\s*$", output.markdown):
+    internal_headings = {
+        line.lstrip("#").strip().casefold()
+        for line in output.markdown.splitlines()
+        if line.startswith(("## ", "### "))
+    }
+    if any(
+        heading.startswith("map summary") or re.fullmatch(r"e\d{4}", heading)
+        for heading in internal_headings
+    ):
         feedback.append("internal_label_heading")
     if re.search(r"\bE\d{4}\b", output.markdown):
         feedback.append("evidence_id_in_content")
     if headings:
-        sections = re.split(r"(?m)^##\s+.+?\s*$", output.markdown)[1:]
         if any(not re.search(r"(?m)^\s*[-*+]\s+\S", section) for section in sections):
             feedback.append("section_without_bullets")
     if re.search(r"```|<\/?[A-Za-z][^>]*>", output.markdown):

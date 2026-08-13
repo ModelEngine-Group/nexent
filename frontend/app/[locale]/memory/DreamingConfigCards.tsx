@@ -53,12 +53,16 @@ function parseCronExpr(
   if (!cronExpr) return null;
   const parts = cronExpr.trim().split(/\s+/);
   if (parts.length < 5) return null;
-  const minute = parseInt(parts[0], 10);
-  const hour = parseInt(parts[1], 10);
+  const minute = Number.parseInt(parts[0], 10);
+  const hour = Number.parseInt(parts[1], 10);
   const dow = parts[4];
-  if (isNaN(minute) || isNaN(hour)) return null;
-  const weekday = dow === "*" ? null : parseInt(dow, 10);
-  return { hour, minute, weekday: isNaN(weekday as number) ? null : weekday };
+  if (Number.isNaN(minute) || Number.isNaN(hour)) return null;
+  const weekday = dow === "*" ? null : Number.parseInt(dow, 10);
+  return {
+    hour,
+    minute,
+    weekday: Number.isNaN(weekday as number) ? null : weekday,
+  };
 }
 
 function buildCronExpr(
