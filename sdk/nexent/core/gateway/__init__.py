@@ -17,14 +17,12 @@ See ``doc/multimodal-gateway-design.md`` for the full design.
 from .multimodal_adapter import ModelInfo, MultimodalAdapter
 from .model_context import (
     EmbeddingContext,
-    LLMSampling,
     LLMContext,
+    LongContextLLMContext,
     ModelContext,
     STTContext,
     TTSContext,
     VLMContext,
-    WSTransport,
-    build_context,
 )
 from .multimodal_gateway import MultimodalGateway, get_gateway
 from .registry import AdapterRegistry, get_registry, register_adapter
@@ -41,13 +39,11 @@ __all__ = [
     "MultimodalAdapter",
     "ModelContext",
     "LLMContext",
+    "LongContextLLMContext",
     "VLMContext",
     "EmbeddingContext",
     "STTContext",
     "TTSContext",
-    "LLMSampling",
-    "WSTransport",
-    "build_context",
     "MultimodalGateway",
     "get_gateway",
     "AdapterRegistry",

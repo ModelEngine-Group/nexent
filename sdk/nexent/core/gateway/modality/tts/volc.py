@@ -85,16 +85,14 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.ws.ws_url if context.ws else None,
-            auth_headers=context.ws.auth_headers if context.ws else None,
+            ws_url=context.ws_url,
+            auth_headers=context.auth_headers,
         )
         self._config = VolcTTSConfig(
             appid=context.model_appid or "",
             token=context.access_token or "",
             speed_ratio=context.speed_ratio,
-            voice_type=context.voice or context.extra.get(
-                "voice_type", "zh_female_vv_uranus_bigtts"
-            ),
+            voice_type=context.voice or context.voice_type or "zh_female_vv_uranus_bigtts",
             ws_url=self._ws_url
             or "wss://openspeech.bytedance.com/api/v1/tts/ws_binary",
         )

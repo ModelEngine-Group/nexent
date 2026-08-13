@@ -91,19 +91,18 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.ws.ws_url if context.ws else None,
-            auth_headers=context.ws.auth_headers if context.ws else None,
+            ws_url=context.ws_url,
+            auth_headers=context.auth_headers,
         )
-        extras = context.extra
         self._config = AliSTTConfig(
             api_key=context.api_key,
             model=context.model_name,
             language=context.language,
             ws_url=self._ws_url,
-            format=extras.get("format", "pcm"),
-            rate=extras.get("rate", 16000),
-            enable_vad=extras.get("enable_vad", True),
-            timeout=extras.get("timeout", 60),
+            format=context.format,
+            rate=context.rate,
+            enable_vad=context.enable_vad,
+            timeout=context.timeout if context.timeout is not None else 60,
         )
         self._audio_file_path = context.audio_file_path
         self._transcription = TranscriptionResult()

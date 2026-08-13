@@ -26,30 +26,30 @@ def _cfg(**over):
 # ---- LLM sampling: falsy-but-valid values must round-trip ----
 
 def test_temperature_zero_round_trips():
-    """temperature=0 (deterministic) must reach sampling, not be dropped by `or`."""
+    """temperature=0 (deterministic) must reach the context, not be dropped by `or`."""
     ctx = _config_to_context(_cfg(), "llm", "llm", None,
                             model_name="m", temperature=0, top_p=0.9)
-    assert ctx.sampling.temperature == 0
-    assert ctx.sampling.top_p == 0.9
+    assert ctx.temperature == 0
+    assert ctx.top_p == 0.9
 
 
 def test_top_p_zero_round_trips():
     ctx = _config_to_context(_cfg(), "llm", "llm", None,
                             model_name="m", top_p=0)
-    assert ctx.sampling.top_p == 0
+    assert ctx.top_p == 0
 
 
 def test_max_output_tokens_zero_round_trips():
     ctx = _config_to_context(_cfg(), "llm", "llm", None,
                             model_name="m", max_output_tokens=0)
-    assert ctx.sampling.max_output_tokens == 0
+    assert ctx.max_output_tokens == 0
 
 
 def test_stream_false_round_trips():
     """stream=False is a real value, not 'unset' (unset is None)."""
     ctx = _config_to_context(_cfg(), "llm", "llm", None,
                             model_name="m", stream=False)
-    assert ctx.sampling.stream is False
+    assert ctx.stream is False
 
 
 # ---- base / TTS numerics ----
@@ -75,20 +75,20 @@ def test_speed_ratio_unset_defaults_to_one():
 
 def test_unset_sampling_fields_stay_none():
     ctx = _config_to_context(_cfg(), "llm", "llm", None, model_name="m")
-    assert ctx.sampling.temperature is None
-    assert ctx.sampling.top_p is None
-    assert ctx.sampling.stream is None
-    assert ctx.sampling.max_output_tokens is None
+    assert ctx.temperature is None
+    assert ctx.top_p is None
+    assert ctx.stream is None
+    assert ctx.max_output_tokens is None
 
 
 # ---- cfg-level values still apply when no per-call extra is given ----
 
 def test_cfg_temperature_applies_when_no_per_call_override():
     ctx = _config_to_context(_cfg(temperature=0.5), "llm", "llm", None, model_name="m")
-    assert ctx.sampling.temperature == 0.5
+    assert ctx.temperature == 0.5
 
 
 def test_per_call_override_wins_over_cfg():
     ctx = _config_to_context(_cfg(temperature=0.5), "llm", "llm", None,
                             model_name="m", temperature=0.2)
-    assert ctx.sampling.temperature == 0.2
+    assert ctx.temperature == 0.2

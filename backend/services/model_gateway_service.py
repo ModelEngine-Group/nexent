@@ -21,10 +21,13 @@ from typing import Any, Dict, Optional
 
 from nexent import MessageObserver
 from nexent.core.gateway import (
-    LLMSampling,
+    EmbeddingContext,
+    LLMContext,
+    LongContextLLMContext,
     ModelContext,
-    WSTransport,
-    build_context,
+    STTContext,
+    TTSContext,
+    VLMContext,
     get_gateway,
 )
 from nexent.core.gateway.registry import get_registry
@@ -108,9 +111,7 @@ def _config_to_context(
     ``construct_extras`` carries per-call-site tuning (temperature, top_p,
     max_output_tokens, stream, observer, display_name, timeout_seconds,
     language, speed_ratio, ...) so construction is behavior-preserving. Known
-    keys are mapped to typed sub-objects / subclass fields; any leftover
-    (e.g. the STT-Ali ``timeout`` key) falls through to the residual ``extra``
-    dict, matching the prior behavior.
+    keys are mapped to subclass fields directly.
     """
     cfg = cfg or {}
     factory = _normalize_factory(cfg.get("model_factory"), modality)
@@ -119,8 +120,8 @@ def _config_to_context(
     if needs_observer and observer is None:
         observer = MessageObserver()
 
-    # ---- base kwargs (通用 + cross-cutting) ----
-    base: Dict[str, Any] = dict(
+    # ---- common kwargs (base class fields) ----
+    common: Dict[str, Any] = dict(
         model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
         base_url=cfg.get("base_url", ""),
         api_key=cfg.get("api_key", ""),
@@ -134,56 +135,82 @@ def _config_to_context(
         timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
     )
 
-    # ---- modality-specific sub-objects / fields ----
-    if modality in ("llm", "llm_long_context", "vlm"):
-        # Sampling params: per-call extras override; cfg-level keys (max_tokens,
-        # truncation_strategy, frequency_penalty, extra_body) for long-context/VLM.
-        # _coalesce (not `or`) so temperature=0 / top_p=0 are preserved.
-        base["sampling"] = LLMSampling(
+    # ---- modality-specific subclass construction ----
+    if modality == "llm":
+        return LLMContext(
+            **common,
             temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
             top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
             stream=construct_extras.pop("stream", None),
             max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            max_tokens=cfg.get("max_tokens"),
-            truncation_strategy=cfg.get("truncation_strategy"),
             frequency_penalty=cfg.get("frequency_penalty"),
             extra_body=cfg.get("extra_body"),
         )
-        if modality == "vlm":
-            caps = construct_extras.pop("capabilities", None)
-            if caps is not None:
-                base["capabilities"] = caps
-    elif modality in ("stt", "tts"):
-        # WS endpoint carried in base_url by the voice services; HTTP-vendor
-        # (ModelEngine) STT/TTS ignore `ws` and read base_url/timeout_seconds.
+    elif modality == "llm_long_context":
+        return LongContextLLMContext(
+            **common,
+            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+            stream=construct_extras.pop("stream", None),
+            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+            frequency_penalty=cfg.get("frequency_penalty"),
+            extra_body=cfg.get("extra_body"),
+            max_tokens=cfg.get("max_tokens"),
+            truncation_strategy=cfg.get("truncation_strategy"),
+        )
+    elif modality == "vlm":
+        caps = construct_extras.pop("capabilities", None) or {}
+        return VLMContext(
+            **common,
+            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+            stream=construct_extras.pop("stream", None),
+            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+            frequency_penalty=cfg.get("frequency_penalty"),
+            extra_body=cfg.get("extra_body"),
+            max_tokens=cfg.get("max_tokens"),
+            capabilities=caps,
+        )
+    elif modality == "stt":
         ws_url = construct_extras.pop("ws_url", None) or cfg.get("base_url")
-        if ws_url:
-            base["ws"] = WSTransport(
-                ws_url=ws_url,
-                auth_headers=construct_extras.pop("auth_headers", None),
-            )
-        base["model_appid"] = cfg.get("model_appid")
-        base["access_token"] = cfg.get("access_token")
-        if modality == "stt":
-            base["language"] = construct_extras.pop("language", "zh") or "zh"
-            base["audio_file_path"] = construct_extras.pop("audio_file_path", None) or TEST_PCM_PATH
-        else:  # tts
-            base["speed_ratio"] = float(
-                _coalesce(construct_extras.pop("speed_ratio", None), cfg.get("speed_ratio"), 1.0)
-            )
-            base["voice"] = construct_extras.pop("voice", None) or cfg.get("voice")
-            base["audio_file_path"] = construct_extras.pop("audio_file_path", None)
+        return STTContext(
+            **common,
+            language=construct_extras.pop("language", "zh") or "zh",
+            audio_file_path=construct_extras.pop("audio_file_path", None) or TEST_PCM_PATH,
+            model_appid=cfg.get("model_appid"),
+            access_token=cfg.get("access_token"),
+            ws_url=ws_url,
+            auth_headers=construct_extras.pop("auth_headers", None),
+            format=construct_extras.pop("format", "pcm"),
+            rate=construct_extras.pop("rate", 16000),
+            resourceid=construct_extras.pop("resourceid", "volc.bigasr.sauc.duration"),
+            enable_vad=construct_extras.pop("enable_vad", True),
+            sample_rate=construct_extras.pop("sample_rate", None),
+            timeout=construct_extras.pop("timeout", 60),
+        )
+    elif modality == "tts":
+        ws_url = construct_extras.pop("ws_url", None) or cfg.get("base_url")
+        return TTSContext(
+            **common,
+            speed_ratio=float(_coalesce(construct_extras.pop("speed_ratio", None), cfg.get("speed_ratio"), 1.0)),
+            voice=construct_extras.pop("voice", None) or cfg.get("voice"),
+            audio_file_path=construct_extras.pop("audio_file_path", None),
+            model_appid=cfg.get("model_appid"),
+            access_token=cfg.get("access_token"),
+            ws_url=ws_url,
+            auth_headers=construct_extras.pop("auth_headers", None),
+            voice_type=construct_extras.pop("voice_type", None),
+            format=construct_extras.pop("format", "mp3"),
+            sample_rate=construct_extras.pop("sample_rate", 16000),
+        )
     elif modality in ("embedding", "multi_embedding"):
-        base["embedding_dim"] = cfg.get("max_tokens", 1024)
-        base["model_type"] = cfg.get("model_type")
-
-    # ---- residual: unmapped per-call extras → extra (behavior-preserving) ----
-    # e.g. the STT-Ali `timeout` key (distinct from `timeout_seconds`) falls
-    # through here and is read by the Ali STT adapter's defaulted extra.get.
-    if construct_extras:
-        base["extra"] = {k: v for k, v in construct_extras.items() if v is not None}
-
-    return build_context(**base)
+        return EmbeddingContext(
+            **common,
+            embedding_dim=cfg.get("max_tokens", 1024),
+            model_type=cfg.get("model_type"),
+        )
+    else:
+        raise ValueError(f"Unknown modality: {modality}")
 
 
 def get_adapter_from_config(

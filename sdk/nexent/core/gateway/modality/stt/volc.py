@@ -128,18 +128,16 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         MultimodalAdapter.__init__(self, context)
         WebSocketTransportMixin.__init__(
             self,
-            ws_url=context.ws.ws_url if context.ws else None,
-            auth_headers=context.ws.auth_headers if context.ws else None,
+            ws_url=context.ws_url,
+            auth_headers=context.auth_headers,
         )
         self._config = VolcSTTConfig(
             appid=context.model_appid or "",
             access_token=context.access_token or "",
             ws_url=self._ws_url or "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-            format=context.extra.get("format", "pcm"),
-            rate=context.extra.get("rate", 16000),
-            resourceid=context.extra.get(
-                "resourceid", "volc.bigasr.sauc.duration"
-            ),
+            format=context.format,
+            rate=context.rate,
+            resourceid=context.resourceid or "volc.bigasr.sauc.duration",
         )
         self._audio_file_path = context.audio_file_path
         self.success_code = 1000
