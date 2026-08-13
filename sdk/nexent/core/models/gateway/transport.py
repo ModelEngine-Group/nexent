@@ -8,34 +8,7 @@ ModelEngine STT/TTS) can therefore take :class:`HttpTransportMixin` instead of
 ``WebSocketTransportMixin``.
 """
 
-from abc import ABC, abstractmethod
 from typing import Optional
-
-
-class Transport(ABC):
-    """Transport-layer contract, orthogonal to modality logic.
-
-    Attributes:
-        transport_type: ``"http"`` or ``"websocket"``.
-    """
-
-    transport_type: str  # "http" | "websocket"
-
-    @abstractmethod
-    async def connect(self) -> None:
-        """Establish the underlying transport session (lazy for HTTP)."""
-
-    @abstractmethod
-    async def close(self) -> None:
-        """Tear down the underlying transport session."""
-
-    @abstractmethod
-    async def health_check(self) -> bool:
-        """Verify the transport endpoint is reachable.
-
-        Returns:
-            True if the endpoint is reachable, False otherwise.
-        """
 
 
 class HttpTransportMixin:

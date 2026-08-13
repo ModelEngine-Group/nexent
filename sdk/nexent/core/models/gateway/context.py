@@ -27,6 +27,7 @@ class ModelContext:
     ``vlm3``/``stt``/``tts``/...) so the gateway can distinguish the VLM slots.
     """
 
+    # ---- 通用 ----
     model_name: str
     base_url: str
     api_key: str
@@ -35,25 +36,33 @@ class ModelContext:
     tenant_id: Optional[str] = None
     slot: Optional[str] = None
     ssl_verify: bool = True
-    # Embedding
+    display_name: Optional[str] = None
+
+    # ---- LLM / VLM ----
+    observer: Any = None
+
+    # ---- Embedding ----
     embedding_dim: Optional[int] = None
     model_type: Optional[str] = None  # "embedding" | "multi_embedding"
-    # Volc
-    model_appid: Optional[str] = None
-    access_token: Optional[str] = None
-    # TTS
-    speed_ratio: float = 1.0
-    voice: Optional[str] = None
-    # STT
+
+    # ---- STT ----
     language: str = "zh"
     audio_file_path: Optional[str] = None
-    # LLM/VLM need a MessageObserver
-    observer: Any = None
-    display_name: Optional[str] = None
-    # Capability declaration, replaces hardcoded URL sniffing
+
+    # ---- TTS ----
+    speed_ratio: float = 1.0
+    voice: Optional[str] = None
+
+    # ---- Volc (STT/TTS) ----
+    model_appid: Optional[str] = None
+    access_token: Optional[str] = None
+
+    # ---- 能力声明 ----
     capabilities: Dict[str, bool] = field(default_factory=dict)
-    # Protocol-specific extras (WS URL, format, rate, max_tokens,
-    # truncation_strategy, timeout_seconds, extra_body, ...)
+
+    # ---- 协议特定扩展 ----
+    # (WS URL, format, rate, max_tokens, truncation_strategy, timeout_seconds,
+    # extra_body, ...)
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def cache_key(self) -> tuple:

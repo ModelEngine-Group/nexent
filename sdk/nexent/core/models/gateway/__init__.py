@@ -20,7 +20,6 @@ from .gateway import MultimodalGateway, get_gateway
 from .registry import AdapterRegistry, get_registry, register_adapter
 from .transport import (
     HttpTransportMixin,
-    Transport,
     WebSocketTransportMixin,
 )
 
@@ -36,7 +35,6 @@ __all__ = [
     "AdapterRegistry",
     "get_registry",
     "register_adapter",
-    "Transport",
     "HttpTransportMixin",
     "WebSocketTransportMixin",
     "modality",

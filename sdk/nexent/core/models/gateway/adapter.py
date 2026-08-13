@@ -119,16 +119,3 @@ class MultimodalAdapter(ABC):
             The model's capability declaration.
         """
         raise NotImplementedError
-
-    @property
-    def info(self) -> dict:
-        """Returns a short summary dict for this adapter.
-
-        Returns:
-            A dict with ``modality``, ``factory``, and ``model_name``.
-        """
-        return {
-            "modality": self.modality,
-            "factory": self.factory,
-            "model_name": self._context.model_name,
-        }
