@@ -19,6 +19,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List
 
+from ...openai_llm import OpenAIModel
+from ...openai_long_context_model import OpenAILongContextModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -137,8 +139,6 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         )
 
     def _build_model(self) -> None:
-        from ...openai_llm import OpenAIModel
-
         # model_id / api_base / api_key are consumed by smolagents
         # OpenAIServerModel via **kwargs forwarding; observer / ssl_verify /
         # model_factory / display_name / timeout_seconds are named on OpenAIModel.
@@ -213,8 +213,6 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
     modality = "llm_long_context"
 
     def _build_model(self) -> None:
-        from ...openai_long_context_model import OpenAILongContextModel
-
         extras = self._context.extra
         self._model = OpenAILongContextModel(
             observer=self._context.observer,

@@ -20,6 +20,7 @@ import gzip
 import io
 import json
 import logging
+import traceback
 import uuid
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Union
 
 import websockets
 
+from ...openai_llm import OpenAIModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -911,7 +913,6 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
         except Exception as e:
             logger.error(f"Ali TTS connectivity test failed with exception: {str(e)}")
-            import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
@@ -1115,7 +1116,6 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return is_success
         except Exception as e:
             logger.error("Volc TTS connectivity test failed with exception: " + str(e))
-            import traceback
             logger.error("Volc TTS connectivity test exception traceback: " + traceback.format_exc())
             return False
 
@@ -1170,8 +1170,6 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
 
     def _build_model(self) -> None:
         """Build the wrapped OpenAIModel on first use."""
-        from ...openai_llm import OpenAIModel
-
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,

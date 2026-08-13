@@ -19,6 +19,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Dict, List, Optional, Union
 
+from ...openai_llm import OpenAIModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -72,8 +73,6 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
-        from ...openai_llm import OpenAIModel
-
         extras = self._context.extra
         # Preserve the VLM sampling defaults that OpenAIVLModel used to set on
         # its own instance; allow per-call-site overrides via context.extra.

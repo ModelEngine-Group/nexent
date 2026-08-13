@@ -23,6 +23,7 @@ import json
 import logging
 import mimetypes
 import time
+import traceback
 import uuid
 import wave
 from abc import abstractmethod
@@ -33,6 +34,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 import aiofiles
 import websockets
 
+from ...openai_llm import OpenAIModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -606,7 +608,6 @@ class AliSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return is_success
         except Exception as e:
             logger.error(f"STT connectivity test failed with exception: {str(e)}")
-            import traceback
             logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False
 
@@ -1230,7 +1231,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
-            import traceback
             traceback.print_exc()
             return {"error": f"Unexpected error: {str(e)}"}
 
@@ -1427,7 +1427,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         except Exception as e:
             error_msg = f"Error in streaming session: {str(e)}"
             logger.error(f"{error_msg}")
-            import traceback
             traceback.print_exc()
             if client_connected:
                 try:
@@ -1454,7 +1453,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
         except Exception as e:
             error_msg = f"Error in streaming session: {str(e)}"
             logger.error(f"{error_msg}")
-            import traceback
             traceback.print_exc()
             await ws_client.send_json({"error": error_msg})
 
@@ -1493,7 +1491,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
             return is_success
         except Exception as e:
             logger.error(f"STT connectivity test failed with exception: {str(e)}")
-            import traceback
             logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False
 
@@ -1570,8 +1567,6 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
 
     def _build_model(self) -> None:
         """Lazily build the wrapped OpenAIModel from the context."""
-        from ...openai_llm import OpenAIModel
-
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
