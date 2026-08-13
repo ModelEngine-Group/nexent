@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..adapter import ModelInfo, MultimodalAdapter
-from ..context import ModelContext
+from ..multimodal_adapter import ModelInfo, MultimodalAdapter
+from ..model_context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin
 

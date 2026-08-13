@@ -14,9 +14,9 @@ registers all built-in adapters with the process-wide registry.
 See ``doc/multimodal-gateway-design.md`` for the full design.
 """
 
-from .adapter import ModelInfo, MultimodalAdapter
-from .context import ModelContext
-from .gateway import MultimodalGateway, get_gateway
+from .multimodal_adapter import ModelInfo, MultimodalAdapter
+from .model_context import ModelContext
+from .multimodal_gateway import MultimodalGateway, get_gateway
 from .registry import AdapterRegistry, get_registry, register_adapter
 from .transport import (
     HttpTransportMixin,

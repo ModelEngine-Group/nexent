@@ -21,8 +21,8 @@ from typing import Any, AsyncIterator, Dict, List
 
 from ...openai_llm import OpenAIModel
 from ...openai_long_context_model import OpenAILongContextModel
-from ..adapter import ModelInfo, MultimodalAdapter
-from ..context import ModelContext
+from ..multimodal_adapter import ModelInfo, MultimodalAdapter
+from ..model_context import ModelContext
 from ..registry import register_adapter
 from ..transport import HttpTransportMixin
 
