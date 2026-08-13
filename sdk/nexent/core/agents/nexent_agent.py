@@ -22,8 +22,8 @@ from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 
 from ..a2ui.integration import is_a2ui_enabled, get_a2ui_system_prompt
-from ..a2ui.parser import may_contain_a2ui_content
-from ..a2ui.finalizer import A2UIResponseFinalizer, should_finalize_a2ui_content
+from ..a2ui.parser import may_contain_a2ui_content, strip_tagged_a2ui_blocks
+from ..a2ui.finalizer import should_finalize_a2ui_content
 from ..a2ui.validator import validate_a2ui_response
 from ..a2ui.constants import A2UI_OPEN_TAG
 
@@ -910,7 +910,7 @@ class NexentAgent:
                     final_answer_str = re.sub(
                         THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
                     
-                    # A2UI finalization: validate and repair structured UI content
+                    # A2UI finalization: validate structured UI content
                     if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
                         try:
                             a2ui_validation = validate_a2ui_response(final_answer_str)
@@ -922,26 +922,18 @@ class NexentAgent:
                                     final_answer_str,
                                 )
                             else:
-                                # Attempt repair
-                                finalizer = A2UIResponseFinalizer()
-                                import asyncio
-                                import inspect as insp
-                                async def _noop_repair(prompt):
-                                    return None
-                                loop = asyncio.get_event_loop()
-                                result = loop.run_until_complete(
-                                    finalizer.finalize_result(
-                                        final_answer_str,
-                                        user_query=self._last_query or "",
-                                        request_id=str(id(self)),
-                                        repair_call=None,
-                                        max_repair_attempts=1,
-                                    )
+                                # Validation failed - degrade by stripping A2UI tags
+                                stripped = strip_tagged_a2ui_blocks(final_answer_str)
+                                if stripped:
+                                    final_answer_str = stripped
+                                else:
+                                    final_answer_str = "界面生成失败，请重试。"
+                                logger.warning(
+                                    "A2UI validation failed: %s", a2ui_validation.error
                                 )
-                                final_answer_str = result.content
                         except Exception as a2ui_err:
                             logger.warning("A2UI finalization error: %s", a2ui_err)
-                    
+
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,
