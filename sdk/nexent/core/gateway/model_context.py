@@ -1,27 +1,12 @@
 """Modality-specific construction contexts for the gateway.
 
-The historical ``ModelContext`` was a single 20-field dataclass consolidating
-every modality's construction params (LLM/VLM observer+model_id; Embedding
-dim+model_type; Rerank name+url; STT/TTS Config+audio path; LongContext
-max_context_tokens+truncation_strategy). Passing ``temperature`` to an STT
-build, or ``speed_ratio`` to an LLM, silently landed in ``extra`` and was
-ignored — no error, no signal.
-
-This module splits that monolith into a slim :class:`ModelContext` base +
-modality subclasses (``LLMContext`` / ``VLMContext`` / ``EmbeddingContext`` /
-``STTContext`` / ``TTSContext``), each declaring only the fields its modality
-reads. The LLM/VLM sampling params and the WS endpoint — previously untyped
-keys in ``extra`` — are promoted to typed sub-objects (:class:`LLMSampling`,
-:class:`WSTransport`). Constructing a context via :func:`build_context` returns
-the subclass for its modality, so reading ``context.sampling.temperature`` on
-an STT context raises ``AttributeError`` rather than silently no-opping.
-
-``modality`` / ``factory`` / ``tenant_id`` / ``slot`` are gateway-dispatch and
-cache-key concerns, read only by :class:`MultimodalGateway`; they stay on the
-base. ``observer`` is cross-cutting (LLM/VLM *and* ModelEngine STT/TTS wrap
-:class:`OpenAIModel`), so it too stays on the base. ``timeout_seconds`` — the
-single most-used ``extra`` key, read by every HTTP-backed adapter — is promoted
-to a base field.
+A slim :class:`ModelContext` base plus modality subclasses
+(``LLMContext`` / ``VLMContext`` / ``EmbeddingContext`` / ``STTContext`` /
+``TTSContext``), each declaring only the fields its modality reads. The
+LLM/VLM sampling params and the WS endpoint are typed sub-objects
+(:class:`LLMSampling`, :class:`WSTransport`) rather than untyped ``extra``
+keys. :func:`build_context` selects the subclass by modality — the single
+construction entry used by the bridge, ``memory.embedding_model``, and tests.
 """
 
 from __future__ import annotations
@@ -77,7 +62,7 @@ class WSTransport:
 
 @dataclass
 class ModelContext:
-    """Slim base construction context — 通用 + cross-cutting + residual.
+    """Slim base construction context — common, cross-cutting, and residual fields.
 
     ``modality`` is the capability family: ``llm`` | ``llm_long_context`` |
     ``vlm`` | ``stt`` | ``tts`` | ``embedding`` | ``multi_embedding`` |
@@ -109,7 +94,7 @@ class ModelContext:
             dispatch, not in the context).
     """
 
-    # ---- 通用 ----
+    # ---- common ----
     model_name: str
     base_url: str
     api_key: str
@@ -233,6 +218,8 @@ class TTSContext(ModelContext):
     ws: Optional[WSTransport] = None
 
 
+# Modality → context subclass. ``build_context`` selects from here; an unknown
+# modality (e.g. ``rerank``) falls back to the base ``ModelContext``.
 _SUBCLASS_FOR: Dict[str, type] = {
     "llm": LLMContext,
     "llm_long_context": LLMContext,
