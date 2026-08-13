@@ -1,9 +1,8 @@
-"""Embedding adapter — text and multimodal embedding via HTTP REST."""
+"""Embedding adapter root: request type + shared text/multimodal embedding machinery."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
 from abc import abstractmethod
@@ -13,12 +12,11 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 
 from nexent.monitor import record_model_call
-from ...multimodal_adapter import ModelInfo, MultimodalAdapter
+
 from ...model_context import EmbeddingContext
-from ...registry import register_adapter
+from ...multimodal_adapter import MultimodalAdapter
 from ...transport import HttpTransportMixin
 
-logger = logging.getLogger(__name__)
 
 ASSETS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), "assets"
@@ -158,8 +156,6 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
             return False
 
 
-# ---- multimodal embedding adapters (Jina / DashScope / Siliconflow) ----
-
 class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
     """Shared multimodal logic: get_embeddings delegates to get_multimodal_embeddings."""
 
@@ -260,216 +256,3 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
 def _is_multimodal(inputs: Any) -> bool:
     """Returns True if ``inputs`` is a non-empty list of dicts."""
     return isinstance(inputs, list) and bool(inputs) and isinstance(inputs[0], dict)
-
-
-@register_adapter("jina", "multi_embedding")
-class JinaEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """Jina multimodal embedding adapter.
-
-    Attributes:
-        factory: ``"jina"``.
-    """
-
-    factory = "jina"
-
-    def _prepare_multimodal_input(self, inputs):
-        """Build the Jina multimodal request body."""
-        prepared = []
-        for item in inputs:
-            if "text" in item:
-                prepared.append(item)
-            elif "image" in item:
-                img = item["image"]
-                if isinstance(img, bytes):
-                    mime = _detect_image_mime(img)
-                    img = f"data:{mime};base64,{base64.b64encode(img).decode('utf-8')}"
-                prepared.append({"image": img})
-            else:
-                prepared.append(item)
-        return {"model": self._model_name, "input": prepared, "truncate": True}
-
-    def _extract_embeddings(self, response):
-        """Extract embedding vectors from a Jina response."""
-        return [item["embedding"] for item in response["data"]]
-
-    def _test_inputs(self):
-        """Return sample text + image inputs for connectivity checks."""
-        test_image_path = os.path.join(ASSETS_DIR, "test.png")
-        with open(test_image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-        return [
-            {"text": "Hello, nexent!"},
-            {"image": f"data:image/png;base64,{image_data}"},
-        ]
-
-    def get_model_info(self) -> ModelInfo:
-        """Return ``ModelInfo`` with text + multimodal capabilities."""
-        return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
-
-
-@register_adapter("dashscope", "multi_embedding")
-class DashScopeEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """DashScope multimodal embedding adapter.
-
-    Attributes:
-        factory: ``"dashscope"``.
-    """
-
-    factory = "dashscope"
-
-    def _prepare_multimodal_input(self, inputs):
-        """Build the DashScope multimodal request body."""
-        normalized = []
-        for item in inputs:
-            if "image" in item:
-                img = item["image"]
-                if isinstance(img, bytes):
-                    img = f"data:image/png;base64,{base64.b64encode(img).decode('utf-8')}"
-                normalized.append({"image": img})
-            else:
-                normalized.append(item)
-        return {"model": self._model_name, "input": {"contents": normalized}}
-
-    def _extract_embeddings(self, response):
-        """Extract embedding vectors from a DashScope response."""
-        return [item["embedding"] for item in response["output"]["embeddings"]]
-
-    def _test_inputs(self):
-        """Return sample text + image inputs for connectivity checks."""
-        test_image_path = os.path.join(ASSETS_DIR, "test.png")
-        with open(test_image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-        return [
-            {"text": "Hello, nexent!"},
-            {"image": f"data:image/png;base64,{image_data}"},
-        ]
-
-    def get_model_info(self) -> ModelInfo:
-        """Return ``ModelInfo`` with text + multimodal capabilities."""
-        return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
-
-
-@register_adapter("siliconflow", "multi_embedding")
-class SiliconflowEmbeddingAdapter(_MultimodalEmbeddingAdapter):
-    """SiliconFlow multimodal embedding adapter.
-
-    Attributes:
-        factory: ``"siliconflow"``.
-    """
-
-    factory = "siliconflow"
-
-    def _prepare_multimodal_input(self, inputs):
-        """Build the SiliconFlow multimodal request body."""
-        prepared = []
-        for item in inputs:
-            if "text" in item:
-                prepared.append(item["text"])
-            elif "image" in item:
-                img = item["image"]
-                if isinstance(img, bytes):
-                    mime = _detect_image_mime(img)
-                    img = f"data:{mime};base64,{base64.b64encode(img).decode('utf-8')}"
-                prepared.append({"image": img})
-            else:
-                prepared.append(item)
-        return {"model": self._model_name, "input": prepared}
-
-    def _extract_embeddings(self, response):
-        """Extract embedding vectors from a SiliconFlow response."""
-        return [item["embedding"] for item in response["data"]]
-
-    def _test_inputs(self):
-        """Return sample text + raw image-bytes inputs for connectivity checks."""
-        test_image_path = os.path.join(ASSETS_DIR, "test.png")
-        with open(test_image_path, "rb") as f:
-            image_data = f.read()
-        return [
-            {"text": "Hello, nexent!"},
-            {"image": image_data},
-        ]
-
-    def get_model_info(self) -> ModelInfo:
-        """Return ``ModelInfo`` with text + multimodal capabilities."""
-        return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": True})
-
-
-# ---- text embedding adapter (OpenAI-compatible) ----
-
-@register_adapter("openai", "embedding")
-class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
-    """OpenAI-compatible text embedding adapter.
-
-    Attributes:
-        factory: ``"openai"``.
-    """
-
-    factory = "openai"
-
-    def _prepare_input(self, inputs):
-        """Normalizes inputs to a list and builds the request body."""
-        if isinstance(inputs, str):
-            inputs = [inputs]
-        return {"model": self._model_name, "input": inputs}
-
-    def get_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        """Embeds text inputs via the OpenAI-compatible endpoint.
-
-        Args:
-            inputs: A string or an iterable of strings to embed.
-            with_metadata: If True, returns the raw provider response instead
-                of embedding vectors.
-            timeout: Optional per-request timeout; defaults to
-                ``retry_timeout_step``.
-            retries: Number of retries on timeout.
-            retry_timeout_step: Seconds added to the timeout per retry.
-
-        Returns:
-            A list of embedding vectors, or the raw response when
-            ``with_metadata`` is True.
-        """
-        with record_model_call("embedding", self._model_name, display_name=self._model_name):
-            data = self._prepare_input(inputs)
-            base_timeout = timeout if timeout is not None else retry_timeout_step
-            attempts = retries + 1
-
-            def _do(current):
-                response = self._make_request(data, timeout=current)
-                if with_metadata:
-                    return response
-                return [item["embedding"] for item in response["data"]]
-
-            return self._retry(attempts, base_timeout, retry_timeout_step, _do, "OpenAI")
-
-    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
-        """Runs a connectivity check with a sample text input.
-
-        Args:
-            timeout: Timeout in seconds for the check.
-
-        Returns:
-            The embedding vectors from the sample request, or an empty list if
-            the check fails.
-        """
-        try:
-            return await asyncio.to_thread(self.get_embeddings, "Hello, nexent!", timeout=timeout)
-        except requests.exceptions.Timeout:
-            logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
-            return []
-        except requests.exceptions.ConnectionError:
-            logging.error("OpenAI embedding connection error")
-            return []
-        except Exception as e:
-            logging.error(f"OpenAI embedding connection failed: {str(e)}")
-            return []
-
-    async def invoke(self, request: EmbeddingRequest):
-        """Embed ``request.inputs`` (text), offloaded to a worker thread."""
-        return await asyncio.to_thread(
-            self.get_embeddings, request.inputs,
-            with_metadata=request.with_metadata, timeout=request.timeout,
-        )
-
-    def get_model_info(self) -> ModelInfo:
-        """Return ``ModelInfo`` with text capability (no multimodal)."""
-        return ModelInfo(self._context.model_name, self._context.display_name or "", self.factory, {"text": True, "multimodal": False})

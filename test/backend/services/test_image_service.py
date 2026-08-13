@@ -21,13 +21,9 @@ helpers_env["mock_const"].MODEL_CONFIG_MAPPING = {
 }
 mock_const = helpers_env["mock_const"]
 
-from services.image_service import get_image_understanding_model, get_video_understanding_model, get_vlm_model, proxy_image_impl
+from services.image_service import proxy_image_impl
 from services import image_service as image_service_module
 from services.image_service import _validate_loopback_url
-
-image_service_module = sys.modules[get_vlm_model.__module__]
-if "services" in sys.modules:
-    setattr(sys.modules["services"], "image_service", image_service_module)
 
 # Sample test data
 test_url = "https://example.com/image.jpg"
@@ -314,101 +310,6 @@ async def test_proxy_image_impl_url_encoding():
         called_url = mock_session.get.call_args[0][0]
         assert "http://mock-data-process-service/tasks/load_image" in called_url
         assert f"url={encoded_url}" in called_url
-
-
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
-def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
-    """Ensure get_vlm_model builds OpenAIVLModel with tenant config."""
-    mock_config = {
-        "base_url": "https://mock-api",
-        "api_key": "secret",
-        "model_name": "gpt-4v"
-    }
-    mock_tenant_config_manager.get_model_config.return_value = mock_config
-    mock_get_model_name.return_value = "gpt-4v"
-    mock_model_instance = MagicMock()
-    mock_openai_vl_model.return_value = mock_model_instance
-
-    result = get_vlm_model("tenant-1")
-
-    mock_tenant_config_manager.get_model_config.assert_called_once_with(
-        key="vlm_model_config",
-        tenant_id="tenant-1"
-    )
-    mock_message_observer.assert_called_once_with()
-    mock_openai_vl_model.assert_called_once_with(
-        observer=mock_message_observer.return_value,
-        model_id="gpt-4v",
-        api_base="https://mock-api",
-        api_key="secret",
-        temperature=0.7,
-        top_p=0.7,
-        frequency_penalty=0.5,
-        max_tokens=512,
-        ssl_verify=True,
-        model_factory=None,
-        display_name=None
-    )
-    assert result == mock_model_instance
-
-
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
-def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
-    """Return None when tenant config is None."""
-    mock_tenant_config_manager.get_model_config.return_value = None
-    mock_model_instance = MagicMock()
-    mock_openai_vl_model.return_value = mock_model_instance
-
-    result = get_vlm_model("tenant-3")
-
-    # get_model_name_from_config should not be called because config is None
-    mock_get_model_name.assert_not_called()
-    # OpenAIVLModel should not be called when config is None
-    mock_openai_vl_model.assert_not_called()
-    assert result is None
-
-
-@patch.object(image_service_module, 'get_vlm_model')
-def test_get_image_understanding_model_uses_first_multimodal_slot(mock_get_vlm_model):
-    """Ensure the image understanding alias keeps using the first multimodal slot."""
-    mock_get_vlm_model.return_value = "image-understanding-model"
-
-    result = get_image_understanding_model("tenant-1")
-
-    mock_get_vlm_model.assert_called_once_with(tenant_id="tenant-1")
-    assert result == "image-understanding-model"
-
-
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
-def test_get_video_understanding_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
-    """Ensure video understanding tools use the third multimodal model slot."""
-    mock_config = {
-        "base_url": "https://mock-video-api",
-        "api_key": "secret",
-        "model_name": "video-model"
-    }
-    mock_tenant_config_manager.get_model_config.return_value = mock_config
-    mock_get_model_name.return_value = "video-model"
-    mock_model_instance = MagicMock()
-    mock_openai_vl_model.return_value = mock_model_instance
-
-    result = get_video_understanding_model("tenant-1")
-
-    mock_tenant_config_manager.get_model_config.assert_called_once_with(
-        key="video_model_config",
-        tenant_id="tenant-1"
-    )
-    mock_openai_vl_model.assert_called_once()
-    assert result == mock_model_instance
 
 
 # ---------------------------------------------------------------------------

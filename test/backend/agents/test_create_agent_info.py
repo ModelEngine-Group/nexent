@@ -250,6 +250,11 @@ sys.modules['services.image_service'] = _create_stub_module(
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
 )
+sys.modules['services.model_gateway_service'] = _create_stub_module(
+    "services.model_gateway_service",
+    get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
+    get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
+)
 sys.modules['services.memory_config_service'] = MagicMock()
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
@@ -1113,7 +1118,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1134,7 +1139,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_vlm_model.assert_called_once_with("tenant_1", None, slot="vlm")
             # Verify metadata includes validate_url_access lambda
             assert "vlm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1157,7 +1162,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_video_understanding_model') as mock_get_video_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_video_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
             mock_search_tools.return_value = [
@@ -1178,7 +1183,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_video_model.assert_called_once_with("tenant_1", None, slot="vlm3")
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
@@ -1192,7 +1197,7 @@ class TestCreateToolConfigList:
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
@@ -1213,7 +1218,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
+            mock_get_llm_model.assert_called_once_with("tenant_1", None, modality="llm_long_context")
             # Verify metadata includes validate_url_access lambda
             assert "llm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -1585,7 +1590,7 @@ class TestCreateToolConfigList:
                 patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
                 patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
                 patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.side_effect = [kb_tool, analyze_tool]
             mock_get_vector_db_core.return_value = 'vdb-core'
             mock_embedding.return_value = ('embedding-model', 1, {'status': 'ok'})
@@ -1664,7 +1669,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model', return_value='llm-model'):
+                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
@@ -1843,7 +1848,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_model') as mock_get_vlm_model, \
+                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 
@@ -1887,7 +1892,7 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
                 patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
 

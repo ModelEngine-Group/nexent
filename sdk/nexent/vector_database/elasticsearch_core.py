@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from elasticsearch import Elasticsearch, exceptions
 
-from ..core.gateway.modality.embedding import EmbeddingAdapter
+from ..core.gateway.modality import EmbeddingAdapter
 from ..core.nlp.tokenizer import calculate_term_weights
 from .base import VectorDatabaseCore
 from .utils import build_weighted_query, format_size

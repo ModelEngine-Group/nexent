@@ -49,18 +49,6 @@ sys.modules[
 ] = openai_long_ctx_mod
 nexent_core_models_pkg.OpenAILongContextModel = OpenAILongContextModel
 
-openai_vlm_mod = types.ModuleType("nexent.core.models.openai_vlm")
-
-
-class OpenAIVLModel:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-openai_vlm_mod.OpenAIVLModel = OpenAIVLModel
-sys.modules["nexent.core.models.openai_vlm"] = openai_vlm_mod
-nexent_core_models_pkg.OpenAIVLModel = OpenAIVLModel
-
 # Create stub vector database modules to satisfy imports
 vector_db_module = types.ModuleType("nexent.vector_database")
 vector_db_module.__path__ = []  # Mark as package

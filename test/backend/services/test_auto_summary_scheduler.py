@@ -137,7 +137,6 @@ class StubModel:
 
 
 models_mod.OpenAIModel = StubModel
-models_mod.OpenAIVLModel = StubModel
 models_mod.OpenAILongContextModel = StubModel
 setattr(core_mod, 'models', models_mod)
 

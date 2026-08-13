@@ -152,7 +152,6 @@ def setup_common_mocks():
     sys.modules['nexent.core'] = nexent_core_mock
     sys.modules['nexent.core.models'] = nexent_core_models_mock
     sys.modules['nexent.core.models.openai_long_context_model'] = MagicMock()
-    sys.modules['nexent.core.models.openai_vlm'] = MagicMock()
     sys.modules['nexent.storage'] = nexent_storage_mock
     sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
 

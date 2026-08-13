@@ -1,4 +1,4 @@
-"""VLM (vision-language model) adapter — image/audio/video understanding."""
+"""OpenAI-compatible VLM adapter (protocol lives on the adapter)."""
 
 from __future__ import annotations
 
@@ -6,59 +6,20 @@ import asyncio
 import base64
 import logging
 import os
-from abc import abstractmethod
-from dataclasses import dataclass
-from typing import Any, BinaryIO, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Dict, List, Union
 
 from nexent.core.models import OpenAIModel
-from ...multimodal_adapter import ModelInfo, MultimodalAdapter
+
 from ...model_context import VLMContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
+from .vlm_adapter import VLMAdapter, VLMRequest
+
 
 logger = logging.getLogger(__name__)
 
 _METHOD_MAP = {"image": "analyze_image", "audio": "analyze_audio", "video": "analyze_video"}
-
-
-@dataclass
-class VLMRequest:
-    """VLM understanding request.
-
-    Attributes:
-        media_type: ``"image"`` | ``"audio"`` | ``"video"``.
-        media_input: A file path or a binary file-like object of the media.
-        prompt: System prompt guiding the analysis.
-        stream: Whether to stream the response.
-        kwargs: Extra arguments forwarded to the ``analyze_*`` method.
-    """
-
-    media_type: str  # "image" | "audio" | "video"
-    media_input: Union[str, BinaryIO]
-    prompt: str = ""
-    stream: bool = True
-    kwargs: Optional[Dict[str, Any]] = None
-
-
-class VLMAdapter(MultimodalAdapter):
-    """VLM adapter root.
-
-    Attributes:
-        modality: ``"vlm"``.
-    """
-
-    modality = "vlm"
-
-    @abstractmethod
-    async def invoke(self, request: VLMRequest) -> Any:
-        """Analyze ``media_input`` with ``prompt`` and return a ChatMessage.
-
-        Args:
-            request: The VLM request describing the media and prompt to use.
-
-        Returns:
-            A smolagents ``ChatMessage`` for the analyzed media.
-        """
 
 
 @register_adapter("openai", "vlm")
@@ -358,14 +319,3 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             provider=self.factory,
             capabilities=caps,
         )
-
-
-@register_adapter("modelengine", "vlm")
-class ModelEngineVLMAdapter(OpenAIVLMAdapter):
-    """ModelEngine VLM — protocol identical to OpenAI; only ``factory`` differs.
-
-    Attributes:
-        factory: ``"modelengine"``.
-    """
-
-    factory = "modelengine"

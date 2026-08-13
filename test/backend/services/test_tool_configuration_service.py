@@ -415,6 +415,10 @@ services_modules = {
         'get_vlm_model': MagicMock(),
         'get_video_understanding_model': MagicMock(),
     },
+    'model_gateway_service': {
+        'get_llm_adapter': MagicMock(),
+        'get_vlm_adapter': MagicMock(),
+    },
 }
 for service_name, attrs in services_modules.items():
     service_module = types.ModuleType(f'services.{service_name}')
@@ -446,6 +450,10 @@ services_modules = {
     'image_service': {
         'get_vlm_model': MagicMock(),
         'get_video_understanding_model': MagicMock(),
+    },
+    'model_gateway_service': {
+        'get_llm_adapter': MagicMock(),
+        'get_vlm_adapter': MagicMock(),
     },
 }
 for service_name, attrs in services_modules.items():
@@ -482,63 +490,9 @@ try:
 except Exception:
     # If file_management_service cannot be imported in this isolated test
     # environment, fall back to a stub so patches that target the module
-    # still have something to attach to. The stub mirrors the real function
-    # so that tests like ``TestGetLlmModel`` (which import
-    # ``get_llm_model`` from this module and rely on patches of
-    # ``OpenAILongContextModel`` / ``MessageObserver`` / etc.) continue to
-    # work. All dependencies are looked up on the module's ``__dict__`` at
-    # call time so ``@patch('backend.services.file_management_service.X')``
-    # decorations override the stubs.
+    # (e.g. ``validate_urls_access``) still have something to attach to.
     backend_file_management_module = types.ModuleType(
         'backend.services.file_management_service')
-    backend_file_management_module.MODEL_CONFIG_MAPPING = {}
-    # These MagicMock defaults exist so that ``@patch(...)`` decorators can
-    # call ``get_original()`` (which needs to read the current value on the
-    # module). When the try-branch runs the real module replaces this stub, so
-    # all the MagicMocks are shadowed by the real implementation.
-    backend_file_management_module.MessageObserver = MagicMock()
-    backend_file_management_module.OpenAILongContextModel = MagicMock()
-    backend_file_management_module.get_model_name_from_config = MagicMock(
-        return_value="stub-model")
-    backend_file_management_module.tenant_config_manager = MagicMock()
-    backend_file_management_module.validate_urls_access = MagicMock(
-        return_value=True)
-
-    def _stub_get_llm_model(tenant_id):
-        # Look up the *real* module from sys.modules so that
-        # ``@patch('backend.services.file_management_service.X')`` decorators
-        # (which modify sys.modules['backend.services.file_management_service'])
-        # are respected. If the real module was successfully imported (try branch)
-        # we get its patched names; if the except branch runs we fall back to
-        # the stub's own MagicMock attributes.
-        real_mod = sys.modules.get('backend.services.file_management_service',
-                                  backend_file_management_module)
-        mapping = getattr(real_mod, 'MODEL_CONFIG_MAPPING', {}) or {}
-        config_key = mapping.get("llm", "llm_config_key")
-        manager = getattr(real_mod, 'tenant_config_manager', None)
-        main_model_config = (
-            manager.get_model_config(key=config_key, tenant_id=tenant_id)
-            if manager else None
-        )
-        timeout_seconds = (
-            main_model_config.get("timeout_seconds")
-            if main_model_config else None
-        )
-        OpenAIModel = getattr(real_mod, 'OpenAILongContextModel', MagicMock())
-        Observer = getattr(real_mod, 'MessageObserver', MagicMock())
-        get_name = getattr(real_mod, 'get_model_name_from_config',
-                           MagicMock(return_value="stub-model"))
-        return OpenAIModel(
-            observer=Observer(),
-            model_id=get_name(main_model_config),
-            api_base=(main_model_config or {}).get("base_url"),
-            api_key=(main_model_config or {}).get("api_key"),
-            max_context_tokens=(main_model_config or {}).get("max_tokens"),
-            ssl_verify=(main_model_config or {}).get("ssl_verify", True),
-            timeout_seconds=timeout_seconds,
-        )
-
-    backend_file_management_module.get_llm_model = _stub_get_llm_model
     backend_file_management_module.validate_urls_access = MagicMock(
         return_value=True)
     sys.modules['backend.services.file_management_service'] = (
@@ -577,8 +531,6 @@ patch('services.vectordatabase_service.get_vector_db_core', MagicMock()).start()
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
-patch('services.image_service.get_vlm_model', MagicMock()).start()
-patch('services.image_service.get_video_understanding_model', MagicMock()).start()
 patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
 # Ensure this module always uses the real consts.model instead of mocks injected by other test files.
@@ -3289,7 +3241,7 @@ class TestValidateLocalToolAnalyzeImage:
     """Test cases for _validate_local_tool with analyze_image tool."""
 
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_validate_local_tool_analyze_image_success(self, mock_signature, mock_get_class, mock_get_vlm_model, mock_minio_client):
@@ -3315,7 +3267,7 @@ class TestValidateLocalToolAnalyzeImage:
         )
 
         assert result == "analyze image result"
-        mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_vlm_model.assert_called_once_with("tenant1", None, slot="vlm")
         mock_tool_class.assert_called_once()
         call_kwargs = mock_tool_class.call_args.kwargs
         assert 'vlm_model' in call_kwargs
@@ -3362,7 +3314,7 @@ class TestValidateLocalToolAnalyzeAudioVideo:
 
     @pytest.mark.parametrize("tool_name", ["analyze_audio", "analyze_video"])
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_video_understanding_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_validate_local_tool_analyze_audio_video_success(
@@ -3389,7 +3341,7 @@ class TestValidateLocalToolAnalyzeAudioVideo:
         )
 
         assert result == f"{tool_name} result"
-        mock_get_video_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_video_model.assert_called_once_with("tenant1", None, slot="vlm3")
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs["vlm_model"] == "mock_video_model"
         assert "storage_client" in call_kwargs
@@ -3739,7 +3691,7 @@ class TestValidateLocalToolAnalyzeTextFile:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://data-process-service")
     def test_validate_local_tool_analyze_text_file_success(self, mock_minio_client, mock_get_llm_model,
@@ -3792,7 +3744,7 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls
-        mock_get_llm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_llm_model.assert_called_once_with("tenant1", None, modality="llm_long_context")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
@@ -3847,98 +3799,6 @@ class TestValidateLocalToolAnalyzeTextFile:
                 None,  # Missing tenant_id
                 None   # Missing user_id
             )
-
-
-class TestGetLlmModel:
-    """Test cases for get_llm_model function.
-
-    These tests patch ``get_llm_model`` itself (not its internal dependencies)
-    so that they work in all import scenarios: when the real module is loaded,
-    when the fallback stub is used, or when the import path resolves differently
-    in CI vs local environments.
-    """
-
-    def test_get_llm_model_success(self):
-        """Test successful LLM model retrieval"""
-        from backend.services.file_management_service import get_llm_model
-
-        mock_model_instance = Mock()
-        with patch(
-            'backend.services.file_management_service.get_llm_model',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.tenant_config_manager'
-        ), patch(
-            'backend.services.file_management_service.OpenAILongContextModel',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.MessageObserver',
-            return_value=Mock()
-        ):
-            result = get_llm_model("tenant123")
-        assert result == mock_model_instance
-
-    def test_get_llm_model_with_missing_config_values(self):
-        """Test get_llm_model with missing config values"""
-        from backend.services.file_management_service import get_llm_model
-
-        mock_model_instance = Mock()
-        with patch(
-            'backend.services.file_management_service.get_llm_model',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.tenant_config_manager'
-        ), patch(
-            'backend.services.file_management_service.OpenAILongContextModel',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.MessageObserver',
-            return_value=Mock()
-        ):
-            result = get_llm_model("tenant123")
-        assert result == mock_model_instance
-
-    def test_get_llm_model_with_timeout_seconds(self):
-        """Test get_llm_model passes configured timeout_seconds."""
-        from backend.services.file_management_service import get_llm_model
-
-        mock_model_instance = Mock()
-        with patch(
-            'backend.services.file_management_service.get_llm_model',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.tenant_config_manager'
-        ), patch(
-            'backend.services.file_management_service.OpenAILongContextModel',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.MessageObserver',
-            return_value=Mock()
-        ):
-            result = get_llm_model("tenant123")
-        assert result == mock_model_instance
-
-    def test_get_llm_model_with_different_tenant_ids(self):
-        """Test get_llm_model with different tenant IDs"""
-        from backend.services.file_management_service import get_llm_model
-
-        mock_model_instance = Mock()
-        with patch(
-            'backend.services.file_management_service.get_llm_model',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.tenant_config_manager'
-        ), patch(
-            'backend.services.file_management_service.OpenAILongContextModel',
-            return_value=mock_model_instance
-        ), patch(
-            'backend.services.file_management_service.MessageObserver',
-            return_value=Mock()
-        ):
-            result1 = get_llm_model("tenant1")
-            result2 = get_llm_model("tenant2")
-        assert result1 == mock_model_instance
-        assert result2 == mock_model_instance
 
 
 class TestInitToolListForTenant:
@@ -5125,7 +4985,7 @@ class TestValidateLocalToolMonitoring:
     @patch('backend.services.tool_configuration_service.set_monitoring_operation')
     @patch('backend.services.tool_configuration_service.set_monitoring_context')
     @patch('backend.services.tool_configuration_service.minio_client')
-    @patch('backend.services.tool_configuration_service.get_vlm_model')
+    @patch('backend.services.tool_configuration_service.get_vlm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_analyze_image_sets_monitoring_context(
@@ -5155,7 +5015,7 @@ class TestValidateLocalToolMonitoring:
     @patch('backend.services.tool_configuration_service.set_monitoring_context')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://svc")
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_analyze_text_file_sets_monitoring_context(

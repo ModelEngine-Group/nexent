@@ -6,18 +6,20 @@ import copy
 import gzip
 import io
 import json
+import logging
 import traceback
 import uuid
-import websockets
-import logging
 from dataclasses import dataclass
 from typing import AsyncGenerator, AsyncIterator, Dict, Optional, Union
 
-from ...multimodal_adapter import MultimodalAdapter, ModelInfo
+import websockets
+
 from ...model_context import TTSContext
+from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
 from ...transport import WebSocketTransportMixin
-from .base import TTSAdapter, TTSRequest
+from .tts_adapter import TTSAdapter, TTSRequest
+
 
 logger = logging.getLogger(__name__)
 

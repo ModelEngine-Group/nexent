@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 
-from ..core.gateway.modality.embedding import EmbeddingAdapter
+from ..core.gateway.modality import EmbeddingAdapter
 
 
 class VectorDatabaseCore(ABC):

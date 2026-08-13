@@ -1,51 +1,39 @@
-"""Modality adapters for the multimodal gateway.
+"""Modality adapter aggregation layer.
 
-Importing this package registers all built-in adapters with the process-wide
-:class:`AdapterRegistry` via the ``@register_adapter`` decorators.
+The only place that re-exports the public adapter API and triggers built-in
+adapter registration: importing :mod:`nexent.core.gateway.modality` imports
+every built-in adapter module, whose ``@register_adapter`` decorators populate
+the process-wide :class:`AdapterRegistry`.
+
+Modality subpackages (``llm`` / ``vlm`` / ``stt`` / ``tts`` / ``embedding`` /
+``rerank``) are namespace packages on purpose: they ship no ``__init__.py`` so
+this module stays the single aggregation point. Import concrete classes via
+this layer or via their leaf module (``modality.vlm.openai``).
 """
 
-from .embedding import (
-    DashScopeEmbeddingAdapter,
-    EmbeddingAdapter,
-    EmbeddingRequest,
-    JinaEmbeddingAdapter,
-    OpenAICompatibleEmbeddingAdapter,
-    SiliconflowEmbeddingAdapter,
-)
-from .llm import (
-    LLMAdapter,
-    LLMRequest,
-    OpenAILLMAdapter,
-    OpenAILongContextLLMAdapter,
-)
-from .rerank import (
-    CohereRerankAdapter,
-    JinaRerankAdapter,
-    OpenAICompatibleRerankAdapter,
-    RerankAdapter,
-    RerankRequest,
-)
-from .stt import (
-    AliSTTAdapter,
-    ModelEngineSTTAdapter,
-    STTAdapter,
-    STTRequest,
-    STTStreamRequest,
-    VolcSTTAdapter,
-)
-from .tts import (
-    AliTTSAdapter,
-    ModelEngineTTSAdapter,
-    TTSAdapter,
-    TTSRequest,
-    VolcTTSAdapter,
-)
-from .vlm import (
-    ModelEngineVLMAdapter,
-    OpenAIVLMAdapter,
-    VLMAdapter,
-    VLMRequest,
-)
+from .embedding.dashscope import DashScopeEmbeddingAdapter
+from .embedding.embedding_adapter import EmbeddingAdapter, EmbeddingRequest
+from .embedding.jina import JinaEmbeddingAdapter
+from .embedding.openai import OpenAICompatibleEmbeddingAdapter
+from .embedding.siliconflow import SiliconflowEmbeddingAdapter
+from .llm.llm_adapter import LLMAdapter, LLMRequest
+from .llm.openai import OpenAILLMAdapter, OpenAILongContextLLMAdapter
+from .rerank.cohere import CohereRerankAdapter
+from .rerank.jina import JinaRerankAdapter
+from .rerank.openai import OpenAICompatibleRerankAdapter
+from .rerank.rerank_adapter import RerankAdapter, RerankRequest
+from .stt.ali import AliSTTAdapter, AliSTTConfig
+from .stt.modelengine import ModelEngineSTTAdapter
+from .stt.stt_adapter import STTAdapter, STTRequest, STTStreamRequest, TranscriptionResult
+from .stt.volc import VolcSTTAdapter, VolcSTTConfig
+from .tts.ali import AliTTSAdapter, AliTTSConfig, AliTTSError
+from .tts.modelengine import ModelEngineTTSAdapter
+from .tts.tts_adapter import TTSAdapter, TTSRequest
+from .tts.volc import VolcTTSAdapter, VolcTTSConfig
+from .vlm.modelengine import ModelEngineVLMAdapter
+from .vlm.openai import OpenAIVLMAdapter
+from .vlm.vlm_adapter import VLMAdapter, VLMRequest
+
 
 __all__ = [
     # LLM
@@ -53,11 +41,12 @@ __all__ = [
     # VLM
     "VLMAdapter", "VLMRequest", "OpenAIVLMAdapter", "ModelEngineVLMAdapter",
     # STT
-    "STTAdapter", "STTRequest", "STTStreamRequest", "AliSTTAdapter",
-    "VolcSTTAdapter", "ModelEngineSTTAdapter",
+    "STTAdapter", "STTRequest", "STTStreamRequest", "TranscriptionResult",
+    "AliSTTAdapter", "AliSTTConfig", "VolcSTTAdapter", "VolcSTTConfig",
+    "ModelEngineSTTAdapter",
     # TTS
-    "TTSAdapter", "TTSRequest", "AliTTSAdapter", "VolcTTSAdapter",
-    "ModelEngineTTSAdapter",
+    "TTSAdapter", "TTSRequest", "AliTTSAdapter", "AliTTSConfig", "AliTTSError",
+    "VolcTTSAdapter", "VolcTTSConfig", "ModelEngineTTSAdapter",
     # Embedding
     "EmbeddingAdapter", "EmbeddingRequest", "JinaEmbeddingAdapter",
     "DashScopeEmbeddingAdapter", "SiliconflowEmbeddingAdapter",

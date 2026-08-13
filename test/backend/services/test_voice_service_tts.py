@@ -78,10 +78,10 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
         _shared_tts.generate_speech = AsyncMock(side_effect=tts_exc)
 
     patches = [
-        patch("services.voice_service.VolcSTTModel", return_value=_shared_stt),
-        patch("services.voice_service.AliSTTModel", return_value=_shared_stt),
-        patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
-        patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
+        patch("services.voice_service.get_stt_adapter_from_params", return_value=_shared_stt),
+        patch("services.voice_service.get_stt_adapter_from_tenant_config", return_value=_shared_stt),
+        patch("services.voice_service.get_tts_adapter_from_params", return_value=_shared_tts),
+        patch("services.voice_service.get_tts_adapter_from_tenant_config", return_value=_shared_tts),
     ]
     return patches, _shared_stt, _shared_tts
 
@@ -91,224 +91,9 @@ from services.voice_service import VoiceService
 
 
 # ---------------------------------------------------------------------------
-# Tests: _get_tts_model_from_config
+# Tests: _get_tts_model_from_config / _get_tts_model_from_tenant_config (deleted)
+# These private methods were moved to model_gateway_service adapter factories.
 # ---------------------------------------------------------------------------
-
-class TestGetTTSModelFromConfig:
-    """Tests for _get_tts_model_from_config."""
-
-    def test_volc_model_selection_with_volc_factory(self):
-        """Test that Volc TTS model is selected when model_factory is 'volc'."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config(
-                model_factory="volc",
-                model_appid="test_appid",
-                access_token="test_token",
-                speed_ratio=1.0
-            )
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_volc_model_selection_with_volcano_factory(self):
-        """Test that Volc TTS model is selected when model_factory is 'volcano'."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config(
-                model_factory="volcano",
-                model_appid="test_appid",
-                access_token="test_token"
-            )
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_volc_model_selection_from_base_url(self):
-        """Test that Volc TTS model is auto-detected from base_url containing openspeech.bytedance.com."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config(
-                base_url="wss://openspeech.bytedance.com/api/v1/tts"
-            )
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_ali_tts_model_default_settings(self):
-        """Test that Ali TTS model is used by default when no factory specified."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config()
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_ali_tts_model_with_api_key_and_model(self):
-        """Test that Ali TTS model is selected with explicit api_key and model parameters."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config(
-                api_key="test_api_key",
-                model="qwen3-tts-flash",
-                speed_ratio=1.2
-            )
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_volc_tts_model_with_custom_base_url(self):
-        """Test Volc TTS model with custom base_url."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-            model = service._get_tts_model_from_config(
-                model_factory="volc",
-                model_appid="test_appid",
-                access_token="test_token",
-                base_url="wss://custom.volc.com/api/tts"
-            )
-            assert model is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-
-# ---------------------------------------------------------------------------
-# Tests: _get_tts_model_from_tenant_config
-# ---------------------------------------------------------------------------
-
-class TestGetTTSModelFromTenantConfig:
-    """Tests for _get_tts_model_from_tenant_config."""
-
-    def test_with_tenant_config_available(self):
-        """Test _get_tts_model_from_tenant_config when tenant config exists."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-
-            mock_tts_config = {
-                "model_factory": "volc",
-                "api_key": "test_api_key",
-                "model_appid": "test_appid",
-                "access_token": "test_token",
-                "speed_ratio": 1.5,
-                "base_url": "wss://custom.url",
-                "model_name": "test_model"
-            }
-
-            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr:
-                mock_config_mgr.get_model_config.return_value = mock_tts_config
-
-                with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
-                    mock_get_model.return_value = MockTTSModel()
-                    result = service._get_tts_model_from_tenant_config("test_tenant_id")
-                    assert result is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_fallback_to_database_records(self):
-        """Test _get_tts_model_from_tenant_config falls back to database records."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-
-            mock_record = {
-                "model_factory": "dashscope",
-                "api_key": "test_api_key",
-                "model_name": "qwen3-tts-flash",
-                "speed_ratio": 1.0
-            }
-
-            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
-                 patch('services.voice_service.get_model_records') as mock_get_records:
-                mock_config_mgr.get_model_config.return_value = None
-                mock_get_records.return_value = [mock_record]
-
-                with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
-                    mock_get_model.return_value = MockTTSModel()
-                    result = service._get_tts_model_from_tenant_config("test_tenant_id")
-                    assert result is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_default_config_when_nothing_available(self):
-        """Test _get_tts_model_from_tenant_config uses default when no config or records exist."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-
-            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
-                 patch('services.voice_service.get_model_records') as mock_get_records:
-                mock_config_mgr.get_model_config.return_value = None
-                mock_get_records.return_value = []
-
-                with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
-                    mock_get_model.return_value = MockTTSModel()
-                    result = service._get_tts_model_from_tenant_config("test_tenant_id")
-                    assert result is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
-
-    def test_exception_handling(self):
-        """Test _get_tts_model_from_tenant_config handles exceptions gracefully."""
-        _reset_singleton()
-        patches, _, _ = _mock_all_models()
-        for p in patches:
-            p.start()
-        try:
-            service = VoiceService()
-
-            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr:
-                mock_config_mgr.get_model_config.side_effect = Exception("Database error")
-
-                with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
-                    mock_get_model.return_value = MockTTSModel()
-                    result = service._get_tts_model_from_tenant_config("test_tenant_id")
-                    assert result is not None
-        finally:
-            for p in reversed(patches):
-                p.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -508,10 +293,8 @@ class TestStreamTTSToWebSocket:
 
         _shared_tts = SyncIterTTSModel()
         patches = [
-            patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
-            patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
-            patch("services.voice_service.VolcSTTModel", return_value=MockSTTModel()),
-            patch("services.voice_service.AliSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.get_tts_adapter_from_params", return_value=_shared_tts),
+            patch("services.voice_service.get_tts_adapter_from_tenant_config", return_value=_shared_tts),
         ]
         for p in patches:
             p.start()
@@ -543,10 +326,8 @@ class TestStreamTTSToWebSocket:
         _reset_singleton()
         _shared_tts = SingleChunkTTSModel()
         patches = [
-            patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
-            patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
-            patch("services.voice_service.VolcSTTModel", return_value=MockSTTModel()),
-            patch("services.voice_service.AliSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.get_tts_adapter_from_params", return_value=_shared_tts),
+            patch("services.voice_service.get_tts_adapter_from_tenant_config", return_value=_shared_tts),
         ]
         for p in patches:
             p.start()

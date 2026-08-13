@@ -8,8 +8,8 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
-from ..gateway.modality.embedding import EmbeddingAdapter
-from ..gateway.modality.rerank import RerankAdapter
+from ..gateway.modality import EmbeddingAdapter
+from ..gateway.modality import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
