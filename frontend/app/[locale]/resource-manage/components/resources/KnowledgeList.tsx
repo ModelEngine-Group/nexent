@@ -33,6 +33,7 @@ import type { QuotaUsageResponse, KBQuotaStatus } from "@/types/quota";
 import { KnowledgeBaseEditModal } from "../../../knowledges/components/knowledge/KnowledgeBaseEditModal";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
+import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -202,15 +203,7 @@ export default function KnowledgeList({
   };
 
   const formatDateTime = (date: string | null | undefined) => {
-    if (!date) return t("common.unknown");
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hours = String(d.getHours()).padStart(2, "0");
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    const seconds = String(d.getSeconds()).padStart(2, "0");
-    return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+    return formatDateTimeUtil(date) ?? t("common.unknown");
   };
 
   // Inline editing for per-KB quota
