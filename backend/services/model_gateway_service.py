@@ -83,6 +83,19 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
     return default
 
 
+def _coalesce(*vals: Any) -> Any:
+    """Return the first non-``None`` value, or ``None`` if all are ``None``.
+
+    Unlike ``a or b``, this preserves falsy-but-valid values such as
+    ``temperature=0`` or ``top_p=0`` — an explicit ``0`` must reach the
+    adapter rather than being silently replaced by the cfg/default fallback.
+    """
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
 def _config_to_context(
     cfg: Optional[dict],
     modality: str,
@@ -117,19 +130,20 @@ def _config_to_context(
         slot=slot,
         ssl_verify=cfg.get("ssl_verify", True),
         observer=observer,
-        display_name=construct_extras.pop("display_name", None) or cfg.get("display_name"),
-        timeout_seconds=construct_extras.pop("timeout_seconds", None) or cfg.get("timeout_seconds"),
+        display_name=_coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
+        timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
     )
 
     # ---- modality-specific sub-objects / fields ----
     if modality in ("llm", "llm_long_context", "vlm"):
         # Sampling params: per-call extras override; cfg-level keys (max_tokens,
         # truncation_strategy, frequency_penalty, extra_body) for long-context/VLM.
+        # _coalesce (not `or`) so temperature=0 / top_p=0 are preserved.
         base["sampling"] = LLMSampling(
-            temperature=construct_extras.pop("temperature", None) or cfg.get("temperature"),
-            top_p=construct_extras.pop("top_p", None) or cfg.get("top_p"),
+            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
             stream=construct_extras.pop("stream", None),
-            max_output_tokens=construct_extras.pop("max_output_tokens", None) or cfg.get("max_output_tokens"),
+            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
             max_tokens=cfg.get("max_tokens"),
             truncation_strategy=cfg.get("truncation_strategy"),
             frequency_penalty=cfg.get("frequency_penalty"),
@@ -155,7 +169,7 @@ def _config_to_context(
             base["audio_file_path"] = construct_extras.pop("audio_file_path", None) or TEST_PCM_PATH
         else:  # tts
             base["speed_ratio"] = float(
-                construct_extras.pop("speed_ratio", None) or cfg.get("speed_ratio", 1.0)
+                _coalesce(construct_extras.pop("speed_ratio", None), cfg.get("speed_ratio"), 1.0)
             )
             base["voice"] = construct_extras.pop("voice", None) or cfg.get("voice")
             base["audio_file_path"] = construct_extras.pop("audio_file_path", None)
