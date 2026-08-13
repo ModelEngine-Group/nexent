@@ -1687,7 +1687,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "tenant_id": "user_id",  # matches the legacy admin tenant
                 "knowledge_sources": "elasticsearch",
                 "ingroup_permission": "EDIT"
             },
@@ -1695,7 +1695,7 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "tenant_id": "user_id",  # matches the legacy admin tenant
                 "knowledge_sources": "elasticsearch",
                 "ingroup_permission": "EDIT"
             }
@@ -1804,8 +1804,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         This test verifies that:
         1. The method filters knowledge bases by the tenant_id parameter
-        2. Only knowledge bases belonging to the target tenant are returned
-        3. The user's tenant_id from auth is used for permission checking, not for filtering
+        2. DAC denies records outside the caller's tenant, so a tenant_A
+           admin querying tenant_B gets no visible knowledge bases
+        3. get_knowledge_info_by_tenant_id is still called with the requested tenant
         """
         # Setup - Simulate user from tenant_A querying for tenant_B's knowledge bases
         self.mock_vdb_core.get_user_indices.return_value = [
@@ -1854,13 +1855,10 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         # Assert
-        # The mock returns all records without filtering by tenant_id
-        # So all 3 indices are returned (the filtering is expected to happen in the DB function)
-        self.assertEqual(len(result["indices"]), 3)
-        self.assertEqual(result["count"], 3)
-        self.assertIn("kb1", result["indices"])
-        self.assertIn("kb2", result["indices"])
-        self.assertIn("kb3", result["indices"])
+        # Cross-tenant records are denied by DAC even though the mock returns
+        # all records without applying the tenant filter.
+        self.assertEqual(result["indices"], [])
+        self.assertEqual(result["count"], 0)
 
         # Verify that get_knowledge_info_by_tenant_id was called with tenant_id
         mock_get_knowledge.assert_called_once_with("tenant_B")
@@ -3472,6 +3470,97 @@ class TestElasticSearchService(unittest.TestCase):
         mock_update_record.assert_called_once()
         call_args = mock_update_record.call_args[0][0]
         self.assertEqual(call_args["group_ids"], "5")
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_can_rename_own_private_kb(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER may update non-permission fields of their own PRIVATE KB."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+        mock_update_record.return_value = True
+
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            knowledge_name="New Name",
+            user_id="test_user",
+            user_role="USER",
+        )
+
+        self.assertTrue(result)
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["knowledge_name"], "New Name")
+        self.assertNotIn("ingroup_permission", call_args)
+        self.assertNotIn("group_ids", call_args)
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_cannot_make_private_shared(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER changing a PRIVATE KB to EDIT is rejected."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+
+        with self.assertRaises(PermissionError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="test_index",
+                ingroup_permission="EDIT",
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("cannot turn a personal knowledge base", str(context.exception))
+        mock_update_record.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_cannot_assign_groups(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER assigning groups to a PRIVATE KB is rejected."""
+        mock_get_record.return_value = {
+            "index_name": "test_index",
+            "ingroup_permission": "PRIVATE",
+            "created_by": "test_user",
+        }
+
+        with self.assertRaises(PermissionError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="test_index",
+                group_ids=[10],
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("cannot assign groups", str(context.exception))
+        mock_update_record.assert_not_called()
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_update_knowledge_base_user_missing_record_raises(
+        self, mock_get_record, mock_update_record
+    ):
+        """A USER updating a missing KB gets a not-found error."""
+        mock_get_record.return_value = None
+
+        with self.assertRaises(ValueError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="missing",
+                knowledge_name="New Name",
+                user_id="test_user",
+                user_role="USER",
+            )
+
+        self.assertIn("not found", str(context.exception))
+        mock_update_record.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     def test_get_summary(self, mock_get_record):

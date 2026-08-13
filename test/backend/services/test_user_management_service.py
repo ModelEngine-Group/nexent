@@ -1559,6 +1559,26 @@ class TestFormatRolePermissions(unittest.TestCase):
         assert result["permissions"] == ["agent:create", "agent:read"]
         assert result["accessibleRoutes"] == []
 
+    def test_format_role_permissions_lowercases_mixed_case_types(self):
+        """Test formatting normalizes uppercase permission types to lower-case"""
+        permissions = [
+            {
+                "permission_category": "RESOURCE",
+                "permission_type": "KB.CAPACITY",
+                "permission_subtype": "READ"
+            },
+            {
+                "permission_category": "RESOURCE",
+                "permission_type": "KB",
+                "permission_subtype": "CREATE"
+            }
+        ]
+
+        result = format_role_permissions(permissions)
+
+        assert result["permissions"] == ["kb.capacity:read", "kb:create"]
+        assert result["accessibleRoutes"] == []
+
     def test_format_role_permissions_LEFT_NAV_MENU_only(self):
         """Test formatting with only LEFT_NAV_MENU permissions"""
         permissions = [

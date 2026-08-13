@@ -56,6 +56,12 @@ def create_app(
     # Register exception handlers
     register_exception_handlers(app)
 
+    @app.on_event("startup")
+    async def _load_permissions_on_startup():
+        from permissions.rbac import init_rbac
+
+        init_rbac()
+
     # Initialize monitoring if enabled
     if enable_monitoring:
         try:

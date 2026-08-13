@@ -335,6 +335,35 @@ def get_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
         raise e
 
 
+def get_private_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records for a tenant."""
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.ingroup_permission == 'PRIVATE',
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(item) for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_private_knowledge_info_by_creator(tenant_id: str, created_by: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records created by a user."""
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.created_by == created_by,
+                KnowledgeRecord.ingroup_permission == 'PRIVATE',
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(item) for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
 def get_knowledge_info_by_tenant_and_source(tenant_id: str, knowledge_sources: str) -> List[Dict[str, Any]]:
     """
     Get knowledge base records by tenant ID and knowledge sources.

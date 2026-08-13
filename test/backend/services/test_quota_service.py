@@ -17,7 +17,11 @@ from services.quota_service import (
     DEFAULT_CRITICAL_THRESHOLD,
     _usage_cache,
 )
-from consts.exceptions import PlatformQuotaConflictError
+from consts.exceptions import (
+    PersonalKbQuotaExceededError,
+    PersonalKbQuotaUnavailableError,
+    PlatformQuotaConflictError,
+)
 
 
 @pytest.fixture
@@ -39,10 +43,16 @@ def mock_tenant_config_db():
 def mock_knowledge_db():
     """Mock knowledge base persistence used by QuotaService."""
     with patch("services.quota_service.get_knowledge_info_by_tenant_id") as mock_list, \
-         patch("services.quota_service.update_knowledge_record") as mock_update:
+         patch("services.quota_service.update_knowledge_record") as mock_update, \
+         patch("services.quota_service.get_private_knowledge_info_by_tenant_id") as mock_private_list, \
+         patch("services.quota_service.get_private_knowledge_info_by_creator") as mock_private_creator, \
+         patch("services.quota_service.get_user_email_map") as mock_email_map:
         yield {
             "get_knowledge_info_by_tenant_id": mock_list,
             "update_knowledge_record": mock_update,
+            "get_private_knowledge_info_by_tenant_id": mock_private_list,
+            "get_private_knowledge_info_by_creator": mock_private_creator,
+            "get_user_email_map": mock_email_map,
         }
 
 
@@ -852,3 +862,497 @@ class TestUsageTracking:
             "visible-kb",
             "hidden-kb",
         }
+
+
+class TestPersonalKbCapacity:
+    """Tests for personal KB quota config, aggregation, and enforcement."""
+
+    def test_get_personal_user_quota_reads_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = {
+            "config_value": str(2 * GB)
+        }
+
+        assert quota_service.get_personal_user_quota("user-1") == 2 * GB
+        mock_tenant_config_db["get_single_config_info"].assert_called_with(
+            "test-tenant-id", "PERSONAL_KB_QUOTA_user-1"
+        )
+
+    def test_get_personal_user_quota_returns_none_for_missing_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = None
+
+        assert quota_service.get_personal_user_quota("user-1") is None
+
+    def test_set_personal_user_quota_updates_config(
+        self, quota_service, mock_tenant_config_db, mock_knowledge_db
+    ):
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = []
+        mock_tenant_config_db["get_single_config_info"].return_value = None
+        mock_tenant_config_db["insert_config"].return_value = True
+
+        result = quota_service.set_personal_user_quota(
+            "user-1", quota_limit_bytes=2 * GB
+        )
+
+        assert result["user_id"] == "user-1"
+        assert result["quota_limit_bytes"] == 2 * GB
+        inserted = mock_tenant_config_db["insert_config"].call_args.args[0]
+        assert inserted["config_key"] == "PERSONAL_KB_QUOTA_user-1"
+        assert inserted["config_value"] == str(2 * GB)
+
+    def test_set_personal_user_quota_unlimited_deletes_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = {
+            "tenant_config_id": 42
+        }
+        mock_tenant_config_db["delete_config_by_tenant_config_id"].return_value = True
+
+        result = quota_service.set_personal_user_quota("user-1", unlimited=True)
+
+        assert result["quota_limit_bytes"] is None
+        mock_tenant_config_db[
+            "delete_config_by_tenant_config_id"
+        ].assert_called_once_with(42)
+
+    def test_get_personal_default_quota_reads_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = {
+            "config_value": str(3 * GB)
+        }
+
+        assert quota_service.get_personal_default_quota() == 3 * GB
+        mock_tenant_config_db["get_single_config_info"].assert_called_with(
+            "test-tenant-id", "PERSONAL_KB_QUOTA_DEFAULT"
+        )
+
+    def test_set_personal_default_quota_updates_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = {
+            "tenant_config_id": 7,
+            "config_value": "old",
+        }
+        mock_tenant_config_db["update_config_by_tenant_config_id"].return_value = True
+
+        result = quota_service.set_personal_default_quota(
+            quota_limit_bytes=5 * GB
+        )
+
+        assert result["quota_limit_bytes"] == 5 * GB
+        mock_tenant_config_db[
+            "update_config_by_tenant_config_id"
+        ].assert_called_once_with(7, str(5 * GB))
+
+    def test_set_personal_default_quota_unlimited_deletes_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = {
+            "tenant_config_id": 8
+        }
+        mock_tenant_config_db["delete_config_by_tenant_config_id"].return_value = True
+
+        result = quota_service.set_personal_default_quota(unlimited=True)
+
+        assert result["quota_limit_bytes"] is None
+        mock_tenant_config_db[
+            "delete_config_by_tenant_config_id"
+        ].assert_called_once_with(8)
+
+    def test_effective_quota_individual_wins_over_default(
+        self, quota_service, mock_tenant_config_db
+    ):
+        def _config(tenant_id, key):
+            if key == "PERSONAL_KB_QUOTA_user-1":
+                return {"config_value": str(10 * GB)}
+            if key == "PERSONAL_KB_QUOTA_DEFAULT":
+                return {"config_value": str(5 * GB)}
+            return None
+
+        mock_tenant_config_db["get_single_config_info"].side_effect = _config
+
+        assert quota_service._get_personal_effective_quota("user-1") == (
+            10 * GB,
+            "individual",
+        )
+
+    def test_effective_quota_falls_back_to_default(
+        self, quota_service, mock_tenant_config_db
+    ):
+        def _config(tenant_id, key):
+            if key == "PERSONAL_KB_QUOTA_DEFAULT":
+                return {"config_value": str(5 * GB)}
+            return None
+
+        mock_tenant_config_db["get_single_config_info"].side_effect = _config
+
+        assert quota_service._get_personal_effective_quota("user-1") == (
+            5 * GB,
+            "default",
+        )
+
+    def test_effective_quota_is_unlimited_when_no_config(
+        self, quota_service, mock_tenant_config_db
+    ):
+        mock_tenant_config_db["get_single_config_info"].return_value = None
+
+        assert quota_service._get_personal_effective_quota("user-1") == (
+            None,
+            "unlimited",
+        )
+
+    def test_list_personal_capacity_users_sorts_and_paginates(
+        self, quota_service, mock_knowledge_db, mock_tenant_config_db
+    ):
+        kb_list = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-a",
+                "knowledge_name": "A",
+            },
+            {
+                "knowledge_id": 2,
+                "index_name": "kb-b",
+                "created_by": "user-a",
+                "knowledge_name": "B",
+            },
+            {
+                "knowledge_id": 3,
+                "index_name": "kb-c",
+                "created_by": "user-b",
+                "knowledge_name": "C",
+            },
+        ]
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = kb_list
+        mock_knowledge_db["get_user_email_map"].return_value = {
+            "user-a": "beta@example.com",
+            "user-b": "alpha@example.com",
+        }
+        mock_vdb = MagicMock()
+        mock_vdb.get_indices_detail.return_value = {
+            "kb-a": {
+                "base_info": {"store_size": "1 GB", "doc_count": 1}
+            },
+            "kb-b": {
+                "base_info": {"store_size": "2 GB", "doc_count": 2}
+            },
+            "kb-c": {
+                "base_info": {"store_size": "4 GB", "doc_count": 4}
+            },
+        }
+
+        def _config(tenant_id, key):
+            if key == "PERSONAL_KB_QUOTA_user-a":
+                return {"config_value": str(2 * GB)}
+            if key == "PERSONAL_KB_QUOTA_user-b":
+                return {"config_value": str(4 * GB)}
+            return None
+
+        mock_tenant_config_db["get_single_config_info"].side_effect = _config
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ):
+            by_total = quota_service.list_personal_capacity_users(
+                "test-tenant-id",
+                page=1,
+                page_size=10,
+                sort_by="total_bytes",
+                sort_order="desc",
+            )
+            by_name = quota_service.list_personal_capacity_users(
+                "test-tenant-id",
+                page=1,
+                page_size=1,
+                sort_by="user_name",
+                sort_order="asc",
+            )
+            by_kb_count = quota_service.list_personal_capacity_users(
+                "test-tenant-id",
+                page=1,
+                page_size=10,
+                sort_by="kb_count",
+                sort_order="desc",
+            )
+            by_quota = quota_service.list_personal_capacity_users(
+                "test-tenant-id",
+                page=1,
+                page_size=10,
+                sort_by="quota_limit_bytes",
+                sort_order="asc",
+            )
+
+        assert [item["user_id"] for item in by_total["items"]] == [
+            "user-b",
+            "user-a",
+        ]
+        assert by_name["items"][0]["user_id"] == "user-b"
+        assert by_name["total_pages"] == 2
+        assert [item["user_id"] for item in by_kb_count["items"]] == [
+            "user-a",
+            "user-b",
+        ]
+        assert [item["user_id"] for item in by_quota["items"]] == [
+            "user-a",
+            "user-b",
+        ]
+        user_a = next(
+            item for item in by_total["items"] if item["user_id"] == "user-a"
+        )
+        assert user_a["kb_count"] == 2
+        assert user_a["total_bytes"] == 3 * GB
+
+    def test_sum_upload_bytes_filters_invalid_entries(self):
+        data = [
+            {"file_size": 100},
+            {"file_size": "50"},
+            {"file_size": -10},
+            {"file_size": None},
+            {"file_size": "bad"},
+            "not-a-dict",
+            {"other": 1},
+        ]
+
+        assert QuotaService.sum_upload_bytes(data) == 150
+
+    def test_parse_quota_value_handles_none_and_invalid(self):
+        assert QuotaService._parse_quota_value(None) is None
+        assert QuotaService._parse_quota_value("128") == 128
+        assert QuotaService._parse_quota_value("bad") == 0
+        assert QuotaService._parse_quota_value("   ") == 0
+
+    def test_set_personal_user_quota_below_usage_rejected(
+        self, quota_service, mock_knowledge_db
+    ):
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_vdb = MagicMock()
+        mock_vdb.get_indices_detail.return_value = {
+            "kb-a": {"base_info": {"store_size": "10 GB"}}
+        }
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ):
+            with pytest.raises(ValueError, match="below current usage"):
+                quota_service.set_personal_user_quota(
+                    "user-1", quota_limit_bytes=5 * GB
+                )
+
+    def _mock_personal_usage(self, mock_knowledge_db, kbs, stats):
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = kbs
+        mock_vdb = MagicMock()
+        mock_vdb.get_indices_detail.return_value = {
+            index_name: {"base_info": {"store_size": store_size}}
+            for index_name, store_size in stats.items()
+        }
+        return mock_vdb
+
+    def test_check_quota_tenant_hard_limit_exceeded(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_vdb = self._mock_personal_usage(
+            mock_knowledge_db, kbs, {"kb-a": "4 GB"}
+        )
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ), patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={"hard_limit_bytes": 5 * GB},
+        ), patch.object(
+            quota_service,
+            "_get_personal_effective_quota",
+            return_value=(None, "unlimited"),
+        ):
+            with pytest.raises(
+                PersonalKbQuotaExceededError,
+                match="Tenant personal KB storage full",
+            ):
+                quota_service.check_personal_kb_quota(
+                    "test-tenant-id", "user-1", 2 * GB
+                )
+
+    def test_check_quota_user_quota_exceeded(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_vdb = self._mock_personal_usage(
+            mock_knowledge_db, kbs, {"kb-a": "4 GB"}
+        )
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ), patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={"hard_limit_bytes": None},
+        ), patch.object(
+            quota_service,
+            "_get_personal_effective_quota",
+            return_value=(5 * GB, "individual"),
+        ):
+            with pytest.raises(
+                PersonalKbQuotaExceededError, match="Personal KB quota exceeded"
+            ):
+                quota_service.check_personal_kb_quota(
+                    "test-tenant-id", "user-1", 2 * GB
+                )
+
+    def test_check_quota_kb_quota_exceeded(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_vdb = self._mock_personal_usage(
+            mock_knowledge_db, kbs, {"kb-a": "4 GB"}
+        )
+        kb_record = {
+            "index_name": "kb-a",
+            "quota_limit_bytes": 5 * GB,
+        }
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ), patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={"hard_limit_bytes": None},
+        ), patch.object(
+            quota_service,
+            "_get_personal_effective_quota",
+            return_value=(None, "unlimited"),
+        ):
+            with pytest.raises(
+                PersonalKbQuotaExceededError, match="KB quota exceeded"
+            ):
+                quota_service.check_personal_kb_quota(
+                    "test-tenant-id",
+                    "user-1",
+                    2 * GB,
+                    kb_record=kb_record,
+                )
+
+    def test_check_quota_zero_quota_disables_uploads(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_vdb = self._mock_personal_usage(mock_knowledge_db, kbs, {})
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ), patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={"hard_limit_bytes": None},
+        ), patch.object(
+            quota_service,
+            "_get_personal_effective_quota",
+            return_value=(0, "individual"),
+        ):
+            with pytest.raises(
+                PersonalKbQuotaExceededError, match="disabled"
+            ):
+                quota_service.check_personal_kb_quota(
+                    "test-tenant-id", "user-1", 1
+                )
+
+    def test_check_quota_strict_es_failure_fails_closed(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = kbs
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            side_effect=RuntimeError("es down"),
+        ):
+            with pytest.raises(
+                PersonalKbQuotaUnavailableError,
+                match="Failed to query ES index stats",
+            ):
+                quota_service.check_personal_kb_quota(
+                    "test-tenant-id", "user-1", 1
+                )
+
+    def test_get_personal_usage_data_non_strict_es_failure_degrades(
+        self, quota_service, mock_knowledge_db
+    ):
+        kbs = [
+            {
+                "knowledge_id": 1,
+                "index_name": "kb-a",
+                "created_by": "user-1",
+            }
+        ]
+        mock_knowledge_db[
+            "get_private_knowledge_info_by_tenant_id"
+        ].return_value = kbs
+
+        with patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            side_effect=RuntimeError("es down"),
+        ):
+            result = quota_service._get_personal_usage_data(
+                "test-tenant-id", strict=False
+            )
+
+        assert result["total_bytes"] == 0
+        assert result["stats"] == {}

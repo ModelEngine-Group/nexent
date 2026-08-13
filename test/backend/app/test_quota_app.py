@@ -7,6 +7,7 @@ with mocked authentication and database dependencies.
 
 import json
 import pytest
+from contextlib import ExitStack
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
@@ -15,8 +16,17 @@ from fastapi import HTTPException
 import apps.quota_app as quota_app
 from apps.app_factory import create_app
 from apps.file_management_app import upload_files
-from apps.quota_app import tenant_quota_router, platform_quota_router
-from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
+from apps.quota_app import (
+    tenant_quota_router,
+    platform_quota_router,
+    personal_quota_router,
+)
+from consts.exceptions import (
+    PersonalKbQuotaExceededError,
+    PersonalKbQuotaUnavailableError,
+    PlatformQuotaConflictError,
+    QuotaExceededError,
+)
 
 GB = 1024 * 1024 * 1024
 
@@ -30,6 +40,7 @@ def _make_test_app() -> FastAPI:
     )
     app.include_router(tenant_quota_router)
     app.include_router(platform_quota_router)
+    app.include_router(personal_quota_router)
     return app
 
 
@@ -109,6 +120,29 @@ def mock_platform_static():
             "set_tenant_hard_limit": mock_set_tenant,
             "delete_tenant_hard_limit": mock_del,
         }
+
+
+@pytest.fixture
+def mock_personal_auth():
+    """Factory for patching the personal capacity permission dependency."""
+    with ExitStack() as stack:
+        def _set(
+            role: str = "ADMIN",
+            tenant_id: str = "test-tenant",
+            user_id: str = "admin-user-id",
+            permission: bool = True,
+        ):
+            stack.enter_context(
+                patch(
+                    "permissions.depends.get_current_user_context",
+                    return_value=(user_id, tenant_id, role),
+                )
+            )
+            stack.enter_context(
+                patch("permissions.depends.has_permission", return_value=permission)
+            )
+
+        yield _set
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -726,3 +760,250 @@ class TestQuotaEnforcementAPI:
             "hard_limit_bytes": 100 * GB,
             "exceeded_by_bytes": 5 * GB,
         }
+
+
+class TestPersonalCapacityAPI:
+    """Integration tests for personal KB capacity endpoints."""
+
+    def test_list_users_allows_admin(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.list_personal_capacity_users.return_value = {
+            "total": 1,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 1,
+            "items": [{"user_id": "user-1", "total_bytes": 0}],
+        }
+
+        resp = client.get("/api/capacity/personal/users")
+
+        assert resp.status_code == 200
+        assert resp.json()["items"][0]["user_id"] == "user-1"
+        mock_quota_service.list_personal_capacity_users.assert_called_once_with(
+            "test-tenant",
+            page=1,
+            page_size=20,
+            sort_by="total_bytes",
+            sort_order="desc",
+        )
+
+    def test_list_users_requires_permission(self, client, mock_personal_auth):
+        mock_personal_auth(permission=False)
+
+        resp = client.get("/api/capacity/personal/users")
+
+        assert resp.status_code == 403
+
+    def test_admin_cannot_view_other_tenant(self, client, mock_personal_auth):
+        mock_personal_auth(role="ADMIN", tenant_id="test-tenant")
+
+        resp = client.get(
+            "/api/capacity/personal/users",
+            params={"tenant_id": "other-tenant"},
+        )
+
+        assert resp.status_code == 403
+        assert "another tenant" in resp.json()["message"]
+
+    @pytest.mark.parametrize("role", ["SU", "SPEED"])
+    def test_su_and_speed_can_view_other_tenant(
+        self, client, mock_personal_auth, mock_quota_service, role
+    ):
+        mock_personal_auth(
+            role=role,
+            tenant_id="home-tenant",
+            user_id="platform-user",
+        )
+        mock_quota_service.list_personal_capacity_users.return_value = {
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 0,
+            "items": [],
+        }
+
+        resp = client.get(
+            "/api/capacity/personal/users",
+            params={"tenant_id": "target-tenant"},
+        )
+
+        assert resp.status_code == 200
+        mock_quota_service.list_personal_capacity_users.assert_called_once_with(
+            "target-tenant",
+            page=1,
+            page_size=20,
+            sort_by="total_bytes",
+            sort_order="desc",
+        )
+
+    def test_list_users_maps_service_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.list_personal_capacity_users.side_effect = RuntimeError(
+            "boom"
+        )
+
+        resp = client.get("/api/capacity/personal/users")
+
+        assert resp.status_code == 500
+        assert "Error listing personal KB capacity" in resp.json()["message"]
+
+    def test_get_user_kbs_allows_admin(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_kb_details.return_value = {
+            "total": 1,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 1,
+            "kbs": [{"kb_id": 1, "index_name": "kb-a"}],
+        }
+
+        resp = client.get("/api/capacity/personal/users/user-1/kbs")
+
+        assert resp.status_code == 200
+        assert resp.json()["kbs"][0]["kb_id"] == 1
+        mock_quota_service.get_personal_kb_details.assert_called_once_with(
+            "test-tenant", "user-1", page=1, page_size=20
+        )
+
+    def test_set_user_quota_requires_value_or_unlimited(
+        self, client, mock_personal_auth
+    ):
+        mock_personal_auth()
+
+        resp = client.put(
+            "/api/capacity/personal/users/user-1/quota", json={}
+        )
+
+        assert resp.status_code == 400
+        assert "Provide quota_limit_bytes" in resp.json()["message"]
+
+    def test_set_user_quota_maps_value_error(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.side_effect = ValueError(
+            "below usage"
+        )
+
+        resp = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert resp.status_code == 400
+        assert "below usage" in resp.json()["message"]
+
+    def test_set_user_quota_maps_quota_exceeded(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.side_effect = (
+            PersonalKbQuotaExceededError("too high")
+        )
+
+        resp = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert resp.status_code == 403
+        assert "Personal KB quota cannot be set" in resp.json()["message"]
+
+    def test_set_user_quota_maps_service_unavailable(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.side_effect = (
+            PersonalKbQuotaUnavailableError("es down")
+        )
+
+        resp = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert resp.status_code == 503
+        assert "service unavailable" in resp.json()["message"]
+
+    def test_set_user_quota_success(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_user_quota.return_value = {
+            "user_id": "user-1",
+            "quota_limit_bytes": 1024,
+            "quota_limit_readable": "1.0 KB",
+        }
+
+        resp = client.put(
+            "/api/capacity/personal/users/user-1/quota",
+            json={"quota_limit_bytes": 1024},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["quota_limit_bytes"] == 1024
+        mock_quota_service.set_personal_user_quota.assert_called_once_with(
+            "user-1", quota_limit_bytes=1024, unlimited=False
+        )
+
+    def test_get_default_quota_returns_unlimited(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_default_quota.return_value = None
+
+        resp = client.get("/api/capacity/personal/default-quota")
+
+        assert resp.status_code == 200
+        assert resp.json()["quota_limit_bytes"] is None
+        assert resp.json()["unlimited"] is True
+
+    def test_get_default_quota_returns_value(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.get_personal_default_quota.return_value = 2048
+
+        resp = client.get("/api/capacity/personal/default-quota")
+
+        assert resp.status_code == 200
+        assert resp.json()["quota_limit_bytes"] == 2048
+        assert resp.json()["unlimited"] is False
+
+    def test_set_default_quota_requires_value_or_unlimited(
+        self, client, mock_personal_auth
+    ):
+        mock_personal_auth()
+
+        resp = client.put(
+            "/api/capacity/personal/default-quota", json={}
+        )
+
+        assert resp.status_code == 400
+        assert "Provide quota_limit_bytes" in resp.json()["message"]
+
+    def test_set_default_quota_success(
+        self, client, mock_personal_auth, mock_quota_service
+    ):
+        mock_personal_auth()
+        mock_quota_service.set_personal_default_quota.return_value = {
+            "quota_limit_bytes": 4096,
+            "quota_limit_readable": "4.0 KB",
+        }
+
+        resp = client.put(
+            "/api/capacity/personal/default-quota",
+            json={"quota_limit_bytes": 4096},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["quota_limit_bytes"] == 4096
+        mock_quota_service.set_personal_default_quota.assert_called_once_with(
+            quota_limit_bytes=4096, unlimited=False
+        )
