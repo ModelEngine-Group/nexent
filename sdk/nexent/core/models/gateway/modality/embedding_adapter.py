@@ -34,14 +34,7 @@ ASSETS_DIR = os.path.join(
 
 
 def _detect_image_mime(img_bytes: bytes) -> str:
-    """Detects an image's MIME type from its magic bytes.
-
-    Args:
-        img_bytes: The raw image bytes to inspect.
-
-    Returns:
-        The detected MIME type, or ``image/jpeg`` when empty or unknown.
-    """
+    """Detect an image's MIME type from its magic bytes (default ``image/jpeg``)."""
     if not img_bytes:
         return "image/jpeg"
     if img_bytes[:8] == b"\x89PNG\r\n\x1a\n":
@@ -94,18 +87,10 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
 
     @property
     def _model_name(self) -> str:
-        """The configured model name."""
         return self._context.model_name
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
-        """POSTs the request body and returns the parsed JSON response.
-
-        Args:
-            data: The JSON-serializable request body.
-            timeout: Optional per-request timeout in seconds.
-
-        Returns:
-            The response body parsed as JSON.
+        """POST the request body and return the parsed JSON response.
 
         Raises:
             requests.HTTPError: If the upstream returns a non-2xx status.
@@ -151,11 +136,7 @@ class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
         return []
 
     async def health_check(self) -> bool:
-        """Checks API connectivity with a quick dimension check.
-
-        Returns:
-            True if the check succeeds, False otherwise.
-        """
+        """Check API connectivity via a quick dimension check."""
         try:
             await self.dimension_check(timeout=5.0)
             return True
@@ -184,21 +165,7 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         ...
 
     def get_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        """Embeds text inputs, delegating to the multimodal embedding path.
-
-        Args:
-            inputs: A string or an iterable of strings to embed.
-            with_metadata: If True, returns the raw provider response instead
-                of embedding vectors.
-            timeout: Optional per-request timeout; defaults to
-                ``retry_timeout_step``.
-            retries: Number of retries on timeout.
-            retry_timeout_step: Seconds added to the timeout per retry.
-
-        Returns:
-            A list of embedding vectors, or the raw response when
-            ``with_metadata`` is True.
-        """
+        """Embed text inputs by delegating to the multimodal embedding path."""
         if isinstance(inputs, str):
             mm = [{"text": inputs}]
         else:
@@ -206,22 +173,7 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
         return self.get_multimodal_embeddings(mm, with_metadata, timeout, retries, retry_timeout_step)
 
     def get_multimodal_embeddings(self, inputs, with_metadata=False, timeout=None, retries=3, retry_timeout_step=5.0):
-        """Embeds multimodal items via the provider's multimodal endpoint.
-
-        Args:
-            inputs: List of multimodal items (dicts with ``text`` and/or
-                ``image`` keys).
-            with_metadata: If True, returns the raw provider response instead
-                of embedding vectors.
-            timeout: Optional per-request timeout; defaults to
-                ``retry_timeout_step``.
-            retries: Number of retries on timeout.
-            retry_timeout_step: Seconds added to the timeout per retry.
-
-        Returns:
-            A list of embedding vectors, or the raw response when
-            ``with_metadata`` is True.
-        """
+        """Embed multimodal items via the provider's multimodal endpoint."""
         with record_model_call("multi_embedding", self._model_name, display_name=self._model_name):
             data = self._prepare_multimodal_input(inputs)
             base_timeout = timeout if timeout is not None else retry_timeout_step
@@ -236,15 +188,7 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
             return self._retry(attempts, base_timeout, retry_timeout_step, _do, type(self).__name__)
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
-        """Runs a connectivity check using sample multimodal inputs.
-
-        Args:
-            timeout: Timeout in seconds for the check.
-
-        Returns:
-            The embedding vectors from the sample request, or an empty list if
-            the check fails.
-        """
+        """Connectivity check using sample multimodal inputs; returns [] on failure."""
         try:
             return await asyncio.to_thread(self.get_multimodal_embeddings, self._test_inputs(), timeout=timeout)
         except requests.exceptions.Timeout:

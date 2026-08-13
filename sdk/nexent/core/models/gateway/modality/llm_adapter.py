@@ -19,6 +19,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List
 
+from ...openai_llm import OpenAIModel
+from ...openai_long_context_model import OpenAILongContextModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -137,13 +139,8 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         )
 
     def _build_model(self) -> None:
-        from ...openai_llm import OpenAIModel
-
-        # model_id / api_base / api_key are consumed by smolagents
-        # OpenAIServerModel via **kwargs forwarding; observer / ssl_verify /
-        # model_factory / display_name / timeout_seconds are named on OpenAIModel.
-        # Per-call-site tuning (temperature/top_p/max_output_tokens/stream) is
-        # carried in context.extra so switching call sites is behavior-preserving.
+        # Keep the existing OpenAIModel construction path so the adapter remains
+        # compatible with smolagents and preserves existing model configuration.
         extras = self._context.extra
         kwargs = dict(
             observer=self._context.observer,
@@ -157,8 +154,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
             extra_body=extras.get("extra_body"),
             max_output_tokens=extras.get("max_output_tokens"),
         )
-        # Only forward sampling/stream params when the call site set them, so
-        # OpenAIModel defaults apply otherwise.
+        # Only override model defaults when the caller explicitly provides them.
         for opt in ("temperature", "top_p", "stream"):
             if extras.get(opt) is not None:
                 kwargs[opt] = extras.get(opt)
@@ -172,6 +168,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         )
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[Any]:
+        """Create a streaming completion using the wrapped OpenAI client."""
         if self._model is None:
             self._build_model()
         completion_kwargs = {
@@ -202,19 +199,15 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
 
 @register_adapter("openai", "llm_long_context")
 class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
-    """Wraps :class:`OpenAILongContextModel` (which subclasses ``OpenAIModel``).
+    """Adapter for OpenAILongContextModel with long-context support.
 
-    Mirrors the ``OpenAILongContextModel → OpenAIModel`` inheritance: reuses
-    ``__call__`` / ``__getattr__`` / ``invoke`` / ``stream`` / ``health_check``
-    from :class:`OpenAILLMAdapter` unchanged; only ``_build_model`` and
-    ``modality`` / capability differ.
+    Reuses the standard OpenAI LLM adapter behavior and overrides only
+    model construction and long-context metadata.
     """
 
     modality = "llm_long_context"
 
     def _build_model(self) -> None:
-        from ...openai_long_context_model import OpenAILongContextModel
-
         extras = self._context.extra
         self._model = OpenAILongContextModel(
             observer=self._context.observer,

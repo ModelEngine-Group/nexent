@@ -20,6 +20,7 @@ import gzip
 import io
 import json
 import logging
+import traceback
 import uuid
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Union
 
 import websockets
 
+from ...openai_llm import OpenAIModel
 from ..base import ModelInfo, MultimodalAdapter
 from ..context import ModelContext
 from ..registry import register_adapter
@@ -911,26 +913,21 @@ class AliTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return False
         except Exception as e:
             logger.error(f"Ali TTS connectivity test failed with exception: {str(e)}")
-            import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
-        """Synthesize the full audio for a request."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
-        """Synthesize speech as a stream of audio chunks."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
-        """Check whether the TTS service is reachable."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
-        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1115,26 +1112,21 @@ class VolcTTSAdapter(TTSAdapter, WebSocketTransportMixin):
             return is_success
         except Exception as e:
             logger.error("Volc TTS connectivity test failed with exception: " + str(e))
-            import traceback
             logger.error("Volc TTS connectivity test exception traceback: " + traceback.format_exc())
             return False
 
     async def invoke(self, request: TTSRequest) -> bytes:
-        """Synthesize the full audio for a request."""
         return await self.generate_speech(request.text, stream=False)
 
     async def stream(self, request: TTSRequest) -> AsyncIterator[bytes]:
-        """Synthesize speech as a stream of audio chunks."""
         gen = await self.generate_speech(request.text, stream=True)
         async for chunk in gen:
             yield chunk
 
     async def health_check(self) -> bool:
-        """Check whether the TTS service is reachable."""
         return await self.check_connectivity()
 
     def get_model_info(self) -> ModelInfo:
-        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -1169,9 +1161,6 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
         self._model: Any = None  # wrapped OpenAIModel, built lazily
 
     def _build_model(self) -> None:
-        """Build the wrapped OpenAIModel on first use."""
-        from ...openai_llm import OpenAIModel
-
         self._model = OpenAIModel(
             observer=self._context.observer,
             model_id=self._context.model_name,
@@ -1218,13 +1207,11 @@ class ModelEngineTTSAdapter(TTSAdapter, HttpTransportMixin):
                 yield base64.b64decode(delta.content)
 
     async def health_check(self) -> bool:
-        """Check whether the ModelEngine service is reachable."""
         if self._model is None:
             self._build_model()
         return await asyncio.to_thread(self._model.check_connectivity)
 
     def get_model_info(self) -> ModelInfo:
-        """Get metadata describing this adapter's model."""
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
