@@ -133,10 +133,17 @@ function ChatStreamFinalMessageInner({
   // Parse A2UI protocol JSON from agent text content
   const { parsedSurfaces, remainingText } = useMemo(() => {
     const rawContent = message.finalAnswer || message.content || "";
-    const { surfaces: a2uiSurfaces, remainingText } = extractA2UIFromText(rawContent);
+    const { surfaces: textSurfaces, remainingText } = extractA2UIFromText(rawContent);
     // Merge with any existing a2uiSurfaces from SSE stream
     const existingSurfaces = message.a2uiSurfaces || [];
-    const allSurfaces = [...existingSurfaces, ...a2uiSurfaces];
+    const allSurfaces = [...existingSurfaces, ...textSurfaces];
+    console.log("[A2UI_DEBUG] useMemo A2UI:", {
+      existingSurfacesCount: existingSurfaces.length,
+      textSurfacesCount: textSurfaces.length,
+      allSurfacesCount: allSurfaces.length,
+      surfaceIds: allSurfaces.map(s => s.surfaceId),
+      componentCounts: allSurfaces.map(s => s.components?.length || 0),
+    });
     return {
       parsedSurfaces: allSurfaces.length > 0 ? allSurfaces : undefined,
       remainingText,

@@ -67,6 +67,28 @@ const cardTypeLabels: Record<string, string> = {
   chart: "Chart · 统计图表",
 };
 
+/**
+ * Safely extract a display string from a value that may be a plain string
+ * or a structured object like `{ display: "inline", text: "..." }`.
+ * Returns a plain string suitable for React rendering.
+ */
+function safeRenderText(value: any): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.content === "string") return value.content;
+    if (typeof value.label === "string") return value.label;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
+}
+
 const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
   component,
   dataModel,
@@ -184,7 +206,7 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     }
 
     case "Card": {
-      const cardTitle = component.text || component.label || "";
+      const cardTitle = safeRenderText(component.text) || safeRenderText(component.label);
       const titleIsHtml = /<[a-z][\s\S]*>/i.test(cardTitle);
       const titleEl = titleIsHtml ? (
         <span dangerouslySetInnerHTML={{ __html: cardTitle }} />
@@ -289,7 +311,7 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     }
 
     case "Text": {
-      const textContent = component.text || "";
+      const textContent = safeRenderText(component.text);
       const isHtml = /<[a-z][\s\S]*>/i.test(textContent);
 
       if (isHtml) {
@@ -453,7 +475,7 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           style={customStyle}
         >
           {(() => {
-            const btnText = component.text || component.label || "";
+            const btnText = safeRenderText(component.text) || safeRenderText(component.label);
             const btnIsHtml = /<[a-z][\s\S]*>/i.test(btnText);
             return btnIsHtml ? (
               <span dangerouslySetInnerHTML={{ __html: btnText }} />
@@ -468,17 +490,16 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     case "TextField": {
       const binding = component.dataBinding || component.id;
       const label =
-        (component.props?.label as string) || component.label || "";
+        safeRenderText(component.props?.label) || safeRenderText(component.label);
       const placeholder =
-        (component.props?.placeholder as string) ||
-        component.placeholder ||
-        "";
+        safeRenderText(component.props?.placeholder) ||
+        safeRenderText(component.placeholder);
       const required =
         (component.props?.required as boolean) ??
         component.required ??
         false;
       const defaultValue =
-        (dataModel?.[binding] as string) || component.value || "";
+        safeRenderText(dataModel?.[binding]) || safeRenderText(component.value);
       return (
         <div style={{ marginBottom: 12 }}>
           {label && (
@@ -512,17 +533,16 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     case "TextArea": {
       const binding = component.dataBinding || component.id;
       const label =
-        (component.props?.label as string) || component.label || "";
+        safeRenderText(component.props?.label) || safeRenderText(component.label);
       const placeholder =
-        (component.props?.placeholder as string) ||
-        component.placeholder ||
-        "";
+        safeRenderText(component.props?.placeholder) ||
+        safeRenderText(component.placeholder);
       const required =
         (component.props?.required as boolean) ??
         component.required ??
         false;
       const defaultValue =
-        (dataModel?.[binding] as string) || component.value || "";
+        safeRenderText(dataModel?.[binding]) || safeRenderText(component.value);
       return (
         <div style={{ marginBottom: 12 }}>
           {label && (
@@ -566,14 +586,14 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
           onChange={(e) => handleDataChange(binding, e.target.checked)}
           style={{ marginBottom: 8 }}
         >
-          {component.text || component.label}
+          {safeRenderText(component.text) || safeRenderText(component.label)}
         </Checkbox>
       );
     }
 
     case "Form": {
       const interactionId = component.dataBinding || component.id;
-      const title = component.text || component.label || "Form";
+      const title = safeRenderText(component.text) || safeRenderText(component.label) || "Form";
       const hasSubmitButton = component.children?.some(
         (child: any) =>
           child?.component === "Button" &&
@@ -620,7 +640,7 @@ const A2UIComponentRenderer: React.FC<A2UIComponentRendererProps> = ({
     }
 
     case "Icon": {
-      const iconName = component.text || component.id;
+      const iconName = safeRenderText(component.text) || component.id || "";
       const icon = iconMap[iconName] || <PushpinOutlined />;
       return <span style={{ fontSize: 16 }}>{icon}</span>;
     }
@@ -710,8 +730,18 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({
   );
 
   if (!surfaces || surfaces.length === 0) {
+    console.log("[A2UI_DEBUG] A2UIRenderer returning null - no surfaces");
     return null;
   }
+
+  console.log("[A2UI_DEBUG] A2UIRenderer rendering:", {
+    surfacesCount: surfaces.length,
+    surfaceDetails: surfaces.map(s => ({
+      surfaceId: s.surfaceId,
+      componentCount: s.components?.length || 0,
+      componentTypes: s.components?.map(c => c.component) || [],
+    })),
+  });
 
   return (
     <ConfigProvider>
@@ -753,10 +783,17 @@ export const A2UIChatMessage: React.FC<A2UIChatMessageProps> = ({
   onAction,
   messageId,
 }) => {
+  console.log("[A2UI_DEBUG] A2UIChatMessage render:", {
+    hasSurfaces: !!(surfaces && surfaces.length > 0),
+    surfacesCount: surfaces?.length || 0,
+    pendingInteractionsCount: pendingInteractions?.length || 0,
+    messageId,
+  });
   if (
     (!surfaces || surfaces.length === 0) &&
     (!pendingInteractions || pendingInteractions.length === 0)
   ) {
+    console.log("[A2UI_DEBUG] A2UIChatMessage returning null - no surfaces or interactions");
     return null;
   }
 

@@ -8,6 +8,7 @@ import {
   ApiConversationDetail,
   ChatMessageType,
   MinioFileItem,
+  A2UISurface,
 } from "@/types/chat";
 import log from "@/lib/logger";
 import type { TFunction } from "i18next";
@@ -103,6 +104,7 @@ export function extractAssistantMsgFromResponse(
   let finalAnswer = "";
   const steps: AgentStep[] = [];
   let automationProposal: ChatMessageType["automationProposal"];
+  const a2uiSurfaces: A2UISurface[] = [];
   if (dialog_msg.message && Array.isArray(dialog_msg.message)) {
     let lastModelOutputIndex = -1;
 
@@ -401,6 +403,96 @@ export function extractAssistantMsgFromResponse(
           break;
         }
 
+        case chatConfig.messageTypes.A2UI_SURFACE: {
+          try {
+            const surfaceData = JSON.parse(msg.content);
+            const existingIndex = a2uiSurfaces.findIndex(
+              (s) => s.surfaceId === surfaceData.surfaceId
+            );
+            if (existingIndex >= 0) {
+              a2uiSurfaces[existingIndex] = {
+                ...a2uiSurfaces[existingIndex],
+                ...surfaceData,
+              };
+            } else {
+              a2uiSurfaces.push(surfaceData);
+            }
+          } catch (e) {
+            log.error("Cannot parse A2UI surface history", e);
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.A2UI_COMPONENTS: {
+          try {
+            const componentsData = JSON.parse(msg.content);
+            const { surfaceId, components, dataModel } = componentsData;
+            const existingIndex = a2uiSurfaces.findIndex(
+              (s) => s.surfaceId === surfaceId
+            );
+            if (existingIndex >= 0) {
+              a2uiSurfaces[existingIndex] = {
+                ...a2uiSurfaces[existingIndex],
+                components: components ?? a2uiSurfaces[existingIndex].components,
+                dataModel: dataModel ?? a2uiSurfaces[existingIndex].dataModel,
+              };
+            } else {
+              a2uiSurfaces.push({
+                surfaceId,
+                components: components ?? [],
+                dataModel: dataModel ?? {},
+              });
+            }
+          } catch (e) {
+            log.error("Cannot parse A2UI components history", e);
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.A2UI_DATA_MODEL: {
+          try {
+            const modelData = JSON.parse(msg.content);
+            const { surfaceId, dataModel } = modelData;
+            const existingIndex = a2uiSurfaces.findIndex(
+              (s) => s.surfaceId === surfaceId
+            );
+            if (existingIndex >= 0) {
+              a2uiSurfaces[existingIndex] = {
+                ...a2uiSurfaces[existingIndex],
+                dataModel: {
+                  ...a2uiSurfaces[existingIndex].dataModel,
+                  ...dataModel,
+                },
+              };
+            } else {
+              a2uiSurfaces.push({
+                surfaceId,
+                components: [],
+                dataModel: dataModel ?? {},
+              });
+            }
+          } catch (e) {
+            log.error("Cannot parse A2UI data model history", e);
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.A2UI_DELETE_SURFACE: {
+          try {
+            const deleteData = JSON.parse(msg.content);
+            const { surfaceId } = deleteData;
+            const index = a2uiSurfaces.findIndex(
+              (s) => s.surfaceId === surfaceId
+            );
+            if (index >= 0) {
+              a2uiSurfaces.splice(index, 1);
+            }
+          } catch (e) {
+            log.error("Cannot parse A2UI delete surface history", e);
+          }
+          break;
+        }
+
         default:
           break;
       }
@@ -445,6 +537,7 @@ export function extractAssistantMsgFromResponse(
     attachments:
       assistantAttachments.length > 0 ? assistantAttachments : undefined,
     automationProposal,
+    a2uiSurfaces: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
   };
   return formattedAssistantMsg;
 }

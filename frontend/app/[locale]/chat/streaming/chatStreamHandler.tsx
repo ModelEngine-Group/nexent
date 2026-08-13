@@ -5,6 +5,21 @@ import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
+/**
+ * Find the index of the last assistant message in the messages array.
+ * Returns -1 if no assistant message is found.
+ * This is more robust than assuming the last message is always the assistant,
+ * especially during streaming when React state updates may be async.
+ */
+function findLastAssistantMessageIndex(messages: ChatMessageType[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === MESSAGE_ROLES.ASSISTANT) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 // Streaming message types for recovery
 export interface StreamingUnit {
   unit_id: number;
@@ -399,6 +414,7 @@ export const handleStreamResponse = async (
   t: any,
   resumeConfig?: ResumeConfig
 ) => {
+  console.error("[A2UI_DEBUG] handleStreamResponse CALLED with isDebug=", isDebug, "resumeConfig:", !!resumeConfig);
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -481,6 +497,11 @@ export const handleStreamResponse = async (
             // Parse the JSON data received each time
             const jsonData: JsonData = JSON.parse(jsonStr);
 
+            // Debug: log every received message type
+            if (jsonData.type) {
+              console.log("[A2UI_DEBUG] Received SSE chunk type:", jsonData.type, "hasContent:", !!jsonData.content, "contentType:", typeof jsonData.content);
+            }
+
             // Handle stream_status data - contains resume information
             // The data format is {"status": "resumed", "last_unit_index": N}
             // Check both the isInStreamStatusBlock flag and the status field
@@ -527,6 +548,11 @@ export const handleStreamResponse = async (
               }
 
               const messageContent = jsonData.content;
+
+              // Debug: log A2UI message before switch
+              if (messageType.startsWith("a2ui_")) {
+                console.log("[A2UI_DEBUG] A2UI message reached handler:", messageType, "contentLength:", typeof messageContent === "string" ? messageContent.length : JSON.stringify(messageContent).length);
+              }
 
               // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.
               // Steps are already reconstructed from the persisted streaming message.
@@ -1243,13 +1269,13 @@ export const handleStreamResponse = async (
                     if (newAttachments.length > 0) {
                       setMessages((prev) => {
                         const newMessages = [...prev];
-                        const lastMsg = newMessages[newMessages.length - 1];
+                        const assistantIdx = findLastAssistantMessageIndex(newMessages);
                         if (
-                          lastMsg &&
-                          lastMsg.role === MESSAGE_ROLES.ASSISTANT
+                          assistantIdx !== -1
                         ) {
+                          const lastMsg = newMessages[assistantIdx];
                           const existingAttachments = lastMsg.attachments || [];
-                          newMessages[newMessages.length - 1] = {
+                          newMessages[assistantIdx] = {
                             ...lastMsg,
                             attachments: [
                               ...existingAttachments,
@@ -1267,11 +1293,19 @@ export const handleStreamResponse = async (
 
                 case chatConfig.messageTypes.A2UI_SURFACE: {
                   try {
+                    console.log("[A2UI_DEBUG] Received A2UI_SURFACE, raw messageContent:", typeof messageContent, messageContent?.substring?.(0, 200));
                     const surfaceData = JSON.parse(messageContent);
+                    console.log("[A2UI_DEBUG] Parsed surfaceData:", surfaceData);
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      console.log("[A2UI_DEBUG] A2UI_SURFACE: assistantIdx=", assistantIdx, "totalMessages:", newMessages.length);
+                      if (assistantIdx === -1) {
+                        console.log("[A2UI_DEBUG] Skipping A2UI_SURFACE: no assistant message found");
+                        return newMessages;
+                      }
+                      const lastMsg = newMessages[assistantIdx];
+                      console.log("[A2UI_DEBUG] lastMsg:", lastMsg ? { role: lastMsg.role, hasA2uiSurfaces: !!lastMsg.a2uiSurfaces, surfacesCount: lastMsg.a2uiSurfaces?.length } : null);
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1287,13 +1321,15 @@ export const handleStreamResponse = async (
                       } else {
                         surfaces.push(surfaceData);
                       }
-                      newMessages[newMessages.length - 1] = {
+                      console.log("[A2UI_DEBUG] Updated surfaces count:", surfaces.length, "surfaceIds:", surfaces.map(s => s.surfaceId));
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         a2uiSurfaces: surfaces,
                       };
                       return newMessages;
                     });
                   } catch (e) {
+                    console.error("[A2UI_DEBUG] Error parsing A2UI_SURFACE:", e);
                     log.error(t("chatStreamHandler.parseSearchContentFailed"), e);
                   }
                   break;
@@ -1301,12 +1337,20 @@ export const handleStreamResponse = async (
 
                 case chatConfig.messageTypes.A2UI_COMPONENTS: {
                   try {
+                    console.log("[A2UI_DEBUG] Received A2UI_COMPONENTS, raw messageContent:", typeof messageContent, messageContent?.substring?.(0, 200));
                     const componentsData = JSON.parse(messageContent);
+                    console.log("[A2UI_DEBUG] Parsed componentsData:", { surfaceId: componentsData.surfaceId, componentsCount: componentsData.components?.length, rootIds: componentsData.rootIds });
                     const { surfaceId, components, dataModel } = componentsData;
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      console.log("[A2UI_DEBUG] A2UI_COMPONENTS: assistantIdx=", assistantIdx);
+                      if (assistantIdx === -1) {
+                        console.log("[A2UI_DEBUG] Skipping A2UI_COMPONENTS: no assistant message found");
+                        return newMessages;
+                      }
+                      const lastMsg = newMessages[assistantIdx];
+                      console.log("[A2UI_DEBUG] A2UI_COMPONENTS lastMsg:", lastMsg ? { role: lastMsg.role, hasA2uiSurfaces: !!lastMsg.a2uiSurfaces } : null);
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1327,7 +1371,7 @@ export const handleStreamResponse = async (
                           dataModel: dataModel || {},
                         });
                       }
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         a2uiSurfaces: surfaces,
                       };
@@ -1345,8 +1389,13 @@ export const handleStreamResponse = async (
                     const { surfaceId, dataModel } = modelData;
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      console.log("[A2UI_DEBUG] A2UI_DATA_MODEL: assistantIdx=", assistantIdx);
+                      if (assistantIdx === -1) {
+                        console.log("[A2UI_DEBUG] Skipping A2UI_DATA_MODEL: no assistant message found");
+                        return newMessages;
+                      }
+                      const lastMsg = newMessages[assistantIdx];
 
                       const surfaces = lastMsg.a2uiSurfaces
                         ? [...lastMsg.a2uiSurfaces]
@@ -1370,7 +1419,7 @@ export const handleStreamResponse = async (
                           dataModel: dataModel || {},
                         });
                       }
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         a2uiSurfaces: surfaces,
                       };
@@ -1388,10 +1437,16 @@ export const handleStreamResponse = async (
                     const { surfaceId } = deleteData;
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.a2uiSurfaces) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      console.log("[A2UI_DEBUG] A2UI_DELETE_SURFACE: assistantIdx=", assistantIdx);
+                      if (assistantIdx === -1) {
+                        console.log("[A2UI_DEBUG] Skipping A2UI_DELETE_SURFACE: no assistant message found");
+                        return newMessages;
+                      }
+                      const lastMsg = newMessages[assistantIdx];
+                      if (!lastMsg.a2uiSurfaces) return newMessages;
 
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         a2uiSurfaces: lastMsg.a2uiSurfaces.filter(
                           (s) => s.surfaceId !== surfaceId
@@ -1410,8 +1465,9 @@ export const handleStreamResponse = async (
                     const formData = JSON.parse(messageContent);
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      if (assistantIdx === -1) return newMessages;
+                      const lastMsg = newMessages[assistantIdx];
 
                       const interactions = lastMsg.pendingInteractions
                         ? [...lastMsg.pendingInteractions]
@@ -1427,7 +1483,7 @@ export const handleStreamResponse = async (
                       } else {
                         interactions.push(formData);
                       }
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         pendingInteractions: interactions,
                       };
@@ -1445,10 +1501,12 @@ export const handleStreamResponse = async (
                     const { interaction_id } = responseData;
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.pendingInteractions) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      if (assistantIdx === -1) return newMessages;
+                      const lastMsg = newMessages[assistantIdx];
+                      if (!lastMsg.pendingInteractions) return newMessages;
 
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         pendingInteractions: lastMsg.pendingInteractions.filter(
                           (i) => i.interaction_id !== interaction_id
@@ -1468,10 +1526,12 @@ export const handleStreamResponse = async (
                     const { interaction_id } = timeoutData;
                     setMessages((prev) => {
                       const newMessages = [...prev];
-                      const lastMsg = newMessages[newMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== MESSAGE_ROLES.ASSISTANT || !lastMsg.pendingInteractions) return newMessages;
+                      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+                      if (assistantIdx === -1) return newMessages;
+                      const lastMsg = newMessages[assistantIdx];
+                      if (!lastMsg.pendingInteractions) return newMessages;
 
-                      newMessages[newMessages.length - 1] = {
+                      newMessages[assistantIdx] = {
                         ...lastMsg,
                         pendingInteractions: lastMsg.pendingInteractions.map(
                           (i) =>
@@ -1496,9 +1556,10 @@ export const handleStreamResponse = async (
               // Update message content, display in real time
               setMessages((prev) => {
                 const newMessages = [...prev];
-                const lastMsg = newMessages[newMessages.length - 1];
+                const assistantIdx = findLastAssistantMessageIndex(newMessages);
 
-                if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                if (assistantIdx !== -1) {
+                  const lastMsg = newMessages[assistantIdx];
                   // Create a new object reference so React.memo detects the change
                   const updatedMsg = { ...lastMsg };
 
@@ -1542,7 +1603,7 @@ export const handleStreamResponse = async (
                   // Update other special content
                   if (finalAnswer) updatedMsg.finalAnswer = finalAnswer;
 
-                  newMessages[newMessages.length - 1] = updatedMsg;
+                  newMessages[assistantIdx] = updatedMsg;
                 }
 
                 return newMessages;
@@ -1578,9 +1639,11 @@ export const handleStreamResponse = async (
     // Mark message as complete, and check all steps again to prevent duplicates
     setMessages((prev) => {
       const newMessages = [...prev];
-      const lastMsg = newMessages[newMessages.length - 1];
+      const assistantIdx = findLastAssistantMessageIndex(newMessages);
+      console.log("[A2UI_DEBUG] Final completion: assistantIdx=", assistantIdx, "totalMessages:", newMessages.length);
 
-      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+      if (assistantIdx !== -1) {
+        const lastMsg = newMessages[assistantIdx];
         // Create a new object reference so React.memo detects the change
         const updatedMsg = { ...lastMsg, isComplete: true };
 
@@ -1610,7 +1673,8 @@ export const handleStreamResponse = async (
         // Also persist any finalAnswer accumulated in the trailing buffer
         if (finalAnswer) updatedMsg.finalAnswer = finalAnswer;
 
-        newMessages[newMessages.length - 1] = updatedMsg;
+        console.log("[A2UI_DEBUG] Final completion: a2uiSurfaces count:", updatedMsg.a2uiSurfaces?.length || 0);
+        newMessages[assistantIdx] = updatedMsg;
       }
 
       return newMessages;

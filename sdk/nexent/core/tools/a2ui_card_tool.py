@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field
@@ -181,6 +182,7 @@ class OutputCardTool(Tool):
         """
         from ..a2ui.a2ui_builder import A2UIBuilder
 
+        print(f"[A2UI_DEBUG] OutputCardTool.forward called: card_type={card_type}, title={title}, observer={'SET' if self.observer else 'NONE'}")
         logger.info(
             "OutputCardTool.forward called: card_type=%s, title=%s, message=%s, observer=%s",
             card_type, title, message[:100] if message else "", self.observer is not None,
@@ -193,11 +195,13 @@ class OutputCardTool(Tool):
                 "error": "Observer not initialized. Cannot send card.",
             }
 
-        builder = A2UIBuilder(surface_id=f"card_{card_type}_{id(self)}")
+        unique_id = uuid.uuid4().hex[:12]
+        builder = A2UIBuilder(surface_id=f"card_{card_type}_{unique_id}")
 
         try:
             # Create surface
             surface_msg = builder.create_surface(catalog="basic")
+            print(f"[A2UI_DEBUG] Creating A2UI_SURFACE: surfaceId={surface_msg.get('surfaceId')}, catalog={surface_msg.get('catalog')}")
             self.observer.add_message(
                 "", ProcessType.A2UI_SURFACE, json.dumps(surface_msg)
             )
@@ -232,6 +236,7 @@ class OutputCardTool(Tool):
 
             # Send components
             components_msg = builder.build_update_components()
+            print(f"[A2UI_DEBUG] Sending A2UI_SURFACE and A2UI_COMPONENTS: surfaceId={builder._sid}, components={len(components_msg.get('components', []))}, rootIds={components_msg.get('rootIds', [])}")
             self.observer.add_message(
                 "", ProcessType.A2UI_COMPONENTS, json.dumps(components_msg)
             )

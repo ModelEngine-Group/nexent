@@ -1436,6 +1436,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let toolCallCount = 0;
     let storedTiming: ReturnType<typeof buildTimingResult> | null = null;
 
+    // A2UI surface registry - manages A2UI card surfaces from SSE
+    const a2uiSurfaces = new Map<string, {
+      surfaceId: string;
+      catalog?: string;
+      components: any[];
+      dataModel?: Record<string, any>;
+    }>();
+
+    // Track the last emitted A2UI surface part index in contentParts
+    let lastA2UIPartIndex = -1;
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -1523,6 +1534,71 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   ? [...contentParts, currentReasoningPart]
                   : [...contentParts]
               );
+            }
+            continue;
+          }
+
+          // Handle A2UI (Agent-to-UI) card messages
+          if (chunk.type === "a2ui_surface" || chunk.type === "a2ui_components" ||
+              chunk.type === "a2ui_data_model" || chunk.type === "a2ui_delete_surface") {
+            try {
+              const rawContent = chunk.content;
+              const payload = typeof rawContent === "string"
+                ? JSON.parse(rawContent)
+                : (rawContent as any);
+              console.error("[A2UI_DEBUG] Received A2UI chunk:", chunk.type, "payload:", JSON.stringify(payload).slice(0, 200));
+
+              if (chunk.type === "a2ui_surface") {
+                const surfaceId = payload.surfaceId || "";
+                const catalog = payload.catalog;
+                a2uiSurfaces.set(surfaceId, {
+                  surfaceId,
+                  catalog,
+                  components: [],
+                });
+              } else if (chunk.type === "a2ui_components") {
+                const surfaceId = payload.surfaceId || "";
+                const surface = a2uiSurfaces.get(surfaceId);
+                if (surface) {
+                  surface.components = payload.components || [];
+                  surface.dataModel = payload.dataModel || surface.dataModel;
+                } else {
+                  a2uiSurfaces.set(surfaceId, {
+                    surfaceId,
+                    components: payload.components || [],
+                    dataModel: payload.dataModel,
+                  });
+                }
+              } else if (chunk.type === "a2ui_data_model") {
+                const surfaceId = payload.surfaceId || "";
+                const surface = a2uiSurfaces.get(surfaceId);
+                if (surface) {
+                  surface.dataModel = payload.dataModel || payload;
+                }
+              } else if (chunk.type === "a2ui_delete_surface") {
+                const surfaceId = payload.surfaceId || "";
+                a2uiSurfaces.delete(surfaceId);
+              }
+
+              // Build the complete A2UI card data and emit as a part
+              const allSurfaces = Array.from(a2uiSurfaces.values());
+              const a2uiPart: any = {
+                type: "a2ui-card",
+                surfaces: allSurfaces,
+              };
+
+              // Replace or append the A2UI part in contentParts
+              if (lastA2UIPartIndex >= 0 && lastA2UIPartIndex < contentParts.length &&
+                  contentParts[lastA2UIPartIndex]?.type === "a2ui-card") {
+                contentParts[lastA2UIPartIndex] = a2uiPart;
+              } else {
+                contentParts.push(a2uiPart);
+                lastA2UIPartIndex = contentParts.length - 1;
+              }
+              console.error("[A2UI_DEBUG] A2UI surfaces count:", allSurfaces.length);
+              yield buildStreamResult(contentParts);
+            } catch (err) {
+              console.error("[A2UI_DEBUG] Failed to parse A2UI chunk:", err);
             }
             continue;
           }

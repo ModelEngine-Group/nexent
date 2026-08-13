@@ -92,6 +92,8 @@ import {
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
 import { VerificationPanel } from "../ui/verification-panel";
+import { A2UIChatMessage } from "../../chat/a2ui/A2UIRenderer";
+import type { A2UISurface } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -958,6 +960,23 @@ const AssistantMessage: FC<{
                   completed={verificationPanel.completed === true}
                 />
               );
+            }
+
+            if (partType === "a2ui-card") {
+              const a2uiPart = part as typeof part & {
+                surfaces?: A2UISurface[];
+              };
+              console.error("[A2UI_DEBUG] Rendering a2ui-card part, surfaces:", a2uiPart.surfaces?.length ?? 0);
+              if (a2uiPart.surfaces && a2uiPart.surfaces.length > 0) {
+                return (
+                  <A2UIChatMessage
+                    surfaces={a2uiPart.surfaces}
+                    pendingInteractions={[]}
+                    messageId={`a2ui-${a2uiPart.surfaces[0]?.surfaceId ?? "unknown"}`}
+                  />
+                );
+              }
+              return null;
             }
 
             switch (part.type) {

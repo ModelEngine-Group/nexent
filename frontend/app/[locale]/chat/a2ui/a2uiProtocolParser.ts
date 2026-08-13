@@ -26,6 +26,28 @@
 
 import type { A2UIComponent, A2UISurface } from "@/types/chat";
 
+/**
+ * Safely extract a display string from a value that may be a plain string
+ * or a structured object like `{ display: "inline", text: "..." }`.
+ * Returns a plain string suitable for React rendering.
+ */
+function safeText(value: any): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    if (typeof value.text === "string") return value.text;
+    if (typeof value.content === "string") return value.content;
+    if (typeof value.label === "string") return value.label;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
+}
+
 /** A2UI card types that we support */
 const A2UI_TYPES = new Set([
   "card",
@@ -222,7 +244,6 @@ function convertA2UIToSurface(a2uiJson: any): A2UISurface {
     return {
       surfaceId: surfaceId,
       catalog: "basic",
-      title: a2uiJson.title || "Chart",
       components: [{
         id: `chart_${surfaceId}`,
         component: "Chart",
@@ -232,7 +253,6 @@ function convertA2UIToSurface(a2uiJson: any): A2UISurface {
           options: chartOptions,
         },
       }],
-      rootIds: [`chart_${surfaceId}`],
       dataModel: {},
     };
   }
@@ -286,7 +306,7 @@ function convertSimplifiedFormat(a2uiJson: any): A2UISurface {
     components.push({
       id: `title_${Date.now()}`,
       component: "Text",
-      text: a2uiJson.title,
+      text: safeText(a2uiJson.title),
       variant: "h3",
     });
   }
@@ -296,7 +316,7 @@ function convertSimplifiedFormat(a2uiJson: any): A2UISurface {
     components.push({
       id: `desc_${Date.now()}`,
       component: "Text",
-      text: a2uiJson.description,
+      text: safeText(a2uiJson.description),
       variant: "body",
     });
   }
@@ -339,7 +359,7 @@ function convertSimplifiedFormat(a2uiJson: any): A2UISurface {
   const cardComponent: A2UIComponent = {
     id: `a2ui_card_${Date.now()}`,
     component: "Card",
-    text: a2uiJson.title || "",
+    text: safeText(a2uiJson.title),
     children: components,
   };
 
@@ -355,8 +375,8 @@ function buildFieldComponent(field: any): A2UIComponent[] {
   const comps: A2UIComponent[] = [];
   const fieldType = field.type;
   const fieldId = field.id || field.name || `field_${Date.now()}`;
-  const label = field.label || field.placeholder || "";
-  const placeholder = field.placeholder || "";
+  const label = safeText(field.label || field.placeholder);
+  const placeholder = safeText(field.placeholder);
   const required = field.required || false;
 
   switch (fieldType) {
@@ -381,7 +401,7 @@ function buildFieldComponent(field: any): A2UIComponent[] {
         label: label,
         placeholder: placeholder,
         required: required,
-        value: field.default || "",
+        value: safeText(field.default),
       });
       break;
     }
@@ -459,7 +479,7 @@ function buildHeaderComponents(header: any): A2UIComponent[] {
     comps.push({
       id: `header_title_${Date.now()}`,
       component: "Text",
-      text: header.title,
+      text: safeText(header.title),
       variant: "h3",
     });
   }
@@ -469,7 +489,7 @@ function buildHeaderComponents(header: any): A2UIComponent[] {
     comps.push({
       id: `header_subtitle_${Date.now()}`,
       component: "Text",
-      text: header.subtitle,
+      text: safeText(header.subtitle),
       variant: "subtitle",
     });
   }
@@ -479,7 +499,7 @@ function buildHeaderComponents(header: any): A2UIComponent[] {
     comps.push({
       id: `header_icon_${Date.now()}`,
       component: "Icon",
-      text: header.icon,
+      text: safeText(header.icon),
     });
   }
 
@@ -498,7 +518,7 @@ function buildBodyComponents(sections: any[]): A2UIComponent[] {
         comps.push({
           id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           component: "Text",
-          text: section.content || "",
+          text: safeText(section.content),
           variant: mapTextStyle(section.style),
         });
         break;
@@ -517,8 +537,8 @@ function buildBodyComponents(sections: any[]): A2UIComponent[] {
       case "key-value": {
         if (section.items && Array.isArray(section.items)) {
           for (const item of section.items) {
-            const keyText = item.key ? `**${item.key}**: ` : "";
-            const valueText = item.value || "";
+            const keyText = item.key ? `**${safeText(item.key)}**: ` : "";
+            const valueText = safeText(item.value);
             const highlightHtml =
               item.highlight === "success"
                 ? `<span style="color: #52c41a; font-weight: 500">${valueText}</span>`
@@ -545,7 +565,7 @@ function buildBodyComponents(sections: any[]): A2UIComponent[] {
             comps.push({
               id: `btn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               component: "Button",
-              text: btn.label || btn.text || "Action",
+              text: safeText(btn.label || btn.text || "Action"),
               variant: btn.style === "primary" ? "primary" : "default",
               action: btn.action || btn.name,
             });
@@ -570,7 +590,7 @@ function buildBodyComponents(sections: any[]): A2UIComponent[] {
           comps.push({
             id: `unknown_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             component: "Text",
-            text: section.content,
+            text: safeText(section.content),
             variant: "body",
           });
         }
