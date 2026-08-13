@@ -13,9 +13,11 @@ from services.memory_dreaming_summarizer import (
     _load_prompt,
     _parse_summary_envelope,
 )
+from services import memory_dreaming_summarizer
 
 
 @pytest.mark.parametrize("value", ["", "# User Memory", "<summary>x", "x<summary>y</summary>",
+                                    "<summary></summary>",
                                     "<summary>a</summary><summary>b</summary>",
                                     "<summary><summary>x</summary></summary>"])
 def test_ac056_rejects_malformed_envelope(value):
@@ -42,6 +44,41 @@ def _summarizer(model, limit=10000):
     value.prompt = _load_prompt()
     value.max_summarization_input_chars = limit
     return value
+
+
+def test_ac078_constructor_requires_and_applies_tenant_model(monkeypatch):
+    monkeypatch.setattr(
+        memory_dreaming_summarizer.tenant_config_manager,
+        "get_model_config",
+        lambda **_kwargs: None,
+    )
+    with pytest.raises(RuntimeError):
+        TenantDreamingSummarizer("t", "u")
+
+    config = {
+        "model_name": "test-model", "base_url": "http://model", "api_key": "secret",
+        "max_input_tokens": 1000, "model_factory": "openai", "ssl_verify": False,
+        "display_name": "Test", "timeout_seconds": 3,
+    }
+    model = object()
+    monkeypatch.setattr(
+        memory_dreaming_summarizer.tenant_config_manager,
+        "get_model_config",
+        lambda **_kwargs: config,
+    )
+    monkeypatch.setattr(memory_dreaming_summarizer, "OpenAIModel", lambda **_kwargs: model)
+    monkeypatch.setattr(memory_dreaming_summarizer, "get_model_name_from_config", lambda _config: "test-model")
+
+    summarizer = TenantDreamingSummarizer("t", "u")
+    assert summarizer.model is model
+    assert summarizer.max_summarization_input_chars == 20_000
+
+
+def test_ac078_small_chunk_set_is_returned_without_repartitioning():
+    units = [DreamingMemoryUnit(unit_id="1", content="new", is_new=True)]
+    chunks = TenantDreamingSummarizer._chunk_units(_request(units), 100)
+    assert len(chunks) == 2
+    assert chunks[0].startswith("## Current Active User Memory")
 
 
 def test_ac057_under_limit_uses_exactly_one_model_call():

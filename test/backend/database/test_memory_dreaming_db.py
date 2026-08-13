@@ -1,7 +1,7 @@
 """Unit tests for memory_dreaming_db CRUD and audit functions."""
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -173,6 +173,76 @@ def test_ac037_delete_history_physically_deletes_schedule(monkeypatch):
     assert session.query.call_args_list[0].args == (MemoryDreamingSchedule,)
     assert query.delete.call_count == 2
     assert session.query.call_count == 3
+
+
+def test_ac078_schedule_reads_thresholds_and_next_fire(monkeypatch):
+    session = _mock_session(monkeypatch)
+    row = MagicMock(
+        schedule_id=1, agent_id="__user__", enabled=True, rule_type="INTERVAL",
+        timezone="Asia/Shanghai", start_at=datetime(2026, 1, 1), cron_expr=None,
+        interval_seconds=3600, next_fire_at=None, last_fire_at=None, fire_count=0,
+        min_score=0.8, min_recall_count=4, min_unique_queries=2, source_limit=50,
+        long_term_max_chars=9000, summarization_max_attempts=2,
+    )
+    query = MagicMock()
+    query.filter.return_value = query
+    query.first.side_effect = [row, row, None]
+    session.query.return_value = query
+
+    assert memory_dreaming_db.get_schedule("t", "u", "__user__")["min_score"] == 0.8
+    assert memory_dreaming_db.get_thresholds("t", "u", "__user__") == {
+        "min_score": 0.8, "min_recall_count": 4, "min_unique_queries": 2,
+        "source_limit": 50, "long_term_max_chars": 9000,
+        "summarization_max_attempts": 2,
+    }
+    assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
+
+    future = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(memory_dreaming_db, "compute_next_fire_at", lambda *_args: future)
+    assert memory_dreaming_db._next_schedule_fire(row, datetime(2025, 1, 1)) == future.replace(tzinfo=None)
+    monkeypatch.setattr(memory_dreaming_db, "compute_next_fire_at", lambda *_args: None)
+    assert memory_dreaming_db._next_schedule_fire(row, datetime(2025, 1, 1)) is None
+
+
+def test_ac078_all_unset_thresholds_return_none(monkeypatch):
+    session = _mock_session(monkeypatch)
+    row = MagicMock(
+        min_score=None, min_recall_count=None, min_unique_queries=None,
+        source_limit=None, long_term_max_chars=None, summarization_max_attempts=None,
+    )
+    session.query.return_value.filter.return_value.first.return_value = row
+    assert memory_dreaming_db.get_thresholds("t", "u", "__user__") is None
+
+
+def test_ac078_materialize_due_schedules_enqueues_only_idle_scope(monkeypatch):
+    session = _mock_session(monkeypatch)
+    idle = MagicMock(
+        tenant_id="t", user_id="u", agent_id="a", next_fire_at=datetime(2026, 1, 1),
+        fire_count=0,
+    )
+    busy = MagicMock(
+        tenant_id="t", user_id="u", agent_id="b", next_fire_at=datetime(2026, 1, 1),
+        fire_count=2,
+    )
+    schedule_query = MagicMock()
+    schedule_query.filter.return_value = schedule_query
+    schedule_query.order_by.return_value = schedule_query
+    schedule_query.limit.return_value = schedule_query
+    schedule_query.with_for_update.return_value = schedule_query
+    schedule_query.all.return_value = [idle, busy]
+    idle_audit_query = MagicMock()
+    idle_audit_query.filter.return_value.first.return_value = None
+    busy_audit_query = MagicMock()
+    busy_audit_query.filter.return_value.first.return_value = (99,)
+    session.query.side_effect = [schedule_query, idle_audit_query, busy_audit_query]
+    monkeypatch.setattr(memory_dreaming_db, "_next_schedule_fire", lambda row, _now: row.next_fire_at)
+
+    assert memory_dreaming_db.materialize_due_schedules(limit=2) == 1
+    added = session.add.call_args.args[0]
+    assert isinstance(added, MemoryDreamingAudit)
+    assert added.status == "queued"
+    assert idle.fire_count == 1
+    assert busy.fire_count == 3
 
 
 def test_delete_history_retires_dreamed_version_and_restores_latest_manual(monkeypatch):

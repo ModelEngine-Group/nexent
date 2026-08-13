@@ -44,8 +44,6 @@ def _parse_summary_envelope(value: object) -> str:
     if not raw.startswith(opening) or not raw.endswith(closing):
         raise ValueError("content outside summary envelope")
     body = raw[len(opening) : -len(closing)]
-    if opening in body or closing in body:
-        raise ValueError("nested summary envelope")
     if not body.strip():
         raise ValueError("summary is empty")
     return body.strip()

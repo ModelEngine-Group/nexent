@@ -30,6 +30,70 @@ def test_ac011_parameters_show_effective_read_only_configuration(monkeypatch):
     }
 
 
+def test_ac078_parameters_apply_persisted_overrides(monkeypatch):
+    monkeypatch.setattr(
+        memory_dreaming_app, "get_current_user_id", lambda _authorization: ("u", "t")
+    )
+    monkeypatch.setattr(
+        memory_dreaming_app.memory_dreaming_db,
+        "get_thresholds",
+        lambda *_args: {
+            "source_limit": 42,
+            "long_term_max_chars": 8000,
+            "summarization_max_attempts": 4,
+        },
+    )
+    assert memory_dreaming_app.get_dreaming_parameters(None) == {
+        "source_limit": 42,
+        "long_term_max_chars": 8000,
+        "summarization_max_attempts": 4,
+    }
+
+
+def test_ac078_schedule_validation_covers_exclusive_fields():
+    with pytest.raises(ValidationError):
+        memory_dreaming_app.DreamingScheduleRequest(
+            rule_type="CRON", cron_expr="0 3 * * *", interval_seconds=3600
+        )
+    with pytest.raises(ValidationError):
+        memory_dreaming_app.DreamingScheduleRequest(rule_type="INTERVAL")
+    with pytest.raises(ValidationError):
+        memory_dreaming_app.DreamingScheduleRequest(
+            rule_type="INTERVAL", interval_seconds=3600, cron_expr="0 3 * * *"
+        )
+
+
+def test_ac078_target_user_requires_permission_and_same_tenant(monkeypatch):
+    monkeypatch.setattr(
+        memory_dreaming_app, "get_current_user_id", lambda _authorization: ("caller", "t")
+    )
+    monkeypatch.setattr(
+        memory_dreaming_app, "get_user_tenant_by_user_id",
+        lambda user_id: {"user_role": "USER"} if user_id == "caller" else {"tenant_id": "t"},
+    )
+    monkeypatch.setattr(memory_dreaming_app, "check_role_permission", lambda *_args, **_kwargs: False)
+    with pytest.raises(HTTPException) as denied:
+        memory_dreaming_app._resolve_target_user(None, "target", tenant_capability="VIEW_TENANT")
+    assert denied.value.status_code == 404
+
+    monkeypatch.setattr(memory_dreaming_app, "check_role_permission", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        memory_dreaming_app, "get_user_tenant_by_user_id",
+        lambda user_id: {"user_role": "ADMIN"} if user_id == "caller" else {"tenant_id": "other"},
+    )
+    with pytest.raises(HTTPException) as cross_tenant:
+        memory_dreaming_app._resolve_target_user(None, "target", tenant_capability="VIEW_TENANT")
+    assert cross_tenant.value.status_code == 404
+
+    monkeypatch.setattr(
+        memory_dreaming_app, "get_user_tenant_by_user_id",
+        lambda user_id: {"user_role": "ADMIN"} if user_id == "caller" else {"tenant_id": "t"},
+    )
+    assert memory_dreaming_app._resolve_target_user(
+        None, "target", tenant_capability="VIEW_TENANT"
+    ) == ("target", "t")
+
+
 def test_ac009_run_uses_authenticated_scope(monkeypatch):
     create_audit = MagicMock(return_value=1)
     monkeypatch.setattr(
