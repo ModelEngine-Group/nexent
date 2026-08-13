@@ -48,7 +48,9 @@ def _make_test_app() -> FastAPI:
 def client():
     """TestClient with mocked auth and DB."""
     app = _make_test_app()
-    with TestClient(app) as c:
+    with TestClient(
+        app, headers={"Authorization": "Bearer test-token"}
+    ) as c:
         yield c
 
 
