@@ -55,10 +55,7 @@ class STTStreamRequest:
 
 
 class STTAdapter(MultimodalAdapter):
-    """STT adapter root.
-
-    Carries the shared STT result-inspection helpers that previously lived on
-    the deleted ``BaseSTTModel`` ABC, so concrete WS adapters inherit them.
+    """STT adapter root; carries shared result-inspection helpers for concrete adapters.
 
     Attributes:
         modality: ``"stt"``.
@@ -1524,10 +1521,6 @@ class VolcSTTAdapter(STTAdapter, WebSocketTransportMixin):
 class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
     """ModelEngine STT — HTTP REST, audio → base64 → Chat Completions.
 
-    Unlike Ali/Volc: inherits :class:`HttpTransportMixin` (not WS) and reuses
-    :class:`OpenAIModel` as ``_model`` (no dedicated STT class). The audio↔base64
-    protocol conversion is the adapter's responsibility.
-
     Attributes:
         factory: ``"modelengine"``.
         _model: The wrapped :class:`OpenAIModel`, built lazily.
@@ -1580,14 +1573,15 @@ class ModelEngineSTTAdapter(STTAdapter, HttpTransportMixin):
         return {"text": getattr(result, "content", str(result)), "raw": result}
 
     async def stream(self, request: STTStreamRequest) -> AsyncIterator[Dict[str, Any]]:
-        """Stream real-time transcription over HTTP SSE.
+        """Real-time streaming is not supported by ModelEngine STT.
+
+        ModelEngine STT is non-realtime file transcription (``realtime: False``);
+        the WebSocket duplex mic contract cannot be served over Chat Completions.
 
         Raises:
-            NotImplementedError: ModelEngine STT streaming is a Phase 2 deliverable.
+            NotImplementedError: Always; this adapter does not stream.
         """
-        # ModelEngine realtime STT = Chat Completions stream=True over HTTP (SSE),
-        # feeding PCM chunks incrementally. Scaffold; full SSE parsing in Phase 2.
-        raise NotImplementedError("ModelEngine STT streaming is a Phase 2 deliverable")
+        raise NotImplementedError("ModelEngine STT is non-realtime; streaming is not supported")
 
     async def health_check(self) -> bool:
         """Probe the wrapped model's connectivity."""

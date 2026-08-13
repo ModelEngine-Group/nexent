@@ -51,10 +51,7 @@ class TTSRequest:
 
 
 class TTSAdapter(MultimodalAdapter):
-    """TTS adapter root.
-
-    Carries the shared TTS result-inspection helpers that previously lived on
-    the deleted ``BaseTTSModel`` ABC, so concrete WS adapters inherit them.
+    """TTS adapter root; carries shared result-inspection helpers for concrete adapters.
 
     Attributes:
         modality: ``"tts"``.
