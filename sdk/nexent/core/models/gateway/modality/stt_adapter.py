@@ -1,17 +1,4 @@
-"""STT (speech-to-text) adapter — protocol implementation sunk in.
-
-The WebSocket speech-to-text protocols (Ali DashScope Realtime JSON-over-WS and
-Volc SAUC binary-gzip frames) live directly in the adapters. The old
-``ali_stt_model.py`` / ``volc_stt_model.py`` / ``stt_model.py`` (BaseSTTModel)
-classes are deleted; the adapters ARE the implementation.
-
-ModelEngine STT is different: it is HTTP REST, turning audio into base64 and
-reusing the OpenAI Chat Completions protocol, so its ``_model`` is
-:class:`OpenAIModel` (kept — see §3.16 LLM exception), not a dedicated STT
-class. The audio↔base64 conversion lives in the adapter's ``invoke``. This
-proves the transport Mixin is orthogonal: an HTTP-only STT vendor needs no
-WebSocket plumbing.
-"""
+"""STT (speech-to-text) adapter — Ali/Volc WebSocket + ModelEngine HTTP."""
 
 from __future__ import annotations
 

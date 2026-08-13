@@ -1,15 +1,4 @@
-"""TTS (text-to-speech) adapter — protocol implementation sunk in.
-
-The WebSocket text-to-speech protocols (Ali CosyVoice / Qwen Realtime JSON over
-WS, and Volc proprietary binary frames) live directly in the adapters. The old
-``ali_tts_model.py`` / ``volc_tts_model.py`` / ``tts_model.py`` (BaseTTSModel)
-classes are deleted; the adapters ARE the implementation.
-
-ModelEngine TTS is different: it is HTTP REST (text → Chat Completions →
-base64 audio in the response content array → decode to bytes). Its ``_model``
-is :class:`OpenAIModel` (kept — see §3.16 LLM exception); the audio↔base64
-conversion lives in the adapter.
-"""
+"""TTS (text-to-speech) adapter — Ali/Volc WebSocket + ModelEngine HTTP."""
 
 from __future__ import annotations
 

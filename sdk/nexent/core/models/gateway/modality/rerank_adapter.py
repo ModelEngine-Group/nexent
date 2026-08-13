@@ -1,10 +1,4 @@
-"""Rerank adapter — protocol implementation sunk in (no _model wrapper).
-
-The rerank protocol (OpenAI-compatible + DashScope URL-sniff request formatting,
-retry, connectivity check) lives directly in the adapter. The old
-``rerank_model.py`` classes (``OpenAICompatibleRerank`` / ``JinaRerank`` /
-``CohereRerank``) are deleted; this adapter IS the implementation.
-"""
+"""Rerank adapter — document reranking via HTTP REST."""
 
 from __future__ import annotations
 

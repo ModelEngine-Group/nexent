@@ -1,13 +1,4 @@
-"""VLM (vision-language model) adapter.
-
-The VLM protocol (image / audio / video understanding via OpenAI-compatible
-multimodal chat completions) lives directly in this adapter — no separate
-``OpenAIVLModel`` class. The adapter composes an :class:`OpenAIModel` (LLM
-base, kept per §3.16) as ``_model`` and forwards ``analyze_*`` calls through
-``self._model(messages=...)``; transport / sampling / connectivity are owned
-here. Using composition instead of inheriting ``OpenAIServerModel`` avoids the
-MRO risk that originally kept VLM out of the sink-and-delete tier.
-"""
+"""VLM (vision-language model) adapter — image/audio/video understanding."""
 
 from __future__ import annotations
 

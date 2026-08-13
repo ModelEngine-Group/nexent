@@ -1,18 +1,4 @@
-"""Adapter root ABC and model capability declaration.
-
-The root is a *pure interface*: it declares the uniform entry points
-(:meth:`invoke` / :meth:`stream` / :meth:`health_check` / :meth:`get_model_info`)
-that every caller uses. It holds no wrapped-model state and forwards no
-attributes — only :class:`LLMAdapter` needs transparent ``__getattr__``
-forwarding (CoreAgent hands the adapter to smolagents as its ``model``, and
-smolagents reaches for ``model.client`` / ``model.model_id`` / ``model.temperature``
-as part of the Model contract), and it owns that itself.
-
-Delegating adapters (:class:`OpenAIVLMAdapter`, ModelEngine STT/TTS) hold their
-wrapped :class:`OpenAIModel` as ``_model`` and call it explicitly — no
-transparent proxy. Native adapters (Ali/Volc STT/TTS, Embedding, Rerank) are the
-implementation themselves and have no ``_model``.
-"""
+"""Multimodal adapter root ABC and model capability declaration."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass

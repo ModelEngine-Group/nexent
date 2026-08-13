@@ -1,16 +1,4 @@
-"""LLM adapter.
-
-LLM is the CoreAgent primary reasoning model. smolagents reaches it through
-``model.__call__()`` / ``model.client`` / ``model.model_id`` / ``model.temperature``
-etc. Because ``__call__`` is a Python special method it bypasses
-``__getattr__`` and must be forwarded explicitly; every other attribute is
-auto-forwarded to ``_model`` via ``__getattr__`` for zero-maintenance smolagents
-compat (new attributes added upstream keep working).
-
-LLM is the *only* modality that keeps ``__getattr__`` — it is contract
-compliance (smolagents treats the adapter as its Model), not a bypass of the
-uniform :meth:`invoke` / :meth:`stream` interface.
-"""
+"""LLM adapter — forwards to a wrapped OpenAIModel for smolagents compat."""
 
 from __future__ import annotations
 
