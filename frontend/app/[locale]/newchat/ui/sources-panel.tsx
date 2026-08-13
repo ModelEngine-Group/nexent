@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import {
+  DatabaseIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   FileTextIcon,
   ImageIcon,
   LoaderCircleIcon,
+  ServerIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,7 @@ export interface PanelSourceItem {
   url?: string;
   title?: string;
   text?: string;
+  publishedDate?: string;
   filename?: string;
   downloadUrl?: string;
   objectName?: string;
@@ -67,6 +71,7 @@ export interface SourcesPanelProps {
   /** Whether the panel is currently open. Allows mount/unmount transitions. */
   open: boolean;
   selectedCitationKey?: string;
+  citationContext?: string;
   className?: string;
   onClose: () => void;
 }
@@ -83,6 +88,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   images,
   open,
   selectedCitationKey,
+  citationContext,
   className,
   onClose,
 }) => {
@@ -115,13 +121,13 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     <aside
       data-slot="sources-panel"
       className={cn(
-        "flex h-full w-80 shrink-0 flex-col border-l bg-background",
+        "flex h-full w-[380px] shrink-0 flex-col border-l border-slate-200 bg-white",
         className,
       )}
       aria-label={t("chat.sources.panel")}
     >
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <h2 className="text-sm font-semibold text-foreground">{t("chat.sources.title")}</h2>
+      <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
+        <h2 className="text-sm font-semibold text-slate-800">{t("chatRightPanel.searchTitle")}</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -135,7 +141,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div
         role="tablist"
         aria-label={t("chat.sources.tabs")}
-        className="flex items-center gap-1 border-b px-2 py-2"
+        className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
       >
         <TabButton
           label={t("chat.sources.sources")}
@@ -153,7 +159,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {showSources ? t("chat.sources.noSources") : t("chat.sources.noImages")}
@@ -165,6 +171,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
                 selected={getCitationKey(item) === selectedCitationKey}
+                citationContext={citationContext}
               />
             ))}
           </ul>
@@ -200,8 +207,8 @@ const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) 
       className={cn(
         "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
         active
-          ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          ? "bg-[#1677ff] text-white"
+          : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
       )}
     >
       {icon}
@@ -209,7 +216,7 @@ const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) 
       <span
         className={cn(
           "ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px]",
-          active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+          active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500",
         )}
       >
         {count}
@@ -226,33 +233,152 @@ const extractDomain = (url: string): string => {
   }
 };
 
-const SourceSummary: FC<{ text?: string; highlighted?: boolean; hitChunkLabel: string }> = ({ text, highlighted = false, hitChunkLabel }) => {
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const extractHighlightTerms = (
+  answerContext: string,
+  sourceText: string,
+): string[] => {
+  if (!answerContext || !sourceText) return [];
+
+  const sourceLower = sourceText.toLowerCase();
+  const candidates = new Set<string>();
+  const addIfPresent = (value: string) => {
+    const term = value.trim();
+    if (term.length >= 2 && sourceLower.includes(term.toLowerCase())) {
+      candidates.add(term);
+    }
+  };
+
+  for (const value of answerContext.match(
+    /\b(?:\d{1,3}(?:\.\d{1,3}){3}|\d{2,}(?:[-:.]\d{1,4})*)\b/g,
+  ) || []) {
+    addIfPresent(value);
+  }
+  for (const value of answerContext.match(/[A-Za-z_][A-Za-z0-9_.\/-]{2,}/g) || []) {
+    addIfPresent(value);
+  }
+  for (const phrase of answerContext.match(/[\u4e00-\u9fff]{3,}/g) || []) {
+    for (let start = 0; start <= phrase.length - 3;) {
+      let matched = "";
+      for (let length = Math.min(12, phrase.length - start); length >= 3; length -= 1) {
+        const candidate = phrase.slice(start, start + length);
+        if (sourceText.includes(candidate)) {
+          matched = candidate;
+          break;
+        }
+      }
+      if (matched) {
+        candidates.add(matched);
+        start += matched.length;
+      } else {
+        start += 1;
+      }
+    }
+  }
+
+  return Array.from(candidates)
+    .sort((left, right) => right.length - left.length)
+    .filter(
+      (term, index, terms) =>
+        !terms.slice(0, index).some((kept) => kept.includes(term)),
+    )
+    .slice(0, 8);
+};
+
+const HighlightedChunkText: FC<{ text: string; terms: string[] }> = ({ text, terms }) => {
+  if (!terms.length) return <>{text}</>;
+
+  const matcher = new RegExp(`(${terms.map(escapeRegExp).join("|")})`, "gi");
+  return (
+    <>
+      {text.split(matcher).map((part, index) => {
+        const isMatch = terms.some(
+          (term) => part.toLowerCase() === term.toLowerCase(),
+        );
+        return isMatch ? (
+          <mark key={`${part}-${index}`} className="rounded-sm bg-yellow-200 px-0.5 text-inherit">
+            {part}
+          </mark>
+        ) : (
+          <span key={`${part}-${index}`}>{part}</span>
+        );
+      })}
+    </>
+  );
+};
+
+const SourceSummary: FC<{
+  text?: string;
+  highlighted?: boolean;
+  highlightTerms?: string[];
+}> = ({ text, highlighted = false, highlightTerms = [] }) => {
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (!highlighted || !highlightTerms.length || !textRef.current) return;
+    const firstHighlight = textRef.current.querySelector("mark");
+    if (firstHighlight) {
+      textRef.current.scrollTop = Math.max(
+        0,
+        firstHighlight.offsetTop - textRef.current.offsetTop - 16,
+      );
+    }
+  }, [highlighted, highlightTerms]);
+
   if (!text?.trim()) return null;
 
   if (highlighted) {
     return (
-      <div className="mt-2 border-t border-primary/15 pt-2">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-primary">
-          <span className="size-1.5 rounded-full bg-primary" />
-          {hitChunkLabel}
-        </div>
-        <p className="max-h-44 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-r-md border-l-2 border-primary/40 bg-muted/40 py-1 pl-2.5 pr-1 text-xs leading-5 text-foreground">
-          {text}
+      <div className="mt-2">
+        <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
+          <HighlightedChunkText text={text} terms={highlightTerms} />
         </p>
       </div>
     );
   }
 
   return (
-    <p className="mt-1 line-clamp-2 wrap-break-word text-xs leading-5 text-muted-foreground">
+    <p className="mt-1 line-clamp-3 wrap-break-word text-sm leading-6 text-gray-700">
       {text}
     </p>
   );
 };
 
-const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
+const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
+  item,
+  sourceLabel,
+}) => {
+  const fileLabel = item.filename || item.title || item.url || "";
+  if (!fileLabel) return null;
+
+  return (
+    <div className="mt-2 flex min-w-0 flex-col gap-0.5 text-xs text-gray-500">
+      <div className="flex min-w-0 items-center gap-1">
+        {item.sourceType === "document" ? (
+          <DatabaseIcon className="size-3 shrink-0" />
+        ) : (
+          <ExternalLinkIcon className="size-3 shrink-0" />
+        )}
+        <span className="truncate text-[#1677ff]">{fileLabel}</span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        <ServerIcon className="size-3 shrink-0" />
+        <span className="truncate">{sourceLabel}</span>
+      </div>
+    </div>
+  );
+};
+
+const SourceListItem: FC<{
+  item: PanelSourceItem;
+  selected: boolean;
+  citationContext?: string;
+}> = ({
   item,
   selected,
+  citationContext,
 }) => {
   const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
@@ -303,14 +429,12 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   };
 
   const selectedClassName = selected
-    ? "border-primary/40 bg-primary/[0.025] shadow-sm"
-    : undefined;
-  const citationLabel = getCitationLabel(item, {
-    knowledgeBase: t("chat.sources.knowledgeBase"),
-    web: t("chat.sources.web"),
-    source: t("chat.sources.source"),
-  });
-  const hitChunkLabel = t("chat.sources.matchedChunk");
+    ? "border-[#1677ff] bg-white shadow-none"
+    : "border-slate-200 bg-white hover:border-slate-300";
+  const highlightTerms = useMemo(
+    () => selected ? extractHighlightTerms(citationContext || "", item.text || "") : [],
+    [citationContext, item.text, selected],
+  );
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
@@ -319,8 +443,8 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
 
   if (item.sourceType === "document") {
     return (
-      <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
-        <div className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm">
+      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
+        <div className="flex items-start gap-2 text-left text-sm">
           <button
             type="button"
             onClick={() => previewUrl && window.open(previewUrl, "_blank", "noopener,noreferrer")}
@@ -333,13 +457,14 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
             <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-1.5">
-                <span className="block min-w-0 flex-1 wrap-break-word font-medium text-foreground">{item.title || item.filename || t("chat.sources.document")}</span>
-                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+                <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">{item.title || item.filename || t("chat.sources.document")}</span>
+                {Number.isFinite(item.citeIndex) && (
+                  <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
+                )}
               </div>
-              <span className="block truncate text-xs text-muted-foreground">
-                {t("chat.sources.knowledgeBase")}
-              </span>
-              <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
+              {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
+              <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+              <SourceFooter item={item} sourceLabel="来源: Nexent" />
             </div>
           </button>
           <button
@@ -359,7 +484,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
           </button>
         </div>
         {downloadError && (
-          <p className="px-3 pb-2 text-xs text-destructive">{downloadError}</p>
+          <p className="pt-2 text-xs text-destructive">{downloadError}</p>
         )}
       </li>
     );
@@ -369,23 +494,26 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
     const domain = extractDomain(item.url);
     const displayTitle = item.title || domain;
     return (
-      <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
+      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
         <a
           href={item.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+          className="flex items-start gap-2 text-sm"
         >
           <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-1.5">
-              <span className="block min-w-0 flex-1 truncate font-medium text-foreground">{displayTitle}</span>
-              <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+              <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">{displayTitle}</span>
+              {Number.isFinite(item.citeIndex) && (
+                <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
+              )}
             </div>
-            <span className="block truncate text-xs text-muted-foreground">
-              {domain}
-            </span>
-            <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
+            {item.publishedDate ? (
+              <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>
+            ) : <span className="block truncate text-xs text-muted-foreground">{domain}</span>}
+            <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+            <SourceFooter item={item} sourceLabel={`来源: ${domain}`} />
           </div>
         </a>
       </li>
@@ -395,16 +523,17 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   return (
     <li
       ref={itemRef}
-      className={cn(
-        "rounded-md border bg-card px-3 py-2 text-sm text-foreground",
-        selectedClassName,
-      )}
+      className={cn("rounded-lg border p-3 text-sm text-foreground", selectedClassName)}
     >
       <div className="flex items-start gap-1.5">
-        <span className="min-w-0 flex-1 font-medium">{item.title || t("chat.sources.untitled")}</span>
-        <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{citationLabel}</span>
+        <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">{item.title || t("chat.sources.untitled")}</span>
+        {Number.isFinite(item.citeIndex) && (
+          <span className="inline-flex shrink-0 items-center justify-center rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-600">{item.citeIndex}</span>
+        )}
       </div>
-      <SourceSummary text={item.text} highlighted={selected} hitChunkLabel={hitChunkLabel} />
+      {item.publishedDate && <span className="mt-1 block text-sm text-gray-500">{item.publishedDate}</span>}
+      <SourceSummary text={item.text} highlighted={selected} highlightTerms={highlightTerms} />
+      <SourceFooter item={item} sourceLabel="来源: Nexent" />
     </li>
   );
 };

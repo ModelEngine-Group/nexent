@@ -693,6 +693,7 @@ export function attachSearchContentToTool(
     title: string;
     text?: string;
     sourceType?: string;
+    publishedDate?: string;
     filename?: string;
     sourceFile?: string;
     downloadUrl?: string;
@@ -747,6 +748,7 @@ export interface SearchSource {
   text?: string;
   sourceType?: string;
   searchType?: string;
+  publishedDate?: string;
   toolSign?: string;
   filename?: string;
   sourceFile?: string;
@@ -1954,6 +1956,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     text,
                     sourceType: result.source_type,
                     searchType: result.search_type,
+                    publishedDate: result.published_date,
                     toolSign: result.tool_sign,
                     filename,
                     sourceFile:
@@ -1971,6 +1974,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     title,
                     text,
                     sourceType: result.source_type,
+                    publishedDate: result.published_date,
                     filename,
                     sourceFile:
                       result.source_file || imageMetadata?.source_file,
@@ -2183,6 +2187,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       text,
                       sourceType: result.source_type,
                       searchType: result.search_type,
+                      publishedDate: result.published_date,
                       toolSign: result.tool_sign,
                       filename,
                       sourceFile:
@@ -2200,6 +2205,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       title,
                       text,
                       sourceType: result.source_type,
+                      publishedDate: result.published_date,
                       filename,
                       sourceFile:
                         result.source_file || imageMetadata?.source_file,

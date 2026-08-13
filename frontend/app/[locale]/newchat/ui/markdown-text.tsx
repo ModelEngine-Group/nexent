@@ -40,6 +40,7 @@ import {
 interface MessageSourcePart {
   type?: string;
   sourceType?: string;
+  publishedDate?: string;
   url?: string;
   title?: string;
   text?: string;
@@ -73,6 +74,7 @@ function resolveCiteSources(
       title: part.title || part.filename || part.url || `Source ${citeIndex}`,
       text: part.text,
       sourceType: part.sourceType,
+      publishedDate: part.publishedDate,
       filename: part.filename,
       downloadUrl: part.downloadUrl,
       objectName: part.objectName,
@@ -122,6 +124,7 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     url: source.url,
     title: source.title,
     text: source.text,
+    publishedDate: source.publishedDate,
     filename: source.filename,
     downloadUrl: source.downloadUrl,
     objectName: source.objectName,
@@ -129,6 +132,75 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     toolSign: source.toolSign,
     isImage: source.isImage,
   };
+}
+
+/**
+ * A citation belongs to the Markdown section immediately before it, rather
+ * than to the entire assistant response. A section can include a paragraph
+ * followed by a table. A preceding citation or heading starts a new section,
+ * so separately cited answer sections cannot affect each other.
+ */
+function getCitationScopeText(citationElement: HTMLElement | null): string {
+  if (!citationElement) return "";
+
+  const markdownRoot = citationElement.closest(".aui-md");
+  if (!markdownRoot) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  let currentBlock: HTMLElement = citationElement;
+  while (
+    currentBlock.parentElement &&
+    currentBlock.parentElement !== markdownRoot
+  ) {
+    currentBlock = currentBlock.parentElement;
+  }
+
+  if (currentBlock.parentElement !== markdownRoot) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  const blocks = Array.from(markdownRoot.children) as HTMLElement[];
+  const currentBlockIndex = blocks.indexOf(currentBlock);
+  if (currentBlockIndex < 0) {
+    return citationElement.closest("p, li, td")?.textContent || "";
+  }
+
+  const citationsInCurrentBlock = Array.from(
+    currentBlock.querySelectorAll<HTMLElement>("[data-citation-marker]"),
+  );
+  const citationIndex = citationsInCurrentBlock.indexOf(citationElement);
+  const currentBlockRange = document.createRange();
+  currentBlockRange.selectNodeContents(currentBlock);
+  if (citationIndex > 0) {
+    currentBlockRange.setStartAfter(citationsInCurrentBlock[citationIndex - 1]);
+  }
+  if (citationIndex >= 0) {
+    currentBlockRange.setEndBefore(citationElement);
+  }
+  const currentBlockText = currentBlockRange.toString().trim();
+
+  if (citationIndex > 0) return currentBlockText;
+
+  let sectionStartIndex = 0;
+  for (let index = currentBlockIndex - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    const startsNewSection = /^H[1-6]$/.test(block.tagName);
+    const hasEarlierCitation = Boolean(
+      block.querySelector("[data-citation-marker]"),
+    );
+    if (startsNewSection || hasEarlierCitation) {
+      sectionStartIndex = index + 1;
+      break;
+    }
+  }
+
+  return blocks
+    .slice(sectionStartIndex, currentBlockIndex)
+    .map((block) => block.textContent?.trim() || "")
+    .filter(Boolean)
+    .concat(currentBlockText ? [currentBlockText] : [])
+    .join("\n");
 }
 
 /**
@@ -173,13 +245,14 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
       loading={!source}
       onClick={
         source && messageId
-          ? () =>
+          ? (citationElement) =>
               open({
                 messageId,
                 groupId: "citations",
                 sources,
                 images,
                 selectedCitationKey: citationKey,
+                citationContext: getCitationScopeText(citationElement),
               })
           : undefined
       }

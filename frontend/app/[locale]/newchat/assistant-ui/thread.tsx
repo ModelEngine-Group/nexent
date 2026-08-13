@@ -656,6 +656,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         images={selection?.images ?? []}
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
+        citationContext={selection?.citationContext}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -708,6 +709,7 @@ export const ReadOnlyConversation: FC<{
           images={selection?.images ?? []}
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
+          citationContext={selection?.citationContext}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -1419,6 +1421,7 @@ interface SourcePartLike {
   url?: string;
   title?: string;
   text?: string;
+  publishedDate?: string;
   filename?: string;
   downloadUrl?: string;
   objectName?: string;
@@ -1661,6 +1664,7 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           url: source.url,
           title: source.title,
           text: source.text,
+          publishedDate: source.publishedDate,
           filename: source.filename,
           downloadUrl: source.downloadUrl,
           objectName: source.objectName,

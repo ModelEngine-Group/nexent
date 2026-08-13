@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Tooltip,
   TooltipContent,
@@ -17,7 +17,7 @@ export interface CiteMarkerProps {
   url?: string;
   title: string;
   text?: string;
-  onClick?: () => void;
+  onClick?: (citationElement: HTMLButtonElement | null) => void;
   loading?: boolean;
   className?: string;
 }
@@ -107,13 +107,17 @@ const CiteMarkerImpl = ({
   loading = false,
   className,
 }: CiteMarkerProps) => {
+  const markerRef = useRef<HTMLButtonElement>(null);
+
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            ref={markerRef}
             type="button"
-            onClick={onClick}
+            data-citation-marker
+            onClick={() => onClick?.(markerRef.current)}
             disabled={!onClick}
             aria-label={
               loading
@@ -121,14 +125,14 @@ const CiteMarkerImpl = ({
                 : `Open ${label}: ${title}`
             }
             className={cn(
-              "mx-0.5 inline-flex items-center justify-center rounded bg-primary/10 px-1 align-baseline font-normal leading-normal text-primary transition-colors",
+              "mx-1 inline-flex size-[18px] items-center justify-center rounded-full bg-sky-100 p-0 align-middle text-[11px] font-medium leading-none text-sky-700 transition-colors",
               onClick
-                ? "cursor-pointer hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                ? "cursor-pointer hover:bg-sky-200 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
                 : "cursor-wait opacity-70",
               className,
             )}
           >
-            [{label}]
+            {citeIndex}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-sm px-3 py-2">

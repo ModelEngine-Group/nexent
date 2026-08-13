@@ -388,6 +388,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 url,
                 title,
                 text: item.text as string | undefined,
+                publishedDate: item.published_date as string | undefined,
                 sourceType: item.source_type as string | undefined,
                 searchType: item.search_type as string | undefined,
                 toolSign: item.tool_sign as string | undefined,
