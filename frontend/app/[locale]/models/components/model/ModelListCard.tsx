@@ -176,7 +176,7 @@ export const ModelListCard = ({
       return t("model.source.tokenpony");
     } else if (model.source === "volcengine") {
       return t("model.provider.volcengine");
-    } else if (model.source === "OpenAI-API-Compatible" || model.source === "jina") {
+    } else if (model.source === "OpenAI-API-Compatible") {
       return t("model.source.custom");
     }
 
@@ -192,7 +192,7 @@ export const ModelListCard = ({
     dashscope: filteredModels.filter((m) => m.source === "dashscope"),
     tokenpony: filteredModels.filter((m) => m.source === "tokenpony"),
     volcengine: filteredModels.filter((m) => m.source === "volcengine"),
-    custom: filteredModels.filter((m) => (m.source === "OpenAI-API-Compatible" || m.source === "jina")),
+    custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
   };
 
   // When parent component's model list updates, update local state

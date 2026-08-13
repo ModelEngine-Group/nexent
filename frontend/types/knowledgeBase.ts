@@ -20,6 +20,7 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  embeddingModelId?: number | null;
   is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;
@@ -45,12 +46,13 @@ export interface KnowledgeBaseCreateParams {
   name: string;
   description: string;
   source?: string;
-  embeddingModel?: string;
+  embeddingModelId: number;
   // Group permission and user groups for new knowledge bases
   ingroup_permission?: string;
   group_ids?: number[];
-  is_multimodal?: boolean;
   preserve_source_file?: boolean;
+  // Per-KB soft storage quota in bytes (null = unlimited)
+  quota_limit_bytes?: number | null;
 }
 
 // Document type

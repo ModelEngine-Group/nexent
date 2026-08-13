@@ -1,6 +1,7 @@
 """Unit tests for agent marketplace repository service."""
 
 import sys
+import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -10,14 +11,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# Mock DB layer before importing the service under test
-sys.modules.setdefault("sqlalchemy", MagicMock())
+# Mock DB layer before importing the service under test.
+# sqlalchemy must look like a package so submodule imports (e.g. sqlalchemy.orm) succeed.
+_sqlalchemy_mock = types.ModuleType("sqlalchemy")
+_sqlalchemy_mock.__path__ = []
+sys.modules.setdefault("sqlalchemy", _sqlalchemy_mock)
+sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
 _agent_repo_db_mock = MagicMock()
 _agent_repo_db_mock.get_agent_repository_by_id = MagicMock()
-_agent_repo_db_mock.get_agent_repository_by_id_and_publisher = MagicMock()
 _agent_repo_db_mock.get_agent_repository_by_agent_id = MagicMock()
 _agent_repo_db_mock.insert_agent_repository_record = MagicMock()
 _agent_repo_db_mock.update_agent_repository_by_id = MagicMock()
@@ -106,10 +110,22 @@ _precheck_mock = MagicMock()
 _precheck_mock.build_repository_import_precheck = MagicMock()
 sys.modules["services.repository_import_precheck"] = _precheck_mock
 
+_notification_service_mock = MagicMock()
+sys.modules["services.notification_service"] = _notification_service_mock
+
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
+from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from backend.services import agent_repository_service as ars
+
+
+@pytest.fixture(autouse=True)
+def reset_notification_mocks():
+    ars.create_repository_review_notification.reset_mock()
+    ars.create_repository_pending_review_notification.reset_mock()
+    ars.deactivate_notifications.reset_mock()
+    yield
 
 
 def _repository_record(
@@ -171,7 +187,6 @@ def test_list_repository_listings_passes_agent_id_to_db():
         publisher_tenant_id="tenant_a",
         status="shared",
         agent_id=123,
-        category_id=None,
     )
     assert [item["agent_repository_id"] for item in result["items"]] == [1]
     assert result["pagination"] == {
@@ -258,33 +273,25 @@ def test_list_repository_listings_paginates_filtered_records():
     }
 
 
-def test_list_repository_listings_search_matches_author_and_tags():
+def test_list_repository_listings_search_matches_tags():
     records = [
         {
             **_repository_record(agent_repository_id=1, status="shared"),
-            "author": "alice@example.com",
-            "tags": [],
+            "tags": ["sales"],
         },
         {
             **_repository_record(agent_repository_id=2, status="shared"),
-            "author": "bob@example.com",
             "tags": ["marketing"],
         },
     ]
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
-        by_author = ars.list_agent_repository_listings_impl(
-            "tenant_a",
-            status="shared",
-            search="alice",
-        )
         by_tag = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="shared",
             search="marketing",
         )
 
-    assert [item["agent_repository_id"] for item in by_author["items"]] == [1]
     assert [item["agent_repository_id"] for item in by_tag["items"]] == [2]
 
 
@@ -325,24 +332,19 @@ def test_validate_card_fields_requires_structural_values():
     with pytest.raises(ValueError, match="icon is required"):
         ars._validate_create_payload(base)
 
-    with pytest.raises(ValueError, match="category_id is required"):
-        ars._validate_create_payload({**base, "icon": "🤖"})
-
     with pytest.raises(ValueError, match="tags is required"):
-        ars._validate_create_payload({**base, "icon": "🤖", "category_id": 1})
+        ars._validate_create_payload({**base, "icon": "🤖"})
 
     with pytest.raises(ValueError, match="non-empty string"):
         ars._validate_create_payload({
             **base,
             "icon": "   ",
-            "category_id": 1,
             "tags": ["marketing"],
         })
 
     ars._validate_create_payload({
         **base,
         "icon": "🤖",
-        "category_id": 99,
         "tags": ["marketing"],
     })
 
@@ -796,7 +798,7 @@ async def test_list_my_editable_agents_impl_rejects_invalid_ownership():
 @pytest.fixture
 def mock_status_update_deps():
     with patch.object(ars, "get_user_tenant_by_user_id") as mock_get_role, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "update_agent_repository_status_by_id"
     ) as mock_update_status, patch.object(
@@ -862,12 +864,32 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
     deps["reset_status"].assert_called_once_with(
         agent_repository_id=1,
         agent_id=10,
         status="shared",
         publisher_tenant_id="tenant_a",
+    )
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="shared",
+        receiver_user_id="user_a",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="su_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="su_user",
     )
 
 
@@ -883,9 +905,30 @@ def test_update_status_su_pending_review_to_rejected(mock_status_update_deps):
         status="rejected",
         user_id="su_user",
         tenant_id="tenant_a",
+        content="needs work",
     )
 
     assert result["status"] == "rejected"
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="rejected",
+        receiver_user_id="user_a",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+            "content": "needs work",
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="su_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="su_user",
+    )
 
 
 def test_update_status_su_shared_to_not_shared(mock_status_update_deps):
@@ -960,6 +1003,7 @@ def test_update_status_admin_not_shared_to_pending_review(mock_status_update_dep
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
+        content=None,
     )
     deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
 
@@ -988,6 +1032,7 @@ def test_update_status_admin_rejected_to_pending_review(mock_status_update_deps)
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
+        content=None,
     )
     deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
 
@@ -1018,6 +1063,26 @@ def test_update_status_admin_pending_review_to_shared(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
+    )
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="shared",
+        receiver_user_id="other_user",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="admin_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="admin_user",
     )
 
 
@@ -1039,6 +1104,25 @@ def test_update_status_admin_pending_review_to_rejected(mock_status_update_deps)
     )
 
     assert result["status"] == "rejected"
+    ars.create_repository_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        review_status="rejected",
+        receiver_user_id="other_user",
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 1,
+            "agent_id": 10,
+        },
+        tenant_id="tenant_a",
+        unique_id=1,
+        created_by="admin_user",
+    )
+    ars.deactivate_notifications.assert_called_once_with(
+        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        unique_id=1,
+        updated_by="admin_user",
+    )
 
 
 def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps):
@@ -1081,6 +1165,7 @@ def test_update_status_admin_pending_review_to_not_shared(mock_status_update_dep
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
 
 
@@ -1158,6 +1243,7 @@ def test_update_status_same_status_noop(mock_status_update_deps):
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
+        content=None,
     )
     deps["reset_status"].assert_called_once_with(
         agent_repository_id=1,
@@ -1176,6 +1262,7 @@ def test_list_repository_listings_includes_submitted_by():
                 status="pending_review",
             ),
             "submitted_by": "reviewer@example.com",
+            "content": "Please review this listing",
         }
     ]
 
@@ -1186,6 +1273,7 @@ def test_list_repository_listings_includes_submitted_by():
         )
 
     assert result["items"][0]["submitted_by"] == "reviewer@example.com"
+    assert result["items"][0]["content"] == "Please review this listing"
     assert result["pagination"]["total"] == 1
 
 
@@ -1205,7 +1293,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ) as mock_get:
         result = ars.get_agent_repository_listing_detail_impl(42, "tenant_a")
@@ -1217,7 +1305,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=None,
     ):
         with pytest.raises(ValueError, match="Repository listing not found"):
@@ -1278,7 +1366,6 @@ def test_count_tools_in_snapshot_invalid_input(snapshot):
 async def test_build_repository_data_from_agent_merges_card_fields():
     card_fields = {
         "icon": "📊",
-        "category_id": 3,
         "tags": [" 数据 ", "数据", "自定义标签"],
         "downloads": 10,
     }
@@ -1306,7 +1393,6 @@ async def test_build_repository_data_from_agent_merges_card_fields():
         )
 
     assert repository_data["icon"] == "📊"
-    assert repository_data["category_id"] == 3
     assert repository_data["tags"] == ["数据", "自定义标签"]
     assert repository_data["downloads"] == 10
     assert repository_data["tool_count"] == 0
@@ -1415,7 +1501,7 @@ async def test_create_agent_repository_listing_impl_success():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1426,7 +1512,6 @@ async def test_create_agent_repository_listing_impl_success():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1435,6 +1520,8 @@ async def test_create_agent_repository_listing_impl_success():
             "agent_repository_id": 42,
             "agent_id": 1,
             "name": "agent_one",
+            "display_name": "Agent One",
+            "content": "please review",
             "agent_info_json": agent_info_json,
             "version_no": 1,
             "status": "pending_review",
@@ -1460,6 +1547,18 @@ async def test_create_agent_repository_listing_impl_success():
     mock_reset_status.assert_has_calls(
         _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
     )
+    ars.create_repository_pending_review_notification.assert_called_once_with(
+        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
+        tenant_id="tenant_a",
+        unique_id=42,
+        details={
+            "name": "Agent One",
+            "agent_repository_id": 42,
+            "agent_id": 1,
+            "content": "please review",
+        },
+        created_by="user_a",
+    )
 
 
 @pytest.mark.asyncio
@@ -1477,7 +1576,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
     ) as mock_get_by_agent_id, patch.object(
         ars, "update_agent_repository_by_id"
     ) as mock_update_by_id, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1488,7 +1587,6 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
             "tool_count": 3,
         }
@@ -1524,9 +1622,9 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         user_id="user_a",
         updates={
             "status": "pending_review",
+            "content": "",
             "icon": "🤖",
             "tags": ["营销"],
-            "category_id": 1,
             "tool_count": 3,
         },
     )
@@ -1550,7 +1648,7 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id_and_publisher"
+        ars, "get_agent_repository_by_id"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1561,7 +1659,6 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
             "agent_info_json": agent_info_json,
             "status": "pending_review",
             "icon": "🤖",
-            "category_id": 1,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1702,7 +1799,6 @@ def test_validate_create_payload_requires_agent_info_json():
         "version_no": 1,
         "name": "agent_one",
         "icon": "🤖",
-        "category_id": 1,
         "tags": ["营销"],
     }
 
@@ -1898,7 +1994,7 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,
@@ -1950,7 +2046,7 @@ async def test_import_agent_from_repository_increments_downloads():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,
@@ -1985,7 +2081,7 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
 
     with patch.object(
         ars,
-        "get_agent_repository_by_id_and_publisher",
+        "get_agent_repository_by_id",
         return_value=record,
     ), patch.object(
         ars,

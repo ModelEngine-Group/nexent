@@ -16,18 +16,12 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     :param user_id: User ID
     :return: Created MCP record
 
-    Note: Only fields defined in the McpRecord model are inserted.
-    Fields like 'transport_type' and 'version' are not part of McpRecord
-    and will be ignored.
     """
-    # Filter to only include fields that exist in the model
-    # McpRecord fields: mcp_id, tenant_id, user_id, mcp_name, mcp_server, status,
-    # container_id, container_port, authorization_token, source, registry_json,
-    # config_json, enabled, tags, description, create_time, update_time, created_by, updated_by, delete_flag
     allowed_fields = {
         'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
-        'authorization_token', 'custom_headers', 'source', 'registry_json', 'config_json',
-        'enabled', 'tags', 'description'
+        'authorization_token', 'custom_headers', 'source', 'market_id',
+        'registry_json', 'config_json', 'enabled', 'tags', 'description',
+        'group_ids', 'ingroup_permission', 'shared_fields'
     }
 
     filtered_data = {k: v for k, v in mcp_data.items() if k in allowed_fields and v is not None}
@@ -145,25 +139,64 @@ def update_mcp_record_manage_fields_by_id(
     authorization_token: str | None,
     custom_headers: Dict[str, Any] | None,
     config_json: Dict[str, Any] | None,
+    market_id: int | None,
+    group_ids: str | None = None,
+    ingroup_permission: str | None = None,
+    shared_fields: dict | None = None,
+) -> None:
+    with get_db_session() as session:
+        update_data = {
+            "mcp_name": name,
+            "mcp_server": server_url,
+            "description": description,
+            "tags": tags or [],
+            "source": source,
+            "authorization_token": authorization_token,
+            "custom_headers": custom_headers,
+            "config_json": config_json,
+            "market_id": market_id,
+            "updated_by": user_id,
+        }
+        if group_ids is not None:
+            update_data["group_ids"] = group_ids
+        if ingroup_permission is not None:
+            update_data["ingroup_permission"] = ingroup_permission
+        if shared_fields is not None:
+            update_data["shared_fields"] = shared_fields
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(update_data)
+
+
+def update_mcp_record_market_id_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    market_id: int | None,
 ) -> None:
     with get_db_session() as session:
         session.query(McpRecord).filter(
             McpRecord.mcp_id == mcp_id,
             McpRecord.tenant_id == tenant_id,
             McpRecord.delete_flag != 'Y'
-        ).update(
-            {
-                "mcp_name": name,
-                "mcp_server": server_url,
-                "description": description,
-                "tags": tags or [],
-                "source": source,
-                "authorization_token": authorization_token,
-                "custom_headers": custom_headers,
-                "config_json": config_json,
-                "updated_by": user_id,
-            }
-        )
+        ).update({"market_id": market_id, "updated_by": user_id})
+
+
+def clear_mcp_record_market_id(
+    *,
+    tenant_id: str,
+    user_id: str,
+    market_id: int,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.market_id == market_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"market_id": None, "updated_by": user_id})
 
 
 def update_mcp_record_enabled_by_id(
@@ -387,3 +420,22 @@ def get_mcp_record_by_id_and_tenant(mcp_id: int, tenant_id: str) -> Dict[str, An
         ).first()
 
         return as_dict(mcp_record) if mcp_record else None
+
+
+def update_mcp_record_registry_json_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    registry_json: dict,
+) -> None:
+    """Update the registry_json field on an MCP record (e.g. to persist refreshed tool names)."""
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({
+            "registry_json": registry_json,
+            "updated_by": user_id,
+        })

@@ -145,6 +145,20 @@ class TestA2AHttpClientGetJson:
             assert result == mock_response_data
 
     @pytest.mark.asyncio
+    async def test_get_json_rejects_unauthorized_response(self):
+        from backend.utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.return_value = (401, b'{"detail": "Unauthorized"}')
+
+                with pytest.raises(A2AHttpStatusError, match="HTTP 401") as exc_info:
+                    await client.get_json("https://example.com/agent-card.json")
+
+        assert exc_info.value.status == 401
+
+    @pytest.mark.asyncio
     async def test_get_json_with_headers(self):
         """Test GET request with custom headers."""
         from backend.utils.a2a_http_client import A2AHttpClient
@@ -185,6 +199,37 @@ class TestA2AHttpClientPostJson:
                     payload=request_payload
                 )
                 assert result == response_data
+
+    @pytest.mark.asyncio
+    async def test_post_json_rejects_non_success_response(self):
+        """Test POST requests raise an error for non-success responses."""
+        from backend.utils.a2a_http_client import A2AHttpClient, A2AHttpStatusError
+
+        client = A2AHttpClient()
+        async with client:
+            with patch.object(client, '_request_with_retry', new_callable=AsyncMock) as mock_request:
+                mock_request.return_value = (503, b'{"detail": "Service unavailable"}')
+
+                with pytest.raises(A2AHttpStatusError, match="HTTP 503") as exc_info:
+                    await client.post_json(
+                        "https://example.com/message:send",
+                        payload={"message": "test"}
+                    )
+
+        assert exc_info.value.status == 503
+
+    @pytest.mark.asyncio
+    async def test_post_json_requires_initialized_session(self):
+        """Test POST requests fail when the client session is not initialized."""
+        from backend.utils.a2a_http_client import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
+
+        client = A2AHttpClient()
+
+        with pytest.raises(RuntimeError, match=ERR_CLIENT_NOT_INITIALIZED):
+            await client.post_json(
+                "https://example.com/message:send",
+                payload={"message": "test"}
+            )
 
     @pytest.mark.asyncio
     async def test_post_json_with_headers(self):
@@ -238,6 +283,20 @@ class TestA2AHttpClientPostJson:
 
 class TestA2AHttpClientPostStream:
     """Test class for A2AHttpClient.post_stream method."""
+
+    @pytest.mark.asyncio
+    async def test_post_stream_requires_initialized_session(self):
+        """Test streaming POST requests fail when the session is not initialized."""
+        from backend.utils.a2a_http_client import A2AHttpClient, ERR_CLIENT_NOT_INITIALIZED
+
+        client = A2AHttpClient()
+
+        with pytest.raises(RuntimeError, match=ERR_CLIENT_NOT_INITIALIZED):
+            async for _ in client.post_stream(
+                "https://example.com/message:stream",
+                payload={"message": "test"}
+            ):
+                pass
 
     @pytest.mark.asyncio
     async def test_post_stream_success(self):

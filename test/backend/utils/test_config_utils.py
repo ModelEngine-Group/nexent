@@ -30,6 +30,7 @@ sys.modules["nexent.core.models.capacity_budget"] = capacity_budget_mock
 with patch_minio_client_initialization():
     from backend.utils.config_utils import (
         CONTEXT_SOFT_LIMIT_RATIO_KEY,
+        CONTEXT_POLICY_KEY,
         safe_value,
         safe_list,
         get_env_key,
@@ -264,6 +265,27 @@ class TestTenantConfigManager:
 
         with pytest.raises(Exception, match=CONTEXT_SOFT_LIMIT_RATIO_KEY):
             config_manager.get_capacity_reserve_policy("tenant1")
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_context_policy_parses_tenant_json(self, mock_get_configs, config_manager):
+        mock_get_configs.return_value = [{
+            "config_key": CONTEXT_POLICY_KEY,
+            "config_value": '{"processing_mode": "adaptive_compact"}',
+        }]
+
+        assert config_manager.get_context_policy("tenant1") == {
+            "processing_mode": "adaptive_compact",
+        }
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_context_policy_rejects_non_object_json(self, mock_get_configs, config_manager):
+        mock_get_configs.return_value = [{
+            "config_key": CONTEXT_POLICY_KEY,
+            "config_value": "[]",
+        }]
+
+        with pytest.raises(ValueError, match=CONTEXT_POLICY_KEY):
+            config_manager.get_context_policy("tenant1")
 
     @patch('backend.utils.config_utils.insert_config')
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')

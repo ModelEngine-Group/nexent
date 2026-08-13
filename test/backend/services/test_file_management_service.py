@@ -8,6 +8,7 @@ import importlib
 import os
 import sys
 import types
+from types import SimpleNamespace
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 from pathlib import Path
@@ -17,6 +18,8 @@ from io import BytesIO
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
+
+from consts.exceptions import QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -59,6 +62,13 @@ vdb_stub.get_vector_db_core = _stub_get_vector_db_core
 sys.modules['services.vectordatabase_service'] = vdb_stub
 setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
+knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')
+knowledge_storage_stub.resolve_storage_context = MagicMock(return_value=None)
+knowledge_storage_stub.commit_uploaded_object = MagicMock(return_value={"storage_object_id": 1})
+knowledge_storage_stub.compensate_uploaded_objects = MagicMock()
+sys.modules['services.knowledge_storage_service'] = knowledge_storage_stub
+setattr(services_stub, 'knowledge_storage_service', knowledge_storage_stub)
+
 # Import the service module after mocking external dependencies
 file_management_service = importlib.import_module(
     'backend.services.file_management_service')
@@ -99,6 +109,25 @@ def setup_patches():
     # Stop all patches
     for p in patches:
         p.stop()
+
+
+@pytest.fixture(autouse=True)
+def reset_knowledge_storage_stub():
+    """Keep generic MinIO tests outside KB accounting unless they opt in."""
+    knowledge_storage_stub.resolve_storage_context.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    knowledge_storage_stub.resolve_storage_context.return_value = None
+    knowledge_storage_stub.commit_uploaded_object.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    knowledge_storage_stub.commit_uploaded_object.return_value = {"storage_object_id": 1}
+    knowledge_storage_stub.compensate_uploaded_objects.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
 
 
 class TestUploadFilesImpl:
@@ -696,6 +725,72 @@ class TestDeleteFileImpl:
             mock_delete.assert_called_once_with(
                 object_name="nonexistent/file.txt")
 
+    @pytest.mark.asyncio
+    async def test_delete_kb_source_requires_same_tenant_ledger_and_releases_charge(self):
+        ledger_module = types.ModuleType("database.knowledge_storage_object_db")
+        ledger_module.get_storage_object = MagicMock(return_value={"storage_object_id": 1})
+        storage_module = types.ModuleType("services.knowledge_storage_service")
+        storage_module.resolve_storage_reference = MagicMock(
+            return_value=SimpleNamespace(
+                bucket_name="kb-bucket",
+                object_name="knowledge_base/doc.pdf",
+            )
+        )
+        storage_module.release_storage_charge = MagicMock(return_value=True)
+
+        with patch.dict(sys.modules, {
+            "database.knowledge_storage_object_db": ledger_module,
+            "services.knowledge_storage_service": storage_module,
+        }), patch(
+            "backend.services.file_management_service.delete_file",
+            return_value={"success": True},
+        ) as delete:
+            result = await delete_file_impl(
+                object_name="knowledge_base/doc.pdf",
+                tenant_id="tenant-a",
+                updated_by="user-a",
+            )
+
+        assert result["success"] is True
+        delete.assert_called_once_with(
+            object_name="knowledge_base/doc.pdf",
+            bucket="kb-bucket",
+        )
+        storage_module.release_storage_charge.assert_called_once_with(
+            tenant_id="tenant-a",
+            bucket_name="kb-bucket",
+            object_name="knowledge_base/doc.pdf",
+            updated_by="user-a",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_kb_source_denies_missing_or_cross_tenant_ledger(self):
+        ledger_module = types.ModuleType("database.knowledge_storage_object_db")
+        ledger_module.get_storage_object = MagicMock(return_value=None)
+        storage_module = types.ModuleType("services.knowledge_storage_service")
+        storage_module.resolve_storage_reference = MagicMock(
+            return_value=SimpleNamespace(
+                bucket_name="kb-bucket",
+                object_name="knowledge_base/doc.pdf",
+            )
+        )
+        storage_module.release_storage_charge = MagicMock()
+
+        with patch.dict(sys.modules, {
+            "database.knowledge_storage_object_db": ledger_module,
+            "services.knowledge_storage_service": storage_module,
+        }), patch(
+            "backend.services.file_management_service.delete_file",
+        ) as delete:
+            with pytest.raises(PermissionError, match="not owned"):
+                await delete_file_impl(
+                    object_name="knowledge_base/doc.pdf",
+                    tenant_id="tenant-b",
+                )
+
+        delete.assert_not_called()
+        storage_module.release_storage_charge.assert_not_called()
+
 
 class TestListFilesImpl:
     """Test cases for list_files_impl function"""
@@ -827,6 +922,322 @@ class TestResolveMinioUploadFolder:
         from backend.services.file_management_service import resolve_minio_upload_folder
 
         assert resolve_minio_upload_folder("knowledge_base", "user123", "tenant_a") == "knowledge_base"
+
+
+class TestUploadQuotaEnforcement:
+    """Test KB-only accounting, batch enforcement, and compensation."""
+
+    @pytest.fixture(autouse=True)
+    def _install_knowledge_storage_stub(self, monkeypatch):
+        monkeypatch.setitem(
+            sys.modules,
+            "services.knowledge_storage_service",
+            knowledge_storage_stub,
+        )
+
+    @staticmethod
+    def _quota_module(quota_service):
+        module = types.ModuleType("services.quota_service")
+        module.QuotaService = MagicMock(return_value=quota_service)
+        return module
+
+    @pytest.mark.asyncio
+    async def test_upload_runs_pre_and_post_write_checks(self, monkeypatch):
+        upload = MagicMock(filename="quota.txt", size=128)
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"stage": "pre"}
+        quota_service.check_hard_limit_post_write.return_value = {"stage": "post"}
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(
+                return_value=[
+                    {
+                        "success": True,
+                        "file_name": "quota.txt",
+                        "object_name": "knowledge_base/quota.txt",
+                    }
+                ]
+            ),
+        ):
+            result = await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                folder="knowledge_base",
+                index_name="kb-index",
+                user_id="user-id",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            128, index_name="kb-index"
+        )
+        quota_service.check_hard_limit_post_write.assert_called_once_with(
+            0, index_name="kb-index"
+        )
+        knowledge_storage_stub.commit_uploaded_object.assert_called_once_with(
+            context=context,
+            object_name="knowledge_base/quota.txt",
+            created_by="user-id",
+        )
+        quota_service.invalidate_usage_cache.assert_called_once_with("tenant-id")
+        assert result.quota_status == {"stage": "post"}
+
+    @pytest.mark.asyncio
+    async def test_missing_sizes_read_complete_batch_and_restore_streams(self, monkeypatch):
+        first = MagicMock(filename="first.txt", size=None)
+        first.read = AsyncMock(return_value=b"a" * 300)
+        first.seek = AsyncMock()
+        second = MagicMock(filename="second.txt", size=None)
+        second.read = AsyncMock(return_value=b"b" * 200)
+        second.seek = AsyncMock()
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[]),
+        ):
+            await upload_files_impl(
+                destination="minio",
+                file=[first, second],
+                index_name="kb-index",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            500,
+            index_name="kb-index",
+        )
+        assert first.seek.await_args_list[0].args == (0,)
+        assert first.seek.await_args_list[-1].args == (0,)
+        assert second.seek.await_args_list[0].args == (0,)
+        assert second.seek.await_args_list[-1].args == (0,)
+
+    @pytest.mark.asyncio
+    async def test_missing_size_uses_spooled_file_without_reading_body(self, monkeypatch):
+        spooled_file = BytesIO(b"spooled-content")
+        spooled_file.seek(3)
+        upload = MagicMock(filename="spooled.txt", size=None, file=spooled_file)
+        upload.read = AsyncMock()
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[]),
+        ):
+            await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                index_name="kb-index",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            len(b"spooled-content"),
+            index_name="kb-index",
+        )
+        upload.read.assert_not_awaited()
+        assert spooled_file.tell() == 3
+
+    @pytest.mark.asyncio
+    async def test_zero_declared_size_reads_actual_nonempty_stream(self, monkeypatch):
+        upload = MagicMock(filename="zero.txt", size=0)
+        upload.read = AsyncMock(return_value=b"actual-content")
+        upload.seek = AsyncMock()
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[]),
+        ):
+            await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                index_name="kb-index",
+                uploader_tenant_id="tenant-id",
+            )
+
+        quota_service.check_hard_limit.assert_called_once_with(
+            len(b"actual-content"),
+            index_name="kb-index",
+        )
+        assert upload.seek.await_args_list[0].args == (0,)
+        assert upload.seek.await_args_list[-1].args == (0,)
+
+    @pytest.mark.asyncio
+    async def test_complete_batch_quota_error_prevents_minio_write(self, monkeypatch):
+        uploads = [
+            MagicMock(filename="a.txt", size=300),
+            MagicMock(filename="b.txt", size=200),
+        ]
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        quota_error = QuotaExceededError("quota exceeded")
+        quota_service.check_hard_limit.side_effect = quota_error
+
+        quota_module = self._quota_module(quota_service)
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            new_callable=AsyncMock,
+        ) as upload_to_minio_mock:
+            with pytest.raises(QuotaExceededError) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=uploads,
+                    index_name="kb-index",
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is quota_error
+        quota_service.check_hard_limit.assert_called_once_with(
+            500,
+            index_name="kb-index",
+        )
+        upload_to_minio_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_kb_upload_skips_quota_and_accounting(self, monkeypatch):
+        upload = MagicMock(filename="attachment.txt", size=128)
+        quota_service = MagicMock()
+        quota_module = self._quota_module(quota_service)
+
+        monkeypatch.setitem(sys.modules, "services.quota_service", quota_module)
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[{
+                "success": True,
+                "file_name": "attachment.txt",
+                "object_name": "attachments/user-id/attachment.txt",
+            }]),
+        ):
+            result = await upload_files_impl(
+                destination="minio",
+                file=[upload],
+                folder="attachments",
+                index_name=None,
+                user_id="user-id",
+                uploader_tenant_id="tenant-id",
+            )
+
+        assert result[1] == ["attachments/user-id/attachment.txt"]
+        quota_module.QuotaService.assert_not_called()
+        knowledge_storage_stub.commit_uploaded_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure_stage", ["ledger", "post-check"])
+    async def test_failure_compensates_only_new_batch(self, failure_stage, monkeypatch):
+        upload = MagicMock(filename="quota.txt", size=128)
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+        failure = RuntimeError(f"{failure_stage} failed")
+        if failure_stage == "ledger":
+            knowledge_storage_stub.commit_uploaded_object.side_effect = failure
+        else:
+            quota_service.check_hard_limit_post_write.side_effect = failure
+        upload_results = [
+            {
+                "success": True,
+                "file_name": "quota.txt",
+                "object_name": "knowledge_base/quota.txt",
+            },
+            {
+                "success": True,
+                "file_name": "quota-2.txt",
+                "object_name": "knowledge_base/quota-2.txt",
+            },
+        ]
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=upload_results),
+        ):
+            with pytest.raises(RuntimeError) as raised:
+                await upload_files_impl(
+                    destination="minio",
+                    file=[upload],
+                    index_name="kb-index",
+                    uploader_tenant_id="tenant-id",
+                )
+
+        assert raised.value is failure
+        knowledge_storage_stub.compensate_uploaded_objects.assert_called_once_with(
+            context=context,
+            object_names=[
+                "knowledge_base/quota.txt",
+                "knowledge_base/quota-2.txt",
+            ],
+            updated_by=None,
+        )
+        expected_invalidations = 1 if failure_stage == "ledger" else 2
+        assert quota_service.invalidate_usage_cache.call_count == expected_invalidations
+        quota_service.invalidate_usage_cache.assert_called_with("tenant-id")
+
+    @pytest.mark.asyncio
+    async def test_different_object_names_are_committed_separately(self, monkeypatch):
+        uploads = [
+            MagicMock(filename="same.txt", size=4),
+            MagicMock(filename="same.txt", size=4),
+        ]
+        context = SimpleNamespace(tenant_id="tenant-id", index_name="kb-index")
+        knowledge_storage_stub.resolve_storage_context.return_value = context
+        quota_service = MagicMock()
+
+        monkeypatch.setitem(
+            sys.modules, "services.quota_service", self._quota_module(quota_service)
+        )
+        with patch(
+            "backend.services.file_management_service.upload_to_minio",
+            AsyncMock(return_value=[
+                {
+                    "success": True,
+                    "file_name": "same.txt",
+                    "object_name": "knowledge_base/object-a",
+                },
+                {
+                    "success": True,
+                    "file_name": "same.txt",
+                    "object_name": "knowledge_base/object-b",
+                },
+            ]),
+        ):
+            await upload_files_impl(
+                destination="minio",
+                file=uploads,
+                index_name="kb-index",
+                uploader_tenant_id="tenant-id",
+            )
+
+        assert knowledge_storage_stub.commit_uploaded_object.call_count == 2
+        assert {
+            call.kwargs["object_name"]
+            for call in knowledge_storage_stub.commit_uploaded_object.call_args_list
+        } == {"knowledge_base/object-a", "knowledge_base/object-b"}
 
 
 class TestCheckFileAccessBatch:

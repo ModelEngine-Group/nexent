@@ -89,10 +89,18 @@ export const fetchTools = async () => {
       category: tool.category,
       labels: Array.isArray(tool.labels)
         ? tool.labels
-        : typeof tool.labels === 'string'
-          ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+        : typeof tool.labels === "string"
+          ? (() => {
+            try {
+              const p = JSON.parse(tool.labels);
+              return Array.isArray(p) ? p : [];
+            } catch {
+              return [];
+            }
+          })()
           : [],
       updated_by: tool.updated_by || "",
+      updated_by_name: tool.updated_by_name || "",
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -148,7 +156,8 @@ export const fetchAgentList = async (tenantId?: string) => {
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -193,18 +202,22 @@ export const fetchPublishedAgentList = async () => {
     // Convert backend data to frontend format
     const formattedAgents = data.map((agent: any) => ({
       id: String(agent.agent_id),
+      agent_id: Number(agent.agent_id),
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
+      model_names:
+        agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
+      is_main_agent: agent.is_main_agent,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
       permission: agent.permission,
       current_version_no: agent.current_version_no,
+      version_name: agent.version_name,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
     }));
@@ -250,7 +263,8 @@ export const getCreatingSubAgentId = async () => {
         description: data.description,
         enabledToolIds: data.enable_tool_id_list || [],
         modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames: data.model_names || (data.model_name ? [data.model_name] : []),
+        modelNames:
+          data.model_names || (data.model_name ? [data.model_name] : []),
         maxSteps: data.max_steps,
         requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
@@ -412,6 +426,7 @@ export interface UpdateAgentInfoPayload {
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
@@ -424,7 +439,13 @@ export interface UpdateAgentInfoPayload {
   prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
+  skill_instances?: Array<{
+    skill_id: number;
+    enabled?: boolean;
+    config_values?: Record<string, unknown>;
+  }>;
   related_agent_ids?: number[];
+  related_agents?: { agent_id: number; version_no: number }[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;
   greeting_message?: string;
@@ -514,9 +535,9 @@ export const exportAgent = async (agentId: number) => {
 
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
-      const filename =
-        response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
-      downloadBlob(blob, filename.replace("attachment; filename=", ""));
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = extractFilenameFromContentDisposition(contentDisposition) || `agent_${agentId}.zip`;
+      downloadBlob(blob, filename);
       return {
         success: true,
         data: null,
@@ -547,6 +568,22 @@ export const exportAgent = async (agentId: number) => {
       message: "Export failed, please try again later",
     };
   }
+};
+
+/**
+ * Extract filename from Content-Disposition header
+ * Handles both quoted and unquoted filename values
+ * @param contentDisposition The Content-Disposition header value
+ * @returns Extracted filename or null if not found
+ */
+const extractFilenameFromContentDisposition = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+  const match = regex.exec(contentDisposition);
+  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
 };
 
 /**
@@ -768,11 +805,17 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
-      model: data.model_name || (Array.isArray(data.model_names) && data.model_names.length > 0 ? data.model_names[0] : ""),
+      model:
+        data.model_name ||
+        (Array.isArray(data.model_names) && data.model_names.length > 0
+          ? data.model_names[0]
+          : ""),
       model_ids: data.model_ids || (data.model_id ? [data.model_id] : []),
-      model_names: data.model_names || (data.model_name ? [data.model_name] : []),
+      model_names:
+        data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,
@@ -788,9 +831,12 @@ export const searchAgentInfo = async (
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],
       sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
+      sub_agent_relations: data.sub_agent_relations || [],
+      external_sub_agent_id_list: data.external_sub_agent_id_list || [],
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
+      created_by: data.created_by ?? null,
       prompts_hidden: data.prompts_hidden === true,
       tools: data.tools
         ? data.tools.map((tool: any) => {
@@ -808,6 +854,9 @@ export const searchAgentInfo = async (
               is_available: tool.is_available,
               usage: tool.usage,
               category: tool.category,
+              unavailable_reasons: Array.isArray(tool.unavailable_reasons)
+                ? tool.unavailable_reasons
+                : [],
               // Pass through `inputs` so the ToolTestPanel can parse runtime
               // input parameters when reopening a tool from the selected
               // tools list. Without this, the test panel falls back to
@@ -817,7 +866,14 @@ export const searchAgentInfo = async (
               labels: Array.isArray(tool.labels)
                 ? tool.labels
                 : typeof tool.labels === "string"
-                  ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                  ? (() => {
+                      try {
+                        const p = JSON.parse(tool.labels);
+                        return Array.isArray(p) ? p : [];
+                      } catch {
+                        return [];
+                      }
+                    })()
                   : [],
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
@@ -1070,6 +1126,13 @@ export const fetchSkills = async (tenantId?: string | null) => {
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      group_ids: Array.isArray(skill.group_ids)
+        ? skill.group_ids.map(Number)
+        : [],
+      ingroup_permission: skill.ingroup_permission ?? null,
+      permission: skill.permission ?? "READ_ONLY",
+      created_by: skill.created_by ?? null,
+      updated_by: skill.updated_by ?? null,
       update_time: skill.update_time,
       create_time: skill.create_time,
     }));
@@ -1219,6 +1282,8 @@ export const createSkill = async (skillData: {
   source?: string;
   tags?: string[];
   content?: string;
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   files?: Array<{ path: string; content: string }>;
 }) => {
   try {
@@ -1231,6 +1296,12 @@ export const createSkill = async (skillData: {
     };
     if (skillData.files && skillData.files.length > 0) {
       requestBody.files = skillData.files;
+    }
+    if (skillData.group_ids !== undefined) {
+      requestBody.group_ids = skillData.group_ids;
+    }
+    if (skillData.ingroup_permission !== undefined) {
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
     const response = await fetch(API_ENDPOINTS.skills.create, {
@@ -1279,6 +1350,8 @@ export const updateSkill = async (
     tags?: string[];
     content?: string;
     config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
     files?: Array<{ path: string; content: string }>;
   },
   tenantId?: string | null
@@ -1294,6 +1367,10 @@ export const updateSkill = async (
       requestBody.content = skillData.content;
     if (skillData.config_values !== undefined)
       requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
     const url = tenantId
@@ -1331,6 +1408,107 @@ export const updateSkill = async (
   }
 };
 
+export const updateSkillById = async (
+  skillId: number,
+  skillData: {
+    name?: string;
+    description?: string;
+    source?: string;
+    tags?: string[];
+    content?: string;
+    config_values?: Record<string, unknown>;
+    group_ids?: number[];
+    ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+    files?: Array<{ path: string; content: string }>;
+  },
+  tenantId?: string | null
+) => {
+  try {
+    const requestBody: Record<string, any> = {};
+    if (skillData.name !== undefined) requestBody.name = skillData.name;
+    if (skillData.description !== undefined)
+      requestBody.description = skillData.description;
+    if (skillData.source !== undefined) requestBody.source = skillData.source;
+    if (skillData.tags !== undefined)
+      requestBody.tags = normalizeTags(skillData.tags);
+    if (skillData.content !== undefined)
+      requestBody.content = skillData.content;
+    if (skillData.config_values !== undefined)
+      requestBody.config_values = skillData.config_values;
+    if (skillData.group_ids !== undefined)
+      requestBody.group_ids = skillData.group_ids;
+    if (skillData.ingroup_permission !== undefined)
+      requestBody.ingroup_permission = skillData.ingroup_permission;
+    if (skillData.files !== undefined) requestBody.files = skillData.files;
+
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.updateById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.updateById(skillId);
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error updating skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message:
+        error instanceof Error ? error.message : "Failed to update skill",
+    };
+  }
+};
+
+export const fetchSkillById = async (
+  skillId: number,
+  tenantId?: string | null
+) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.getById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.getById(skillId);
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error fetching skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message: error instanceof Error ? error.message : "Failed to fetch skill",
+    };
+  }
+};
+
 /**
  * Create or update skill from file upload
  * @param skillName skill name (optional for new skill)
@@ -1349,6 +1527,7 @@ export const createSkillFromFile = async (
     if (skillName) {
       formData.append("skill_name", skillName);
     }
+    formData.append("source", "custom");
 
     const endpoint =
       isUpdate && skillName
@@ -1381,8 +1560,8 @@ export const createSkillFromFile = async (
           ? errorData.detail
           : Array.isArray(errorData.detail)
             ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
+              .map((e: any) => e.msg || JSON.stringify(e))
+              .join("; ")
             : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }

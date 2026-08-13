@@ -6,32 +6,35 @@ import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
-export type AgentConfigUpdate = Partial<Pick<
-  Agent,
-  | "name"
-  | "display_name"
-  | "author"
-  | "model"
-  | "model_ids"
-  | "max_step"
-  | "requested_output_tokens"
-  | "provide_run_summary"
-  | "description"
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
-  | "business_description"
-  | "business_logic_model_id"
-  | "business_logic_model_name"
-  | "prompt_template_id"
-  | "prompt_template_name"
-  | "verification_config"
-  | "file_preprocess"
-  | "group_ids"
-  | "ingroup_permission"
-  | "greeting_message"
-  | "example_questions"
->>;
+export type AgentConfigUpdate = Partial<
+  Pick<
+    Agent,
+    | "name"
+    | "display_name"
+    | "author"
+    | "model"
+    | "model_ids"
+    | "max_step"
+    | "requested_output_tokens"
+    | "is_main_agent"
+    | "provide_run_summary"
+    | "description"
+    | "duty_prompt"
+    | "constraint_prompt"
+    | "few_shots_prompt"
+    | "business_description"
+    | "business_logic_model_id"
+    | "business_logic_model_name"
+    | "prompt_template_id"
+    | "prompt_template_name"
+    | "verification_config"
+    | "file_preprocess"
+    | "group_ids"
+    | "ingroup_permission"
+    | "greeting_message"
+    | "example_questions"
+  >
+>;
 
 export interface AgentVerificationConfig {
   enabled: boolean;
@@ -50,7 +53,40 @@ export interface AgentVerificationConfig {
     | "handoff"
     | "final_answer"
   >;
+  guardrail_config?: GuardrailConfig;
 }
+
+// Guardrail types
+
+export type GuardrailSeverity = "block" | "mask" | "pass";
+
+export interface GuardrailRule {
+  /** Human-readable rule identifier */
+  name: string;
+  /** Regular expression in Python re syntax */
+  pattern: string;
+  /** Action when pattern matches */
+  severity: GuardrailSeverity;
+  /** Optional explanation shown in configuration UI */
+  description?: string;
+}
+
+export interface GuardrailConfig {
+  /** Master switch; when false the engine is not created */
+  enabled: boolean;
+  /** Ordered pattern rules; first match wins */
+  rules: GuardrailRule[];
+  /** Fallback severity when a matched rule has unknown severity */
+  default_action: GuardrailSeverity;
+}
+
+export const DEFAULT_GUARDRAIL_RULES: GuardrailRule[] = [];
+
+export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
+  enabled: false,
+  rules: [...DEFAULT_GUARDRAIL_RULES],
+  default_action: "pass",
+};
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
   enabled: false,
@@ -69,6 +105,7 @@ export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
     "handoff",
     "final_answer",
   ],
+  guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
 };
 
 // ========== File Preprocess Config ==========
@@ -131,24 +168,48 @@ export function computeFilePreprocessMaxTokens(model?: {
 
 // ========== Core Interfaces ==========
 
+export interface PublishedAgent {
+  id: string;
+  agent_id: number;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  unavailable_reasons?: string[];
+  model_ids?: number[];
+  model_names?: string[];
+  /** Single model name resolved from model_ids for display purposes */
+  model_name?: string;
+  is_available?: boolean;
+  is_new?: boolean;
+  group_ids?: string;
+  permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number;
+  greeting_message?: string;
+  example_questions?: string[];
+}
+
 export interface Agent {
   id: string;
   name: string;
   display_name?: string;
   description: string;
   author?: string;
+  /** Nexent user_id of the agent creator (owner). */
+  created_by?: string | null;
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];
-  model_names?: string[];  // Model display names resolved from model_ids for list/detail responses
+  model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
   file_preprocess?: AgentFilePreprocessConfig;
   tools: Tool[];
-  skills?: Skill[];  // Skills configured for this agent
+  skills?: Skill[]; // Skills configured for this agent
   duty_prompt?: string;
   constraint_prompt?: string;
   few_shots_prompt?: string;
@@ -160,7 +221,8 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
-  external_sub_agent_id_list?: number[];  // External A2A agent IDs
+  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string; version_no: number | null; version_name?: string }>;
+  external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /**
@@ -171,6 +233,7 @@ export interface Agent {
   /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
   prompts_hidden?: boolean;
   current_version_no?: number;
+  version_name?: string;
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
@@ -196,6 +259,11 @@ export interface Tool {
    * Used to pass knowledge base names to prompt generation without requiring database lookup.
    */
   display_names?: string[];
+  /**
+   * Reasons why this tool may be unavailable.
+   * E.g., ["mcp_model_unavailable"] when the selected model has been deleted.
+   */
+  unavailable_reasons?: string[];
 }
 
 export interface ToolParam {
@@ -215,12 +283,33 @@ export interface AidpKnowledgeBaseItem {
   description?: string;
   document_count?: number;
   chunk_count?: number;
+  /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
+  permission?: "EDIT" | "READ_ONLY" | null;
+  /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. Ignored when PRIVATE. */
+  group_ids?: number[];
+  /** Nexent user_id of the KB creator (owner). */
+  created_by?: string;
+  /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
+  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
+  created_at?: string;
+  /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
+  updated_at?: string;
+  /** Embedding model name configured for this KB in AIDP. */
+  embedding_model?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {
   value: AidpKnowledgeBaseItem[];
   total_count?: number;
   next_link?: string | null;
+  has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface SkillParam {
@@ -232,8 +321,6 @@ export interface SkillParam {
   description_zh?: string;
   depends_on?: string;
 }
-
-
 
 // ========== Data Interfaces ==========
 
@@ -269,6 +356,11 @@ export interface Skill {
   config_schemas?: SkillParam[] | null;
   config_values?: Record<string, any> | null;
   tool_ids?: number[];
+  group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE" | null;
+  permission?: "EDIT" | "READ_ONLY";
+  created_by?: string | null;
+  updated_by?: string | null;
   update_time?: string;
   create_time?: string;
 }
@@ -281,7 +373,8 @@ export interface SkillGroup {
 }
 
 // Skill with installation status for tenant creation flow
-export type SkillInstallStatus = "installable" | "installed" | "resource_missing";
+export type SkillInstallStatus =
+  "installable" | "installed" | "resource_missing";
 
 export interface InstallableSkill {
   skill_id: number;
@@ -420,7 +513,6 @@ export interface CollaborativeAgentDisplayProps {
 
 // ToolConfigModal component props interface
 
-
 // ExpandEditModal component props interface
 export interface ExpandEditModalProps {
   open: boolean;
@@ -520,6 +612,7 @@ export interface McpServer {
   service_name: string;
   mcp_url: string;
   status: boolean;
+  enabled: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
@@ -530,6 +623,7 @@ export interface McpServer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  group_ids?: string;
 }
 
 // MCP tool interface definition

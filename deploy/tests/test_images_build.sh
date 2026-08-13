@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_SCRIPT="$PROJECT_ROOT/deploy/images/build.sh"
+ROOT_BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
+export DEPLOYMENT_LANG=en
 
 fail() {
   echo "FAIL: $*"
@@ -47,9 +49,30 @@ output="$(bash "$BUILD_SCRIPT" --main --version latest --platform linux/amd64 --
 assert_contains "$output" "--platform linux/amd64" "explicit platform should be forwarded"
 assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
 
+output="$(bash "$ROOT_BUILD_SCRIPT" --web --version latest --dry-run)"
+assert_contains "$output" "nexent/nexent-web:latest" "root image build entrypoint should forward to deploy/images/build.sh"
+assert_not_contains "$output" "nexent/nexent:latest" "root image build entrypoint should preserve selected image arguments"
+
+output="$(bash "$BUILD_SCRIPT" --main --version latest --no-cache --dry-run)"
+assert_contains "$output" "--no-cache" "explicit no-cache option should be forwarded"
+assert_contains "$output" "nexent/nexent:latest" "explicit no-cache build should still build selected image"
+
+output="$(bash "$BUILD_SCRIPT" --web --version v9.9.9 --registry mainland --dry-run)"
+assert_contains "$output" "--no-cache" "mainland web build should avoid stale Docker cache"
+assert_contains "$output" "nexent/nexent-web:v9.9.9" "mainland web build without push should keep local Nexent tag"
+
+output="$(bash "$BUILD_SCRIPT" --web --version v9.9.9 --registry mainland --push --dry-run)"
+assert_contains "$output" "--no-cache" "mainland web push should avoid stale Docker cache"
+assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-web:v9.9.9" "mainland web push should use CCS tag"
+
 output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --dry-run)"
-assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "terminal option should build terminal image with selected version"
+assert_contains "$output" "nexent/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should keep local Nexent tag"
+assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should not use CCS tag"
 assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent:v9.9.9" "main image should not be built for terminal-only option"
+
+output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --push --dry-run)"
+assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "mainland push should use CCS tag"
+assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:v9.9.9" "mainland push should not use local Nexent tag"
 
 output="$(bash "$BUILD_SCRIPT" --web --docs --version v8.8.8 --registry general --dry-run)"
 assert_contains "$output" "nexent/nexent-web:v8.8.8" "web option should build web image"

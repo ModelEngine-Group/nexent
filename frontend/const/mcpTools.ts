@@ -44,8 +44,16 @@ export enum McpServerStatus {
 
 /** Main MCP tools page: imported workspace services vs. published community list. */
 export enum McpToolsServicesTab {
-  IMPORTED = "imported",
-  PUBLISHED = "published",
+  REPOSITORY = "repository",
+  MINE = "mine",
+  REVIEW = "review",
+}
+
+export enum McpDeploymentType {
+  REMOTE_LINK = "remote_link",
+  CONTAINER = "container",
+  API = "api",
+  LOCAL_IMAGE = "local_image",
 }
 
 /** Sentinel value used by toolbar `Select`s to mean "no filter applied". */
@@ -123,6 +131,7 @@ export const MCP_TOOLS_QUERY_KEYS = {
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
   registryList: ["mcp-tools", "registry"] as const,
   communityList: ["mcp-tools", "community"] as const,
+  communityReview: ["mcp-tools", "community-review"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,
   myCommunity: ["mcp-tools", "my-community"] as const,
 };

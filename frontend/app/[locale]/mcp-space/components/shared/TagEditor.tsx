@@ -17,6 +17,7 @@ interface TagEditorProps {
   placeholderKey?: string;
   /** Disable interactions while saving. */
   loading?: boolean;
+  titleClassName?: string;
 }
 
 /**
@@ -35,6 +36,7 @@ export default function TagEditor({
   removeAriaKey = "mcpTools.addModal.removeTagAria",
   placeholderKey = "mcpTools.addModal.tagInputPlaceholder",
   loading = false,
+  titleClassName = "mb-1 block text-sm font-normal text-slate-500",
 }: TagEditorProps) {
   const { t } = useTranslation("common");
   const isControlled = tagInput !== undefined;
@@ -62,7 +64,7 @@ export default function TagEditor({
   return (
     <div>
       {title ? (
-        <p className="mb-1 block text-sm font-normal text-slate-500">
+        <p className={titleClassName}>
           {title}
         </p>
       ) : null}

@@ -65,11 +65,11 @@ export default function McpEditServerModal({
       <Space direction="vertical" className="w-full">
         <div>
           <Text strong>{t("mcpConfig.editServer.serviceName")}</Text>
-          <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-2" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-2" autoComplete="off" />
         </div>
         <div>
           <Text strong>{t("mcpConfig.editServer.mcpUrl")}</Text>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} className="mt-2" />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} className="mt-2" autoComplete="off" />
         </div>
         <div>
           <Text strong>{t("mcpConfig.editServer.authorizationToken")}</Text>
@@ -78,6 +78,7 @@ export default function McpEditServerModal({
             onChange={(e) => setAuthorizationToken(e.target.value)}
             placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
             className="mt-2"
+            autoComplete="new-password"
           />
         </div>
         <div>

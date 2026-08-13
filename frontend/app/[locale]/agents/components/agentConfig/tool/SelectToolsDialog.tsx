@@ -2,11 +2,14 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Tabs, Input, Checkbox, Button, Select } from "antd";
+import { Modal, Tabs, Input, Checkbox, Button, Select, Tooltip } from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
+import i18n from "i18next";
 
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
@@ -29,6 +32,27 @@ function isToolDisabled(name: string, img: boolean, vid: boolean, emb: boolean):
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) return true;
   if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) return true;
   return false;
+}
+
+function getToolDisabledTooltipKey(name: string, img: boolean, vid: boolean, emb: boolean): string | null {
+  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name) && !img) {
+    return "toolPool.imageUnderstandingDisabledTooltip";
+  }
+  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) {
+    return "toolPool.videoUnderstandingDisabledTooltip";
+  }
+  if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) {
+    return "toolPool.embeddingDisabledTooltip";
+  }
+  return null;
+}
+
+function getToolDescription(tool: any): string {
+  const locale = i18n.language || "en";
+  if (locale === "zh" && tool.description_zh) {
+    return tool.description_zh;
+  }
+  return tool.description || "";
 }
 
 const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
@@ -56,6 +80,21 @@ export default function SelectToolsDialog({
   const { confirm } = useConfirmModal();
 
   const { availableTools } = useToolList({ enabled: open });
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+  const { serverList: rawServers } = useMcpServerList({ enabled: open, tenantId });
+  const allMcpServerNames = useMemo(
+    () => new Set(rawServers.map((s) => s.service_name)),
+    [rawServers],
+  );
+  const visibleMcpNames = useMemo(
+    () => new Set(
+      rawServers
+        .filter((s) => !s.permission || s.permission === "EDIT" || s.permission === "READ_ONLY" || s.group_ids)
+        .map((s) => s.service_name),
+    ),
+    [rawServers],
+  );
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const { isImageUnderstandingAvailable, isVideoUnderstandingAvailable, isEmbeddingAvailable } = useConfig();
 
@@ -82,6 +121,7 @@ export default function SelectToolsDialog({
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
 
   // --- Group tools by source & category ---
   const sourceGroups = useMemo(() => {
@@ -90,8 +130,12 @@ export default function SelectToolsDialog({
       const sourceTools = availableTools.filter(
         (t: any) => t.source === tab.sourceValue
       );
+      // For MCP tools: show API-added (not in server list) or from visible servers
+      const filteredTools = tab.key === "mcp"
+        ? sourceTools.filter((t: any) => !allMcpServerNames.has(t.usage) || visibleMcpNames.has(t.usage))
+        : sourceTools;
       const catMap = new Map<string, any[]>();
-      for (const tool of sourceTools) {
+      for (const tool of filteredTools) {
         // MCP tools are grouped by server name (usage); local/langchain by category
         const cat =
           tab.key === "mcp"
@@ -112,7 +156,7 @@ export default function SelectToolsDialog({
         });
     }
     return result;
-  }, [availableTools]);
+  }, [availableTools, visibleMcpNames, allMcpServerNames]);
 
   // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {
@@ -124,11 +168,12 @@ export default function SelectToolsDialog({
     if (!hasSearch && !hasLabels) return groups;
 
     const filterOne = (tool: any): boolean => {
-      // Search filter (OR across name/desc/tags)
+      // Search filter (OR across name/desc/desc_zh/tags)
       if (hasSearch) {
+        const toolDesc = getToolDescription(tool);
         const matchSearch =
           tool.name.toLowerCase().includes(kw) ||
-          (tool.description && tool.description.toLowerCase().includes(kw)) ||
+          (toolDesc && toolDesc.toLowerCase().includes(kw)) ||
           getToolLabels(tool).some((l: string) => l.toLowerCase().includes(kw));
         if (!matchSearch) return false;
       }
@@ -148,13 +193,19 @@ export default function SelectToolsDialog({
   const visibleCategories = useMemo(() => currentGroups.map((g) => g.category), [currentGroups]);
 
   // Auto-select first visible category
-  if (visibleCategories.length > 0 && (!activeCategory || !visibleCategories.includes(activeCategory))) {
-    setTimeout(() => setActiveCategory(visibleCategories[0]), 0);
-  }
+  useEffect(() => {
+    if (visibleCategories.length > 0 && (!activeCategory || !visibleCategories.includes(activeCategory))) {
+      setActiveCategory(visibleCategories[0]);
+    }
+  }, [visibleCategories, activeCategory]);
 
   const selectedToolIds = useMemo(
     () => new Set(selectedTools.map((t) => parseInt(t.id))),
     [selectedTools]
+  );
+  const activeToolGroup = useMemo(
+    () => currentGroups.find((group) => group.category === activeCategory),
+    [activeCategory, currentGroups]
   );
 
   // --- Merge instance params for a tool ---
@@ -198,6 +249,45 @@ export default function SelectToolsDialog({
           (p.value === undefined || p.value === "" || p.value === null)
       ),
     []
+  );
+
+  const selectableToolsInActiveGroup = useMemo(() => {
+    if (!activeToolGroup) return [];
+
+    return activeToolGroup.tools.filter((tool: any) => {
+      const toolId = parseInt(tool.id);
+      const hasDuplicateName = selectedTools.some(
+        (selectedTool) =>
+          parseInt(selectedTool.id) !== toolId &&
+          selectedTool.name === tool.name
+      );
+
+      return (
+        !hasDuplicateName &&
+        !isToolDisabled(
+          tool.name,
+          isImageUnderstandingAvailable,
+          isVideoUnderstandingAvailable,
+          isEmbeddingAvailable
+        ) &&
+        !hasMissingRequired(tool.initParams || [])
+      );
+    });
+  }, [
+    activeToolGroup,
+    hasMissingRequired,
+    isEmbeddingAvailable,
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
+    selectedTools,
+  ]);
+  const allVisibleSelectableToolsSelected = useMemo(
+    () =>
+      selectableToolsInActiveGroup.length > 0 &&
+      selectableToolsInActiveGroup.every((tool: any) =>
+        selectedToolIds.has(parseInt(tool.id))
+      ),
+    [selectableToolsInActiveGroup, selectedToolIds]
   );
 
   // --- Open ToolConfigModal (which handles add/update internally) ---
@@ -268,6 +358,67 @@ export default function SelectToolsDialog({
     },
     [prefetchKnowledgeBases, mergeInstanceParams, hasMissingRequired, confirm, updateTools, t]
   );
+
+  const selectAllVisibleTools = useCallback(async () => {
+    if (isSelectingAll) return;
+
+    const currentSelected = useAgentConfigStore.getState().editedAgent.tools;
+    const currentSelectedIds = new Set(
+      currentSelected.map((tool) => parseInt(tool.id))
+    );
+    const toolsToAdd = selectableToolsInActiveGroup.filter(
+      (tool: any) => !currentSelectedIds.has(parseInt(tool.id))
+    );
+    if (toolsToAdd.length === 0) return;
+
+    setIsSelectingAll(true);
+    try {
+      const toolsWithParams = await Promise.all(
+        toolsToAdd.map(async (tool: any) => ({
+          ...tool,
+          initParams: await mergeInstanceParams(tool),
+        }))
+      );
+      const latestSelected = useAgentConfigStore.getState().editedAgent.tools;
+      const latestIds = new Set(latestSelected.map((tool) => parseInt(tool.id)));
+      const names = new Set(latestSelected.map((tool) => tool.name));
+      const additions = toolsWithParams.filter((tool) => {
+        if (
+          latestIds.has(parseInt(tool.id)) ||
+          names.has(tool.name) ||
+          hasMissingRequired(tool.initParams)
+        ) {
+          return false;
+        }
+        names.add(tool.name);
+        return true;
+      });
+
+      if (additions.length > 0) {
+        updateTools([...latestSelected, ...additions]);
+      }
+    } finally {
+      setIsSelectingAll(false);
+    }
+  }, [
+    hasMissingRequired,
+    isSelectingAll,
+    mergeInstanceParams,
+    selectableToolsInActiveGroup,
+    updateTools,
+  ]);
+
+  const deselectAllVisibleTools = useCallback(() => {
+    if (!activeToolGroup) return;
+
+    const visibleToolIds = new Set(
+      activeToolGroup.tools.map((tool: any) => parseInt(tool.id))
+    );
+    const currentSelected = useAgentConfigStore.getState().editedAgent.tools;
+    updateTools(
+      currentSelected.filter((tool) => !visibleToolIds.has(parseInt(tool.id)))
+    );
+  }, [activeToolGroup, updateTools]);
 
   const tabItems: TabsProps["items"] = SOURCE_TABS
     .filter((tab) => (sourceGroups[tab.key] || []).length > 0)
@@ -346,6 +497,25 @@ export default function SelectToolsDialog({
             maxTagCount={1}
             notFoundContent={allLabels.length === 0 ? t("toolPool.noLabelsAssigned") : undefined}
           />
+          <Button
+            loading={isSelectingAll}
+            disabled={
+              isSelectingAll || selectableToolsInActiveGroup.length === 0
+            }
+            onClick={() => {
+              if (allVisibleSelectableToolsSelected) {
+                deselectAllVisibleTools();
+                return;
+              }
+              void selectAllVisibleTools();
+            }}
+          >
+            {t(
+              allVisibleSelectableToolsSelected
+                ? "common.deselectAll"
+                : "common.selectAll"
+            )}
+          </Button>
         </div>
 
         <div className="flex max-h-[55vh] min-h-[340px] gap-3">
@@ -396,60 +566,78 @@ export default function SelectToolsDialog({
                         isVideoUnderstandingAvailable,
                         isEmbeddingAvailable
                       );
+                      const disabledTooltipKey = disabled
+                        ? getToolDisabledTooltipKey(
+                            tool.name,
+                            isImageUnderstandingAvailable,
+                            isVideoUnderstandingAvailable,
+                            isEmbeddingAvailable
+                          )
+                        : null;
+
+                      const row = (
+                        <div
+                          role="button"
+                          tabIndex={disabled ? -1 : 0}
+                          className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
+                            disabled
+                              ? "cursor-not-allowed opacity-50"
+                              : "cursor-pointer hover:bg-gray-50"
+                          }`}
+                          onClick={disabled ? undefined : () => handleToolToggle(tool)}
+                          onKeyDown={(e) => {
+                            if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+                              e.preventDefault();
+                              handleToolToggle(tool);
+                            }
+                          }}
+                        >
+                          <Checkbox checked={isSelected} disabled={disabled} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-mono text-xs font-medium text-gray-800">
+                                {tool.name}
+                              </span>
+                              {getToolLabels(tool)
+                                .slice(0, 2)
+                                .map((label: string) => (
+                                  <span
+                                    key={label}
+                                    className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                            </div>
+                            {tool.description && (
+                              <p className="truncate text-xs text-gray-400">
+                                {getToolDescription(tool)}
+                              </p>
+                            )}
+                          </div>
+                          {!disabled && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openConfigModal(tool);
+                              }}
+                              className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100"
+                            >
+                              <Settings className="size-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
 
                       return (
                         <li key={tool.id}>
-                          <div
-                            role="button"
-                            tabIndex={disabled ? -1 : 0}
-                            className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
-                              disabled
-                                ? "cursor-not-allowed opacity-50"
-                                : "cursor-pointer hover:bg-gray-50"
-                            }`}
-                            onClick={disabled ? undefined : () => handleToolToggle(tool)}
-                            onKeyDown={(e) => {
-                              if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
-                                e.preventDefault();
-                                handleToolToggle(tool);
-                              }
-                            }}
-                          >
-                            <Checkbox checked={isSelected} disabled={disabled} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate font-mono text-xs font-medium text-gray-800">
-                                  {tool.name}
-                                </span>
-                                {getToolLabels(tool)
-                                  .slice(0, 2)
-                                  .map((label: string) => (
-                                    <span
-                                      key={label}
-                                      className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
-                                    >
-                                      {label}
-                                    </span>
-                                  ))}
-                              </div>
-                              {tool.description && (
-                                <p className="truncate text-xs text-gray-400">
-                                  {tool.description}
-                                </p>
-                              )}
-                            </div>
-                            {!disabled && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openConfigModal(tool);
-                                }}
-                                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100"
-                              >
-                                <Settings className="size-4" />
-                              </button>
-                            )}
-                          </div>
+                          {disabledTooltipKey ? (
+                            <Tooltip title={t(disabledTooltipKey)} mouseEnterDelay={0.2}>
+                              {row}
+                            </Tooltip>
+                          ) : (
+                            row
+                          )}
                         </li>
                       );
                     })}

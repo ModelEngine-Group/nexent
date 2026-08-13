@@ -1,3 +1,5 @@
+import { BASE_PATH } from "./base-path.mjs";
+
 let userConfig = undefined
 try {
   userConfig = await import('./v0-user-next.config')
@@ -8,6 +10,7 @@ try {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  basePath: BASE_PATH,
   eslint: {
     ignoreDuringBuilds: true,
   },

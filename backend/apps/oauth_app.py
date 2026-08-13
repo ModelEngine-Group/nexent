@@ -7,6 +7,7 @@ from typing import Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from consts.const import JWT_EXPIRY_SECONDS
 from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
@@ -20,6 +21,7 @@ from services.oauth_service import (
     generate_pending_oauth_token,
     get_authorize_url,
     get_enabled_providers,
+    get_oauth_config,
     get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
@@ -35,6 +37,14 @@ from utils.auth_utils import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
+
+
+@router.get("/config")
+async def get_config():
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={"message": "success", "data": get_oauth_config()},
+    )
 
 
 @router.get("/providers")
@@ -193,8 +203,10 @@ async def callback(
             username=username,
         )
 
-        expiry_seconds = 3600
-        jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+        jwt_token = generate_session_jwt(
+            supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+        )
+        expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
         return JSONResponse(

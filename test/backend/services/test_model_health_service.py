@@ -130,7 +130,7 @@ async def test_perform_connectivity_check_embedding():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
     # Setup
-    with mock.patch("backend.services.model_health_service.JinaMultimodalEmbedding") as mock_embedding:
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(return_value=[
             [1]
@@ -526,6 +526,35 @@ async def test_check_model_connectivity_exception():
 
 
 @pytest.mark.asyncio
+async def test_check_model_connectivity_probe_exception_returns_unavailable():
+    with mock.patch("backend.services.model_health_service._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("backend.services.model_health_service.get_model_by_display_name") as mock_get_model, \
+            mock.patch("backend.services.model_health_service.update_model_record") as mock_update_model, \
+            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum:
+
+        mock_enum.AVAILABLE.value = "available"
+        mock_enum.UNAVAILABLE.value = "unavailable"
+        mock_enum.DETECTING.value = "detecting"
+
+        mock_get_model.return_value = {
+            "model_id": "model123",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+            "base_url": "https://api.openai.com",
+            "api_key": "test-key"
+        }
+        mock_connectivity_check.side_effect = RuntimeError("connection refused")
+
+        response = await check_model_connectivity("GPT-4", "tenant456")
+
+        assert response["connectivity"] is False
+        assert response["model_name"] == "gpt-4"
+        assert response["error"] == "connection refused"
+        mock_update_model.assert_any_call(
+            "model123", {"connect_status": "unavailable"})
+
+
+@pytest.mark.asyncio
 async def test_check_model_connectivity_general_exception():
     # Setup
     with mock.patch("backend.services.model_health_service.get_model_by_display_name") as mock_get_model, \
@@ -682,7 +711,7 @@ async def test_embedding_dimension_check_embedding_success():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_success():
-    with mock.patch("backend.services.model_health_service.JinaMultimodalEmbedding") as mock_embedding:
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3, 0.4]])
@@ -767,8 +796,8 @@ async def test_embedding_dimension_check_wrapper_exception():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_empty_response():
-    """Test multi_embedding dimension check with empty response (covers line 48-50)"""
-    with mock.patch("backend.services.model_health_service.JinaMultimodalEmbedding") as mock_embedding, \
+    """Test multi_embedding dimension check with an empty response."""
+    with mock.patch("backend.services.model_health_service.SiliconflowMultimodalEmbedding") as mock_embedding, \
             mock.patch("backend.services.model_health_service.logging") as mock_logging:
         mock_embedding_instance = mock.MagicMock()
         mock_embedding_instance.dimension_check = mock.AsyncMock(
@@ -1024,6 +1053,14 @@ async def test_infer_model_factory_dashscope():
     from backend.services.model_health_service import _infer_model_factory
     result = _infer_model_factory("embedding", "https://dashscope.aliyuncs.com/v1/", None)
     assert result == "dashscope"
+
+
+@pytest.mark.asyncio
+async def test_infer_model_factory_siliconflow():
+    """L47: _infer_model_factory returns SILICONFLOW_MODEL_FACTORY for siliconflow URLs"""
+    from backend.services.model_health_service import _infer_model_factory
+    result = _infer_model_factory("multi_embedding", "https://api.siliconflow.cn/v1/", None)
+    assert result == "silicon"
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -66,7 +66,23 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
-  const { availableTools } = useToolList({ enabled: true });
+  const { availableTools, isSuccess: toolsLoaded } = useToolList({ enabled: true });
+
+  // Reconcile the selected-tools draft against the canonical tool list.
+  // When an MCP is deleted, its tools are marked unavailable and dropped from
+  // /tool/list; without this reconciliation those stale selections would stay
+  // visible in the panel (and be re-persisted on save) until a page refresh.
+  // Gated on the tool list having loaded so we never blank out the panel while
+  // `availableTools` is still empty on the initial fetch.
+  useEffect(() => {
+    if (!toolsLoaded) return;
+    const availableIds = new Set(availableTools.map((t: any) => String(t.id)));
+    const current = useAgentConfigStore.getState().editedAgent.tools;
+    const next = current.filter((t) => availableIds.has(String(t.id)));
+    if (next.length !== current.length) {
+      updateTools(next);
+    }
+  }, [availableTools, toolsLoaded, selectedTools, updateTools]);
 
   // --- Group by source → category ---
   const grouped = groupToolsBySource(selectedTools);
@@ -186,15 +202,18 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                       <div className="divide-y divide-gray-100">
                         {cat.tools.map((tool) => {
                           const labels = getToolLabels(tool);
+                          const toolUnavailableReasons = tool.unavailable_reasons || [];
+                          const isModelUnavailable = toolUnavailableReasons.includes("mcp_model_unavailable");
                           const disabled =
                             isToolDisabledDueToVlm(tool.name, isImageUnderstandingAvailable, isVideoUnderstandingAvailable) ||
-                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+                            isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable) ||
+                            isModelUnavailable;
 
                           return (
                             <div key={tool.id} className="group flex items-center gap-2 px-3 py-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate font-mono text-xs font-medium text-gray-800">
+                                  <span className={`truncate font-mono text-xs font-medium ${isModelUnavailable ? "text-gray-400" : "text-gray-800"}`}>
                                     {tool.name}
                                   </span>
                                   {labels.slice(0, 2).map((l) => (
@@ -209,7 +228,12 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                                       </span>
                                     </Tooltip>
                                   )}
-                                  {disabled && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
+                                  {isModelUnavailable && (
+                                    <Tooltip title={t("toolPool.mcpModelUnavailableTooltip")}>
+                                      <AlertTriangle size={14} className="shrink-0 text-orange-400" />
+                                    </Tooltip>
+                                  )}
+                                  {disabled && !isModelUnavailable && <AlertTriangle size={14} className="shrink-0 text-orange-400" />}
                                 </div>
                               </div>
 
@@ -268,7 +292,10 @@ function groupToolsBySource(tools: Tool[]): SourceGroup[] {
     if (srcTools.length === 0) continue;
     const catMap = new Map<string, Tool[]>();
     for (const tool of srcTools) {
-      const cat = (tool as any).category?.trim() || "toolPool.category.other";
+      const cat =
+        key === "mcp"
+          ? (tool as any).usage?.trim() || "toolPool.category.other"
+          : (tool as any).category?.trim() || "toolPool.category.other";
       if (!catMap.has(cat)) catMap.set(cat, []);
       catMap.get(cat)!.push(tool);
     }

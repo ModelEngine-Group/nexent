@@ -3,7 +3,7 @@ from typing import Optional
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, OpenAICompatibleMultimodalEmbedding, JinaMultimodalEmbedding, SiliconMultimodalEmbedding, DashScopeMultimodalEmbedding, VolcengineMultimodalEmbedding
+from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
@@ -17,6 +17,7 @@ logger = logging.getLogger("model_health_service")
 
 DASHSCOPE_MODEL_FACTORY = "dashscope"
 TOKENPONY_MODEL_FACTORY = "tokenpony"
+SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
 PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
 
@@ -38,10 +39,19 @@ def _normalize_embedding_url(base_url: str) -> str:
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
     """Infer model_factory from base_url if not already set or is generic.
 
-    For embedding/multi_embedding, uses legacy logic (only dashscope) to avoid
-    changing existing behavior. For other types (VLM), uses extended inference
-    so tokenpony URLs can be recognized for catalog healthcheck.
+    For embedding/multi_embedding, recognizes dashscope and siliconflow URLs.
+    For other types (VLM), uses extended inference so tokenpony URLs can be
+    recognized for catalog healthcheck.
     """
+    # Embedding types: infer from base_url host
+    if model_type in EMBEDDING_TYPES:
+        if "dashscope" in base_url.lower():
+            return DASHSCOPE_MODEL_FACTORY
+        if "siliconflow" in base_url.lower():
+            return SILICONFLOW_MODEL_FACTORY  # stored as "silicon" for catalog consistency
+        return current_factory
+
+    # Non-embedding types (VLM, etc): use extended inference
     try:
         from services.model_capacity_suggestion_service import pick_provider_from_base_url
 
@@ -85,23 +95,22 @@ async def _embedding_dimension_check(
         return 0
     elif model_type == "multi_embedding":
         model_factory_lower = (model_factory or "").lower()
-        model_config = {
-            "api_key": model_api_key,
-            "base_url": model_base_url,
-            "model_name": model_name,
-            "embedding_dim": 0,
-            "ssl_verify": ssl_verify
-        }
         if model_factory_lower == "dashscope":
-            embedding_instance = DashScopeMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "silicon":
-            embedding_instance = SiliconMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "volcengine":
-            embedding_instance = VolcengineMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "jina":
-            embedding_instance = JinaMultimodalEmbedding(**model_config)
+            embedding_instance = DashScopeMultimodalEmbedding(
+                api_key=model_api_key,
+                base_url=model_base_url,
+                model_name=model_name,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            )
         else:
-            embedding_instance = OpenAICompatibleMultimodalEmbedding(**model_config)
+            embedding_instance = SiliconflowMultimodalEmbedding(
+                api_key=model_api_key,
+                base_url=model_base_url,
+                model_name=model_name,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            )
         embedding = await embedding_instance.dimension_check(timeout=effective_timeout)
         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
             return len(embedding[0])
@@ -184,23 +193,22 @@ async def _perform_connectivity_check(
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "multi_embedding":
         model_factory_lower = (model_factory or "").lower()
-        model_config = {
-            "api_key": model_api_key,
-            "base_url": model_base_url,
-            "model_name": model_name,
-            "embedding_dim": 0,
-            "ssl_verify": ssl_verify
-        }
         if model_factory_lower == "dashscope":
-            embedding = DashScopeMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "silicon":
-            embedding = SiliconMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "volcengine":
-            embedding = VolcengineMultimodalEmbedding(**model_config)
-        elif model_factory_lower == "jina":
-            embedding = JinaMultimodalEmbedding(**model_config)
+            embedding = DashScopeMultimodalEmbedding(
+                api_key=model_api_key,
+                base_url=model_base_url,
+                model_name=model_name,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            )
         else:
-            embedding = OpenAICompatibleMultimodalEmbedding(**model_config)
+            embedding = SiliconflowMultimodalEmbedding(
+                api_key=model_api_key,
+                base_url=model_base_url,
+                model_name=model_name,
+                embedding_dim=0,
+                ssl_verify=ssl_verify,
+            )
         emb = await embedding.dimension_check(timeout=effective_timeout)
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "llm":
@@ -349,7 +357,13 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
                 "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             logger.error(f"Error checking model connectivity: {str(e)}")
             update_model_record(model["model_id"], update_data)
-            raise e
+            if isinstance(e, ValueError):
+                raise e
+            return {
+                "connectivity": False,
+                "model_name": model_name,
+                "error": str(e),
+            }
 
         if connectivity:
             logger.info(
@@ -362,10 +376,11 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         if ssl_verify_fallback:
             update_data["ssl_verify"] = False
         update_model_record(model["model_id"], update_data)
-        return {
+        result = {
             "connectivity": connectivity,
             "model_name": model_name,
         }
+        return result
     except Exception as e:
         logger.error(f"Error checking model connectivity: {str(e)}")
         if 'model' in locals() and model:

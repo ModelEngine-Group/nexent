@@ -2,7 +2,7 @@
 {{- $shared := default dict $global.sharedStorage }}
 {{- $mode := default "local" $shared.mode }}
 {{- $storageClassName := default "" $shared.storageClassName }}
-{{- $accessModes := default (list "ReadWriteOnce") $shared.accessModes }}
+{{- $accessModes := default (list "ReadWriteMany") $shared.accessModes }}
 {{- $workspace := default dict $shared.workspace }}
 {{- $workspaceSize := default "10Gi" $workspace.size }}
 {{- $workspaceLocalPath := default "/var/lib/nexent" $workspace.localPath }}

@@ -133,6 +133,8 @@ class ErrorMessage:
         ErrorCode.AIDP_CONFIG_INVALID: "AIDP configuration invalid. Please check URL and API key format.",
         ErrorCode.AIDP_CONNECTION_ERROR: "Failed to connect to AIDP. Please check network connection and URL.",
         ErrorCode.AIDP_AUTH_ERROR: "AIDP authentication failed. Please check your API key.",
+        ErrorCode.AIDP_RATE_LIMIT: "AIDP API rate limit exceeded. Please try again later.",
+        ErrorCode.AIDP_RESPONSE_ERROR: "Failed to parse AIDP response. Please check API URL.",
 
         # ==================== 14 Northbound / 北向接口 ====================
         ErrorCode.NORTHBOUND_REQUEST_FAILED: "Northbound request failed.",
@@ -141,6 +143,36 @@ class ErrorMessage:
         # ==================== 15 DataProcess / 数据处理 ====================
         ErrorCode.DATAPROCESS_TASK_FAILED: "Data process task failed.",
         ErrorCode.DATAPROCESS_PARSE_FAILED: "Data parsing failed.",
+
+        # ==================== 16 AgentEvaluation / 智能体评估 ====================
+        ErrorCode.AGENT_EVALUATION_CONCURRENT_LIMIT: "Too many evaluation tasks running. Please wait for completion.",
+        ErrorCode.AGENT_EVALUATION_TOTAL_LIMIT: "Evaluation task limit reached. Please delete old tasks and retry.",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT: "Too many evaluators selected (max 5).",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND: "Evaluator not found.",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED: "Evaluator is not published.",
+        ErrorCode.AGENT_EVALUATION_SET_EMPTY: "Evaluation set has no cases.",
+        ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE: "Query count must be between 1 and 50.",
+        ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND: "Agent not found.",
+        ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED: "Judge model ID is required.",
+        ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: "Only the creator can delete this evaluation run.",
+        ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED: "Failed to generate test queries.",
+        ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT: "AI returned invalid format for test queries.",
+        ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY: "AI generated no valid test queries.",
+        ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FAILED: "Failed to generate evaluation cases.",
+        ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FORMAT: "AI returned invalid format for cases.",
+        ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY: "AI generated no valid cases.",
+        ErrorCode.AGENT_EVALUATION_GENERATION_FAILED: "Generation failed.",
+        ErrorCode.AGENT_EVALUATION_GENERATION_BAD_FORMAT: "Generation returned invalid format.",
+        ErrorCode.AGENT_EVALUATION_GENERATION_NO_VALID_CASES: "No valid cases generated.",
+        ErrorCode.AGENT_EVALUATION_SET_IN_USE: "Evaluation set is referenced by active runs and cannot be deleted.",
+        ErrorCode.AGENT_EVALUATION_EVALUATOR_IN_USE: "Evaluator is referenced by active evaluation runs and cannot be deleted.",
+        ErrorCode.AGENT_EVALUATION_VERSION_NOT_FOUND: "Evaluator version not found.",
+        ErrorCode.AGENT_EVALUATION_ANALYSIS_FAILED: "Failed to generate analysis report.",
+        ErrorCode.AGENT_EVALUATION_ANALYSIS_NOT_READY: "Evaluation is not complete. Analysis is only available for completed runs.",
+        ErrorCode.AGENT_EVALUATION_ANNOTATION_SCHEMA_IN_USE: "Annotation schema is referenced by existing data and cannot be deleted.",
+        ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH: "Session turn_order mismatch.",
+        ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_LAST: "Can only delete the last turn.",
+        ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS: "Turn deletion not contiguous.",
 
         # ==================== 99 System / 系统级 ====================
         # 01 - System Errors

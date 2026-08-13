@@ -13,7 +13,6 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
-from nexent.memory.memory_service import clear_memory, add_memory_in_levels
 from jinja2 import Template
 
 from agents.agent_run_manager import agent_run_manager
@@ -24,10 +23,10 @@ from services.vectordatabase_service import get_embedding_model
 from nexent.core.agents.agent_model import FileMode, AgentFilePreprocessConfig
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
-from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
+from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
-from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -40,7 +39,6 @@ from consts.model import (
     ExportAndImportDataFormat,
     MCPInfo,
     MessageRequest,
-    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -48,6 +46,7 @@ from consts.model import (
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
+    batch_search_agent_display_names,
     create_agent,
     delete_agent_by_id,
     delete_agent_relationship,
@@ -65,7 +64,12 @@ from database.agent_db import (
     clear_agent_new_mark
 )
 from database import a2a_agent_db
-from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
+from database.model_management_db import (
+    get_model_by_model_id,
+    get_model_by_model_id_ignore_delete,
+    get_model_id_by_display_name,
+    get_valid_model_ids,
+)
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
@@ -73,7 +77,7 @@ from database.tool_db import (
     delete_tools_by_agent_id,
     query_all_enabled_tool_instances,
     query_all_tools,
-    query_tool_instances_by_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
@@ -81,7 +85,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list, query_current_version_no
+from database.agent_version_db import query_version_list, query_current_version_no, batch_search_version_names, batch_query_current_version_nos
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -93,15 +97,21 @@ from services.prompt_template_service import (
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     create_new_conversation,
-    generate_conversation_title_service,
+    generate_conversation_title_service,  # noqa: F401 - compatibility patch point
+    get_conversation_service,
+    get_current_run_user_message_id,
     get_latest_assistant_message,
     get_last_unit_for_message,
+    load_historical_context,
+    persist_history_summary_candidate,
     save_conversation_user,
     save_message,
     save_message_unit,
     save_source_image,
     save_source_search,
     save_skill_files_to_conversation,
+    update_conversation_agent_id_service,
+    update_conversation_chat_mode_service,
     update_message_content,
     update_message_status,
     update_unit_content,
@@ -109,9 +119,10 @@ from services.conversation_management_service import (
 )
 from services.memory_config_service import build_memory_context
 from services.streaming_channel import streaming_channel_manager
+from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
-from utils.memory_utils import build_memory_config
+from utils.context_utils import build_authorized_context_input
 from utils.thread_utils import submit
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -124,6 +135,7 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+_channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
@@ -133,6 +145,34 @@ async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: floa
     """
     await asyncio.sleep(delay)
     await streaming_channel_manager.remove_channel(conversation_id, user_id)
+
+
+async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
+    """Mirror Redis cancel signal into the local agent stop_event."""
+    while not stop_event.is_set():
+        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+            stop_event.set()
+            logger.info(
+                "Runtime cancel signal received, user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+
+async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
+    """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
+    while not task.done():
+        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+            task.cancel()
+            logger.info(
+                "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -171,6 +211,18 @@ def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
     return payloads
 
 
+def _serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
+    """Preserve tool metadata in the existing message-unit content column."""
+    if data.get("type") not in {"tool", "tool-call"}:
+        return content
+
+    payload: Dict[str, Any] = {"content": content}
+    for field in ("tool_name", "tool_arguments", "role"):
+        if field in data:
+            payload[field] = data[field]
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
     """
     Transform skill file upload results to match the frontend attachment format.
@@ -195,14 +247,19 @@ def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> lis
 
 
 async def _process_skill_file_uploads(
-    content: str,
+    payloads: list[dict] | str,
     user_id: str,
     tenant_id: str,
 ) -> list[dict]:
     """Upload generated skill files to storage and return upload metadata."""
 
     upload_results: list[dict] = []
-    for payload in _extract_skill_file_upload_payloads(content):
+    structured_payloads = (
+        payloads
+        if isinstance(payloads, list)
+        else _extract_skill_file_upload_payloads(payloads)
+    )
+    for payload in structured_payloads:
         absolute_path = str(payload.get("absolute_path") or "").strip()
         file_name = str(
             payload.get("file_name")
@@ -260,7 +317,7 @@ async def _process_skill_file_uploads(
                     absolute_path,
                     error_message,
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "[skill-file] failed to upload file file_name=%s absolute_path=%s",
                 file_name,
@@ -313,6 +370,27 @@ def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
         logger.warning(
             f"Failed to get user groups for user {user_id}: {str(e)}")
         return ""
+
+
+def _inject_user_timezone_time(query: str, http_request) -> str:
+    """Inject [Current time: ...] prefix in the user's timezone.
+
+    Reads the X-User-Timezone header (set by the frontend) and prepends
+    the current time in that timezone. If the header is absent, invalid,
+    or the query already has the prefix, the query is returned unchanged.
+    """
+    user_timezone = http_request.headers.get("x-user-timezone") if http_request else None
+    if user_timezone and query and not query.startswith("[Current time:"):
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(user_timezone)
+            now = datetime.now(tz)
+            time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            return f"[Current time: {time_str}]\n\n{query}"
+        except Exception:
+            pass
+    return query
 
 
 def _resolve_model_ids_with_fallback(
@@ -887,7 +965,6 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
-    captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
@@ -899,7 +976,7 @@ async def _stream_agent_chunks(
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
-            1 for item in getattr(agent_request, "history", [])
+            1 for item in (getattr(agent_request, "history", None) or ())
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -936,6 +1013,14 @@ async def _stream_agent_chunks(
             user_id=user_id
         )
 
+    cancel_poll_task = asyncio.create_task(
+        _poll_runtime_cancel_signal(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
+            stop_event=agent_run_info.stop_event,
+        )
+    )
+
     # In resume mode, emit a status event first
     if is_resume_mode:
         await channel.publish(STREAM_STATUS_EVENT)
@@ -943,8 +1028,18 @@ async def _stream_agent_chunks(
         yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
+    async def _iter_run_chunks():
+        for event in getattr(
+            agent_run_info.agent_config,
+            "pre_run_tool_events",
+            (),
+        ):
+            yield json.dumps(event, ensure_ascii=False)
+        async for agent_chunk in agent_run(agent_run_info):
+            yield agent_chunk
+
     try:
-        async for chunk in agent_run(agent_run_info):
+        async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
             chunk_content: str = ""
             try:
@@ -964,6 +1059,8 @@ async def _stream_agent_chunks(
                     elif chunk_type not in ("search_content_placeholder",):
                         # New unit - this will be the next index after assignment
                         data["unit_index"] = next_unit_index
+                    # Tool events and side-channel output carry the same ID
+                    # from the observer's actual invocation context.
                     # Re-serialize the chunk with unit_index for accurate frontend skip
                     chunk = json.dumps(data)
                     logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
@@ -973,8 +1070,33 @@ async def _stream_agent_chunks(
                 yield f"data: {chunk}\n\n"
                 continue
 
-            if chunk_type == "final_answer":
-                captured_final_answer = chunk_content
+            if chunk_type == ProcessType.SKILL_ARTIFACT.value:
+                artifact_content = data.get("content")
+                if isinstance(artifact_content, str):
+                    try:
+                        artifact_content = json.loads(artifact_content)
+                    except json.JSONDecodeError:
+                        artifact_content = {}
+
+                artifacts = (
+                    artifact_content.get("artifacts", [])
+                    if isinstance(artifact_content, dict)
+                    else []
+                )
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    absolute_path = str(artifact.get("absolute_path") or "").strip()
+                    if not absolute_path or absolute_path in captured_skill_files:
+                        continue
+                    captured_skill_files[absolute_path] = artifact
+
+                logger.info(
+                    "[skill-file] received structured artifacts count=%s current_total=%s",
+                    len(artifacts),
+                    len(captured_skill_files),
+                )
+                continue
 
             should_parse_skill_file = (
                 chunk_type in {"execution_logs", "parse"}
@@ -1032,9 +1154,7 @@ async def _stream_agent_chunks(
                     # loop is async but the DB operations are I/O-bound with network
                     # latency, synchronous writes here are acceptably fast and guarantee
                     # that each chunk is fully persisted before the next chunk arrives.
-                    old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
-                    new_len = len(current_unit["content"])
                     update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
@@ -1089,16 +1209,26 @@ async def _stream_agent_chunks(
                     # and inserts each search result as a source_search row
                     # linked back to the unit_id we just created.
                     if chunk_type == "search_content":
-                        placeholder_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type="search_content_placeholder",
-                            unit_content='{"placeholder": true}',
-                            user_id=user_id,
-                            unit_status="completed",
-                        ).result()
+                        try:
+                            placeholder_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type="search_content_placeholder",
+                                unit_content='{"placeholder": true}',
+                                user_id=user_id,
+                                unit_status="completed",
+                                tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist search_content placeholder: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                            placeholder_unit_id = None
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
@@ -1144,27 +1274,64 @@ async def _stream_agent_chunks(
                         continue
 
                     # Default path: insert a new unit row with unit_status='streaming'.
-                    if streaming_message_id is not None and chunk_type not in (
+                    # history_summary is already persisted once by the canonical
+                    # checkpoint sink on its covered assistant message. The stream
+                    # event is display-only and must not create a duplicate unit on
+                    # the currently-running assistant message.
+                    if chunk_type == "history_summary":
+                        current_unit = None
+                    elif streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        new_unit_id = submit(
-                            save_message_unit,
-                            message_id=streaming_message_id,
-                            conversation_id=agent_request.conversation_id,
-                            unit_index=next_unit_index,
-                            unit_type=chunk_type,
-                            unit_content=chunk_content,
-                            user_id=user_id,
-                            unit_status="streaming",
-                        ).result()
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": chunk_content,
-                            "unit_id": new_unit_id,
-                            "unit_index": next_unit_index,
-                            "mergeable": mergeable,
-                        }
-                        next_unit_index += 1
+                        persisted_content = _serialize_stream_unit_content(
+                            data, chunk_content
+                        )
+                        try:
+                            new_unit_id = submit(
+                                save_message_unit,
+                                message_id=streaming_message_id,
+                                conversation_id=agent_request.conversation_id,
+                                unit_index=next_unit_index,
+                                unit_type=chunk_type,
+                                unit_content=persisted_content,
+                                user_id=user_id,
+                                unit_status="streaming",
+                                tool_call_id=data.get("tool_call_id"),
+                                invocation_id=data.get("invocation_id"),
+                            ).result()
+                        except Exception as persistence_exc:
+                            logger.error(
+                                "Failed to persist streaming message unit: %r",
+                                persistence_exc,
+                                exc_info=True,
+                            )
+                        else:
+                            current_unit = {
+                                "type": chunk_type,
+                                "content": persisted_content,
+                                "unit_id": new_unit_id,
+                                "unit_index": next_unit_index,
+                                "mergeable": mergeable,
+                            }
+                            if chunk_type == "automation_proposal":
+                                try:
+                                    from services.agent_automation.tool_adapter import (
+                                        link_persisted_proposal_card,
+                                    )
+
+                                    link_persisted_proposal_card(
+                                        persisted_content,
+                                        tenant_id,
+                                        user_id,
+                                        streaming_message_id,
+                                        new_unit_id,
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to link persisted automation proposal card",
+                                        exc_info=True,
+                                    )
+                            next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
@@ -1198,7 +1365,8 @@ async def _stream_agent_chunks(
                 except Exception:
                     logger.exception("Failed to mark last unit as completed")
 
-            terminal_status = "completed" if stream_completed_normally else "failed"
+            was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
+            terminal_status = "stopped" if was_stopped else "completed" if stream_completed_normally else "failed"
             try:
                 update_message_status(
                     streaming_message_id,
@@ -1208,12 +1376,17 @@ async def _stream_agent_chunks(
             except Exception:
                 logger.exception("Failed to mark assistant message as %s", terminal_status)
 
+        if not cancel_poll_task.done():
+            cancel_poll_task.cancel()
+
+        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
+        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
+
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id)
+            agent_request.conversation_id, user_id, status=terminal_status)
 
         # Mark channel as completed and schedule cleanup
         if channel is not None:
-            terminal_status = 'completed' if stream_completed_normally else 'failed'
             await streaming_channel_manager.complete_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=user_id,
@@ -1226,15 +1399,14 @@ async def _stream_agent_chunks(
                     user_id=user_id
                 )
             )
+            _channel_cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
 
         try:
-            skill_file_content_local = "\n".join(
-                json.dumps(payload, ensure_ascii=False)
-                for payload in captured_skill_files.values()
-            )
-            if skill_file_content_local:
+            skill_file_payloads = list(captured_skill_files.values())
+            if skill_file_payloads:
                 skill_file_uploads = await _process_skill_file_uploads(
-                    content=skill_file_content_local,
+                    payloads=skill_file_payloads,
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
@@ -1272,57 +1444,12 @@ async def _stream_agent_chunks(
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
-        async def _add_memory_background():
-            try:
-                # Skip if memory recording is disabled
-                if not getattr(memory_ctx.user_config, "memory_switch", False):
-                    return
-                # Use the captured final answer during streaming; observer queue was drained
-                final_answer_local = captured_final_answer
-                if not final_answer_local:
-                    return
-
-                # Determine allowed memory levels
-                levels_local = {"agent", "user_agent"}
-                if memory_ctx.user_config.agent_share_option == "never":
-                    levels_local.discard("agent")
-                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_agent_ids", []):
-                    levels_local.discard("agent")
-                if memory_ctx.agent_id in getattr(memory_ctx.user_config, "disable_user_agent_ids", []):
-                    levels_local.discard("user_agent")
-                if not levels_local:
-                    return
-
-                mem_messages_local = [
-                    {"role": MESSAGE_ROLE["USER"],
-                        "content": agent_run_info.query},
-                    {"role": MESSAGE_ROLE["ASSISTANT"],
-                        "content": final_answer_local},
-                ]
-
-                add_result_local = await add_memory_in_levels(
-                    messages=mem_messages_local,
-                    memory_config=memory_ctx.memory_config,
-                    tenant_id=memory_ctx.tenant_id,
-                    user_id=memory_ctx.user_id,
-                    agent_id=memory_ctx.agent_id,
-                    memory_levels=list(levels_local),
-                )
-                items_local = add_result_local.get("results", [])
-                logger.info(f"Memory addition completed: {items_local}")
-            except Exception as bg_e:
-                logger.error(
-                    f"Unexpected error during background memory addition: {bg_e}")
-
-        try:
-            # Create and store the background task to avoid warnings
-            background_task = asyncio.create_task(_add_memory_background())
-            # Add done callback to handle any exceptions that might occur
-            background_task.add_done_callback(
-                lambda t: t.exception() if t.exception() else None)
-        except Exception as schedule_err:
-            logger.error(
-                f"Failed to schedule background memory addition: {schedule_err}")
+        # Memory recording is now handled by the agent-side ``StoreMemoryTool``
+        # (which delegates to the new ``MemoryService`` facade). The legacy
+        # background ``add_memory_in_levels`` call has been removed because
+        # its dual-level ``agent``/``user_agent`` semantics no longer map to
+        # the new layered architecture (agents may only write to
+        # ``agent.short_term``).
 
 
 def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):
@@ -1379,6 +1506,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         tool_info = search_tools_for_sub_agent(
             agent_id=agent_id, tenant_id=tenant_id)
+        # Check if selected_model_id in tool params points to a deleted model
+        for tool in tool_info:
+            unavailable_reasons: List[str] = []
+            params = tool.get("params") or []
+            if isinstance(params, list):
+                for param_def in params:
+                    if not isinstance(param_def, dict):
+                        continue
+                    if param_def.get("name") == "selected_model_id":
+                        selected_model_id = param_def.get("default")
+                        if selected_model_id is not None:
+                            model_record = get_model_by_model_id_ignore_delete(selected_model_id, tenant_id)
+                            if model_record is not None and model_record.get("delete_flag") == "Y":
+                                unavailable_reasons.append(AgentUnavailableReason.MCP_MODEL_UNAVAILABLE)
+                        break
+            tool["unavailable_reasons"] = unavailable_reasons
         agent_info["tools"] = tool_info
     except Exception as e:
         logger.error(f"Failed to get agent tools: {str(e)}")
@@ -1388,9 +1531,80 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         sub_agent_id_list = query_sub_agents_id_list(
             main_agent_id=agent_id, tenant_id=tenant_id)
         agent_info["sub_agent_id_list"] = sub_agent_id_list
+
+        # Enrich sub-agent relations with version names (batch query)
+        relations = query_sub_agent_relations(agent_id, tenant_id, version_no)
+        enriched_relations = []
+
+        # Collect all agent_ids and (agent_id, version_no) pairs for batch lookup
+        all_agent_ids = set()
+        lookup_agent_ids = set()
+        lookup_version_nos = set()
+        # Track agents whose pinned version_no is null -> need to resolve latest published version
+        missing_version_agent_ids = set()
+        for rel in relations:
+            aid = rel.get("selected_agent_id")
+            if aid:
+                all_agent_ids.add(aid)
+            vno = rel.get("selected_agent_version_no")
+            if aid and vno is not None and vno != 0:
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(vno)
+            elif aid:
+                # Historical data: pinned version_no is null or 0 (draft), resolve from child's current published version
+                missing_version_agent_ids.add(aid)
+
+        # Batch query current published version_no for agents with missing pinned version
+        resolved_version_no_map: dict = {}
+        if missing_version_agent_ids:
+            resolved_version_no_map = batch_query_current_version_nos(
+                agent_ids=list(missing_version_agent_ids),
+                tenant_id=tenant_id,
+            )
+            # Merge resolved version_nos into the version name lookup set
+            for aid, resolved_vno in resolved_version_no_map.items():
+                lookup_agent_ids.add(aid)
+                lookup_version_nos.add(resolved_vno)
+
+        # Batch query all version names at once
+        version_name_map: dict = {}
+        if lookup_agent_ids and lookup_version_nos:
+            batch_results = batch_search_version_names(
+                agent_ids=list(lookup_agent_ids),
+                tenant_id=tenant_id,
+                version_nos=list(lookup_version_nos),
+            )
+            for item in batch_results:
+                key = (item["agent_id"], item["version_no"])
+                version_name_map[key] = item["version_name"]
+
+        # Batch query all agent display names at once
+        agent_name_map = batch_search_agent_display_names(
+            agent_ids=list(all_agent_ids),
+            tenant_id=tenant_id,
+        )
+
+        for rel in relations:
+            selected_agent_id = rel.get("selected_agent_id")
+            selected_version_no = rel.get("selected_agent_version_no")
+            # Fallback to resolved latest published version_no when pinned version is null or 0 (draft)
+            if (selected_version_no is None or selected_version_no == 0) and selected_agent_id in resolved_version_no_map:
+                selected_version_no = resolved_version_no_map[selected_agent_id]
+            version_name = None
+            if selected_agent_id and selected_version_no is not None:
+                version_name = version_name_map.get((selected_agent_id, selected_version_no))
+            enriched_relations.append({
+                "agent_id": selected_agent_id,
+                "agent_name": agent_name_map.get(selected_agent_id) if selected_agent_id else None,
+                "version_no": selected_version_no,
+                "version_name": version_name,
+            })
+
+        agent_info["sub_agent_relations"] = enriched_relations
     except Exception as e:
         logger.error(f"Failed to get sub agent id list: {str(e)}")
         agent_info["sub_agent_id_list"] = []
+        agent_info["sub_agent_relations"] = []
 
     try:
         skill_service = SkillService()
@@ -1399,7 +1613,29 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             tenant_id=tenant_id,
             version_no=version_no
         )
-        agent_info["skills"] = instances
+        # Keep disabled instances for their saved configuration, but do not
+        # return them as selected skills in the agent configuration.
+        instances = [
+            instance for instance in instances if instance.get("enabled", True)
+        ]
+
+        # Fallback: verify each instance's skill_id still exists in ag_skill_info_t
+        valid_skill_ids = skill_db.get_valid_skill_ids(
+            tenant_id=tenant_id,
+            skill_ids=[inst.get("skill_id") for inst in instances if isinstance(inst, dict)]
+        )
+        filtered = []
+        for inst in instances:
+            skill_id = inst.get("skill_id")
+            if skill_id in valid_skill_ids:
+                filtered.append(inst)
+            else:
+                logger.warning(
+                    "Filtering out stale skill instance: agent_id=%s, skill_id=%s (not found in ag_skill_info_t)",
+                    agent_id, skill_id,
+                )
+        agent_info["skills"] = filtered
+
     except Exception as e:
         logger.exception(f"Failed to get agent skills: {str(e)}")
         agent_info["skills"] = []
@@ -1415,19 +1651,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["external_sub_agent_id_list"] = []
 
     # Get model names from model_ids array
-    model_ids = agent_info.get("model_ids")
+    # Filter out deleted models (delete_flag='Y' in model_record_t)
+    model_ids = agent_info.get("model_ids") or []
+    valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+    agent_info["model_ids"] = valid_model_ids
+
     model_names: List[str] = []
-    if model_ids and len(model_ids) > 0:
-        for mid in model_ids:
-            model_info = get_model_by_model_id(mid)
-            if model_info:
-                display_name = model_info.get("display_name")
-                if display_name:
-                    model_names.append(display_name)
+    for mid in valid_model_ids:
+        model_info = get_model_by_model_id(mid)
+        if model_info:
+            display_name = model_info.get("display_name")
+            if display_name:
+                model_names.append(display_name)
     agent_info["model_names"] = model_names
-    # Always derive model_name from model_ids so the API contract is consistent.
-    if model_ids and len(model_ids) > 0:
-        first_model_info = get_model_by_model_id(model_ids[0])
+    # Always derive model_name from valid_model_ids so the API contract is consistent.
+    if valid_model_ids:
+        first_model_info = get_model_by_model_id(valid_model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -1517,34 +1756,40 @@ def _validate_requested_output_tokens_for_agent(
     if requested_output_tokens is None:
         return
 
-    model_id = request.model_id
-    if model_id is None and request.agent_id is not None:
+    # Validate against every configured model — the user can switch models at
+    # chat time, so requested_output_tokens must not exceed any model's limit.
+    model_ids = list(request.model_ids or [])
+    if not model_ids and request.agent_id is not None:
         try:
             existing_agent = search_agent_info_by_agent_id(
                 agent_id=request.agent_id,
                 tenant_id=tenant_id,
                 version_no=request.version_no,
             )
-            model_id = existing_agent.get("model_id")
+            model_ids = list(existing_agent.get("model_ids") or [])
         except Exception as exc:
             logger.warning(
-                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                "Could not resolve existing agent models for requested_output_tokens validation: %s",
                 exc,
             )
 
-    if model_id is None:
+    if not model_ids:
         return
 
-    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            (
-                "requested_output_tokens cannot exceed the selected model "
-                f"max_output_tokens ({max_output_tokens})"
-            ),
-        )
+    for model_id in model_ids:
+        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+        if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+            model_display = (
+                model_info.get("display_name") if model_info else f"model_id={model_id}"
+            )
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                (
+                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
+                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
+                ),
+            )
 
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
@@ -1580,8 +1825,10 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
+                "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
+                "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
@@ -1649,13 +1896,45 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
         logger.error(f"Failed to update agent tools: {str(e)}")
         raise ValueError(f"Failed to update agent tools: {str(e)}")
 
-    # Handle enabled skills saving when provided
+    # Handle enabled skills and their per-agent configuration.
     try:
-        if request.enabled_skill_ids is not None and agent_id is not None:
-            enabled_set = set(request.enabled_skill_ids)
+        requested_skill_instances = getattr(request, "skill_instances", None)
+        has_structured_skill_instances = isinstance(requested_skill_instances, list)
+        if (
+            (has_structured_skill_instances or request.enabled_skill_ids is not None)
+            and agent_id is not None
+        ):
+            raw_version_no = getattr(request, "version_no", 0)
+            request_version_no = raw_version_no if isinstance(raw_version_no, int) else 0
+            requested_by_id = {}
+            if has_structured_skill_instances:
+                for requested_instance in requested_skill_instances:
+                    skill_id = requested_instance.skill_id
+                    if skill_id in requested_by_id:
+                        raise ValueError(f"Duplicate skill_id in skill_instances: {skill_id}")
+                    requested_by_id[skill_id] = requested_instance
+                enabled_set = {
+                    skill_id
+                    for skill_id, requested_instance in requested_by_id.items()
+                    if requested_instance.enabled
+                }
+            else:
+                enabled_set = set(request.enabled_skill_ids or [])
+
+            if has_structured_skill_instances:
+                valid_skill_ids = skill_db.get_valid_skill_ids(
+                    tenant_id=tenant_id,
+                    skill_ids=list(enabled_set),
+                )
+                missing_skill_ids = enabled_set - valid_skill_ids
+                if missing_skill_ids:
+                    raise ValueError(
+                        f"Invalid or unavailable skill IDs: {sorted(missing_skill_ids)}"
+                    )
+
             # Query existing skill instances for this agent
             existing_instances = skill_db.query_skill_instances_by_agent_id(
-                agent_id, tenant_id)
+                agent_id, tenant_id, version_no=request_version_no)
 
             # Handle unselected skill (already exist instance) -> enabled=False
             for instance in existing_instances:
@@ -1665,39 +1944,37 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_info=SkillInstanceInfoRequest(
                             skill_id=inst_skill_id,
                             agent_id=agent_id,
-                            skill_description=instance.get(
-                                "skill_description"),
-                            skill_content=instance.get("skill_content"),
                             enabled=False,
                             config_values=instance.get("config_values"),
+                            version_no=request_version_no,
                         ),
                         tenant_id=tenant_id,
-                        user_id=user_id
+                        user_id=user_id,
+                        version_no=request_version_no,
                     )
 
             # Handle selected skill -> enabled=True (create or update)
             for skill_id in enabled_set:
-                # Keep existing skill_description and skill_content if any
                 existing_instance = next(
                     (inst for inst in existing_instances
                      if inst.get("skill_id") == skill_id),
                     None
                 )
-                skill_description = (existing_instance or {}).get(
-                    "skill_description")
-                skill_content = (existing_instance or {}).get("skill_content")
+                if has_structured_skill_instances:
+                    config_values = requested_by_id[skill_id].config_values
+                else:
+                    config_values = (existing_instance or {}).get("config_values")
                 skill_db.create_or_update_skill_by_skill_info(
                     skill_info=SkillInstanceInfoRequest(
                         skill_id=skill_id,
                         agent_id=agent_id,
-                        skill_description=skill_description,
-                        skill_content=skill_content,
                         enabled=True,
-                        config_values=(existing_instance or {}
-                                       ).get("config_values"),
+                        config_values=config_values,
+                        version_no=request_version_no,
                     ),
                     tenant_id=tenant_id,
-                    user_id=user_id
+                    user_id=user_id,
+                    version_no=request_version_no,
                 )
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")
@@ -1724,14 +2001,25 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                     main_agent_id=left_ele, tenant_id=tenant_id)
                 search_list.extend(sub_ids)
 
-            # Update related agents
+            # Update related agents - use related_agents if provided, otherwise build from IDs
+            if request.related_agents:
+                related_agents_dicts = [
+                    {"agent_id": ra.agent_id, "version_no": ra.version_no}
+                    for ra in request.related_agents
+                ]
+            else:
+                related_agents_dicts = [
+                    {"agent_id": aid, "version_no": None}
+                    for aid in related_agent_ids
+                ]
+
             update_related_agents(
                 parent_agent_id=agent_id,
-                related_agent_ids=related_agent_ids,
                 tenant_id=tenant_id,
-                user_id=user_id
+                user_id=user_id,
+                related_agents=related_agents_dicts,
             )
-    except ValueError as e:
+    except ValueError:
         # Re-raise ValueError (circular dependency) as-is
         raise
     except Exception as e:
@@ -1799,61 +2087,9 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
-
-        # Clean up all memory data related to the agent
-        await clear_agent_memory(agent_id, tenant_id, user_id)
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
-
-
-async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
-    """
-    Purge specified agent's memory data
-
-    Args:
-        agent_id: Agent ID
-        tenant_id: Tenant ID
-        user_id: User ID
-    """
-    try:
-        # Build memory configuration
-        memory_config = build_memory_config(tenant_id)
-
-        # Clean up agent-level memory
-        try:
-            agent_memory_result = await clear_memory(
-                memory_level="agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=str(agent_id)
-            )
-            logger.info(
-                f"Cleared agent memory for agent {agent_id}: {agent_memory_result}")
-        except Exception as e:
-            logger.error(
-                f"Failed to clear agent-level memory for agent {agent_id}: {str(e)}")
-
-        # Clean up user_agent-level memory
-        try:
-            user_agent_memory_result = await clear_memory(
-                memory_level="user_agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                agent_id=str(agent_id)
-            )
-            logger.info(
-                f"Cleared user_agent memory for agent {agent_id}: {user_agent_memory_result}")
-        except Exception as e:
-            logger.error(
-                f"Failed to clear user_agent-level memory for agent {agent_id}: {str(e)}")
-
-    except Exception as e:
-        logger.error(
-            f"Failed to build memory config for agent {agent_id}: {str(e)}")
-        # Silently fail to maintain agent deletion process
 
 
 async def _export_agent_dict_core(
@@ -2111,8 +2347,10 @@ async def export_agent_by_agent_id(
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
+                                          is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
+                                          context_policy=agent_info.get("context_policy"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -2175,12 +2413,13 @@ async def import_agent_impl(
             mapping_agent_id[need_import_agent_id] = new_agent_id
 
             agent_id_set.add(need_import_agent_id)
-            # Establish relationships with sub-agents
+            # Establish relationships with sub-agents - new sub-agents always use version 1
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
                                      tenant_id=tenant_id,
-                                     user_id=user_id)
+                                     user_id=user_id,
+                                     selected_agent_version_no=1)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)
@@ -2225,9 +2464,9 @@ async def import_agent_by_agent_id(
                                                  enabled=True,
                                                  params=tool.params))
     # check the validity of the agent parameters
-    if import_agent_info.max_steps <= 0 or import_agent_info.max_steps > 30:
+    if import_agent_info.max_steps <= 0:
         raise ValueError(
-            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0 and less than 30.")
+            f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0.")
     if not import_agent_info.name.isidentifier():
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
@@ -2273,8 +2512,10 @@ async def import_agent_by_agent_id(
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
+                                         "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
+                                         "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
@@ -2386,6 +2627,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
 
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent["model_ids"] = valid_model_ids
+
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
                 agent_id=agent["agent_id"],
@@ -2446,6 +2692,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
                 "is_published": agent.get("current_version_no") is not None,
+                "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
             })
 
@@ -2582,6 +2829,22 @@ def check_agent_availability(
         if not all(tool_statuses):
             unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
 
+    # Check if any tool has a selected_model_id pointing to a deleted model
+    for tool in tool_info:
+        params = tool.get("params") or []
+        if isinstance(params, list):
+            for param_def in params:
+                if not isinstance(param_def, dict):
+                    continue
+                if param_def.get("name") == "selected_model_id":
+                    selected_model_id = param_def.get("default")
+                    if selected_model_id is not None:
+                        model_record = get_model_by_model_id_ignore_delete(
+                            selected_model_id, tenant_id)
+                        if model_record is not None and model_record.get("delete_flag") == "Y":
+                            unavailable_reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
+                    break
+
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
         agent=agent_info,
@@ -2642,34 +2905,60 @@ async def prepare_agent_run(
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
+
+    create_run_kwargs = {
+        "agent_id": agent_request.agent_id,
+        "minio_files": agent_request.minio_files,
+        "query": agent_request.query,
+        "history": agent_request.history,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "language": language,
+        "allow_memory_search": allow_memory_search,
+        "is_debug": agent_request.is_debug,
+        "override_version_no": agent_request.version_no,
+        "override_model_id": agent_request.model_id,
+        "requested_output_tokens": agent_request.requested_output_tokens,
+        "tool_params": agent_request.tool_params,
+        "conversation_id": agent_request.conversation_id,
+        "context_policy": agent_request.context_policy,
+        "enable_planning": agent_request.enable_plan,
+    }
+    if not agent_request.enable_automation_tool:
+        create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
-        agent_id=agent_request.agent_id,
-        minio_files=agent_request.minio_files,
-        query=agent_request.query,
-        history=agent_request.history,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        language=language,
-        allow_memory_search=allow_memory_search,
-        is_debug=agent_request.is_debug,
-        override_version_no=agent_request.version_no,
-        override_model_id=agent_request.model_id,
-        requested_output_tokens=agent_request.requested_output_tokens,
-        tool_params=agent_request.tool_params,
-        conversation_id=agent_request.conversation_id,
+        **create_run_kwargs,
     )
 
-    # Mount conversation-level reusable ContextManager if enabled
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = get_current_run_user_message_id(
+            agent_request.conversation_id, user_id
+        )
+        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+            current_message_id = None
+            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+    agent_run_info.context_input = build_authorized_context_input(
+        agent_run_info, historical_context
+    )
+    agent_run_info.conversation_id = agent_request.conversation_id
+    agent_run_info.user_id = user_id
+
+    # ContextManager is created exactly once by the SDK Agent creation entry.
+    # The application boundary only injects the persistence callback into its
+    # configuration before the worker thread starts.
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
-    if cm_config and cm_config.enabled:
-        cm = agent_run_manager.get_or_create_context_manager(
-            conversation_id=str(agent_request.conversation_id),
-            config=cm_config,
-            max_steps=agent_run_info.agent_config.max_steps
+    if cm_config:
+        cm_config.history_summary_sink = (
+            (lambda candidate: persist_history_summary_candidate(
+                agent_request.conversation_id, candidate, user_id, tenant_id
+            )) if historical_context is not None else None
         )
-        agent_run_info.context_manager = cm
-
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)
     return agent_run_info, memory_context
@@ -2682,7 +2971,8 @@ def save_messages(agent_request, target: str, user_id: str, tenant_id: str, mess
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
-        submit(save_conversation_user, agent_request, user_id, tenant_id)
+        # Historical checkpoint lookup for this run needs the current message boundary.
+        save_conversation_user(agent_request, user_id, tenant_id)
         return
 
     if target == MESSAGE_ROLE["ASSISTANT"]:
@@ -2725,46 +3015,52 @@ def _resolve_file_preprocess_config(agent_id: str, tenant_id: str):
         return None
 
 
-# Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
-async def generate_stream_with_memory(
+# Helper function for run_agent_stream. ``enable_memory`` controls whether
+# fixed pre-run retrieval and the model-directed store_memory tool are enabled.
+async def generate_stream(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    enable_memory: bool = False,
+    channel: Optional[Any] = None,
 ):
-    # Prepare preprocess task tracking (simulate preprocess flow)
-    task_id = str(uuid.uuid4())
-    conversation_id = agent_request.conversation_id
-    current_task = asyncio.current_task()
-    if current_task:
-        preprocess_manager.register_preprocess_task(
-            task_id, conversation_id, current_task
+    """Unified streaming entry point.
+
+    Args:
+        agent_request: The agent run payload.
+        user_id: The caller user id.
+        tenant_id: The caller tenant id.
+        language: UI/i18n language (``"zh"`` / ``"en"``).
+        enable_memory: When ``True``, memory retrieval runs once before the
+            model loop and store_memory is loaded for model-directed use. A
+            ``MemoryPreparationException`` triggers a single fallback to the
+            no-memory path so the run still produces output.
+        channel: Optional streaming channel; when ``None`` a fresh channel
+            is created lazily when memory is enabled.
+    """
+    # Poll for cross-pod cancel signal so the outer generator task can be
+    # cancelled when another Pod writes the runtime cancel flag.
+    _outer_task = asyncio.current_task()
+    cancel_poll_task = (
+        asyncio.create_task(
+            _cancel_task_on_runtime_signal(
+                agent_request.conversation_id, user_id, _outer_task
+            )
         )
-
-    # Helper to emit memory_search token
-    def _memory_token(message_text: str) -> str:
-        payload = {
-            "type": "memory_search",
-            "content": json.dumps({"message": message_text}, ensure_ascii=False),
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
-    # Placeholder messages handled by frontend for i18n
-    msg_start = MEMORY_SEARCH_START_MSG
-    msg_done = MEMORY_SEARCH_DONE_MSG
-    msg_fail = MEMORY_SEARCH_FAIL_MSG
-
-    # ------------------------------------------------------------------
-    # Note: the actual streaming happens via `_stream_agent_chunks` helper
-    # ------------------------------------------------------------------
-
-    # Create channel for multi-subscriber support
-    channel = await streaming_channel_manager.get_or_create_channel(
-        conversation_id=agent_request.conversation_id,
-        user_id=user_id
+        if _outer_task
+        else None
     )
 
-    memory_enabled = False
+    # Lazily open the streaming channel. Recursive fallback below needs to
+    # reuse the same channel so subscribers stay connected.
+    if channel is None and enable_memory:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id,
+        )
+
+    memory_enabled_runtime = False
     try:
         # Stream file preprocessing events before memory/agent preparation.
         if agent_request.conversation_id and agent_request.minio_files:
@@ -2783,34 +3079,31 @@ async def generate_stream_with_memory(
                 ):
                     await channel.publish(chunk)
                     yield chunk
+        
+        if enable_memory:
+            # Resolve the user-level switch for tool loading only.
+            memory_context_preview = build_memory_context(
+                user_id, tenant_id, agent_request.agent_id
+            )
+            memory_enabled_runtime = bool(
+                memory_context_preview.user_config.memory_switch
+            )
 
-        memory_context_preview = build_memory_context(
-            user_id, tenant_id, agent_request.agent_id
-        )
-        memory_enabled = bool(memory_context_preview.user_config.memory_switch)
-
-        if memory_enabled:
-            # Emit start token before memory retrieval
-            await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
-            yield f"data: {_memory_token(msg_start)}\n\n"
-
-        # Prepare run (will execute memory retrieval inside create_agent_run_info)
+        # Prepare the agent with or without memory. The preparation path runs
+        # fixed retrieval before the model loop and exposes only store_memory.
         try:
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
                 language=language,
-                allow_memory_search=True,
+                allow_memory_search=memory_enabled_runtime,
             )
         except Exception as prep_err:
-            # Normalize any preparation error to MemoryPreparationException
+            # Normalize any preparation error to MemoryPreparationException so
+            # the memory-enabled path can decide between retry-without-memory
+            # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
-
-        if memory_enabled:
-            # Emit completion token once memory is ready
-            await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
-            yield f"data: {_memory_token(msg_done)}\n\n"
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -2823,17 +3116,24 @@ async def generate_stream_with_memory(
             yield data_chunk
 
     except MemoryPreparationException:
-        # Memory retrieval failure: emit failure token when memory is enabled, and continue without blocking
-        if memory_enabled:
-            await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
-            yield f"data: {_memory_token(msg_fail)}\n\n"
+        if not enable_memory:
+            # No-memory path has no fallback; surface the failure cleanly.
+            logger.error(
+                "Agent run error without memory: %r", None, exc_info=True
+            )
+            await channel.publish(_safe_agent_stream_error_chunk())
+            yield _safe_agent_stream_error_chunk()
+            return
 
         try:
-            # Fallback to the no-memory streaming path, which internally handles
-            async for data_chunk in generate_stream_no_memory(
+            # Single fallback: re-issue this generator with memory turned off
+            # so the actual ``_stream_agent_chunks`` still runs.
+            async for data_chunk in generate_stream(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                language=language,
+                enable_memory=False,
                 channel=channel,
             ):
                 yield data_chunk
@@ -2848,7 +3148,7 @@ async def generate_stream_with_memory(
             return
     except Exception as stream_exc:
         logger.error(
-            "Generate stream with memory error: %r",
+            "Generate stream error: %r",
             stream_exc,
             exc_info=True,
         )
@@ -2856,59 +3156,8 @@ async def generate_stream_with_memory(
         yield _safe_agent_stream_error_chunk()
         return
     finally:
-        # Always unregister preprocess task
-        preprocess_manager.unregister_preprocess_task(task_id)
-
-
-# Helper function for run_agent_stream, used when user memory is disabled (no memory tokens)
-async def generate_stream_no_memory(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-    language: str = LANGUAGE["ZH"],
-    channel: Optional[Any] = None,
-):
-    """Stream agent responses without any memory preprocessing tokens or fallback logic."""
-
-    # Stream file preprocessing events before preparing the agent run.
-    # Results are persisted to DB; create_agent_run_info reads them via
-    # build_conversation_file_component (and skips already-processed files).
-    if agent_request.conversation_id and agent_request.minio_files:
-        resolved = _resolve_file_preprocess_config(
-            agent_request.agent_id, tenant_id,
-        )
-        if resolved is not None:
-            file_mode, embedding_model = resolved
-            async for chunk in preprocess_files_streaming(
-                minio_files=agent_request.minio_files,
-                conversation_id=str(agent_request.conversation_id),
-                tenant_id=tenant_id,
-                file_mode=file_mode,
-                embedding_model=embedding_model,
-                user_id=user_id,
-            ):
-                if channel:
-                    await channel.publish(chunk)
-                yield chunk
-
-    # Prepare run info respecting memory disabled (honor provided user_id/tenant_id)
-    agent_run_info, memory_context = await prepare_agent_run(
-        agent_request=agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-        allow_memory_search=False,
-    )
-
-    async for data_chunk in _stream_agent_chunks(
-        agent_request=agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        agent_run_info=agent_run_info,
-        memory_ctx=memory_context,
-        channel=channel,
-    ):
-        yield data_chunk
+        if cancel_poll_task and not cancel_poll_task.done():
+            cancel_poll_task.cancel()
 
 
 def _detect_resume_position(
@@ -3008,6 +3257,12 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    # Inject current time in the user's timezone so the LLM can answer
+    # time-related questions correctly. The SDK strips this prefix before
+    # sending AGENT_NEW_RUN to the frontend, so the user message display
+    # does not show the time marker.
+    agent_request.query = _inject_user_timezone_time(agent_request.query, http_request)  # pragma: no cover
+
     # Auto-create conversation when conversation_id is not provided.
     # Skip in debug mode: debug runs are ephemeral and must not persist
     # conversations, titles, or messages to the user's history.
@@ -3022,6 +3277,8 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(
             title=default_title,
             user_id=resolved_user_id,
+            agent_id=agent_request.agent_id,
+            chat_mode="planning" if agent_request.enable_plan else "execution",
         )
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -3029,6 +3286,37 @@ async def run_agent_stream(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
             resolved_user_id,
+        )
+
+    if (
+        not agent_request.is_debug
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+    ):
+        conversation = get_conversation_service(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            tenant_id=resolved_tenant_id,
+        )
+        if conversation is None:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
+        update_conversation_chat_mode_service(
+            conversation_id=agent_request.conversation_id,
+            chat_mode="planning" if agent_request.enable_plan else "execution",
+            user_id=resolved_user_id,
+        )
+
+    if (
+        not agent_request.is_debug
+        and not resume
+        and not is_new_conversation
+        and agent_request.conversation_id is not None
+        and agent_request.agent_id is not None
+    ):
+        update_conversation_agent_id_service(
+            conversation_id=agent_request.conversation_id,
+            agent_id=agent_request.agent_id,
+            user_id=resolved_user_id,
         )
 
     # Resume mode: check for existing streaming message
@@ -3053,8 +3341,13 @@ async def run_agent_stream(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id
         )
+        run_state = await runtime_state_service.get_run_state_async(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id,
+        )
+        is_remote_running = run_state.get("status") == "running"
 
-        if existing_run_info is None:
+        if existing_run_info is None and not is_remote_running:
             # Agent has finished while frontend was disconnected
             # Update message status to completed if it's still streaming
             try:
@@ -3078,8 +3371,82 @@ async def run_agent_stream(
             conversation_id=agent_request.conversation_id,
             user_id=resolved_user_id
         )
+        last_unit_index = resume_info["resume_from_unit_index"] - 1
+
+        def _resume_status_chunk(replay_chunk_count: int) -> str:
+            payload = {
+                'status': 'resumed',
+                'last_unit_index': last_unit_index,
+                'replay_chunk_count': replay_chunk_count,
+            }
+            return f"data: {json.dumps(payload)}\n\n"
+
+        def _resume_completed_chunk(status: str = "completed") -> str:
+            payload = {
+                'status': status,
+                'last_unit_index': last_unit_index,
+            }
+            return f"data: {json.dumps(payload)}\n\n"
 
         if channel is None:
+            if runtime_state_service.enabled and is_remote_running:
+                async def redis_channel_stream():
+                    replay_events = await runtime_state_service.read_stream_events_async(
+                        user_id=resolved_user_id,
+                        conversation_id=agent_request.conversation_id,
+                    )
+                    replay_chunk_count = len(replay_events)
+
+                    yield STREAM_STATUS_EVENT
+                    yield _resume_status_chunk(replay_chunk_count)
+
+                    last_event_id = "0-0"
+                    for event_id, chunk in replay_events:
+                        last_event_id = event_id
+                        if chunk:
+                            yield chunk
+
+                    while True:
+                        events = await runtime_state_service.wait_for_stream_events_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                            last_id=last_event_id,
+                        )
+                        for event_id, chunk in events:
+                            last_event_id = event_id
+                            if chunk:
+                                yield chunk
+
+                        stream_status = await runtime_state_service.get_stream_status_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
+                        latest_run_state = await runtime_state_service.get_run_state_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
+                        if stream_status.get("status") or latest_run_state.get("status") in {
+                            "completed",
+                            "failed",
+                            "stopped",
+                        }:
+                            break
+
+                    terminal_status = stream_status.get("status") or latest_run_state.get("status") or "completed"
+                    yield STREAM_STATUS_EVENT
+                    yield _resume_completed_chunk(terminal_status)
+
+                return StreamingResponse(
+                    redis_channel_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Stream-Status": "resumed",
+                        "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+                    },
+                )
+
             # No channel exists, agent might be in a different state
             return JSONResponse(
                 status_code=HTTPStatus.OK,
@@ -3096,7 +3463,7 @@ async def run_agent_stream(
 
             # Emit status event first with chunk count for skip tracking
             yield STREAM_STATUS_EVENT
-            yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
+            yield _resume_status_chunk(replay_chunk_count)
 
             # Use subscribe_with_history(0) to replay ALL chunks from the buffer
             # This ensures no chunks are lost even if frontend disconnected during streaming
@@ -3106,7 +3473,7 @@ async def run_agent_stream(
 
             # Mark as complete when channel ends
             yield STREAM_STATUS_EVENT
-            yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
+            yield _resume_completed_chunk()
 
         return StreamingResponse(
             channel_stream(),
@@ -3120,6 +3487,11 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
+    await runtime_state_service.reset_stream_async(
+        user_id=resolved_user_id,
+        conversation_id=agent_request.conversation_id,
+    )
+
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
             agent_request,
@@ -3160,20 +3532,13 @@ async def run_agent_stream(
 
     use_memory_stream = memory_enabled and not agent_request.is_debug
 
-    if use_memory_stream:
-        stream_gen = generate_stream_with_memory(
-            agent_request,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-            language=language,
-        )
-    else:
-        stream_gen = generate_stream_no_memory(
-            agent_request,
-            user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
-            language=language,
-        )
+    stream_gen = generate_stream(
+        agent_request,
+        user_id=resolved_user_id,
+        tenant_id=resolved_tenant_id,
+        language=language,
+        enable_memory=use_memory_stream,
+    )
 
     async def stream_with_agent_context():
         try:
@@ -3191,29 +3556,98 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
-        finally:
-            # Auto-generate title for new conversations after stream completes
-            if is_new_conversation:
-                try:
-                    await generate_conversation_title_service(
-                        conversation_id=agent_request.conversation_id,
-                        question=agent_request.query,
-                        user_id=resolved_user_id,
-                        tenant_id=resolved_tenant_id,
-                        language=language,
-                    )
-                except Exception as title_exc:
-                    logger.warning(
-                        "Failed to auto-generate title for conversation_id=%s: %r",
-                        agent_request.conversation_id,
-                        title_exc,
-                    )
+
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if agent_request.conversation_id is not None:
+        headers["conversation_id"] = str(agent_request.conversation_id)
 
     return StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=headers,
     )
+
+
+async def run_agent_background(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    skip_user_save: bool = False,
+) -> Dict[str, Any]:
+    """
+    Run an agent without returning an SSE response.
+
+    This path is used by background automation tasks. It reuses the same
+    preparation, monitoring, memory and message persistence flow as
+    run_agent_stream, but consumes generated chunks internally.
+    """
+    if not agent_request.conversation_id:
+        raise ValueError("conversation_id is required for background agent runs")
+
+    if not agent_request.is_debug and not skip_user_save:
+        save_messages(
+            agent_request,
+            target=MESSAGE_ROLE["USER"],
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+
+    memory_ctx_preview = build_memory_context(
+        user_id, tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
+    )
+    memory_enabled = memory_ctx_preview.user_config.memory_switch
+
+    agent_metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+        agent_id=agent_request.agent_id,
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        query=agent_request.query,
+        is_debug=agent_request.is_debug,
+        language=language,
+        memory_enabled=memory_enabled,
+        history_count=len(agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
+        extra_metadata={
+            "background": True,
+            "skip_user_save": skip_user_save,
+            "agent_share_option": getattr(
+                memory_ctx_preview.user_config,
+                "agent_share_option",
+                "unknown",
+            ),
+        },
+    ))
+
+    if memory_enabled and not agent_request.is_debug:
+        stream_gen = generate_stream(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+            enable_memory=True,
+        )
+    else:
+        stream_gen = generate_stream(
+            agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+            enable_memory=False,
+        )
+
+    chunks = 0
+    with agent_monitoring_context(agent_metadata):
+        async for _ in stream_gen:
+            chunks += 1
+
+    latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
+    return {
+        "conversation_id": agent_request.conversation_id,
+        "assistant_message_id": latest_message.get("message_id") if latest_message else None,
+        "chunks": chunks,
+    }
 
 
 def stop_agent_tasks(conversation_id: int, user_id: str):
@@ -3242,6 +3676,10 @@ def stop_agent_tasks(conversation_id: int, user_id: str):
         message = f"no running agent or preprocess tasks found for user_id {user_id}, conversation_id {conversation_id}"
         logging.info(message)
         return {"status": "success", "message": message, "already_stopped": True}
+
+
+def is_agent_running(conversation_id: int, user_id: str) -> bool:
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
 
 
 async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
@@ -3522,3 +3960,93 @@ async def import_agent_with_skills_impl(
             )
 
     return agent_id_mapping
+
+
+# =============================================================================
+# Sandbox Policy Builder
+# =============================================================================
+
+
+def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
+    """
+    Assemble a sandbox policy dict from ``NEXENT_SANDBOX_*`` environment variables.
+
+    This is the canonical factory used by the backend service layer to resolve
+    ``SandboxConfig`` for every agent run.  It is called before constructing
+    ``AgentRunInfo`` so that the resolved config flows into ``NexentAgent``.
+
+    Resolution order:
+      1. ``AgentConfig.sandbox_policy`` from the DB (takes precedence).
+      2. ``NEXENT_SANDBOX_*`` environment variables (fallback when DB has no policy).
+
+    Args:
+        tenant_id: tenant identifier (reserved for future per-tenant overrides).
+        agent_type: agent type string (reserved for future per-type overrides).
+
+    Returns:
+        A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
+    """
+    from consts.const import (
+        NEXENT_SANDBOX_DEFAULT_LEVEL,
+        NEXENT_SANDBOX_DEFAULT_SCOPE,
+        NEXENT_SANDBOX_DOCKER_IMAGE,
+        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        NEXENT_SANDBOX_CPU_QUOTA,
+        NEXENT_SANDBOX_TIMEOUT_S,
+        NEXENT_SANDBOX_NETWORK_DISABLED,
+        NEXENT_SANDBOX_SHELL_POLICY,
+        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    )
+
+    level = NEXENT_SANDBOX_DEFAULT_LEVEL
+    if level == "local":
+        return None
+
+    return {
+        "level": level,
+        "scope": NEXENT_SANDBOX_DEFAULT_SCOPE,
+        "docker_image": NEXENT_SANDBOX_DOCKER_IMAGE,
+        "memory_limit_mb": NEXENT_SANDBOX_MEMORY_LIMIT_MB,
+        "cpu_quota": NEXENT_SANDBOX_CPU_QUOTA,
+        "timeout_seconds": NEXENT_SANDBOX_TIMEOUT_S,
+        "network_disabled": NEXENT_SANDBOX_NETWORK_DISABLED,
+        "shell_policy": NEXENT_SANDBOX_SHELL_POLICY,
+        "auto_sync_outputs": NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+    }
+
+
+def get_sandbox_minio_client() -> Optional[Any]:
+    """
+    Build and return a MinIO client for sandbox output sync.
+
+    Returns None when MinIO is not configured (safe no-op).
+
+    The caller is responsible for managing the client lifecycle — this function
+    returns a fresh client on each call so the caller can call ``close()`` on it
+    after the run finishes.
+    """
+    from consts.const import (
+        NEXENT_SANDBOX_OUTPUT_BUCKET,
+        MINIO_ENDPOINT,
+        MINIO_ACCESS_KEY,
+        MINIO_SECRET_KEY,
+        MINIO_SECURE,
+    )
+
+    if not MINIO_ENDPOINT:
+        return None
+
+    try:
+        from nexent.storage import MinIOStorageClient
+    except ImportError:
+        return None
+
+    client = MinIOStorageClient(
+        endpoint=MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY or "",
+        secret_key=MINIO_SECRET_KEY or "",
+        region=None,
+        default_bucket=NEXENT_SANDBOX_OUTPUT_BUCKET,
+        secure=MINIO_SECURE,
+    )
+    return client

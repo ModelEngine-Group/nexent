@@ -19,7 +19,12 @@ from consts.const import (
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
-from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
+from consts.exceptions import (
+    FileTooLargeException,
+    NotFoundException,
+    OfficeConversionException,
+    UnsupportedFileTypeException,
+)
 from database.attachment_db import (
     copy_file,
     delete_file,
@@ -259,6 +264,68 @@ def validate_urls_access(
                 validate_s3_url_access(object_name, user_id, caller_tenant_id)
 
 
+class UploadFilesResult(tuple):
+    """Backward-compatible three-item upload result with optional quota metadata."""
+
+    quota_status: Optional[dict]
+
+    def __new__(
+        cls,
+        errors: list,
+        uploaded_file_paths: list,
+        uploaded_filenames: list,
+        quota_status: Optional[dict] = None,
+    ):
+        result = super().__new__(
+            cls, (errors, uploaded_file_paths, uploaded_filenames))
+        result.quota_status = quota_status
+        return result
+
+
+async def _get_complete_upload_batch_size(files: List[UploadFile]) -> int:
+    """Return the full raw batch size without changing upload stream positions."""
+    total_size = 0
+    for upload in files:
+        if not upload:
+            continue
+
+        declared_size = getattr(upload, "size", None)
+        if (
+            isinstance(declared_size, int)
+            and not isinstance(declared_size, bool)
+            and declared_size > 0
+        ):
+            total_size += declared_size
+            continue
+
+        file_object = getattr(upload, "file", None)
+        if file_object is not None:
+            original_position = None
+            try:
+                original_position = file_object.tell()
+                file_object.seek(0, os.SEEK_END)
+                measured_size = file_object.tell()
+                if isinstance(measured_size, int) and measured_size >= 0:
+                    total_size += measured_size
+                    continue
+            except (AttributeError, OSError, TypeError, ValueError):
+                pass
+            finally:
+                if original_position is not None:
+                    try:
+                        file_object.seek(original_position)
+                    except (AttributeError, OSError, TypeError, ValueError):
+                        logger.warning("Failed to restore upload file position")
+
+        try:
+            await upload.seek(0)
+            content = await upload.read()
+            total_size += len(content)
+        finally:
+            await upload.seek(0)
+    return total_size
+
+
 async def upload_files_impl(
     destination: str,
     file: List[UploadFile],
@@ -279,11 +346,12 @@ async def upload_files_impl(
         uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
 
     Returns:
-        tuple: (errors, uploaded_file_paths, uploaded_filenames)
+        UploadFilesResult: Three-item tuple-compatible result with quota metadata
     """
     uploaded_filenames = []
     uploaded_file_paths = []
     errors = []
+    quota_status = None
     if destination == "local":
         async with upload_semaphore:
             for f in file:
@@ -305,6 +373,21 @@ async def upload_files_impl(
     elif destination == "minio":
         actual_folder = resolve_minio_upload_folder(
             folder, user_id, uploader_tenant_id)
+
+        from services.knowledge_storage_service import resolve_storage_context
+
+        storage_context = resolve_storage_context(index_name, uploader_tenant_id)
+        quota_service = None
+        if storage_context:
+            from services.quota_service import QuotaService
+
+            total_file_size = await _get_complete_upload_batch_size(file)
+            quota_service = QuotaService(storage_context.tenant_id, user_id)
+            quota_status = quota_service.check_hard_limit(
+                total_file_size,
+                index_name=storage_context.index_name,
+            )
+
         minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
@@ -353,9 +436,38 @@ async def upload_files_impl(
             except Exception as e:
                 logger.warning(
                     f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")
+
+        if storage_context and uploaded_file_paths:
+            from services.knowledge_storage_service import (
+                commit_uploaded_object,
+                compensate_uploaded_objects,
+            )
+
+            try:
+                for object_name in uploaded_file_paths:
+                    commit_uploaded_object(
+                        context=storage_context,
+                        object_name=object_name,
+                        created_by=user_id,
+                    )
+                quota_service.invalidate_usage_cache(storage_context.tenant_id)
+                quota_status = quota_service.check_hard_limit_post_write(
+                    0,
+                    index_name=storage_context.index_name,
+                )
+            except Exception:
+                compensate_uploaded_objects(
+                    context=storage_context,
+                    object_names=uploaded_file_paths,
+                    updated_by=user_id,
+                )
+                quota_service.invalidate_usage_cache(storage_context.tenant_id)
+                raise
     else:
         raise Exception("Invalid destination. Must be 'local' or 'minio'.")
-    return errors, uploaded_file_paths, uploaded_filenames
+
+    return UploadFilesResult(
+        errors, uploaded_file_paths, uploaded_filenames, quota_status)
 
 
 async def upload_to_minio(
@@ -434,11 +546,55 @@ async def get_file_stream_impl(object_name: str):
     return file_stream, content_type
 
 
-async def delete_file_impl(object_name: str):
-    result = delete_file(object_name=object_name)
+async def delete_file_impl(
+    object_name: str,
+    tenant_id: Optional[str] = None,
+    updated_by: Optional[str] = None,
+):
+    """Delete a storage object and reconcile a tenant-owned KB ledger row."""
+    reference = None
+    ledger_record = None
+    if tenant_id:
+        from database.knowledge_storage_object_db import get_storage_object
+        from services.knowledge_storage_service import resolve_storage_reference
+
+        reference = resolve_storage_reference(object_name)
+        if reference:
+            is_kb_source_path = reference.object_name.startswith((
+                "knowledge_base/",
+                f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/",
+            ))
+            ledger_record = get_storage_object(
+                tenant_id=tenant_id,
+                bucket_name=reference.bucket_name,
+                object_name=reference.object_name,
+            )
+            if is_kb_source_path and ledger_record is None:
+                raise PermissionError(
+                    "The knowledge-base source object is not owned by the caller's tenant"
+                )
+
+    if reference:
+        result = await asyncio.to_thread(
+            delete_file,
+            object_name=reference.object_name,
+            bucket=reference.bucket_name,
+        )
+    else:
+        result = await asyncio.to_thread(delete_file, object_name=object_name)
     if not result["success"]:
         raise Exception(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")
+
+    if ledger_record and reference:
+        from services.knowledge_storage_service import release_storage_charge
+
+        release_storage_charge(
+            tenant_id=tenant_id,
+            bucket_name=reference.bucket_name,
+            object_name=reference.object_name,
+            updated_by=updated_by,
+        )
     return result
 
 

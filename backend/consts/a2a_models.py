@@ -133,9 +133,13 @@ class A2AAgentCard(BaseModel):
 # =============================================================================
 
 class DiscoverFromUrlRequest(BaseModel):
-    """Request to discover an external A2A agent from URL."""
+    """Request to discover an external A2A agent from an Agent Card URL."""
     url: str = Field(description="Direct URL to the Agent Card")
     name: Optional[str] = Field(default=None, description="Optional display name override")
+    custom_headers: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Headers saved for Agent Card discovery and refresh only"
+    )
 
 
 class DiscoverFromNacosRequest(BaseModel):

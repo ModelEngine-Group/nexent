@@ -17,6 +17,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
+import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
 
 const { Header, Sider, Content, Footer } = Layout;
 
@@ -63,7 +65,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     left: 0,
     backgroundColor: "#fff",
     overflow: "visible",
-    zIndex: 998,
+    zIndex: 30,
   };
 
   const siderInnerStyle: React.CSSProperties = {
@@ -122,6 +124,8 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <Layout style={layoutStyle}>
+      <QuotaWarningMonitor enabled={!isSetupPage} />
+      <MemoryEmbeddingMonitor />
       <Header style={headerStyle}>
         <TopNavbar isChatPage={isChatPage} />
       </Header>
@@ -151,7 +155,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
               transform: "translateY(-50%)",
               right: "-12px",
               transition: "right 0.2s ease, left 0.2s ease",
-              zIndex: 999,
+              zIndex: 40,
             }}
             icon={
               collapsed ? (

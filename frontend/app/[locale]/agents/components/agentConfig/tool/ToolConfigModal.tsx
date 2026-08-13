@@ -40,22 +40,17 @@ import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSe
 import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
-import AidpKnowledgeSelectorModal from "@/components/tool-config/AidpKnowledgeSelectorModal";
+import AidpKnowledgeSelectorModal from "@/ext_components/aidp/AidpKnowledgeSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig, knowledgeBaseKeys } from "@/hooks/useKnowledgeBaseSelector";
 import {
   useKnowledgeBaseConfigChangeHandler,
   ToolKbType,
 } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
-import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import log from "@/lib/logger";
 import { MODEL_TYPES } from "@/const/modelConfig";
-import {
-  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
-  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
-} from "@/lib/knowledgeBaseCompatibility";
 import { isZhLocale, getLocalizedDescription, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
 import { ModelOption, ModelType } from "@/types/modelConfig";
 
@@ -77,6 +72,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "ragflow_search",
   "aidp_search",
 ];
 
@@ -84,6 +80,7 @@ const TOOLS_SUPPORTING_RERANK = [
   "knowledge_base_search",
   "dify_search",
   "datamate_search",
+  "ragflow_search",
 ];
 
 const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
@@ -241,6 +238,15 @@ export default function ToolConfigModal({
     apiKey: "",
   });
 
+  // RAGFlow configuration state
+  const [ragflowConfig, setRagflowConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
   // iData configuration state
   const [idataConfig, setIdataConfig] = useState<{
     serverUrl: string;
@@ -289,6 +295,7 @@ export default function ToolConfigModal({
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | "aidp_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
@@ -297,6 +304,7 @@ export default function ToolConfigModal({
     if (name === "datamate_search") return "datamate_search";
     if (name === "idata_search") return "idata_search";
     if (name === "haotian_search") return "haotian_search";
+    if (name === "ragflow_search") return "ragflow_search";
     if (name === "aidp_search") return "aidp_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
@@ -346,14 +354,6 @@ export default function ToolConfigModal({
     HaotianKnowledgeSet[]
   >([]);
 
-  const [aidpConfig, setAidpConfig] = useState<{
-    serverUrl: string;
-    apiKey: string;
-  }>({
-    serverUrl: "",
-    apiKey: "",
-  });
-
   // Initialize Haotian config from params
   useEffect(() => {
     if (toolKbType !== "haotian_search") return;
@@ -367,17 +367,6 @@ export default function ToolConfigModal({
       currentParams.find((p) => p.name === "authorization")?.value || ""
     );
     setHaotianConfig({ listUrl, retrieveUrl, authorization: extAuth });
-  }, [toolKbType, currentParams]);
-
-  useEffect(() => {
-    if (toolKbType !== "aidp_search") return;
-    const serverUrl = String(
-      currentParams.find((p) => p.name === "server_url")?.value || ""
-    );
-    const apiKey = String(
-      currentParams.find((p) => p.name === "api_key")?.value || ""
-    );
-    setAidpConfig({ serverUrl, apiKey });
   }, [toolKbType, currentParams]);
 
   const {
@@ -428,6 +417,28 @@ export default function ToolConfigModal({
       });
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
+
+  // Get RAGFlow configuration from initial params
+  const ragflowServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const ragflowApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize RAGFlow config from params
+  useEffect(() => {
+    if (toolKbType === "ragflow_search") {
+      const serverUrl = ragflowServerUrlParam?.value || "";
+      const apiKey = ragflowApiKeyParam?.value || "";
+
+      setRagflowConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, ragflowServerUrlParam, ragflowApiKeyParam]);
 
   // Get iData configuration from initial params
   const idataServerUrlParam = useMemo(() => {
@@ -539,18 +550,25 @@ export default function ToolConfigModal({
         knowledgeSpaceId: idataConfig.knowledgeSpaceId,
       };
     }
-    if (toolKbType === "aidp_search") {
-      return {
-        serverUrl: aidpConfig.serverUrl,
-        apiKey: aidpConfig.apiKey,
-      };
-    }
-    return undefined;
+	    if (toolKbType === "aidp_search") {
+	      return {};
+	    }
+	    if (toolKbType === "ragflow_search") {
+	      if (!ragflowConfig.serverUrl || !ragflowConfig.apiKey) {
+	        return undefined;
+	      }
+	      return {
+	        serverUrl: ragflowConfig.serverUrl,
+	        apiKey: ragflowConfig.apiKey,
+	      };
+	    }
+	    return undefined;
   };
 
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
+    isSuccess: isKbListLoaded,
     refetch: refetchKnowledgeBases,
     clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(toolKbType, resolveKbConfig());
@@ -608,25 +626,35 @@ export default function ToolConfigModal({
     refetchKnowledgeBases();
   }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
 
+  // Resolve the config payload for the knowledge-base config change handler
+  // based on the current tool type, avoiding a deeply-nested ternary expression.
+  const kbHandlerConfig = useMemo(() => {
+    switch (toolKbType) {
+      case "dify_search":
+        return difyConfig;
+      case "ragflow_search":
+        return ragflowConfig;
+      case "datamate_search":
+        return { serverUrl: datamateServerUrl };
+      case "idata_search":
+        return {
+          serverUrl: idataConfig.serverUrl,
+          apiKey: idataConfig.apiKey,
+          userId: idataConfig.userId,
+        };
+      case "aidp_search":
+        return {
+          serverUrl: "",
+          apiKey: "",
+        };
+      default:
+        return undefined;
+    }
+  }, [toolKbType, difyConfig, ragflowConfig, datamateServerUrl, idataConfig]);
+
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
-    config:
-      toolKbType === "dify_search"
-        ? difyConfig
-        : toolKbType === "datamate_search"
-          ? { serverUrl: datamateServerUrl }
-          : toolKbType === "idata_search"
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-              }
-            : toolKbType === "aidp_search"
-              ? {
-                  serverUrl: aidpConfig.serverUrl,
-                  apiKey: aidpConfig.apiKey,
-                }
-              : undefined,
+    config: kbHandlerConfig,
     onConfigChange: handleKbConfigChange,
   });
 
@@ -706,100 +734,6 @@ export default function ToolConfigModal({
     }
   }, [isOpen, toolKbType, idataConfig.knowledgeSpaceId]);
 
-  // Get current embedding model from config for model matching
-  const currentEmbeddingModel = useMemo(() => {
-    try {
-      const modelConfig = configData?.models;
-      return (
-        modelConfig?.embedding?.modelName ||
-        modelConfig?.embedding?.displayName ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }, [configData]);
-
-  const currentMultiEmbeddingModel = useMemo(() => {
-    try {
-      const modelConfig = configData?.models;
-      return (
-        modelConfig?.multiEmbedding?.modelName ||
-        modelConfig?.multiEmbedding?.displayName ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }, [configData]);
-
-  const hasEmbeddingModel = Boolean(currentEmbeddingModel);
-  const hasMultiEmbeddingModel = Boolean(currentMultiEmbeddingModel);
-  const canToggleMultimodalParam = hasEmbeddingModel && hasMultiEmbeddingModel;
-  const forcedMultimodalValue = useMemo(() => {
-    if (!hasEmbeddingModel && hasMultiEmbeddingModel) {
-      return true;
-    }
-    if (hasEmbeddingModel && !hasMultiEmbeddingModel) {
-      return false;
-    }
-    return null;
-  }, [hasEmbeddingModel, hasMultiEmbeddingModel]);
-
-  const toolMultimodal = useMemo(() => {
-    const multimodalParam = currentParams.find(
-      (param) => param.name === "multimodal"
-    );
-    const value = multimodalParam?.value;
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (typeof value === "string") {
-      const normalized = value.trim().toLowerCase();
-      if (["true", "1", "yes", "y"].includes(normalized)) return true;
-      if (["false", "0", "no", "n"].includes(normalized)) return false;
-    }
-    return null;
-  }, [currentParams]);
-
-  useEffect(() => {
-    if (tool?.name !== "knowledge_base_search") return;
-    if (forcedMultimodalValue === null) return;
-
-    const index = currentParams.findIndex(
-      (param) => param.name === "multimodal"
-    );
-    if (index < 0) return;
-
-    const param = currentParams[index];
-    if (param.value === forcedMultimodalValue) return;
-
-    const updatedParams = [...currentParams];
-    updatedParams[index] = { ...param, value: forcedMultimodalValue };
-    setCurrentParams(updatedParams);
-
-    const fieldName = `param_${index}`;
-    safeSetFieldValue(form, fieldName, forcedMultimodalValue);
-  }, [tool?.name, forcedMultimodalValue, currentParams, form]);
-
-  const isMultimodalConstraintMismatch = useCallback(
-    (kb: KnowledgeBase) => {
-      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
-    },
-    [toolMultimodal]
-  );
-
-  const isEmbeddingModelCompatible = useCallback(
-    (kb: KnowledgeBase) => {
-      return isEmbeddingModelCompatibleBase(
-        kb,
-        currentEmbeddingModel,
-        currentMultiEmbeddingModel
-      );
-    },
-    [currentEmbeddingModel, currentMultiEmbeddingModel]
-  );
-
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -810,16 +744,9 @@ export default function ToolConfigModal({
         return false;
       }
 
-      if (kb.source === "nexent") {
-        if (isMultimodalConstraintMismatch(kb)) {
-          return false;
-        }
-        return isEmbeddingModelCompatible(kb);
-      }
-
       return true;
     },
-    [isEmbeddingModelCompatible, isMultimodalConstraintMismatch]
+    []
   );
 
   // Track whether this is the first time opening the modal (reset when modal closes)
@@ -895,7 +822,13 @@ export default function ToolConfigModal({
         }
         if (ids.length > 0) {
           setSelectedKbIds(ids);
+        } else {
+          setSelectedKbIds([]);
+          setSelectedKbDisplayNames([]);
         }
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
       }
       return;
     }
@@ -953,7 +886,13 @@ export default function ToolConfigModal({
       }
       if (ids.length > 0) {
         setSelectedKbIds(ids);
+      } else {
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
       }
+    } else {
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
     }
   }, [
     isOpen,
@@ -1116,10 +1055,15 @@ export default function ToolConfigModal({
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Filter selectedKbIds to only include knowledge bases that exist in the current list
-  // This handles cases where knowledge bases are no longer available (e.g., wrong URL)
+  // Filter selected KB IDs to the current accessible list. For AIDP, an
+  // successfully loaded empty list is meaningful: the current user cannot
+  // read any of the KBs saved by the agent creator.
   useEffect(() => {
-    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+    const canValidateSelection =
+      knowledgeBases.length > 0 ||
+      (toolKbType === "aidp_search" && isKbListLoaded);
+
+    if (selectedKbIds.length > 0 && canValidateSelection) {
       const validKbIds = selectedKbIds.filter((id) =>
         knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
       );
@@ -1133,9 +1077,28 @@ export default function ToolConfigModal({
           return kb?.display_name || kb?.name || id;
         });
         setSelectedKbDisplayNames(displayNames);
+
+        if (toolKbType === "aidp_search") {
+          setTestPanelKbIds(validKbIds);
+          setTestPanelKbDisplayNames(displayNames);
+          const fieldIndex = currentParams.findIndex((p) => p.name === "kds_list");
+          if (fieldIndex !== -1) {
+            form.setFieldValue(`param_${fieldIndex}`, validKbIds);
+          }
+          setCurrentParams((prevParams) => {
+            const prevFieldIndex = prevParams.findIndex((p) => p.name === "kds_list");
+            if (prevFieldIndex === -1) return prevParams;
+            const updatedParams = [...prevParams];
+            updatedParams[prevFieldIndex] = {
+              ...updatedParams[prevFieldIndex],
+              value: validKbIds,
+            };
+            return updatedParams;
+          });
+        }
       }
     }
-  }, [knowledgeBases]);
+  }, [knowledgeBases, isKbListLoaded, toolKbType, selectedKbIds, currentParams, form]);
 
   // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
   // This ensures the modal receives the correct selected IDs
@@ -1205,6 +1168,10 @@ export default function ToolConfigModal({
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "dify_search"],
         });
+      } else if (toolKbType === "ragflow_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "ragflow_search"],
+        });
       } else if (toolKbType === "datamate_search") {
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "datamate_search"],
@@ -1231,11 +1198,8 @@ export default function ToolConfigModal({
       return false;
     }
     if (toolKbType === "aidp_search") {
-      if (aidpConfig.serverUrl && aidpConfig.apiKey) {
-        refetchKnowledgeBases();
-        return true;
-      }
-      return false;
+      refetchKnowledgeBases();
+      return true;
     }
     refetchKnowledgeBases();
     return true;
@@ -1257,8 +1221,8 @@ export default function ToolConfigModal({
     refetchHaotianSets,
     toolKbType,
     difyConfig,
+    ragflowConfig,
     haotianConfig,
-    aidpConfig,
   ]);
 
   // Show sync message when knowledge base selector modal opens
@@ -1266,11 +1230,6 @@ export default function ToolConfigModal({
   useEffect(() => {
     // Only trigger when KB selector opens and tool requires KB selection
     if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
-      // For AIDP, only sync if credentials are configured to avoid premature "success" message
-      if (toolKbType === "aidp_search" && (!aidpConfig.serverUrl || !aidpConfig.apiKey)) {
-        return;
-      }
-
       // Mark as shown to avoid duplicate messages
       hasShownSyncMessageRef.current = true;
 
@@ -1668,6 +1627,14 @@ export default function ToolConfigModal({
         // Value can be an array or a JSON string
         ids = parseKbIds(formValue);
 
+        if (toolKbType === "aidp_search" && isKbListLoaded) {
+          ids = ids.filter((id) =>
+            knowledgeBases.some(
+              (kb) => String(kb.id).trim() === String(id).trim()
+            )
+          );
+        }
+
         // Map IDs to display names
         if (ids.length > 0) {
           if (toolKbType === "haotian_search" && haotianKnowledgeSets.length > 0) {
@@ -1689,7 +1656,11 @@ export default function ToolConfigModal({
       }
 
       // Fallback to selectedKbDisplayNames if displayNames is empty
-      if (displayNames.length === 0 && selectedKbDisplayNames.length > 0) {
+      if (
+        toolKbType !== "aidp_search" &&
+        displayNames.length === 0 &&
+        selectedKbDisplayNames.length > 0
+      ) {
         displayNames = selectedKbDisplayNames;
         ids = selectedKbIds;
       }
@@ -1778,6 +1749,8 @@ export default function ToolConfigModal({
     [
       form,
       knowledgeBases,
+      isKbListLoaded,
+      toolKbType,
       selectedKbIds,
       selectedKbDisplayNames,
       kbLoading,
@@ -2082,6 +2055,13 @@ export default function ToolConfigModal({
                   if (param.name === "rerank_model_name" && !isRerankEnabled) {
                     return null;
                   }
+                  // Hide server_url / api_key for AIDP search - now read from environment variables
+                  if (
+                    toolKbType === "aidp_search" &&
+                    (param.name === "server_url" || param.name === "api_key")
+                  ) {
+                    return null;
+                  }
                   const fieldName = `param_${index}`;
                   const rules: any[] = [];
 
@@ -2340,8 +2320,6 @@ export default function ToolConfigModal({
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleAidpKbConfirm}
           selectedDatasetIds={isTestPanelKbSelection ? testPanelKbIds : selectedKbIds}
-          serverUrl={aidpConfig.serverUrl}
-          apiKey={aidpConfig.apiKey}
         />
       ) : (
         <KnowledgeBaseSelectorModal
@@ -2371,9 +2349,6 @@ export default function ToolConfigModal({
           }}
           syncLoading={kbLoading}
           isSelectable={canSelectKnowledgeBase}
-          currentEmbeddingModel={currentEmbeddingModel}
-          currentMultiEmbeddingModel={currentMultiEmbeddingModel}
-          toolMultimodal={toolMultimodal}
           difyConfig={resolveDifyModalConfig()}
         />
       )}

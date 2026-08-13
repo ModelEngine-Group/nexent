@@ -1,232 +1,338 @@
+"""Tests for authorized backend ContextItemInput snapshot construction."""
+
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 import pytest
-import sys
-from pathlib import Path
 
-TEST_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = TEST_ROOT.parent
-
-for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
-
-class TestFormatFunctions:
-    def test_format_tools_empty(self):
-        from backend.utils.context_utils import _format_tools_description
-        result = _format_tools_description({}, language="zh")
-        assert result == "1. 工具\n- 当前没有可用的工具"
-
-    def test_format_tools_empty_managed(self):
-        from backend.utils.context_utils import _format_tools_description
-        result = _format_tools_description({}, language="zh", is_manager=False)
-        assert result == "1. 工具\n- 当前没有可用的工具"
-
-    def test_format_tools_single(self):
-        from backend.utils.context_utils import _format_tools_description
-        class MockTool:
-            name = "search"
-            description = "Search tool"
-            inputs = '{"query": "str"}'
-            output_type = "string"
-            source = "local"
-        result = _format_tools_description({"search": MockTool()}, language="zh")
-        assert "search" in result
-        assert "Search tool" in result
-
-    def test_format_skills_empty(self):
-        from backend.utils.context_utils import _format_skills_description
-        result = _format_skills_description([], language="zh")
-        assert result == ""
-
-    def test_format_skills_single(self):
-        from backend.utils.context_utils import _format_skills_description
-        skills = [{"name": "skill1", "description": "Test skill"}]
-        result = _format_skills_description(skills, language="zh")
-        assert "skill1" in result
-        assert "Test skill" in result
-
-    def test_format_memory_empty(self):
-        from backend.utils.context_utils import _format_memory_context
-        result = _format_memory_context([], language="zh")
-        assert result == ""
-
-    def test_format_memory_dict(self):
-        from backend.utils.context_utils import _format_memory_context
-        memory = [{"memory": "test memory", "memory_level": "user", "score": 0.9}]
-        result = _format_memory_context(memory, language="zh")
-        assert "test memory" in result
-
-    def test_format_memory_string(self):
-        from backend.utils.context_utils import _format_memory_context
-        memory = [{"memory": "simple string", "memory_level": "user", "score": 0.5}]
-        result = _format_memory_context(memory, language="zh")
-        assert "simple string" in result
-
-    def test_format_managed_agents_empty(self):
-        from backend.utils.context_utils import _format_managed_agents_description
-        result = _format_managed_agents_description({}, language="zh")
-        assert result == ""
-
-    def test_format_managed_agents_single(self):
-        from backend.utils.context_utils import _format_managed_agents_description
-        class MockAgent:
-            name = "research"
-            description = "Research assistant"
-        result = _format_managed_agents_description({"research": MockAgent()}, language="zh")
-        assert "research" in result
-
-    def test_format_external_agents_empty(self):
-        from backend.utils.context_utils import _format_external_agents_description
-        result = _format_external_agents_description({}, language="zh")
-        assert result == ""
-
-    def test_format_external_agents_single(self):
-        from backend.utils.context_utils import _format_external_agents_description
-        class MockAgent:
-            agent_id = "ext-1"
-            name = "External"
-            description = "External agent"
-        result = _format_external_agents_description({"ext-1": MockAgent()}, language="zh")
-        assert "External" in result
+from backend.utils.context_utils import (
+    build_app_context_string,
+    build_authorized_context_input,
+    build_context_inputs,
+)
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextItemRenderer,
+    ContextItemType,
+)
+from nexent.core.agents.context.models import normalize_context_inputs
 
 
-class TestBuildComponents:
-    def test_build_tools_component_empty(self):
-        from backend.utils.context_utils import build_tools_component
-        comp = build_tools_component({}, language="zh")
-        assert comp.tools == []
-
-    def test_build_tools_component_with_tools(self):
-        from backend.utils.context_utils import build_tools_component
-        class MockTool:
-            name = "tool"
-            description = "desc"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-        comp = build_tools_component({"tool": MockTool()}, language="zh")
-        assert len(comp.tools) == 1
-
-    def test_build_skills_component_empty(self):
-        from backend.utils.context_utils import build_skills_component
-        comp = build_skills_component([], language="zh")
-        assert comp.skills == []
-
-    def test_build_skills_component_with_skills(self):
-        from backend.utils.context_utils import build_skills_component
-        comp = build_skills_component([{"name": "skill"}], language="zh")
-        assert len(comp.skills) == 1
-
-    def test_build_memory_component_empty(self):
-        from backend.utils.context_utils import build_memory_component
-        comp = build_memory_component([], language="zh")
-        assert comp.memories == []
-
-    def test_build_memory_component_with_search_query(self):
-        from backend.utils.context_utils import build_memory_component
-        comp = build_memory_component([], search_query="test query", language="zh")
-        assert comp.search_query == "test query"
-
-    def test_build_knowledge_base_component_empty(self):
-        from backend.utils.context_utils import build_knowledge_base_component
-        comp = build_knowledge_base_component("")
-        assert comp.summary == ""
-
-    def test_build_knowledge_base_component_with_summary(self):
-        from backend.utils.context_utils import build_knowledge_base_component
-        comp = build_knowledge_base_component("KB text", kb_ids=["kb-1"])
-        assert "KB text" in comp.summary
-        assert "knowledge_base_search" in comp.summary
-
-    def test_build_managed_agents_component_empty(self):
-        from backend.utils.context_utils import build_managed_agents_component
-        comp = build_managed_agents_component({}, language="zh")
-        assert comp.agents == []
-
-    def test_build_external_agents_component_empty(self):
-        from backend.utils.context_utils import build_external_agents_component
-        comp = build_external_agents_component({}, language="zh")
-        assert comp.agents == []
-
-    def test_build_system_prompt_component_empty(self):
-        from backend.utils.context_utils import build_system_prompt_component
-        comp = build_system_prompt_component("")
-        assert comp.content == ""
-
-    def test_build_system_prompt_component_with_template(self):
-        from backend.utils.context_utils import build_system_prompt_component
-        comp = build_system_prompt_component("test", template_name="template.yaml")
-        assert comp.template_name == "template.yaml"
+@dataclass
+class Value:
+    description: str = "description"
+    inputs: dict | None = None
+    output_type: str = "string"
+    source: str = "local"
+    name: str = "value"
+    tools: tuple = ()
+    agent_id: str = "external-id"
+    url: str = "https://example.invalid"
 
 
-class TestBuildContextComponents:
-    def test_empty_inputs_produces_skeleton(self):
-        from backend.utils.context_utils import build_context_components
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi?\nA: Hello!",
-            app_name="Test",
-            app_description="Test",
-            user_id="test",
-            language="zh",
-            is_manager=False,
-        )
-        types = [c.component_type for c in components]
-        assert "system_prompt" in types
-
-    def test_with_tools_only(self):
-        from backend.utils.context_utils import build_context_components
-        class MockTool:
-            name = "tool"
-            description = "desc"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q?",
-            app_name="Test",
-            app_description="Test",
-            user_id="test",
-            language="zh",
-            is_manager=False,
-            tools={"tool": MockTool()},
-        )
-        types = [c.component_type for c in components]
-        assert "tools" in types
-
-    def test_include_flags_skip_tools(self):
-        from backend.utils.context_utils import build_context_components
-        class MockTool:
-            name = "tool"
-            description = "desc"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q?",
-            app_name="Test",
-            app_description="Test",
-            user_id="test",
-            language="zh",
-            is_manager=False,
-            tools={"tool": MockTool()},
-            include_tools=False,
-        )
-        types = [c.component_type for c in components]
-        assert "tools" not in types
-
-    def test_app_context_string(self):
-        from backend.utils.context_utils import build_app_context_string
-        result = build_app_context_string("Nexent", "Platform", "user-1")
-        assert "Nexent" in result
-        assert "Platform" in result
-        assert "user-1" in result
+def _messages(**kwargs):
+    return ContextItemRenderer().render(normalize_context_inputs(build_context_inputs(**kwargs)))
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+def test_authorized_context_snapshot_merges_config_summary_and_turns_in_order():
+    configured_item = ContextItemInput(
+        id="system:duty",
+        type="system",
+        content={"text": "Answer weather questions."},
+        source=("agent_config",),
+    )
+    run_info = SimpleNamespace(
+        history=[],
+        agent_config=SimpleNamespace(context_items=[configured_item]),
+    )
+    summary = {
+        "unit_id": 42,
+        "summary": "The user is planning a trip.",
+        "covered_through_message_id": 9,
+    }
+    turn = {
+        "user_message": "Will it rain?",
+        "assistant_final_answer": "I will check.",
+        "attachments": [],
+        "user_message_id": 10,
+        "assistant_message_id": 11,
+    }
+
+    context_input = build_authorized_context_input(
+        run_info,
+        historical_context={
+            "history_summary": summary,
+            "conversation_turns": [turn],
+        },
+    )
+
+    assert [item.id for item in context_input.items] == [
+        "system:duty",
+        "history_summary:42",
+        "conversation_turn:10:11",
+    ]
+    assert context_input.items[1].content == summary
+    assert context_input.items[2].content == turn
+    assert context_input.items[2].metadata == {"layout_order": 0}
+
+
+def test_authorized_context_snapshot_ignores_unpaired_assistant_history():
+    run_info = SimpleNamespace(
+        history=[
+            SimpleNamespace(role="assistant", content="Orphaned private output"),
+            SimpleNamespace(role="user", content="Plan a trip"),
+            SimpleNamespace(role="assistant", content="Where are you going?"),
+        ],
+        agent_config=SimpleNamespace(context_items=[]),
+    )
+
+    context_input = build_authorized_context_input(run_info)
+
+    assert len(context_input.items) == 1
+    assert context_input.items[0].content == {
+        "user_message": "Plan a trip",
+        "assistant_final_answer": "Where are you going?",
+        "attachments": [],
+        "user_message_id": -2,
+        "assistant_message_id": -3,
+    }
+    assert "Orphaned private output" not in str(context_input.items)
+
+
+def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
+    items = build_context_inputs()
+
+    assert [item.id for item in items] == [
+        "system:execution_flow",
+        "system:available_resources_header",
+        "system:agent_fallback",
+        "system:skills_usage",
+        "system:code_norms",
+    ]
+    assert all(item.type == ContextItemType.SYSTEM for item in items)
+
+
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_restricted_python_policy_is_injected_before_code_norms(language):
+    items = build_context_inputs(
+        restricted_python_authorized_imports=["json", "csv", "math", "json"],
+        language=language,
+    )
+
+    policy_item = next(
+        item for item in items if item.id == "system:restricted_python_execution"
+    )
+    policy_text = policy_item.content["text"]
+    item_ids = [item.id for item in items]
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.metadata["authority"] == "platform"
+    assert policy_item.priority == 25
+    assert "`csv`, `json`, `math`" in policy_text
+    assert "`requests`" in policy_text
+    assert item_ids.index(policy_item.id) < item_ids.index("system:code_norms")
+    if language == "en":
+        assert "### Python Code Execution Boundary" in policy_text
+
+
+def test_all_sources_are_naturally_granular_and_keep_stable_order():
+    items = build_context_inputs(
+        duty="duty",
+        constraint="constraint",
+        few_shots="example",
+        app_name="app",
+        app_description="description",
+        user_id="user",
+        tools={"one": Value(), "two": Value()},
+        skills=[{"name": "skill-one", "description": "one"}, {"name": "skill-two", "description": "two"}],
+        managed_agents={"worker": Value()},
+        external_a2a_agents={"external-id": Value()},
+        memory_list=[
+            {"memory": "tenant fact", "memory_level": "tenant", "score": 1.0},
+            {"memory": "user fact", "memory_level": "user", "score": 0.9},
+        ],
+        knowledge_base_summary="index summary",
+        kb_ids=["kb-one"],
+        language="en",
+    )
+
+    ids = [item.id for item in items]
+    assert ids.index("tool:one") < ids.index("tool:two")
+    assert ids.index("skill:skill-one") < ids.index("skill:skill-two")
+    assert {item.id for item in items if item.type == ContextItemType.MEMORY} == {"memory:0", "memory:1"}
+    assert "managed_agent:worker" in ids
+    assert "external_agent:external-id" in ids
+    assert all("_source_component" not in item.metadata for item in items)
+
+
+@pytest.mark.parametrize(
+    ("flag", "kwargs", "item_type"),
+    [
+        ("include_tools", {"tools": {"tool": Value()}}, ContextItemType.TOOL),
+        ("include_skills", {"skills": [{"name": "skill", "description": "d"}]}, ContextItemType.SKILL),
+        ("include_memory", {"memory_list": ["memory"]}, ContextItemType.MEMORY),
+        ("include_knowledge_base", {"knowledge_base_summary": "kb"}, ContextItemType.KNOWLEDGE_BASE),
+        ("include_managed_agents", {"managed_agents": {"worker": Value()}}, ContextItemType.MANAGED_AGENT),
+        ("include_external_agents", {"external_a2a_agents": {"id": Value()}}, ContextItemType.EXTERNAL_AGENT),
+    ],
+)
+def test_inclusion_flags_remove_the_corresponding_item_type(flag, kwargs, item_type):
+    items = build_context_inputs(**kwargs, **{flag: False})
+
+    assert all(item.type != item_type for item in items)
+
+
+def test_managed_agent_does_not_receive_sub_agent_definitions_or_manager_fallback():
+    items = build_context_inputs(
+        is_manager=False,
+        managed_agents={"worker": Value()},
+        external_a2a_agents={"id": Value()},
+    )
+
+    assert all(item.type not in {ContextItemType.MANAGED_AGENT, ContextItemType.EXTERNAL_AGENT} for item in items)
+    assert all(item.id != "system:agent_fallback" for item in items)
+
+
+def test_invalid_memory_payload_fails_at_backend_boundary():
+    with pytest.raises(ValueError, match="invalid memory payload at index 0"):
+        build_context_inputs(memory_list=[object()])
+
+
+def test_memory_tool_policy_is_a_required_system_item_rendered_verbatim():
+    policy = (
+        "### Memory Tool Policy\n"
+        "Evaluate this turn and call `store_memory` when durable memory exists."
+    )
+
+    items = build_context_inputs(memory_tool_policy=policy, language="en")
+    policy_items = [item for item in items if item.id == "system:memory_tool_policy"]
+
+    assert len(policy_items) == 1
+    assert policy_items[0].type == ContextItemType.SYSTEM
+    assert policy_items[0].content == {"text": policy}
+    assert policy_items[0].metadata["authority"] == "platform"
+
+    normalized = normalize_context_inputs(items)
+    normalized_policy = next(item for item in normalized if item.id == "system:memory_tool_policy")
+    assert normalized_policy.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert policy in rendered_text
+    assert rendered_text.count(policy) == 1
+
+
+def test_memory_tool_policy_is_omitted_when_empty():
+    items = build_context_inputs(memory_tool_policy="")
+
+    assert all(item.id != "system:memory_tool_policy" for item in items)
+
+
+def test_automation_tool_policy_is_required_platform_context():
+    policy = "Use create_scheduled_task_proposal without executing the business task."
+
+    items = build_context_inputs(automation_tool_policy=policy, language="en")
+    policy_item = next(item for item in items if item.id == "system:automation_tool_policy")
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.content == {"text": policy}
+    assert policy_item.metadata["authority"] == "platform"
+    normalized = normalize_context_inputs(items)
+    assert next(
+        item for item in normalized if item.id == "system:automation_tool_policy"
+    ).required is True
+
+
+def test_long_term_memory_prompt_is_a_required_system_item():
+    context = (
+        "### Tenant Long-term Memory\n- Follow company policy\n\n"
+        "### User Long-term Memory\n- Prefers concise answers"
+    )
+
+    items = build_context_inputs(
+        long_term_memory_prompt=context,
+        language="en",
+    )
+    memory_item = next(
+        item for item in items if item.id == "system:long_term_memory"
+    )
+
+    assert memory_item.type == ContextItemType.SYSTEM
+    assert memory_item.content == {"text": context}
+    assert memory_item.metadata["authority"] == "retrieved"
+
+    normalized = normalize_context_inputs(items)
+    normalized_item = next(
+        item for item in normalized if item.id == "system:long_term_memory"
+    )
+    assert normalized_item.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    system_text = "\n".join(
+        block["text"]
+        for message in messages
+        if message["role"] == "system"
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert context in system_text
+
+
+def test_group_rendering_uses_only_selected_tool_items():
+    items = normalize_context_inputs(build_context_inputs(
+        tools={
+            "selected": {"description": "keep", "inputs": {}, "output_type": "str"},
+            "dropped": {"description": "must disappear", "inputs": {}, "output_type": "str"},
+        },
+        language="en",
+    ))
+    selected = [item for item in items if item.type != ContextItemType.TOOL or item.id == "tool:selected"]
+
+    messages = ContextItemRenderer().render(selected)
+
+    assert "selected" in str(messages)
+    assert "must disappear" not in str(messages)
+
+
+def test_rendered_roles_and_sections_match_context_semantics():
+    messages = _messages(
+        duty="duty",
+        memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
+        knowledge_base_summary="kb",
+        language="en",
+    )
+
+    assert messages[0]["role"] == "system"
+    first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
+    assert all(message["role"] == "system" for message in messages[:first_user])
+    assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
+    assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
+
+
+def test_agent_presearch_result_is_rendered_into_model_context():
+    result_text = "Found 2 relevant memories:\n[1] Likes fish\n[2] Dislikes fish"
+
+    messages = _messages(
+        memory_list=[{"memory": result_text, "memory_level": "agent"}],
+        language="en",
+    )
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+
+    assert "**Agent Level Memory:**" in rendered_text
+    assert result_text in rendered_text
+
+
+def test_app_context_compatibility_string_is_unchanged():
+    assert build_app_context_string("App", "Description", "user") == (
+        "Application: App\nDescription: Description\nCurrent user: user"
+    )

@@ -31,7 +31,7 @@ from database.agent_version_db import (
     STATUS_DISABLED,
     STATUS_ARCHIVED,
 )
-from database.model_management_db import get_model_by_model_id
+from database.model_management_db import get_model_by_model_id, get_valid_model_ids
 from utils.str_utils import convert_string_to_list
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 
@@ -825,7 +825,7 @@ async def list_published_agents_impl(
             _apply_duplicate_name_availability_rules,
         )
         from services.asset_owner_visibility import resolve_agent_list_permission
-        from database.agent_version_db import query_agent_snapshot
+        from database.agent_version_db import query_agent_snapshot, query_version_list
 
         # Get user role for permission check
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
@@ -868,6 +868,21 @@ async def list_published_agents_impl(
             if not current_version_no or current_version_no <= 0:
                 continue
 
+            # Verify current_version_no exists, if not find the latest available version
+            available_versions = query_version_list(agent_id=agent_id, tenant_id=tenant_id)
+            
+            if not available_versions:
+                logger.warning(f"No available versions found for agent_id={agent_id}")
+                continue
+            
+            available_version_nos = {v["version_no"] for v in available_versions}
+            
+            if current_version_no not in available_version_nos:
+                logger.warning(
+                    f"Current version {current_version_no} not found for agent_id={agent_id}, using latest available version"
+                )
+                current_version_no = available_versions[0]["version_no"]
+
             # Get the published version snapshot
             agent_snapshot, tools_snapshot, relations_snapshot = query_agent_snapshot(
                 agent_id=agent_id,
@@ -889,6 +904,11 @@ async def list_published_agents_impl(
                 if key != 'current_version_no':
                     agent_info[key] = value
 
+            # Add version_name from version metadata
+            current_version_info = next((v for v in available_versions if v["version_no"] == current_version_no), None)
+            if current_version_info:
+                agent_info['version_name'] = current_version_info.get("version_name")
+
             # Add tools
             agent_info['tools'] = tools_snapshot
 
@@ -898,6 +918,11 @@ async def list_published_agents_impl(
 
             # Add current version info
             agent_info['current_version_no'] = current_version_no
+
+            # Filter out deleted models (delete_flag='Y' in model_record_t)
+            raw_model_ids = agent_info.get("model_ids") or []
+            valid_model_ids = get_valid_model_ids(raw_model_ids, tenant_id)
+            agent_info["model_ids"] = valid_model_ids
 
             # Check agent availability using the shared function
             _, unavailable_reasons = check_agent_availability(
@@ -957,9 +982,11 @@ async def list_published_agents_impl(
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
+                "is_main_agent": agent.get("is_main_agent", True),
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),
+                "version_name": agent.get("version_name"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
             })

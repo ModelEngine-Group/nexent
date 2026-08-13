@@ -172,10 +172,7 @@ class TestReadFileToolForward:
         assert result_data["lines_count"] == 1
         assert "read successfully" in result_data["message"]
 
-        # Verify observer messages
-        read_file_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "Reading file..."
-        )
+        # Verify CARD observer message
         read_file_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps(
                 [{"icon": "file-text", "text": f"Reading {file_path}"}], ensure_ascii=False)
@@ -382,11 +379,6 @@ class TestReadFileToolForward:
         result_data = json.loads(result)
 
         assert result_data["status"] == "success"
-
-        # Verify Chinese running prompt
-        read_file_tool_zh.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, "正在读取文件..."
-        )
 
     def test_forward_chinese_language_large_file_warning(self, read_file_tool_zh, temp_workspace):
         """Test forward with Chinese observer and large file warning"""

@@ -47,11 +47,11 @@ Nexent首页展示了平台的核心功能，为您提供快速入口：
 
 建议按照以下顺序完成配置，也可以直接点击“快速配置”按钮：
 
-1️⃣ **[模型管理](./model-management)**，配置应用信息并接入模型
+1️⃣ **[模型管理](./agent-development/model-configuration.md)**，配置应用信息并接入模型
 
-2️⃣ **[知识库](./knowledge-base)**，上传您的文档和资料
+2️⃣ **[知识库](./agent-development/knowledge-configuration.md)**，上传您的文档和资料
 
-3️⃣ **[智能体开发](./agent-development)**，创建您的专属智能体
+3️⃣ **[智能体开发](./agent-development.md)**，创建您的专属智能体
 
 4️⃣ **[开始问答](./start-chat)** 立即与智能体互动，体验成果
 
@@ -60,7 +60,7 @@ Nexent首页展示了平台的核心功能，为您提供快速入口：
 
 遇到问题时，您可以：
 
-- 查看 **[常见问题](../quick-start/faq)**
+- 查看 **[常见问题](../quick-start/faq.md)**
 - 在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中提问
 
 💡 保持您的 Nexent 处于最新版本，我们会修复已知问题

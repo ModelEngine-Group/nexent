@@ -39,8 +39,11 @@ import { useMcpConfig } from "@/hooks/useMcpConfig";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import McpEditServerModal from "@/components/mcp/McpEditServerModal";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
-import { API_ENDPOINTS } from "@/services/api";
-import { getAuthHeaders } from "@/lib/auth";
+import {
+  getOpenApiServices,
+  importOpenApiService,
+  deleteOpenApiService,
+} from "@/services/mcpService";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -457,12 +460,9 @@ export default function McpConfigModal({
   const loadOpenapiServices = async () => {
     setLoadingOpenapiServices(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiServices, {
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
-      if (result.data) {
-        setOpenapiServices(result.data);
+      const services = await getOpenApiServices();
+      if (services) {
+        setOpenapiServices(services);
       } else {
         message.error(t("mcpConfig.openApiToMcp.message.loadToolsFailed"));
       }
@@ -483,7 +483,7 @@ export default function McpConfigModal({
       return;
     }
     if (!openApiJson.trim()) {
-      message.error(t("mcpConfig.openApiToMcp.jsonPlaceholder"));
+      message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
       return;
     }
 
@@ -491,40 +491,35 @@ export default function McpConfigModal({
     try {
       parsedJson = JSON.parse(openApiJson);
     } catch {
-      message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+      message.error(t("mcpConfig.openApiToMcp.message.invalidJsonFormat"));
+      return;
+    }
+    if (
+      !parsedJson ||
+      typeof parsedJson !== "object" ||
+      Array.isArray(parsedJson) ||
+      !("openapi" in parsedJson)
+    ) {
+      message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
       return;
     }
 
     setImportingOpenApi(true);
     try {
-      const response = await fetch(API_ENDPOINTS.tool.openapiService, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          service_name: openApiServiceName.trim(),
-          server_url: openApiServerUrl.trim(),
-          openapi_json: parsedJson,
-          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
-        }),
+      await importOpenApiService({
+        service_name: openApiServiceName.trim(),
+        server_url: openApiServerUrl.trim(),
+        openapi_json: parsedJson,
+        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
       });
 
-      if (response.ok) {
-        message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
-        setOpenApiJson("");
-        setOpenApiServiceName("");
-        setOpenApiServerUrl("");
-        setOpenApiHeadersTemplate("");
-        await loadOpenapiServices();
-        await refreshToolsAndAgents();
-      } else {
-        const errorData = await response.json();
-        message.error(
-          errorData.detail || t("mcpConfig.openApiToMcp.message.importFailed")
-        );
-      }
+      message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
+      setOpenApiJson("");
+      setOpenApiServiceName("");
+      setOpenApiServerUrl("");
+      setOpenApiHeadersTemplate("");
+      await loadOpenapiServices();
+      await refreshToolsAndAgents();
     } catch (error) {
       log.error("Failed to import OpenAPI service:", error);
       message.error(t("mcpConfig.openApiToMcp.message.importFailed"));
@@ -541,25 +536,10 @@ export default function McpConfigModal({
       okText: t("common.delete", "Delete"),
       onOk: async () => {
         try {
-          const response = await fetch(
-            API_ENDPOINTS.tool.deleteOpenapiService(service.mcp_service_name),
-            {
-              method: "DELETE",
-              headers: getAuthHeaders(),
-            }
-          );
-
-          if (response.ok) {
-            message.success(
-              t("mcpConfig.openApiToMcp.message.deleteSuccess")
-            );
-            await loadOpenapiServices();
-            await refreshToolsAndAgents();
-          } else {
-            message.error(
-              t("mcpConfig.openApiToMcp.message.deleteFailed")
-            );
-          }
+          await deleteOpenApiService(service.mcp_service_name);
+          message.success(t("mcpConfig.openApiToMcp.message.deleteSuccess"));
+          await loadOpenapiServices();
+          await refreshToolsAndAgents();
         } catch (error) {
           log.error("Failed to delete OpenAPI service:", error);
           message.error(t("mcpConfig.openApiToMcp.message.deleteFailed"));
@@ -890,6 +870,7 @@ export default function McpConfigModal({
                             style={{ flex: 0.8 }}
                             maxLength={20}
                             disabled={actionsLocked || addingServer}
+                            autoComplete="off"
                           />
                           <Input
                             placeholder={t("mcpConfig.addServer.urlPlaceholder")}
@@ -897,6 +878,7 @@ export default function McpConfigModal({
                             onChange={(e) => setNewServerUrl(e.target.value)}
                             style={{ flex: 3 }}
                             disabled={actionsLocked || addingServer}
+                            autoComplete="off"
                           />
                         </div>
                         <Input.TextArea
@@ -920,6 +902,7 @@ export default function McpConfigModal({
                             onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
                             disabled={actionsLocked || addingServer}
                             style={{ flex: 1 }}
+                            autoComplete="new-password"
                           />
                           <Button
                             type="primary"
@@ -1237,6 +1220,9 @@ export default function McpConfigModal({
                         rows={6}
                         disabled={actionsLocked || importingOpenApi}
                       />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                      </Text>
                       <div
                         style={{
                           display: "flex",

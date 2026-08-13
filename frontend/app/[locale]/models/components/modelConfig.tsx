@@ -19,6 +19,7 @@ import {
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
+import { loadMemoryConfig } from "@/services/memoryService";
 import { CapacityCoverage, ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
@@ -27,6 +28,7 @@ import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
+import { useModelList } from "@/hooks/model/useModelList";
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
@@ -123,7 +125,7 @@ export const ModelConfigSection = forwardRef<
   const [isVerifying, setIsVerifying] = useState(false);
   const [capacityCoverage, setCapacityCoverage] =
     useState<CapacityCoverage | null>(null);
-
+  const  { invalidate } = useModelList();
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
     "llm.main": false,
@@ -261,6 +263,7 @@ export const ModelConfigSection = forwardRef<
     if (!modelConfig) return;
 
     try {
+      invalidate()
       const [allModels, coverage] = await Promise.all([
         modelService.getAllModels(),
         modelService.getCapacityCoverage(),
@@ -844,12 +847,20 @@ export const ModelConfigSection = forwardRef<
       const currentValue = selectedModels[category]?.[option] || "";
       // Only prompt when modifying from a non-empty value to a different value
       if (currentValue && currentValue !== displayName) {
+        const memoryEnabled =
+          option === MODEL_TYPES.EMBEDDING
+            ? (await loadMemoryConfig()).memoryEnabled
+            : false;
         confirm({
           title: t("embedding.modifyWarningModal.title"),
           content: (
             <div className="py-2">
               <div className="text-sm leading-6">
-                {t("embedding.modifyWarningModal.content")}
+                {t(
+                  memoryEnabled
+                    ? "embedding.memoryModelSwitchWarningModal.content"
+                    : "embedding.modifyWarningModal.content"
+                )}
               </div>
             </div>
           ),
@@ -905,80 +916,66 @@ export const ModelConfigSection = forwardRef<
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
             justifyContent: "flex-start",
+            gap: 8,
             paddingRight: 12,
+            paddingTop: "16px",
             marginLeft: "4px",
             minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
+            marginBottom: "16px",
           }}
         >
-          <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            {modelEngineEnable && (
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  onClick={handleSyncModels}
-                  style={{ width: "100%" }}
-                  icon={<RefreshCw size={16} />}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.syncModelEngine")}
-                  </span>
-                </Button>
-              </Col>
-            )}
-            <Can permission="model:create">
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  icon={<Plus size={16} />}
-                  onClick={() => {
-                    setAddModalDefaultIsBatch(false);
-                    setIsAddModalOpen(true);
-                  }}
-                  style={{ width: "100%" }}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.addCustomModel")}
-                  </span>
-                </Button>
-              </Col>
-            </Can>
-            <Can permission="model:update">
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  icon={<PenLine size={16} />}
-                  onClick={() => setIsDeleteModalOpen(true)}
-                  style={{ width: "100%" }}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.editCustomModel")}
-                  </span>
-                </Button>
-              </Col>
-            </Can>
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button
-                type="primary"
-                size="middle"
-                icon={<ShieldCheck size={16} />}
-                onClick={verifyModels}
-                loading={isVerifying}
-                style={{ width: "100%" }}
-                block
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.checkConnectivity")}
-                </span>
-              </Button>
-            </Col>
-          </Row>
+          {modelEngineEnable && (
+            <Button
+              type="primary"
+              size="middle"
+              onClick={handleSyncModels}
+              icon={<RefreshCw size={16} />}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.syncModelEngine")}
+              </span>
+            </Button>
+          )}
+          <Can permission="model:create">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<Plus size={16} />}
+              onClick={() => {
+                setAddModalDefaultIsBatch(false);
+                setIsAddModalOpen(true);
+              }}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.addCustomModel")}
+              </span>
+            </Button>
+          </Can>
+          <Can permission="model:update">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<PenLine size={16} />}
+              onClick={() => setIsDeleteModalOpen(true)}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.editCustomModel")}
+              </span>
+            </Button>
+          </Can>
+          <Button
+            type="primary"
+            size="middle"
+            icon={<ShieldCheck size={16} />}
+            onClick={verifyModels}
+            loading={isVerifying}
+          >
+            <span className="button-text-full">
+              {t("modelConfig.button.checkConnectivity")}
+            </span>
+          </Button>
         </div>
 
         {capacityCoverage && capacityCoverage.bareCount > 0 && (

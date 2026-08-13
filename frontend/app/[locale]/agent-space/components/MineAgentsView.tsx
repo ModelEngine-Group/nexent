@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { deleteAgent } from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
@@ -14,15 +16,16 @@ import {
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
-  parseAgentImportFile,
-  selectFile,
+  openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
+  findRepositoryInfoById,
   pickReviewDisplayRepositoryInfo,
+  resolveReviewModalMode,
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
@@ -44,6 +47,11 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "others",
 ];
 
+export interface ReviewDeepLinkTarget {
+  agentRepositoryId: number;
+  agentId: number;
+}
+
 interface MineAgentsViewProps {
   agents: MyEditableAgentListItem[];
   counts: MyEditableAgentOwnershipCounts;
@@ -60,6 +68,10 @@ interface MineAgentsViewProps {
   isFetching: boolean;
   onRetry: () => void;
   onViewDetail: (agentId: number, versionNo: number) => void;
+  reviewDeepLink?: ReviewDeepLinkTarget | null;
+  deepLinkFallbackAgent?: MyEditableAgentItem | null;
+  deepLinkFallbackLoading?: boolean;
+  onReviewDeepLinkConsumed?: () => void;
 }
 
 export function MineAgentsView({
@@ -78,9 +90,14 @@ export function MineAgentsView({
   isFetching,
   onRetry,
   onViewDetail,
+  reviewDeepLink = null,
+  deepLinkFallbackAgent = null,
+  deepLinkFallbackLoading = false,
+  onReviewDeepLinkConsumed,
 }: MineAgentsViewProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
@@ -100,40 +117,66 @@ export function MineAgentsView({
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const consumedDeepLinkRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
+  const deleteAgentMutation = useMutation({
+    mutationFn: (agentId: number) => deleteAgent(agentId),
+  });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const handleCreateAgent = () => {
-    router.push(`/${locale}/agents?create=true`);
+    router.push(`/${locale}/agents?create=true&from=agent-space&tab=mine`);
   };
 
   const handleImportAgent = async () => {
-    const file = await selectFile(".json");
-    if (!file) return;
-
-    const agentData = await parseAgentImportFile(file, {
-      onParseError: (msgKey) => message.error(t(msgKey)),
-      onValidationError: (msgKey) => message.error(t(msgKey)),
-      onGenericError: (error) => {
-        log.error("Failed to read import file:", error);
-        message.error(t("businessLogic.config.error.agentImportFailed"));
+    await openImportWizardWithFile({
+      onSuccess: (agentData) => {
+        setImportWizardData(agentData);
+        setImportWizardVisible(true);
       },
+      message: message,
+      t: t,
+      log: log,
     });
-
-    if (!agentData) return;
-
-    setImportWizardData(agentData);
-    setImportWizardVisible(true);
   };
 
   const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
     if (permission === "READ_ONLY") {
       return;
     }
-    router.push(`/${locale}/agents?agent_id=${agentId}`);
+    router.push(
+      `/${locale}/agents?agent_id=${agentId}&from=agent-space&tab=mine`
+    );
+  };
+
+  const handleDeleteAgent = (agent: MyEditableAgentItem) => {
+    const name = agent.name?.trim() || t("agentRepository.card.untitled");
+    confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", { name }),
+      onOk: async () => {
+        try {
+          const result = await deleteAgentMutation.mutateAsync(agent.agent_id);
+          if (!result.success) {
+            throw new Error(result.message || "delete failed");
+          }
+          message.success(
+            t("businessLogic.config.error.agentDeleteSuccess", { name })
+          );
+          await Promise.all([
+            invalidateAgentRepositoryCaches(queryClient),
+            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+          ]);
+        } catch (error) {
+          log.error("Failed to delete agent:", error);
+          message.error(t("businessLogic.config.error.agentDeleteFailed"));
+          throw error;
+        }
+      },
+    });
   };
 
   const handleEvaluate = (agent: MyEditableAgentItem) => {
@@ -141,7 +184,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`);
+    router.push(`/${locale}/space/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {
@@ -184,15 +227,11 @@ export function MineAgentsView({
         payload,
       });
       message.success(
-        t("agentRepository.mine.applySuccess", {
-          name:
-            applyModalAgent.name?.trim() ||
-            t("agentRepository.card.untitled"),
-        })
+        t("repository.mine.applySuccess")
       );
       closeApplyModal();
     } catch {
-      message.error(t("agentRepository.mine.applyError"));
+      message.error(t("repository.mine.applyError"));
     } finally {
       setApplyingAgentId(null);
     }
@@ -208,11 +247,80 @@ export function MineAgentsView({
     if (!repositoryInfo) {
       return;
     }
+    openReviewModal(agent, repositoryInfo, mode);
+  };
+
+  const openReviewModal = (
+    agent: MyEditableAgentItem,
+    repositoryInfo: MyAgentRepositoryInfoItem,
+    mode: "review" | "reviewUpdate"
+  ) => {
     setReviewModalAgent(agent);
     setReviewModalInfo(repositoryInfo);
     setReviewModalMode(mode);
     setReviewModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!reviewDeepLink) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+
+    if (consumedDeepLinkRef.current === reviewDeepLink.agentRepositoryId) {
+      return;
+    }
+
+    const listStillLoading = isLoading;
+    const fallbackStillLoading = deepLinkFallbackLoading;
+    if (listStillLoading && fallbackStillLoading) {
+      return;
+    }
+
+    const agentFromList = agents.find(
+      (item): item is MyEditableAgentItem =>
+        !isNewAgentPaddingItem(item) && item.agent_id === reviewDeepLink.agentId
+    );
+    const agent = agentFromList ?? deepLinkFallbackAgent;
+
+    if (!agent) {
+      if (listStillLoading || fallbackStillLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    const repositoryInfo = findRepositoryInfoById(
+      agent.repository_info ?? [],
+      reviewDeepLink.agentRepositoryId
+    );
+
+    if (!repositoryInfo) {
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+      onReviewDeepLinkConsumed?.();
+      return;
+    }
+
+    openReviewModal(
+      agent,
+      repositoryInfo,
+      resolveReviewModalMode(agent, repositoryInfo)
+    );
+    consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
+    onReviewDeepLinkConsumed?.();
+  }, [
+    agents,
+    deepLinkFallbackAgent,
+    deepLinkFallbackLoading,
+    isLoading,
+    onReviewDeepLinkConsumed,
+    reviewDeepLink,
+    t,
+  ]);
 
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {
@@ -235,24 +343,24 @@ export function MineAgentsView({
       });
       message.success(
         wasShared
-          ? t("agentRepository.mine.takeDownSuccess")
-          : t("agentRepository.mine.cancelApplySuccess")
+          ? t("repository.mine.takeDownSuccess")
+          : t("repository.mine.cancelApplySuccess")
       );
       closeReviewModal();
     } catch {
       message.error(
         wasShared
-          ? t("agentRepository.mine.takeDownError")
-          : t("agentRepository.mine.cancelApplyError")
+          ? t("repository.mine.takeDownError")
+          : t("repository.mine.cancelApplyError")
       );
       throw new Error("Update repository status failed");
     }
   };
 
   const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "agentRepository.mine.filter.all",
-    created: "agentRepository.mine.filter.created",
-    others: "agentRepository.mine.filter.others",
+    all: "repository.mine.filter.all",
+    created: "repository.mine.filter.created",
+    others: "repository.mine.filter.others",
   };
 
   const hasActiveFilter = ownership !== "all" || normalizedQuery.length > 0;
@@ -328,7 +436,7 @@ export function MineAgentsView({
             {t("agentRepository.mine.loadError")}
           </p>
           <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : showFilteredEmpty ? (
@@ -361,10 +469,15 @@ export function MineAgentsView({
                     }
                     onApplyListing={() => handleApplyListing(agent)}
                     onViewReview={(mode) => handleViewReview(agent, mode)}
+                    onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending
+                    }
+                    isDeleting={
+                      deleteAgentMutation.isPending &&
+                      deleteAgentMutation.variables === agent.agent_id
                     }
                   />
                 </div>
@@ -379,7 +492,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-label={t("agentRepository.mine.pagination.prev")}
+                aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </Button>
@@ -390,7 +503,7 @@ export function MineAgentsView({
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
                     onClick={() => onPageChange(pageNumber)}
-                    aria-label={t("agentRepository.mine.pagination.page", {
+                    aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
                     aria-current={pageNumber === page ? "page" : undefined}
@@ -404,7 +517,7 @@ export function MineAgentsView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-label={t("agentRepository.mine.pagination.next")}
+                aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
               </Button>
@@ -443,7 +556,9 @@ export function MineAgentsView({
           setImportWizardData(null);
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
           ]);
         }}
       />

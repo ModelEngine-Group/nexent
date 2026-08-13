@@ -115,9 +115,6 @@ class AnalyzeImageTool(Tool):
         self.forward = self.mm.load_object(
             input_names=["image_urls_list"])(self._forward_impl)
 
-        self.running_prompt_zh = "正在分析图片..."
-        self.running_prompt_en = "Analyzing image..."
-
     def _forward_impl(self, image_urls_list: List[bytes], query: str) -> List[str]:
         """
         Analyze images identified by S3 URL, HTTP URL, or HTTPS URL and return the identified text.
@@ -145,10 +142,9 @@ class AnalyzeImageTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-        # Send tool run message
-        if self.observer:
-            running_prompt = self.running_prompt_zh if self._is_chinese else self.running_prompt_en
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+        # Tool running chunk is emitted by the SDK tool-call bridge in
+        # core_agent.py so it is consistent across direct and code_action
+        # invocations. This tool does not emit a card.
 
         if image_urls_list is None:
             raise ValueError("image_urls cannot be None")

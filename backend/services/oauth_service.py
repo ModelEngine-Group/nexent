@@ -17,9 +17,11 @@ from consts.const import (
     ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
     OAUTH_CALLBACK_BASE_URL,
+    OAUTH_LOGIN_MODE,
     OAUTH_SSL_VERIFY,
     OAUTH_CA_BUNDLE,
     SUPABASE_JWT_SECRET,
+    JWT_EXPIRY_SECONDS,
 )
 from consts.exceptions import OAuthLinkError, OAuthProviderError
 from services.asset_owner_visibility import require_asset_owner_enabled
@@ -88,6 +90,12 @@ def get_supported_providers() -> set:
     return set(get_all_provider_definitions().keys())
 
 
+def _get_oauth_login_mode() -> str:
+    if OAUTH_LOGIN_MODE in {"button", "force", "disabled"}:
+        return OAUTH_LOGIN_MODE
+    return "disabled"
+
+
 def get_enabled_providers() -> List[Dict[str, str]]:
     providers = []
     for name, definition in get_all_provider_definitions().items():
@@ -101,6 +109,31 @@ def get_enabled_providers() -> List[Dict[str, str]]:
                 }
             )
     return providers
+
+
+def get_oauth_config() -> Dict[str, Any]:
+    mode = _get_oauth_login_mode()
+    providers = get_enabled_providers()
+    auto_login_provider = None
+
+    if mode == "force":
+        if len(providers) == 1:
+            auto_login_provider = providers[0]["name"]
+        else:
+            logger.warning(
+                "OAuth auto login requires exactly one enabled provider; found %s",
+                len(providers),
+            )
+
+    if not providers:
+        mode = "disabled"
+
+    return {
+        "enabled": bool(providers),
+        "login_mode": mode,
+        "auto_login_provider": auto_login_provider,
+        "providers": providers,
+    }
 
 
 def get_authorize_url(provider: str, link_user_id: str = "") -> str:
@@ -382,7 +415,6 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from services.tool_configuration_service import init_tool_list_for_tenant
-    from services.user_management_service import generate_tts_stt_4_admin
     from utils.auth_utils import calculate_expires_at, generate_session_jwt
 
     pending = parse_pending_oauth_token(pending_token)
@@ -459,8 +491,6 @@ async def complete_pending_oauth_account(
     if group_ids and not is_asset_owner_registration:
         add_user_to_groups(supabase_user_id, group_ids, supabase_user_id)
 
-    if user_role == "ADMIN":
-        await generate_tts_stt_4_admin(tenant_id, supabase_user_id)
     if not is_asset_owner_registration:
         await init_tool_list_for_tenant(tenant_id, supabase_user_id)
 
@@ -473,8 +503,10 @@ async def complete_pending_oauth_account(
         tenant_id=tenant_id,
     )
 
-    expiry_seconds = 3600
-    jwt_token = generate_session_jwt(supabase_user_id, expires_in=expiry_seconds)
+    jwt_token = generate_session_jwt(
+        supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+    )
+    expiry_seconds = JWT_EXPIRY_SECONDS
     expires_at = calculate_expires_at(jwt_token)
 
     return {

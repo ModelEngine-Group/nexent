@@ -365,6 +365,92 @@ class TestGenerateContainerName:
 
 
 # ---------------------------------------------------------------------------
+# Test _detect_container_port
+# ---------------------------------------------------------------------------
+
+
+class TestDetectContainerPort:
+    """Test the container-internal port detection logic."""
+
+    @staticmethod
+    def _make_image(entrypoint=None, cmd=None, env=None):
+        img = MagicMock()
+        config = {}
+        if entrypoint is not None:
+            config["Entrypoint"] = entrypoint
+        if cmd is not None:
+            config["Cmd"] = cmd
+        if env is not None:
+            config["Env"] = env
+        img.attrs = {"Config": config}
+        return img
+
+    def test_detect_port_from_cmd_flag(self, docker_container_client):
+        """Detect port from a `--port <N>` flag in CMD (e.g. mcp-echarts)."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            entrypoint=["mcp-echarts"],
+            cmd=["--transport", "streamable", "--port", "3033", "--endpoint", "/mcp"],
+        )
+        assert docker_container_client._detect_container_port("mcp-echarts:0.7.1", 40000) == 3033
+
+    def test_detect_port_from_short_flag(self, docker_container_client):
+        """Detect port from a `-p <N>` short flag."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["server", "-p", "7000"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 7000
+
+    def test_detect_port_from_eq_flag(self, docker_container_client):
+        """Detect port from a `--port=<N>` flag."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["--port=8080"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 8080
+
+    def test_detect_port_from_env(self, docker_container_client):
+        """Detect port from a PORT env var when no --port flag is present."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["python", "-m", "server"],
+            env=["PATH=/usr/bin", "PORT=8000"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 8000
+
+    def test_detect_port_falls_back_to_default(self, docker_container_client):
+        """Fall back to the provided default when no port can be detected."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["python", "-m", "server"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_image_lookup_error(self, docker_container_client):
+        """Fall back to the default when the image lookup raises."""
+        docker_container_client.client.images.get.side_effect = Exception("image not found")
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_from_cmd_flag_invalid_value(self, docker_container_client):
+        """Fall back to default when the `--port <N>` value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["--transport", "streamable", "--port", "not-a-number"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_from_eq_flag_invalid_value(self, docker_container_client):
+        """Fall back to default when the `--port=<N>` value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["--port=abc"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+    def test_detect_port_from_env_invalid_value(self, docker_container_client):
+        """Fall back to default when the PORT env value is not a valid integer."""
+        docker_container_client.client.images.get.return_value = self._make_image(
+            cmd=["python", "-m", "server"],
+            env=["PORT=not-a-number"],
+        )
+        assert docker_container_client._detect_container_port("img", 40000) == 40000
+
+
+# ---------------------------------------------------------------------------
 # Test start_container
 # ---------------------------------------------------------------------------
 
@@ -1072,6 +1158,78 @@ class TestStartContainer:
             mock_find_port.assert_not_called()
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args.kwargs["environment"]["PORT"] == "8080"
+
+    @pytest.mark.asyncio
+    async def test_start_container_maps_detected_internal_port(self, docker_container_client):
+        """When the image hardcodes an internal port (e.g. --port 3033), the port
+        mapping must be host:<host_port> -> container:<detected_port>."""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+
+        img = MagicMock()
+        img.attrs = {
+            "Config": {
+                "Entrypoint": ["mcp-echarts"],
+                "Cmd": ["--transport", "streamable", "--port", "3033"],
+            }
+        }
+        docker_container_client.client.images.get.return_value = img
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port") as mock_find_port, \
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock), \
+                patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            await docker_container_client.start_container(
+                service_name="echarts",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=None,
+                host_port=37432,
+                image="mcp-echarts:0.7.1",
+            )
+
+            call_args = docker_container_client.client.containers.run.call_args
+            # host:37432 must map to the container's internal port 3033
+            assert call_args.kwargs["ports"] == {"3033/tcp": 37432}
+
+    @pytest.mark.asyncio
+    async def test_start_container_default_port_mapping_without_internal_port(self, docker_container_client):
+        """When the image exposes no detectable internal port, the port mapping
+        stays host:<host_port> -> container:<host_port>."""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+
+        img = MagicMock()
+        img.attrs = {"Config": {"Entrypoint": [], "Cmd": ["python", "-m", "server"]}}
+        docker_container_client.client.images.get.return_value = img
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port") as mock_find_port, \
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock), \
+                patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            await docker_container_client.start_container(
+                service_name="server",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=None,
+                host_port=8080,
+                image="plain-server:latest",
+            )
+
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args.kwargs["ports"] == {"8080/tcp": 8080}
 
 
 # ---------------------------------------------------------------------------

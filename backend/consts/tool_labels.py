@@ -13,7 +13,7 @@ Why not in SQL?
   - This module is the only hook that fires at the exact moment tools are
     inserted — the earliest lifecycle point where the data exists.
 
-Keep in sync with: deploy/sql/migrations/v2.3.0_0624_add_labels_to_ag_tool_info.sql
+Keep in sync with: deploy/sql/migrations/v2.3_merged_migrations.sql
 """
 
 # tool_name → [label, ...]
@@ -33,6 +33,7 @@ _category_search = {
 _category_kb = {
     "dify_search": ["knowledge-base"], "datamate_search": ["knowledge-base"],
     "idata_search": ["knowledge-base"], "haotian_search": ["knowledge-base"],
+    "ragflow_search": ["knowledge-base"],
     "aidp_search": ["knowledge-base"],
 }
 _category_multimodal = {
@@ -53,4 +54,5 @@ BUILTIN_LABEL_MAP.update(_category_email)
 BUILTIN_LABEL_MAP.update(_category_memory)
 BUILTIN_LABEL_MAP.update(_category_terminal)
 
-SYSTEM_MANAGED_TOOL_NAMES = frozenset({"store_memory", "search_memory"})
+PARALLEL_EXECUTOR_TOOL_NAME = "parallel_executor"
+SYSTEM_MANAGED_TOOL_NAMES = frozenset({"store_memory", "search_memory", PARALLEL_EXECUTOR_TOOL_NAME})

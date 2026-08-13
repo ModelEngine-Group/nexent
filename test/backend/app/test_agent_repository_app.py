@@ -25,7 +25,6 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     icon: Optional[str] = None
     downloads: int = Field(0, ge=0)
     tags: Optional[List[str]] = None
-    category_id: Optional[int] = 0
     tool_count: Optional[int] = Field(None, ge=0)
 
 
@@ -67,7 +66,6 @@ def test_list_agent_repository_listings_api_success(
         "test_tenant_id",
         status=None,
         agent_id=None,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -99,7 +97,6 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         "test_tenant_id",
         status=None,
         agent_id=123,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -131,7 +128,6 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         "test_tenant_id",
         status="pending_review",
         agent_id=None,
-        category_id=None,
         page=1,
         page_size=10,
         search=None,
@@ -171,7 +167,6 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         "test_tenant_id",
         status=None,
         agent_id=None,
-        category_id=None,
         page=2,
         page_size=6,
         search="alpha",
@@ -341,6 +336,8 @@ def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
         status="shared",
         user_id="test_user_id",
         tenant_id="test_tenant_id",
+        notify_content=None,
+        content=None,
     )
     assert response.json()["status"] == "shared"
 
@@ -411,7 +408,6 @@ def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_aut
 
     payload = {
         "icon": "🤖",
-        "category_id": 2,
         "tags": ["代码审查", "自定义"],
         "downloads": 0,
     }
@@ -478,6 +474,7 @@ def test_list_my_editable_agents_api_success_default_ownership(
         page_size=10,
         search=None,
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -520,6 +517,7 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
         page_size=10,
         search=None,
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -562,6 +560,7 @@ def test_list_my_editable_agents_api_passes_pagination_and_search(
         page_size=5,
         search="alpha",
         new_agent_padding=False,
+        agent_id=None,
     )
 
 
@@ -604,6 +603,50 @@ def test_list_my_editable_agents_api_passes_new_agent_padding(
         page_size=10,
         search=None,
         new_agent_padding=True,
+        agent_id=None,
+    )
+
+
+def test_list_my_editable_agents_api_passes_agent_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards agent_id query parameter to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_list_mine.return_value = {
+        "items": [],
+        "counts": {"all": 0, "created": 0, "others": 0},
+        "pagination": {
+            "page": 1,
+            "page_size": 10,
+            "total": 0,
+            "total_pages": 0,
+        },
+    }
+
+    response = client.get(
+        "/repository/agent/mine?agent_id=123",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_list_mine.assert_called_once_with(
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        ownership="all",
+        page=1,
+        page_size=10,
+        search=None,
+        new_agent_padding=False,
+        agent_id=123,
     )
 
 

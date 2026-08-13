@@ -102,7 +102,7 @@ export interface ToolTestPanelProps {
   /** Callback to notify parent when testPanelKbIds should change (e.g., from manual JSON edit) */
   onTestPanelKbIdsChange?: (ids: string[], displayNames: string[]) => void;
   /** Tool type for KB selection (used to determine parameter name) */
-  toolKbType?: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | null;
+  toolKbType?: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | "ragflow_search" | null;
   /** Haotian knowledge sets for display name resolution */
   haotianKnowledgeSets?: Array<{
     name: string;
@@ -214,9 +214,9 @@ export default function ToolTestPanel({
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
           // Check if this is the KB selector parameter and KB selection is enabled
-          // Haotian and iData use dataset_ids, others use index_names
-          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search" && toolKbType !== "aidp_search"
-            || paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search")
+          // Haotian and iData use dataset_ids, ragflow_search also uses dataset_ids, others use index_names
+          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search" && toolKbType !== "aidp_search" && toolKbType !== "ragflow_search"
+            || paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search" || toolKbType === "ragflow_search")
             || paramName === "kds_list" && toolRequiresKbSelection && toolKbType === "aidp_search";
 
           if (isKbSelectorParam) {
@@ -287,28 +287,15 @@ export default function ToolTestPanel({
         // Mark form as initialized
         formInitializedRef.current = true;
       } else {
-        // Parsing returned empty object - try to fall back to configParams so the
-        // form still has fields the user can edit (otherwise executeTest would
-        // send an empty inputs payload and the SDK forward() would error with
-        // "missing 1 required positional argument" for tools like knowledge_base_search).
-        const fallbackNames = (configParams || []).map((p) => p.name);
-        if (fallbackNames.length > 0) {
-          const parameterValues: Record<string, any> = {};
-          const formValues: Record<string, any> = {};
-          (configParams || []).forEach((p) => {
-            const value = p.value;
-            parameterValues[p.name] = value;
-            formValues[`param_${p.name}`] = value != null ? String(value) : "";
-          });
-          setParameterValues(parameterValues);
-          form.setFieldsValue(formValues);
-          setManualJsonInput(JSON.stringify(parameterValues, null, 2));
-        } else {
-          setParameterValues({});
-        }
+        // Parsing returned empty object — the tool's inputs schema is not
+        // available.  configParams are __init__ parameters (server_url,
+        // api_key, etc.), not runtime forward() inputs (query, doc_id, etc.),
+        // so they must not be repurposed as form fields here.
+        // Fall back to manual JSON mode.
+        setParameterValues({});
         setParsedInputs({});
         setIsManualInputMode(true);
-        setManualJsonInput((prev) => (prev && prev !== "{}" ? prev : "{}"));
+        setManualJsonInput("{}");
         formInitializedRef.current = true;
       }
     } catch (error) {
@@ -593,7 +580,7 @@ export default function ToolTestPanel({
       const aidpKbIds = toolKbType === "aidp_search" ? testPanelKbIds : selectedKbIds;
       if (toolRequiresKbSelection && aidpKbIds.length > 0) {
         // Determine the correct parameter name based on tool type
-        if (tool?.name === "dify_search") {
+        if (tool?.name === "dify_search" || tool?.name === "ragflow_search") {
           kbSelectionConfig = { dataset_ids: JSON.stringify(aidpKbIds) };
         } else if (tool?.name === "haotian_search" || tool?.name === "idata_search") {
           // Haotian and iData use dataset_ids as an array

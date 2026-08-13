@@ -2,7 +2,7 @@
 
 export const TOOLS_REQUIRING_KB_SELECTION = [
   "knowledge_base_search", "dify_search", "datamate_search",
-  "idata_search", "haotian_search", "aidp_search",
+  "idata_search", "haotian_search", "ragflow_search", "aidp_search",
 ];
 export const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
 export const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
@@ -15,6 +15,7 @@ export function getToolKbType(name: string) {
   if (name === "idata_search") return "idata_search" as const;
   if (name === "haotian_search") return "haotian_search" as const;
   if (name === "aidp_search") return "aidp_search" as const;
+  if (name === "ragflow_search") return "ragflow_search" as const;
   return "knowledge_base_search" as const;
 }
 

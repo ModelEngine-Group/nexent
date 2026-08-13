@@ -14,16 +14,21 @@
 
 ## 🚀 Quick Start
 
-### 1. Download and Setup
+- [Online Deployment](#online-deployment)
+- [Offline Deployment](#offline-deployment)
+
+### Online Deployment
+
+#### 1. Download and Setup
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
+> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Before every deployment, the scripts keep all existing values, comments, and old variables, then append variables newly introduced by the current `deploy/env/.env.example`. If `.env` does not exist, they first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
 
-### 2. Deployment Options
+#### 2. Deployment Options
 
 Run the following command to start deployment:
 
@@ -53,6 +58,9 @@ After running the command, the script opens Bash TUI menus for deployment option
 You can also pass options directly:
 
 ```bash
+# Use saved deploy.options or built-in defaults without opening the TUI
+bash deploy.sh docker --defaults
+
 # Default component set, development port policy, standard image source
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -66,15 +74,15 @@ bash deploy.sh docker --image-source mainland
 bash deploy.sh docker --image-source local-latest
 ```
 
-After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
-1️⃣ **When deploying v1.8.0 or later for the first time**, please pay special attention to the `suadmin` super administrator account information output in the Docker logs. This account has the highest system privileges, and the password is only displayed upon first generation. It cannot be viewed again later, so please be sure to save it securely.
+1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. As an exception, an offline package launched with `--config` prompts for and confirms the password, and that input takes precedence without being displayed.
 
-> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/user-management).
+> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/resource-management).
 
-2️⃣ Forgot to note the `suadmin` account password? Follow these steps:
+2️⃣ To recreate the `suadmin` account, follow these steps:
 
 ```bash
 # Step 1: Delete su account record in supabase container
@@ -90,12 +98,63 @@ docker exec -it nexent-postgresql bash
 psql -U root -d nexent
 delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
-# Step 3: Redeploy and record the su account password
+# Step 3: Redeploy; non-interactive mode uses the configured or default password
 ```
 
-### 3. Access Your Installation
+### Offline Deployment
+
+When the target host cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+
+1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
+2. Select a successful run for the required version and download the artifact matching the server architecture from **Artifacts** at the bottom of the run page.
+3. Download `nexent-<version>-amd64.zip` for AMD64 or `nexent-<version>-arm64.zip` for ARM64.
+
+GitHub Actions artifacts are retained for 30 days. If the required artifact has expired, ask a maintainer to rerun the workflow.
+
+Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+bash deploy.sh --load-images docker
+```
+
+The offline package installs all Nexent components by default. Add `--config` to reselect components, port policy, image source, or monitoring provider:
+
+```bash
+bash deploy.sh --load-images --config docker
+```
+
+If the host still has a previously deployed offline package, use `--reuse-from` to reuse its environment configuration and deployment options:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  docker
+```
+
+The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Docker `deploy.options` when present; the new scripts regenerate Docker-derived configuration. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
+
+When `suadmin@nexent.com` is created for the first time, non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation. Offline deployment with `--config` prompts for and confirms the password; that input is neither persisted nor displayed.
+
+To push the packaged images to an internal registry accessible to the target environment:
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  docker
+```
+
+When the prefix is omitted, the wrapper prompts for it. `push-images.sh` then prompts for the registry username and password before pushing.
+
+### Access Your Installation
 
 When deployment completes successfully:
+
+> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
+
 1. Open **http://localhost:3000** in your browser
 2. Log in with the super administrator account
 3. Access tenant resources → Create tenant and tenant administrator
@@ -172,30 +231,6 @@ bash uninstall.sh docker delete-all
 
 The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
 
-### Offline Image Package
-
-Use `deploy/offline/build_offline_package.sh` when you need to move images and deployment scripts to an offline host:
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target docker \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
-
-On the target host, keep the deployment options consistent with the package manifest:
-
-```bash
-cd offline-package
-bash deploy.sh --load-images docker
-```
-
 ## 🔌 Port Mapping
 
 | Service | Internal Port | External Port | Description |
@@ -217,7 +252,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `deploy/env/.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. The frontend monitoring entry is visible in speed mode when a dashboard URL is configured; in standard mode, only the super administrator can see it.
 
 ```bash
 cd nexent
@@ -240,7 +275,7 @@ Supported providers:
 To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 Common variables:
@@ -253,7 +288,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/env/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/monitoring.env`:
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -302,6 +337,11 @@ WECHAT_OAUTH_APP_SECRET=
 # TLS verification when contacting OAuth providers
 OAUTH_SSL_VERIFY=true
 OAUTH_CA_BUNDLE=
+
+# disabled: hide OAuth login entries and disable automatic redirects
+# button: show configured OAuth providers as login buttons
+# force: redirect automatically when exactly one provider is configured
+OAUTH_LOGIN_MODE=button
 ```
 
 Provider enablement rules:
@@ -314,6 +354,8 @@ Provider enablement rules:
 | WeChat | `ENABLE_WECHAT_OAUTH=true`, `WECHAT_OAUTH_APP_ID`, `WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
+
+`OAUTH_LOGIN_MODE` supports `disabled`, `button`, and `force`, and defaults to `button`. In `force` mode, unauthenticated users are redirected when exactly one provider is enabled. OAuth is disabled when no provider is available, while multiple providers fall back to login buttons. CAS `force` mode takes precedence when both are configured.
 
 ### CAS Login Configuration
 

@@ -92,6 +92,8 @@ from backend.database.agent_version_db import (
     insert_skill_snapshot,
     get_next_version_no,
     delete_version,
+    batch_search_version_names,
+    batch_query_current_version_nos,
     SOURCE_TYPE_NORMAL,
     SOURCE_TYPE_ROLLBACK,
     STATUS_RELEASED,
@@ -1148,6 +1150,28 @@ def test_get_next_version_no_existing_versions(monkeypatch, mock_session):
     assert result == 6  # Should be 5 + 1
 
 
+def test_get_next_version_no_includes_soft_deleted_snapshots(monkeypatch, mock_session):
+    """Test that a soft-deleted snapshot version number is not reused."""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.scalar = lambda: 2
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    db_models_mock.AgentInfo.delete_flag.__eq__.reset_mock()
+
+    result = get_next_version_no(agent_id=1, tenant_id="tenant1")
+
+    assert result == 3
+    filter_conditions = query.filter.call_args.args
+    assert db_models_mock.AgentInfo.delete_flag.__eq__.call_count == 0
+    assert len(filter_conditions) == 2
+
+
 def test_delete_version_success(monkeypatch, mock_session):
     """Test successfully deleting a version"""
     session, query = mock_session
@@ -1523,3 +1547,83 @@ def test_delete_skill_snapshot_not_found(monkeypatch, mock_session):
     )
 
     assert result == 0
+
+
+# ===================== batch_search_version_names tests =====================
+
+
+def test_batch_search_version_names_empty_inputs(monkeypatch):
+    """Test batch_search_version_names with empty lists returns empty list."""
+    assert batch_search_version_names(agent_ids=[], tenant_id="tenant1", version_nos=[]) == []
+    assert batch_search_version_names(agent_ids=[1], tenant_id="tenant1", version_nos=[]) == []
+    assert batch_search_version_names(agent_ids=[], tenant_id="tenant1", version_nos=[1]) == []
+
+
+def test_batch_search_version_names_success(monkeypatch, mock_session):
+    """Test batch_search_version_names returns list of dicts with version info."""
+    session, query = mock_session
+
+    mock_v1 = MagicMock()
+    mock_v1.agent_id = 1
+    mock_v1.version_no = 2
+    mock_v1.version_name = "v2.0"
+
+    mock_v2 = MagicMock()
+    mock_v2.agent_id = 3
+    mock_v2.version_no = 1
+    mock_v2.version_name = None
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_v1, mock_v2]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+
+    result = batch_search_version_names(agent_ids=[1, 3], tenant_id="tenant1", version_nos=[1, 2])
+
+    assert len(result) == 2
+    assert result[0] == {"agent_id": 1, "version_no": 2, "version_name": "v2.0"}
+    assert result[1] == {"agent_id": 3, "version_no": 1, "version_name": None}
+
+
+# ===================== batch_query_current_version_nos tests =====================
+
+
+def test_batch_query_current_version_nos_empty_list(monkeypatch):
+    """Test batch_query_current_version_nos with empty agent_ids returns empty dict."""
+    result = batch_query_current_version_nos(agent_ids=[], tenant_id="tenant1")
+    assert result == {}
+
+
+def test_batch_query_current_version_nos_success(monkeypatch, mock_session):
+    """Test batch_query_current_version_nos returns mapping of agent_id -> current_version_no."""
+    session, query = mock_session
+
+    mock_a1 = MagicMock()
+    mock_a1.agent_id = 1
+    mock_a1.current_version_no = 3
+
+    mock_a2 = MagicMock()
+    mock_a2.agent_id = 2
+    mock_a2.current_version_no = None  # Should be filtered out
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_a1, mock_a2]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+
+    result = batch_query_current_version_nos(agent_ids=[1, 2], tenant_id="tenant1")
+
+    # Agent 2 should be filtered out because current_version_no is None
+    assert result == {1: 3}

@@ -32,6 +32,7 @@ export function useKnowledgeBasesForToolConfig(
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | "aidp_search"
     | null = null,
   config?: {
@@ -111,6 +112,22 @@ export function useKnowledgeBasesForToolConfig(
           // No Dify config provided, return empty
           kbs = [];
         }
+      } else if (toolType === "ragflow_search") {
+        // For RAGFlow, fetch knowledge bases using provided config
+        if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+          try {
+            // Use RAGFlow /api/v1/datasets endpoint to list datasets
+            kbs = await knowledgeBaseService.getRagflowKnowledgeBases(
+              difyConfig.serverUrl,
+              difyConfig.apiKey
+            );
+          } catch (error: any) {
+            log.error("Failed to fetch RAGFlow knowledge bases:", error);
+            kbs = [];
+          }
+        } else {
+          kbs = [];
+        }
       } else if (toolType === "idata_search") {
         // For iData, fetch knowledge bases using provided config
         if (
@@ -137,23 +154,14 @@ export function useKnowledgeBasesForToolConfig(
           kbs = [];
         }
       } else if (toolType === "aidp_search") {
-        if (aidpConfig?.serverUrl && aidpConfig?.apiKey) {
-          try {
-            const result = await knowledgeBaseService.getAidpKnowledgeBases(
-              aidpConfig.serverUrl,
-              aidpConfig.apiKey,
-              1,
-              100
-            );
-            kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
-              result.value || []
-            );
-          } catch (error: any) {
-            log.error("Failed to fetch AIDP knowledge bases:", error);
-            showErrorToUser(error, t);
-            kbs = [];
-          }
-        } else {
+        try {
+          const result = await knowledgeBaseService.getAidpKnowledgeBasesAll();
+          kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
+            result.value || []
+          );
+        } catch (error: any) {
+          log.error("Failed to fetch AIDP knowledge bases:", error);
+          showErrorToUser(error, t);
           kbs = [];
         }
       } else {
@@ -204,6 +212,7 @@ export function usePrefetchKnowledgeBases() {
         | "datamate_search"
         | "idata_search"
         | "haotian_search"
+        | "ragflow_search"
         | "aidp_search"
         | null,
       difyConfig?: {
@@ -295,24 +304,30 @@ export function usePrefetchKnowledgeBases() {
             } else {
               kbs = [];
             }
-          } else if (toolType === "aidp_search") {
+          } else if (toolType === "ragflow_search") {
             if (difyConfig?.serverUrl && difyConfig?.apiKey) {
               try {
-                const result = await knowledgeBaseService.getAidpKnowledgeBases(
+                kbs = await knowledgeBaseService.getRagflowKnowledgeBases(
                   difyConfig.serverUrl,
-                  difyConfig.apiKey,
-                  1,
-                  100
-                );
-                kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
-                  result.value || []
+                  difyConfig.apiKey
                 );
               } catch (error: any) {
-                log.error("Failed to prefetch AIDP knowledge bases:", error);
+                log.error("Failed to prefetch RAGFlow knowledge bases:", error);
                 showErrorToUser(error, t);
                 kbs = [];
               }
             } else {
+              kbs = [];
+            }
+          } else if (toolType === "aidp_search") {
+            try {
+              const result = await knowledgeBaseService.getAidpKnowledgeBasesAll();
+              kbs = knowledgeBaseService.mapAidpKnowledgeBasesToKnowledgeBases(
+                result.value || []
+              );
+            } catch (error: any) {
+              log.error("Failed to prefetch AIDP knowledge bases:", error);
+              showErrorToUser(error, t);
               kbs = [];
             }
           } else {
@@ -390,16 +405,17 @@ export function useSyncKnowledgeBases() {
               );
             }
             break;
-          case "aidp_search":
-            // AIDP sync requires server URL and API key
+          case "ragflow_search":
+            // RAGFlow sync requires server URL and API key
             if (config?.serverUrl && config?.apiKey) {
-              await knowledgeBaseService.getAidpKnowledgeBases(
+              await knowledgeBaseService.getRagflowKnowledgeBases(
                 config.serverUrl,
-                config.apiKey,
-                1,
-                100
+                config.apiKey
               );
             }
+            break;
+          case "aidp_search":
+            await knowledgeBaseService.getAidpKnowledgeBasesAll();
             break;
           default:
             // Default sync behavior - sync Nexent only

@@ -65,6 +65,82 @@ tags:
         assert result["name"] == "tagged-skill"
         assert result["tags"] == ["python", "ml"]
 
+    def test_parse_with_inline_tags_preserves_array(self):
+        """Test valid inline YAML tags remain a string list."""
+        content = """---
+name: inline-tagged-skill
+description: A tagged skill
+tags: [python, ml, data]
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["tags"] == ["python", "ml", "data"]
+
+    def test_parse_with_scalar_compatibility_preserves_inline_tags_array(self):
+        """Test scalar compatibility fixes do not turn inline tags into a string."""
+        content = """---
+name: fallback-tagged-skill
+description: URL: http://example.com
+tags: [python, ml, data]
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["description"] == "URL: http://example.com"
+        assert result["tags"] == ["python", "ml", "data"]
+
+    def test_parse_preserves_special_characters_in_description(self):
+        """Test existing scalar compatibility handling remains intact."""
+        content = """---
+name: special-description-skill
+description: hello #tag {special}
+tags: [python, ml]
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["description"] == "hello #tag {special}"
+        assert result["tags"] == ["python", "ml"]
+
+    def test_parse_string_tags_returns_empty_list(self):
+        """Test string-valued tags cannot enter the persistence flow."""
+        content = """---
+name: string-tagged-skill
+description: A tagged skill
+tags: "[python, ml, data]"
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["tags"] == []
+
+    def test_parse_with_file_output_metadata(self):
+        """Test parsing the artifact contract from skill frontmatter."""
+        content = """---
+name: file-skill
+description: A file-producing skill
+script_outputs:
+  scripts/render_pdf.py:
+    kind: file
+    mime_types:
+      - application/pdf
+---
+# Body
+"""
+        result = SkillLoader.parse(content)
+
+        assert result["script_outputs"] == {
+            "scripts/render_pdf.py": {
+                "kind": "file",
+                "mime_types": ["application/pdf"],
+            }
+        }
+
     def test_parse_ignores_unknown_fields(self):
         """Test that unknown fields are ignored during parsing."""
         content = """---
@@ -72,6 +148,9 @@ name: minimax-docx
 author: MiniMaxAI
 version: 1.0
 license: MIT
+output_type: file
+output_mime_types:
+  - application/pdf
 description: Process DOCX files
 ---
 # Content
@@ -137,6 +216,18 @@ description: Array [1, 2, 3]
 """
         fixed = SkillLoader._fix_yaml_frontmatter(frontmatter)
         assert "description: \"Array [1, 2, 3]\"" in fixed
+
+    def test_preserve_inline_structured_metadata(self):
+        """Test inline array metadata is not converted into a quoted scalar."""
+        frontmatter = """name: test
+description: URL: http://example.com
+tags: [python, ml]
+allowed-tools: [search, calculator]
+"""
+        fixed = SkillLoader._fix_yaml_frontmatter(frontmatter)
+
+        assert "tags: [python, ml]" in fixed
+        assert "allowed-tools: [search, calculator]" in fixed
 
     def test_preserve_block_scalar_pipe(self):
         """Test that block scalar with pipe (|) is preserved."""
@@ -301,6 +392,27 @@ class TestSkillLoaderToSkillMd:
         assert "allowed-tools:" in result
         assert "- tool1" in result
         assert "- tool2" in result
+
+    def test_to_skill_md_with_file_output_metadata(self):
+        """Test preserving the artifact contract when serializing a skill."""
+        skill_dict = {
+            "name": "file-skill",
+            "description": "A file-producing skill",
+            "script_outputs": {
+                "scripts/render_pdf.py": {
+                    "kind": "file",
+                    "mime_types": ["application/pdf"],
+                }
+            },
+            "content": "# Body",
+        }
+
+        result = SkillLoader.to_skill_md(skill_dict)
+
+        assert "output_type:" not in result
+        assert "output_mime_types:" not in result
+        assert "script_outputs:" in result
+        assert "scripts/render_pdf.py:" in result
 
     def test_to_skill_md_with_tags(self):
         """Test converting skill dict with tags."""

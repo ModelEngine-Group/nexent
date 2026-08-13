@@ -14,7 +14,12 @@
 
 ## 🚀 Quick Start
 
-### 1. Prepare Kubernetes Cluster
+- [Online Deployment](#online-deployment)
+- [Offline Deployment](#offline-deployment)
+
+### Online Deployment
+
+#### 1. Prepare Kubernetes Cluster
 
 Ensure your Kubernetes cluster is running and kubectl is configured with cluster access:
 
@@ -23,14 +28,14 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
-### 2. Clone and Navigate
+#### 2. Clone and Navigate
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-### 3. Deployment
+#### 3. Deployment
 
 Run the deployment script:
 
@@ -57,15 +62,17 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-Kubernetes uses the same `deploy/env/.env` file as Docker. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`.
+Kubernetes uses the same `deploy/env/.env` file as Docker. Before every deployment, existing values, comments, and old variables are preserved while variables newly introduced by the current `deploy/env/.env.example` are appended. If `.env` does not exist, the scripts first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required.
+
+Use `bash deploy.sh k8s --defaults` to skip the TUI and deploy with saved `deploy.options` or built-in defaults.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
-### ⚠️ Important Notes
+#### ⚠️ Important Notes
 
-1️⃣ **When deploying v1.8.0 or later for the first time**, you will be prompted to set a password for the `suadmin` super administrator account during the deployment process. This account has the highest system privileges. Please enter your desired password and **save it securely** after creation - it cannot be retrieved later.
+1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. An offline package launched with `--config` instead prompts for and confirms the password, and that input takes precedence without being displayed.
 
-2️⃣ Forgot to note the `suadmin` account password? Follow these steps:
+2️⃣ To recreate the `suadmin` account, follow these steps:
 
 ```bash
 # Step 1: Delete su account record in Supabase database
@@ -81,13 +88,58 @@ kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
 kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
-# Step 3: Re-deploy and record the su account password
+# Step 3: Redeploy; non-interactive mode uses the configured or default password
 bash deploy.sh k8s
 ```
 
-### 4. Access Your Installation
+### Offline Deployment
+
+When the target cluster cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+
+1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
+2. Select a successful run for the required version and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from **Artifacts**.
+3. Copy the archive to a management host that can access the target cluster and extract it. Workflow artifacts are retained for 30 days; if one has expired, ask a maintainer to rerun the workflow.
+
+Extract the offline deployment package:
+
+```bash
+unzip nexent-v2.2.1-amd64.zip -d nexent
+cd nexent
+```
+
+A single-node cluster backed by the Docker container runtime can load and deploy the images directly:
+
+```bash
+bash deploy.sh --load-images k8s
+```
+
+If the management host still has a previously deployed offline package, use `--reuse-from` to reuse its environment configuration and Kubernetes deployment options:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  k8s
+```
+
+The specified directory must be the root of an extracted previous package and contain `deploy/env/.env`. This option imports the old `.env`, preserves its values, and immediately appends variables newly introduced by the current package's `.env.example`. It also reuses `monitoring.env` and Kubernetes `deploy.options` when present; the new scripts regenerate Helm generated values. `--reuse-from` can be combined with `--config`, `--defaults`, or `--push-images`.
+
+For other single-node and multi-node clusters, push images to an internal registry accessible to the cluster, or import them with the container runtime's tooling on every node that may run Nexent Pods:
+
+```bash
+bash deploy.sh \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  k8s
+```
+
+The offline package installs all Nexent components by default. Add `--config` to reselect deployment settings. When the super administrator is created for the first time, this mode prompts for and confirms the password without displaying or persisting it. Non-interactive deployment uses `NEXENT_SUPER_ADMIN_PASSWORD`, which defaults to `Nexent@123`, and displays the effective password after successful creation.
+
+### Access Your Installation
 
 When deployment completes successfully:
+
+> **Get the administrator password**: The super administrator account is `suadmin@nexent.com`. On its first non-interactive creation, the terminal displays the effective password; when no value was configured, the default password is `Nexent@123`. For an offline deployment using `--config`, the manually entered password is neither saved nor displayed. If it is forgotten, recreate the account by following the earlier "Recreate the `suadmin` account" steps.
 
 | Service | Default Address |
 |---------|-----------------|
@@ -185,30 +237,6 @@ bash uninstall.sh k8s delete-all
 
 `--delete-data` and `--delete-volumes` are compatibility options for Helm-managed resources. For local disks, use `--delete-local-data` or `--keep-local-data`; `delete-all --keep-local-data` removes the namespace while preserving local volume contents.
 
-### Offline Image Package
-
-Build a Kubernetes offline package from the repository root:
-
-```bash
-bash deploy/offline/build_offline_package.sh \
-  --target k8s \
-  --version v2.2.1 \
-  --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general \
-  --compress true \
-  --output-dir offline-package
-```
-
-The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `manifest.yaml`, and `checksums.txt`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
-
-```bash
-cd offline-package
-bash deploy.sh --load-images k8s
-```
-
-For multi-node clusters, load the images on every node that may run Nexent Pods, or push the loaded images to an internal registry and deploy with matching image settings.
-
 ## 🔧 Deployment Commands
 
 ```bash
@@ -250,7 +278,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 ### Monitoring Configuration
 
-Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script renders runtime Helm values for `global.monitoring.enabled`, `global.monitoring.provider`, and `global.monitoring.dashboardUrl`, and enables the `nexent-monitoring` subchart.
+Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script synchronizes provider settings in `deploy/env/monitoring.env`, renders runtime Helm values for `global.monitoring.*` and `nexent-monitoring.*`, and enables the `nexent-monitoring` subchart.
 
 ```bash
 cd nexent
@@ -270,20 +298,28 @@ Supported providers:
 | `grafana` | Local Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | Local Zipkin | `http://localhost:30011` |
 
-Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `deploy/deploy/k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` and optionally `LANGSMITH_PROJECT` in `deploy/env/monitoring.env`. To change local Grafana, Langfuse, or dashboard ports, adjust the related `K8S_*_NODE_PORT` or service variables in `deploy/env/monitoring.env`, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
 
-Common Helm values:
+Common generated Helm values:
 
 | Value | Description |
 |-------|-------------|
 | `global.monitoring.enabled` | Enables OpenTelemetry export in the Nexent backend |
 | `global.monitoring.provider` | Backend provider label: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `global.monitoring.otlpEndpoint` | Backend OTLP HTTP endpoint, default `http://nexent-otel-collector:4318` |
-| `global.monitoring.dashboardUrl` | Frontend monitoring entry URL; leave empty to hide the entry |
+| `global.monitoring.dashboardUrl` | Frontend monitoring entry URL; leave empty to hide the entry. Visible in speed mode; in standard mode only the super administrator can see it |
 | `global.monitoring.traceContentMode` | Trace content capture mode: `summary`, `metrics`, or `full` |
 | `nexent-monitoring.<provider>.service.nodePort` | NodePort override for provider dashboards |
 | `nexent-monitoring.langfuse.init.*` | Local Langfuse bootstrap organization, project, and admin account |
 | `nexent-monitoring.grafana.adminUser` / `adminPassword` | Local Grafana admin credentials |
+
+Common `deploy/env/monitoring.env` variables:
+
+| Variable | Description |
+|----------|-------------|
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
+| `K8S_PHOENIX_NODE_PORT` / `K8S_LANGFUSE_NODE_PORT` / `K8S_GRAFANA_NODE_PORT` / `K8S_ZIPKIN_NODE_PORT` | NodePort overrides for local dashboards |
+| `K8S_LANGFUSE_NEXTAUTH_URL` | Browser-accessible Langfuse URL used by the K8s Langfuse stack |
 
 Check monitoring status:
 
@@ -313,7 +349,8 @@ helm upgrade --install nexent nexent \
   --set nexent-supabase-db.enabled=true \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
-  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
+  --set nexent-common.config.oauth.loginMode=force
 ```
 
 Configurable OAuth values:
@@ -331,6 +368,9 @@ Configurable OAuth values:
 | `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
 | `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | Whether to verify provider TLS certificates |
 | `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | Custom CA bundle path |
+| `nexent-common.config.oauth.loginMode` | `OAUTH_LOGIN_MODE` | `disabled`, `button`, or `force` |
+
+`loginMode` defaults to `button`. In `force` mode, OAuth is disabled when no provider is available, while multiple providers fall back to login buttons. CAS `force` mode takes precedence over OAuth auto login.
 
 Provider callback URLs:
 

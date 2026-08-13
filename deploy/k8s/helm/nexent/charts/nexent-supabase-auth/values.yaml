@@ -5,6 +5,11 @@ image:
   tag: v2.170.0
   pullPolicy: IfNotPresent
 
+initImage:
+  repository: postgres
+  tag: 15-alpine
+  pullPolicy: IfNotPresent
+
 resources:
   requests:
     memory: 512Mi
@@ -17,7 +22,7 @@ config:
   siteUrl: "http://localhost:3011"
   apiExternalUrl: "http://nexent-supabase-kong:8000"
   disableSignup: false
-  jwtExpiry: "3600"
+  jwtExpiry: "7200"
   debugJwtExpireSeconds: "0"
   enableEmailSignup: true
   enableEmailAutoconfirm: true

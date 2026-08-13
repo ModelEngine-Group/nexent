@@ -12,6 +12,7 @@ DEFAULT_VERSION="latest"
 DEFAULT_PLATFORM="amd64"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/offline-package"
 DEFAULT_INCLUDE_SOURCE="false"
+DEFAULT_INCLUDE_SANDBOX="true"
 DEFAULT_TARGET="all"
 DEFAULT_COMPRESS="false"
 
@@ -19,8 +20,10 @@ VERSION=""
 PLATFORM=""
 OUTPUT_DIR=""
 INCLUDE_SOURCE=""
+INCLUDE_SANDBOX=""
 TARGET=""
 COMPRESS=""
+PACKAGE_NAME=""
 DRY_RUN="false"
 COMMON_ARGS=()
 
@@ -38,6 +41,45 @@ if [ -f "$VERSION_HELPER" ]; then
 fi
 
 show_help() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "用法：$0 [选项]"
+    echo ""
+    echo "构建 Nexent 离线部署包"
+    echo ""
+    echo "选项："
+    echo "  --version VERSION       Nexent 镜像版本（例如 v1.0.0 或 latest）"
+    echo "                           默认：$DEFAULT_VERSION"
+    echo "  --platform PLATFORM     目标平台（amd64 或 arm64）"
+    echo "                           默认：$DEFAULT_PLATFORM"
+    echo "  --output-dir DIR        离线包输出目录"
+    echo "                           默认：$DEFAULT_OUTPUT_DIR"
+    echo "  --include-source BOOL   是否包含源码（true 或 false）"
+    echo "                           默认：$DEFAULT_INCLUDE_SOURCE"
+    echo "  --include-sandbox BOOL  是否包含 Sandbox 镜像（true 或 false）"
+    echo "                           默认：$DEFAULT_INCLUDE_SANDBOX"
+    echo "  --target TARGET         docker、k8s 或 all"
+    echo "                           默认：$DEFAULT_TARGET"
+    echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
+    echo "                           默认：$DEFAULT_COMPRESS"
+    echo "  --package-name NAME     最终 zip 包名称（可省略 .zip 后缀）"
+    echo "                           默认：根据目标、平台和版本自动生成"
+    echo "  --components LIST       用于镜像选择的部署组件"
+    echo "  --image-source SOURCE   general、mainland 或 local-latest"
+    echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
+    echo "  --image-registry-prefix PREFIX"
+    echo "                           使用指定镜像仓库前缀拉取和打包镜像"
+    echo "  --defaults              复用保存配置或内置默认值并跳过交互界面"
+    echo "  --config                进入交互式部署配置界面"
+    echo "  --dry-run               只展示执行计划，不执行实际操作"
+    echo "  --help                  显示帮助信息"
+    echo ""
+    echo "示例："
+    echo "  $0 --version v1.0.0 --platform arm64"
+    echo "  $0 --version latest --platform amd64 --include-source false"
+    echo "  $0 --dry-run  # 只展示执行计划"
+    return
+  fi
+
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Build offline deployment package for Nexent"
@@ -51,14 +93,21 @@ show_help() {
   echo "                           Default: $DEFAULT_OUTPUT_DIR"
   echo "  --include-source BOOL   Include source code (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
+  echo "  --include-sandbox BOOL  Include the Sandbox image (true or false)"
+  echo "                           Default: $DEFAULT_INCLUDE_SANDBOX"
   echo "  --target TARGET         docker, k8s, or all"
   echo "                           Default: $DEFAULT_TARGET"
   echo "  --compress BOOL        Create zip archive after package build (true or false)"
   echo "                           Default: $DEFAULT_COMPRESS"
+  echo "  --package-name NAME     Final zip package name (.zip suffix is optional)"
+  echo "                           Default: generated from target, platform, and version"
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
-  echo "  --config FILE           Deployment config with components and image source"
+  echo "  --image-registry-prefix PREFIX"
+  echo "                           Pull and package images with this registry prefix"
+  echo "  --defaults              Use saved config or built-in defaults and skip TUI"
+  echo "  --config                Open the interactive deployment configuration"
   echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
   echo ""
@@ -89,6 +138,10 @@ parse_args() {
         INCLUDE_SOURCE="$2"
         shift 2
         ;;
+      --include-sandbox)
+        INCLUDE_SANDBOX="$2"
+        shift 2
+        ;;
       --target)
         TARGET="$2"
         shift 2
@@ -97,15 +150,19 @@ parse_args() {
         COMPRESS="$2"
         shift 2
         ;;
+      --package-name)
+        PACKAGE_NAME="$2"
+        shift 2
+        ;;
       --dry-run)
         DRY_RUN="true"
         shift
         ;;
-      --components|--image-source|--registry-profile|--app-version|--monitoring-provider|--port-policy|--config|--local-config)
+      --components|--image-source|--registry-profile|--image-registry-prefix|--registry-prefix|--image-registry|--app-version|--monitoring-provider|--port-policy|--local-config)
         COMMON_ARGS+=("$1" "$2")
         shift 2
         ;;
-      --use-local-config|--reconfigure)
+      --defaults|--config|--use-local-config|--reconfigure)
         COMMON_ARGS+=("$1")
         shift
         ;;
@@ -114,7 +171,11 @@ parse_args() {
         exit 0
         ;;
       *)
-        echo "Unknown option: $1"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "未知选项：$1"
+        else
+          echo "Unknown option: $1"
+        fi
         show_help
         exit 1
         ;;
@@ -129,19 +190,49 @@ parse_args() {
   PLATFORM="${PLATFORM:-$DEFAULT_PLATFORM}"
   OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
   INCLUDE_SOURCE="${INCLUDE_SOURCE:-$DEFAULT_INCLUDE_SOURCE}"
+  INCLUDE_SANDBOX="${INCLUDE_SANDBOX:-$DEFAULT_INCLUDE_SANDBOX}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
+  PACKAGE_NAME="${PACKAGE_NAME%.zip}"
 
   if [[ "$PLATFORM" != "amd64" && "$PLATFORM" != "arm64" ]]; then
-    echo "Error: Platform must be 'amd64' or 'arm64'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Platform 必须是 'amd64' 或 'arm64'"
+    else
+      echo "Error: Platform must be 'amd64' or 'arm64'"
+    fi
     exit 1
   fi
   if [[ "$TARGET" != "docker" && "$TARGET" != "k8s" && "$TARGET" != "all" ]]; then
-    echo "Error: Target must be 'docker', 'k8s', or 'all'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Target 必须是 'docker'、'k8s' 或 'all'"
+    else
+      echo "Error: Target must be 'docker', 'k8s', or 'all'"
+    fi
     exit 1
   fi
   if [[ "$COMPRESS" != "true" && "$COMPRESS" != "false" ]]; then
-    echo "Error: Compress must be 'true' or 'false'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Compress 必须是 'true' 或 'false'"
+    else
+      echo "Error: Compress must be 'true' or 'false'"
+    fi
+    exit 1
+  fi
+  if [[ "$INCLUDE_SANDBOX" != "true" && "$INCLUDE_SANDBOX" != "false" ]]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Include sandbox 必须是 'true' 或 'false'"
+    else
+      echo "Error: Include sandbox must be 'true' or 'false'"
+    fi
+    exit 1
+  fi
+  if [[ -n "$PACKAGE_NAME" && ! "$PACKAGE_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Package name 只能包含字母、数字、点、下划线和连字符，且必须以字母或数字开头"
+    else
+      echo "Error: Package name may contain only letters, numbers, dots, underscores, and hyphens, and must start with a letter or number"
+    fi
     exit 1
   fi
 }
@@ -163,15 +254,40 @@ prepare_deployment_image_config() {
 }
 
 show_dry_run_plan() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "=== DRY RUN 模式 ==="
+    echo "版本：$VERSION"
+    echo "平台：$PLATFORM"
+    echo "输出目录：$OUTPUT_DIR"
+    echo "包含源码：$INCLUDE_SOURCE"
+    echo "包含 Sandbox 镜像：$INCLUDE_SANDBOX"
+    echo "目标：$TARGET"
+    echo "压缩：$COMPRESS"
+    echo "最终包名称：$(offline_package_name).zip"
+    echo "组件：$DEPLOYMENT_COMPONENTS"
+    echo "镜像源：$DEPLOYMENT_IMAGE_SOURCE"
+    [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "镜像仓库前缀：$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
+    echo ""
+    echo "将拉取的镜像："
+    get_nexent_images
+    get_third_party_images
+    echo ""
+    echo "不会执行实际操作。"
+    exit 0
+  fi
+
     echo "=== DRY RUN MODE ==="
     echo "Version: $VERSION"
     echo "Platform: $PLATFORM"
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
+    echo "Include Sandbox image: $INCLUDE_SANDBOX"
     echo "Target: $TARGET"
     echo "Compress: $COMPRESS"
+    echo "Package name: $(offline_package_name).zip"
     echo "Components: $DEPLOYMENT_COMPONENTS"
     echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+    [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     echo ""
     echo "Images to pull:"
     get_nexent_images
@@ -187,10 +303,17 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
+  [ "$INCLUDE_SANDBOX" = "true" ] && echo "$NEXENT_SANDBOX_IMAGE"
   true
 }
 
 get_third_party_images() {
+  local image
+  echo_image_ref() {
+    deployment_add_image_registry_prefix "$1"
+    echo ""
+  }
+
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
     echo "$ELASTICSEARCH_IMAGE"
     echo "$POSTGRESQL_IMAGE"
@@ -203,21 +326,24 @@ get_third_party_images() {
     echo "$SUPABASE_DB"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    echo "otel/opentelemetry-collector-contrib:0.151.0"
+    echo_image_ref "otel/opentelemetry-collector-contrib:0.151.0"
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
-      phoenix) echo "arizephoenix/phoenix:15" ;;
+      phoenix) echo_image_ref "arizephoenix/phoenix:15" ;;
       grafana)
-        echo "grafana/tempo:2.10.5"
-        echo "grafana/grafana:12.4"
+        echo_image_ref "grafana/tempo:2.10.5"
+        echo_image_ref "grafana/grafana:12.4"
         ;;
-      zipkin) echo "openzipkin/zipkin:latest" ;;
+      zipkin) echo_image_ref "openzipkin/zipkin:latest" ;;
       langfuse)
-        echo "docker.io/langfuse/langfuse-worker:3"
-        echo "docker.io/langfuse/langfuse:3"
-        echo "docker.io/clickhouse/clickhouse-server:26.3-alpine"
-        echo "docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
-        echo "docker.io/redis:alpine"
-        echo "docker.io/postgres:15-alpine"
+        for image in \
+          "docker.io/langfuse/langfuse-worker:3" \
+          "docker.io/langfuse/langfuse:3" \
+          "docker.io/clickhouse/clickhouse-server:26.3-alpine" \
+          "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+          "docker.io/redis:alpine" \
+          "docker.io/postgres:15-alpine"; do
+          echo_image_ref "$image"
+        done
         ;;
     esac
   fi
@@ -240,11 +366,6 @@ should_skip_pull() {
 
   if image_exists_locally "$image"; then
     echo "Using existing local image without pulling: $image"
-    return 0
-  fi
-
-  if uses_latest_tag "$image"; then
-    echo "Skipping pull for latest image; expecting local image: $image"
     return 0
   fi
 
@@ -445,6 +566,9 @@ copy_source_code() {
   done <<< "$git_files"
 
   echo "✅ Git-managed source code copied to: $source_dir"
+  if [ -f "$source_dir/VERSION" ]; then
+    printf '%s\n' "$VERSION" > "$source_dir/VERSION"
+  fi
 
   local total_size
   total_size=$(du -sh "$source_dir" | cut -f1)
@@ -453,38 +577,61 @@ copy_source_code() {
   return 0
 }
 
-create_load_script() {
+copy_load_script() {
   local load_script="$OUTPUT_DIR/load-images.sh"
+  local template_script="$SCRIPT_DIR/load-images.sh"
 
   echo ""
   echo "========================================"
-  echo "Creating load-images.sh script..."
+  echo "Copying load-images.sh script..."
   echo "========================================"
 
-  cat > "$load_script" << 'LOADSCRIPT'
-#!/bin/bash
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGES_DIR="$SCRIPT_DIR/images"
-
-echo "Loading Docker images from $IMAGES_DIR..."
-
-for tar_file in "$IMAGES_DIR"/*.tar; do
-  if [[ -f "$tar_file" ]]; then
-    echo "Loading: $tar_file"
-    docker load -i "$tar_file"
+  if [ ! -f "$template_script" ]; then
+    echo "❌ load-images.sh template not found: $template_script"
+    return 1
   fi
-done
 
-echo ""
-echo "✅ All images loaded successfully"
-LOADSCRIPT
-
+  cp "$template_script" "$load_script"
   chmod +x "$load_script"
 
   echo "✅ Created: $load_script"
+}
+
+copy_push_script() {
+  local push_script="$OUTPUT_DIR/push-images.sh"
+  local template_script="$SCRIPT_DIR/push-images.sh"
+
+  echo ""
+  echo "========================================"
+  echo "Copying push-images.sh script..."
+  echo "========================================"
+
+  if [ ! -f "$template_script" ]; then
+    echo "❌ push-images.sh template not found: $template_script"
+    return 1
+  fi
+
+  cp "$template_script" "$push_script"
+  chmod +x "$push_script"
+
+  echo "✅ Created: $push_script"
+}
+
+create_offline_deploy_entrypoint() {
+  local deploy_script="$OUTPUT_DIR/deploy.sh"
+
+  if [ ! -f "$deploy_script" ]; then
+    echo "❌ deploy.sh not found in offline package: $deploy_script"
+    return 1
+  fi
+  if ! grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE=""$' "$deploy_script"; then
+    echo "❌ deploy.sh does not contain the offline mode marker: $deploy_script"
+    return 1
+  fi
+
+  local tmp_script="${deploy_script}.tmp"
+  sed 's/^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE=""$/DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"/' "$deploy_script" > "$tmp_script"
+  mv "$tmp_script" "$deploy_script"
 }
 
 copy_deployment_bundle() {
@@ -495,7 +642,7 @@ copy_deployment_bundle() {
 
   cp "$PROJECT_ROOT/deploy.sh" "$OUTPUT_DIR/deploy.sh"
   cp "$PROJECT_ROOT/uninstall.sh" "$OUTPUT_DIR/uninstall.sh"
-  cp "$PROJECT_ROOT/VERSION" "$OUTPUT_DIR/VERSION"
+  printf '%s\n' "$VERSION" > "$OUTPUT_DIR/VERSION"
 
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
@@ -503,6 +650,7 @@ copy_deployment_bundle() {
       --exclude='deploy.options' \
       --exclude='env/.env' \
       --exclude='env/.env.bak' \
+      --exclude='env/monitoring.env' \
       --exclude='docker/.env.generated' \
       --exclude='k8s/helm/nexent/generated-values.yaml' \
       --exclude='k8s/helm/nexent/generated-runtime-values.yaml' \
@@ -514,15 +662,16 @@ copy_deployment_bundle() {
     find "$OUTPUT_DIR" -name '.DS_Store' -type f -delete 2>/dev/null || true
   fi
 
-  rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
+  rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/env/monitoring.env" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;
     k8s) rm -rf "$OUTPUT_DIR/deploy/docker" ;;
   esac
 
+  create_offline_deploy_entrypoint
   find "$OUTPUT_DIR" -name '.git' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" 2>/dev/null || true
+  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" "$OUTPUT_DIR/push-images.sh" 2>/dev/null || true
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   echo "✅ Deployment bundle copied"
@@ -542,7 +691,9 @@ create_manifest() {
     echo "platform: \"$PLATFORM\""
     echo "target: \"$TARGET\""
     echo "components: \"$DEPLOYMENT_COMPONENTS\""
+    echo "includeSandbox: \"$INCLUDE_SANDBOX\""
     echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
+    echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
     echo "images:"
     while IFS= read -r image; do
       [ -n "$image" ] && echo "  - \"$image\""
@@ -582,6 +733,11 @@ create_checksums() {
 }
 
 offline_package_name() {
+  if [[ -n "$PACKAGE_NAME" ]]; then
+    echo "$PACKAGE_NAME"
+    return
+  fi
+
   local safe_version="${VERSION//\//-}"
   echo "nexent-offline-${TARGET}-${PLATFORM}-${safe_version}"
 }
@@ -633,8 +789,10 @@ main() {
   echo "Include source: $INCLUDE_SOURCE"
   echo "Target: $TARGET"
   echo "Compress: $COMPRESS"
+  echo "Package name: $(offline_package_name).zip"
   echo "Components: $DEPLOYMENT_COMPONENTS"
   echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+  [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ] && echo "Image registry prefix: $DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
   echo "========================================"
 
   rm -rf "$OUTPUT_DIR"
@@ -655,8 +813,13 @@ main() {
     exit 1
   }
 
-  create_load_script || {
+  copy_load_script || {
     echo "❌ Load script creation failed, aborting"
+    exit 1
+  }
+
+  copy_push_script || {
+    echo "❌ Push script creation failed, aborting"
     exit 1
   }
 

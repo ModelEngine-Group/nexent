@@ -28,6 +28,14 @@ def test_model_request_and_validation():
     assert req.filename == "f"
 
 
+def test_skill_repository_install_request_limits_target_name_to_100_characters():
+    request = model_consts.SkillRepositoryInstallRequest(target_name="x" * 100)
+    assert len(request.target_name) == 100
+
+    with pytest.raises(ValidationError):
+        model_consts.SkillRepositoryInstallRequest(target_name="x" * 101)
+
+
 def test_model_request_threads_w11_capacity_and_accept_fields():
     """W11 spec L721-727 + L500-502: ModelRequest must carry every capacity
     column the save handler can persist AND the audit-only accept-signal
@@ -56,6 +64,48 @@ def test_model_request_threads_w11_capacity_and_accept_fields():
     assert not missing, f"ModelRequest missing W11 fields: {missing}"
 
 
+@pytest.mark.parametrize(
+    ("request_type", "required_fields"),
+    [
+        (
+            model_consts.ManageTenantModelCreateRequest,
+            {"tenant_id", "model_name", "model_type"},
+        ),
+        (
+            model_consts.ManageTenantModelUpdateRequest,
+            {"tenant_id", "current_display_name"},
+        ),
+    ],
+)
+def test_manage_model_requests_preserve_capacity_fields(request_type, required_fields):
+    """Manage create/update must not silently discard capacity fields."""
+    capacity_values = {
+        "context_window_tokens": 128_000,
+        "max_input_tokens": 120_000,
+        "max_output_tokens": 8_000,
+        "default_output_reserve_tokens": 4_000,
+        "tokenizer_family": "cl100k_base",
+        "capacity_source": "operator",
+        "capability_profile_version": "2026-07-17",
+    }
+    required_values = {
+        "tenant_id": "tenant-1",
+        "model_name": "test-model",
+        "model_type": "llm",
+        "current_display_name": "Test Model",
+    }
+    request = request_type(
+        **{
+            field: required_values[field]
+            for field in required_fields
+        },
+        **capacity_values,
+    )
+
+    dumped = request.model_dump(exclude_unset=True)
+    assert {field: dumped[field] for field in capacity_values} == capacity_values
+
+
 def test_capacity_suggestion_response_has_required_fields():
     """Pin ModelCapacitySuggestionResponse schema so a downstream rename
     (e.g. suggested_provider -> canonical_provider) trips a test instead
@@ -76,5 +126,4 @@ def test_capacity_suggestion_response_has_required_fields():
     assert not missing, (
         f"ModelCapacitySuggestionResponse missing W11 fields: {missing}"
     )
-
 

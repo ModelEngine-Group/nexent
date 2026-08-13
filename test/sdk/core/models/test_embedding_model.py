@@ -3,7 +3,12 @@ import requests
 import sys
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaMultimodalEmbedding, DashScopeMultimodalEmbedding
+from nexent.core.models.embedding_model import (
+    DashScopeMultimodalEmbedding,
+    JinaEmbedding,
+    OpenAICompatibleEmbedding,
+    SiliconflowMultimodalEmbedding,
+)
 
 class DummyResponse:
     def __init__(self, status_code=200, json_data=None):
@@ -37,9 +42,9 @@ def openai_embedding_instance():
 
 @pytest.fixture()
 def jina_embedding_instance():
-    """Return a JinaMultimodalEmbedding instance with minimal viable attributes for tests."""
+    """Return a JinaEmbedding instance with minimal viable attributes for tests."""
 
-    return JinaMultimodalEmbedding(api_key="dummy-key", ssl_verify=True)
+    return JinaEmbedding(api_key="dummy-key", ssl_verify=True)
 
 
 def test_openai_embedding_default_model_type():
@@ -50,11 +55,11 @@ def test_openai_embedding_default_model_type():
         embedding_dim=128,
         ssl_verify=True,
     )
-    assert emb.model_type == "text"
+    assert emb.model_type == "embedding"
 
 
 def test_jina_embedding_default_model_type():
-    emb = JinaMultimodalEmbedding(api_key="dummy-key", ssl_verify=True)
+    emb = JinaEmbedding(api_key="dummy-key", ssl_verify=True)
     assert emb.model_type == "multimodal"
 
 
@@ -110,7 +115,7 @@ async def test_openai_dimension_check_timeout_returns_empty(openai_embedding_ins
 
 
 # ---------------------------------------------------------------------------
-# Tests for JinaMultimodalEmbedding.dimension_check
+# Tests for JinaEmbedding.dimension_check
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +261,7 @@ def test_openai_get_embeddings_timeout_exhausts_raises(openai_embedding_instance
 
 
 # ---------------------------------------------------------------------------
-# Tests for JinaMultimodalEmbedding.get_embeddings delegation and retry
+# Tests for JinaEmbedding.get_embeddings delegation and retry
 # ---------------------------------------------------------------------------
 
 
@@ -270,7 +275,7 @@ def test_jina_get_embeddings_converts_text_and_delegates(jina_embedding_instance
         return [[0.3, 0.4]]
 
     with patch(
-        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -295,7 +300,7 @@ def test_jina_get_embeddings_timeout_retry_succeeds(jina_embedding_instance):
     side_effect.calls = 0
 
     with patch(
-        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=side_effect,
     ) as mock_delegate:
         result = jina_embedding_instance.get_embeddings(
@@ -317,7 +322,7 @@ def test_jina_get_embeddings_timeout_exhausts_raises(jina_embedding_instance):
     """Should raise Timeout after exhausting retries."""
 
     with patch(
-        "nexent.core.models.embedding_model.JinaMultimodalEmbedding.get_multimodal_embeddings",
+        "nexent.core.models.embedding_model.JinaEmbedding.get_multimodal_embeddings",
         side_effect=requests.exceptions.Timeout(),
     ) as mock_delegate:
         with pytest.raises(requests.exceptions.Timeout):
@@ -563,7 +568,7 @@ def test_api_key_normalization_and_verify_jina(monkeypatch):
     monkeypatch.setattr("requests.Session.post", fake_post)
 
     # api_key containing Bearer prefix should be normalized
-    emb = JinaMultimodalEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
+    emb = JinaEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
     data = emb._prepare_multimodal_input([{"text": "hello"}])
     resp = emb._make_request(data, timeout=1)
     assert captured['headers']["Authorization"].startswith("Bearer ")
@@ -628,7 +633,7 @@ def test_jina_make_request_raises_http_error(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", fake_post)
 
-    emb = JinaMultimodalEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
+    emb = JinaEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
     data = emb._prepare_multimodal_input([{"text": "hi"}])
     with pytest.raises(requests.HTTPError):
         emb._make_request(data, timeout=1)
@@ -666,7 +671,7 @@ def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", lambda *a, **k: RespNoData())
 
-    emb = JinaMultimodalEmbedding(api_key="k")
+    emb = JinaEmbedding(api_key="k")
     with pytest.raises(KeyError):
         emb.get_multimodal_embeddings([{"text": "t"}], with_metadata=False, timeout=1)
 
@@ -705,7 +710,7 @@ def test_openai_get_embeddings_calls_record_model_call(mocker):
 
 
 def test_jina_get_embeddings_calls_record_model_call(mocker):
-    """JinaMultimodalEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
+    """JinaEmbedding.get_multimodal_embeddings calls record_model_call with correct args."""
     mock_ctx = MagicMock()
     mock_ctx.__enter__ = MagicMock(return_value=None)
     mock_ctx.__exit__ = MagicMock(return_value=False)
@@ -717,7 +722,7 @@ def test_jina_get_embeddings_calls_record_model_call(mocker):
     mock_resp.raise_for_status = Mock()
     mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
 
-    emb = JinaMultimodalEmbedding(api_key="k", ssl_verify=True)
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
     mocker.patch.object(emb.session, "post", return_value=mock_resp)
     emb.get_multimodal_embeddings([{"text": "hi"}], with_metadata=False, timeout=5)
 
@@ -750,6 +755,7 @@ def test_dashscope_init_sets_attributes(dashscope_embedding_instance):
     assert emb.model == "text-embedding-vision"
     assert emb.embedding_dim == 1024
     assert emb.ssl_verify is True
+    assert emb.model_type == "multimodal"
     assert "Authorization" in emb.headers
 
 
@@ -759,6 +765,17 @@ def test_dashscope_prepare_multimodal_input_formats_correctly(dashscope_embeddin
     result = dashscope_embedding_instance._prepare_multimodal_input(inputs)
     assert result["model"] == "text-embedding-vision"
     assert result["input"]["contents"] == inputs
+
+
+def test_siliconflow_init_sets_multimodal_model_type():
+    """Siliconflow multimodal clients must declare the indexing model type."""
+    embedding = SiliconflowMultimodalEmbedding(
+        api_key="dummy-key",
+        base_url="https://api.siliconflow.cn/v1/embeddings",
+        model_name="Qwen/Qwen3-VL-Embedding-8B",
+    )
+
+    assert embedding.model_type == "multimodal"
 
 
 def test_dashscope_get_embeddings_with_string_input(dashscope_embedding_instance):
@@ -1019,7 +1036,7 @@ def test_jina_get_multimodal_embeddings_generic_exception_propagates(jina_embedd
 
 @pytest.mark.asyncio
 async def test_jina_dimension_check_generic_exception_returns_empty(jina_embedding_instance):
-    """JinaMultimodalEmbedding.dimension_check should return [] on generic Exception."""
+    """JinaEmbedding.dimension_check should return [] on generic Exception."""
     with patch(
         "nexent.core.models.embedding_model.asyncio.to_thread",
         new_callable=AsyncMock,
@@ -1083,7 +1100,7 @@ def test_openai_get_embeddings_http_error_not_caught(openai_embedding_instance):
 
 
 def test_jina_get_embeddings_http_error_not_caught(jina_embedding_instance):
-    """HTTP errors should propagate for JinaMultimodalEmbedding too."""
+    """HTTP errors should propagate for JinaEmbedding too."""
     mock_resp = Mock()
     mock_resp.raise_for_status = Mock(side_effect=requests.HTTPError("Server error"))
     mock_resp.json = Mock(return_value={"data": []})
@@ -1197,3 +1214,499 @@ def test_dashscope_get_multimodal_embeddings_timeout_exhausts_raises(dashscope_e
         timeouts = [call.kwargs.get("timeout")
                     for call in dashscope_embedding_instance._make_request.call_args_list]
         assert timeouts == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Tests for _detect_image_mime utility
+# ---------------------------------------------------------------------------
+
+
+def test_detect_image_mime_png():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16) == "image/png"
+
+
+def test_detect_image_mime_jpeg():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"\xff\xd8\xff\xe0\x00\x10JFIF") == "image/jpeg"
+
+
+def test_detect_image_mime_webp():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP") == "image/webp"
+
+
+def test_detect_image_mime_bmp():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"BM" + b"\x00" * 16) == "image/bmp"
+
+
+def test_detect_image_mime_unknown_falls_back_to_jpeg():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"TEXT text file content") == "image/jpeg"
+
+
+def test_detect_image_mime_empty_falls_back_to_jpeg():
+    from nexent.core.models.embedding_model import _detect_image_mime
+    assert _detect_image_mime(b"") == "image/jpeg"
+
+
+# ---------------------------------------------------------------------------
+# Tests for JinaEmbedding._prepare_multimodal_input
+# ---------------------------------------------------------------------------
+
+
+def test_jina_prepare_multimodal_input_text_item():
+    from nexent.core.models.embedding_model import JinaEmbedding
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    result = emb._prepare_multimodal_input([{"text": "hello"}])
+    assert result["input"] == [{"text": "hello"}]
+    assert result["truncate"] is True
+
+
+def test_jina_prepare_multimodal_input_url_image_item():
+    from nexent.core.models.embedding_model import JinaEmbedding
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    result = emb._prepare_multimodal_input([{"image": "https://example.com/img.jpg"}])
+    assert result["input"] == [{"image": "https://example.com/img.jpg"}]
+
+
+def test_jina_prepare_multimodal_input_bytes_image_item():
+    from nexent.core.models.embedding_model import JinaEmbedding
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    result = emb._prepare_multimodal_input([{"image": png_bytes}])
+    assert result["input"][0]["image"].startswith("data:image/png;base64,")
+
+
+def test_jina_prepare_multimodal_input_other_item():
+    """Items with neither 'text' nor 'image' key are passed through as-is."""
+    from nexent.core.models.embedding_model import JinaEmbedding
+
+    emb = JinaEmbedding(api_key="k", ssl_verify=True)
+    result = emb._prepare_multimodal_input([{"video": "http://x.mov"}])
+    assert result["input"] == [{"video": "http://x.mov"}]
+
+
+# ---------------------------------------------------------------------------
+# Tests for JinaEmbedding exhausted-retries fallback [] path
+# ---------------------------------------------------------------------------
+
+
+def test_jina_get_embeddings_exhausted_retries_returns_empty(jina_embedding_instance):
+    """retries=-1 → attempts=0, loop body never runs, last_timeout stays None → returns []. (line 290)"""
+    result = jina_embedding_instance.get_embeddings("x", timeout=None, retries=-1)
+    assert result == []
+
+
+def test_jina_get_multimodal_embeddings_exhausted_retries_returns_empty(jina_embedding_instance):
+    """retries=-1 → attempts=0, loop body never runs, last_timeout stays None → returns []. (line 349)"""
+    result = jina_embedding_instance.get_multimodal_embeddings([{"text": "x"}], timeout=None, retries=-1)
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for SiliconflowMultimodalEmbedding
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def siliconflow_embedding_instance():
+    return SiliconflowMultimodalEmbedding(
+        api_key="dummy-key",
+        base_url="https://api.siliconflow.cn/v1/embeddings/multimodal",
+        model_name="Qwen/Qwen3-VL-Embedding-8B",
+        embedding_dim=1024,
+        ssl_verify=True,
+    )
+
+
+def test_siliconflow_init_sets_attributes(siliconflow_embedding_instance):
+    emb = siliconflow_embedding_instance
+    assert emb.api_key == "dummy-key"
+    assert emb.model == "Qwen/Qwen3-VL-Embedding-8B"
+    assert emb.embedding_dim == 1024
+    assert emb.ssl_verify is True
+    assert emb.model_type == "multimodal"
+    assert "Authorization" in emb.headers
+
+
+def test_siliconflow_prepare_multimodal_input_text_converts_to_plain_string():
+    from nexent.core.models.embedding_model import SiliconflowMultimodalEmbedding
+
+    emb = SiliconflowMultimodalEmbedding(
+        api_key="k",
+        base_url="https://api.siliconflow.cn/v1",
+        model_name="qwen-vl",
+    )
+    result = emb._prepare_multimodal_input([{"text": "hello"}])
+    assert result["input"] == ["hello"]
+    assert result["model"] == "qwen-vl"
+
+
+def test_siliconflow_prepare_multimodal_input_url_image_preserved():
+    from nexent.core.models.embedding_model import SiliconflowMultimodalEmbedding
+
+    emb = SiliconflowMultimodalEmbedding(api_key="k", base_url="https://api.x.com", model_name="m")
+    result = emb._prepare_multimodal_input([{"image": "https://cdn.example.com/pic.png"}])
+    assert result["input"] == [{"image": "https://cdn.example.com/pic.png"}]
+
+
+def test_siliconflow_prepare_multimodal_input_bytes_image_encodes():
+    from nexent.core.models.embedding_model import SiliconflowMultimodalEmbedding
+
+    emb = SiliconflowMultimodalEmbedding(api_key="k", base_url="https://api.x.com", model_name="m")
+    jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 8
+    result = emb._prepare_multimodal_input([{"image": jpeg_bytes}])
+    assert result["input"][0]["image"].startswith("data:image/jpeg;base64,")
+
+
+def test_siliconflow_prepare_multimodal_input_other_item_passed_through():
+    from nexent.core.models.embedding_model import SiliconflowMultimodalEmbedding
+
+    emb = SiliconflowMultimodalEmbedding(api_key="k", base_url="https://api.x.com", model_name="m")
+    result = emb._prepare_multimodal_input([{"audio": "http://x.mp3"}])
+    assert result["input"] == [{"audio": "http://x.mp3"}]
+
+
+def test_siliconflow_get_embeddings_string_wraps_to_list(siliconflow_embedding_instance):
+    """Siliconflow get_embeddings converts string to [{"text": ...}] then delegates."""
+    captured = {}
+
+    def side_effect(data, timeout=None):
+        captured["input"] = data["input"]
+        return {"data": [{"embedding": [0.1, 0.2]}]}
+
+    with patch.object(
+        siliconflow_embedding_instance, "_make_request", side_effect=side_effect
+    ):
+        result = siliconflow_embedding_instance.get_embeddings(
+            "hello", with_metadata=False, timeout=3
+        )
+        # Siliconflow wraps text as {"text": "..."} then _prepare_multimodal_input
+        # extracts it back to plain string "hello"
+        assert result == [[0.1, 0.2]]
+
+
+def test_siliconflow_get_embeddings_list_converts_to_text_dicts(siliconflow_embedding_instance):
+    """Siliconflow get_embeddings converts list of strings to plain strings via _prepare_multimodal_input."""
+    captured = {}
+
+    def side_effect(data, timeout=None):
+        captured["input"] = data["input"]
+        return {"data": [{"embedding": [0.3, 0.4]}]}
+
+    with patch.object(
+        siliconflow_embedding_instance, "_make_request", side_effect=side_effect
+    ):
+        result = siliconflow_embedding_instance.get_embeddings(
+            ["a", "b"], with_metadata=False, timeout=3
+        )
+        # _prepare_multimodal_input extracts text values to plain strings
+        assert captured["input"] == ["a", "b"]
+        assert result == [[0.3, 0.4]]
+
+
+def test_siliconflow_get_embeddings_with_metadata(siliconflow_embedding_instance):
+    fake_response = {"data": [{"embedding": [1.0]}], "usage": {"total": 1}}
+
+    with patch.object(
+        siliconflow_embedding_instance, "_make_request", return_value=fake_response
+    ):
+        result = siliconflow_embedding_instance.get_embeddings(
+            ["x"], with_metadata=True, timeout=1
+        )
+        assert result == fake_response
+
+
+def test_siliconflow_get_embeddings_timeout_retry_succeeds(siliconflow_embedding_instance):
+    fake_response = {"data": [{"embedding": [0.9]}]}
+
+    def side_effect(data, timeout=None):
+        calls = side_effect.calls
+        side_effect.calls += 1
+        if calls == 0:
+            raise requests.exceptions.Timeout()
+        return fake_response
+
+    side_effect.calls = 0
+
+    with patch.object(
+        siliconflow_embedding_instance, "_make_request", side_effect=side_effect
+    ):
+        result = siliconflow_embedding_instance.get_embeddings(
+            ["a"], with_metadata=False, timeout=None, retries=2, retry_timeout_step=2
+        )
+        assert result == [[0.9]]
+        timeouts = [
+            call.kwargs.get("timeout")
+            for call in siliconflow_embedding_instance._make_request.call_args_list
+        ]
+        assert timeouts == [2, 4]
+
+
+def test_siliconflow_get_embeddings_timeout_exhausts_raises(siliconflow_embedding_instance):
+    with patch.object(
+        siliconflow_embedding_instance, "_make_request",
+        side_effect=requests.exceptions.Timeout(),
+    ):
+        with pytest.raises(requests.exceptions.Timeout):
+            siliconflow_embedding_instance.get_embeddings(
+                ["x"], with_metadata=False, timeout=None, retries=2, retry_timeout_step=1
+            )
+        timeouts = [
+            call.kwargs.get("timeout")
+            for call in siliconflow_embedding_instance._make_request.call_args_list
+        ]
+        assert timeouts == [1, 2, 3]
+
+
+def test_siliconflow_get_embeddings_returns_empty_when_attempts_skipped(siliconflow_embedding_instance):
+    result = siliconflow_embedding_instance.get_embeddings(
+        ["x"], with_metadata=False, timeout=None, retries=-1
+    )
+    assert result == []
+
+
+def test_siliconflow_get_embeddings_zero_retries_succeeds_first_try(siliconflow_embedding_instance):
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.5]}]}
+
+    with patch.object(
+        siliconflow_embedding_instance.session, "post", return_value=mock_resp
+    ):
+        result = siliconflow_embedding_instance.get_embeddings(
+            ["x"], with_metadata=False, timeout=10, retries=0
+        )
+        assert result == [[0.5]]
+        siliconflow_embedding_instance.session.post.assert_called_once()
+
+
+def test_siliconflow_get_embeddings_connection_error_propagates(siliconflow_embedding_instance):
+    with patch.object(
+        siliconflow_embedding_instance.session, "post",
+        side_effect=requests.exceptions.ConnectionError(),
+    ):
+        with pytest.raises(requests.exceptions.ConnectionError):
+            siliconflow_embedding_instance.get_embeddings(
+                ["x"], with_metadata=False, timeout=5
+            )
+
+
+def test_siliconflow_get_embeddings_generic_exception_propagates(siliconflow_embedding_instance):
+    with patch.object(
+        siliconflow_embedding_instance.session, "post",
+        side_effect=RuntimeError("unexpected"),
+    ):
+        with pytest.raises(RuntimeError):
+            siliconflow_embedding_instance.get_embeddings(
+                ["x"], with_metadata=False, timeout=5
+            )
+
+
+def test_siliconflow_get_embeddings_http_error_propagates(siliconflow_embedding_instance):
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock(side_effect=requests.HTTPError("Server error"))
+    mock_resp.json = Mock(return_value={"data": []})
+
+    with patch.object(
+        siliconflow_embedding_instance.session, "post", return_value=mock_resp
+    ):
+        with pytest.raises(requests.HTTPError):
+            siliconflow_embedding_instance.get_embeddings(
+                ["x"], with_metadata=False, timeout=5
+            )
+
+
+def test_siliconflow_make_request_invokes_session_post(siliconflow_embedding_instance):
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
+
+    with patch.object(
+        siliconflow_embedding_instance.session, "post", return_value=mock_resp
+    ) as mock_post:
+        result = siliconflow_embedding_instance._make_request(
+            {"model": "x", "input": []}, timeout=5
+        )
+        assert result["data"][0]["embedding"] == [0.1]
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args.kwargs
+        assert call_kwargs["timeout"] == 5
+        assert call_kwargs["verify"] is True
+
+
+def test_siliconflow_make_request_raises_http_error(siliconflow_embedding_instance):
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock(side_effect=requests.HTTPError("Bad Gateway"))
+    mock_resp.json.return_value = {}
+
+    with patch.object(
+        siliconflow_embedding_instance.session, "post", return_value=mock_resp
+    ):
+        with pytest.raises(requests.HTTPError):
+            siliconflow_embedding_instance._make_request({}, timeout=5)
+
+
+def test_siliconflow_get_embeddings_calls_record_model_call(mocker):
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=None)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
+    mock_record = mocker.patch(
+        "nexent.core.models.embedding_model.record_model_call",
+        return_value=mock_ctx,
+    )
+    mock_resp = Mock()
+    mock_resp.raise_for_status = Mock()
+    mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2]}]}
+
+    emb = SiliconflowMultimodalEmbedding(
+        api_key="k",
+        base_url="https://api.siliconflow.cn/v1",
+        model_name="qwen-vl",
+        embedding_dim=2,
+        ssl_verify=True,
+    )
+    mocker.patch.object(emb.session, "post", return_value=mock_resp)
+    emb.get_embeddings(["hello"], with_metadata=False, timeout=5)
+
+    mock_record.assert_called_once_with(
+        "multi_embedding", "qwen-vl", display_name="qwen-vl"
+    )
+
+
+@pytest.mark.asyncio
+async def test_siliconflow_dimension_check_success(siliconflow_embedding_instance):
+    with patch(
+        "nexent.core.models.embedding_model.asyncio.to_thread",
+        new_callable=AsyncMock,
+        return_value=[[0.1, 0.2, 0.3]],
+    ):
+        result = await siliconflow_embedding_instance.dimension_check()
+        assert result == [[0.1, 0.2, 0.3]]
+
+
+@pytest.mark.asyncio
+async def test_siliconflow_dimension_check_timeout_returns_empty(siliconflow_embedding_instance):
+    async def raise_timeout(*args, **kwargs):
+        raise requests.exceptions.Timeout()
+
+    with patch(
+        "nexent.core.models.embedding_model.asyncio.to_thread",
+        side_effect=raise_timeout,
+    ):
+        result = await siliconflow_embedding_instance.dimension_check(timeout=3.0)
+        assert result == []
+
+
+@pytest.mark.asyncio
+async def test_siliconflow_dimension_check_connection_error_returns_empty(siliconflow_embedding_instance):
+    with patch(
+        "nexent.core.models.embedding_model.asyncio.to_thread",
+        new_callable=AsyncMock,
+        side_effect=requests.exceptions.ConnectionError(),
+    ):
+        result = await siliconflow_embedding_instance.dimension_check()
+        assert result == []
+
+
+@pytest.mark.asyncio
+async def test_siliconflow_dimension_check_generic_exception_returns_empty(siliconflow_embedding_instance):
+    with patch(
+        "nexent.core.models.embedding_model.asyncio.to_thread",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unexpected"),
+    ):
+        result = await siliconflow_embedding_instance.dimension_check()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for DashScopeMultimodalEmbedding._prepare_multimodal_input bytes path
+# ---------------------------------------------------------------------------
+
+
+def test_dashscope_prepare_multimodal_input_bytes_image_encodes_png():
+    from nexent.core.models.embedding_model import DashScopeMultimodalEmbedding
+
+    emb = DashScopeMultimodalEmbedding(
+        api_key="k",
+        base_url="https://dashscope.example.com",
+        model_name="text-embedding-vision",
+    )
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    result = emb._prepare_multimodal_input([{"image": png_bytes}])
+    assert result["input"]["contents"][0]["image"].startswith("data:image/png;base64,")
+
+
+def test_dashscope_prepare_multimodal_input_url_image_preserved():
+    from nexent.core.models.embedding_model import DashScopeMultimodalEmbedding
+
+    emb = DashScopeMultimodalEmbedding(
+        api_key="k",
+        base_url="https://dashscope.example.com",
+        model_name="text-embedding-vision",
+    )
+    result = emb._prepare_multimodal_input([{"image": "https://cdn.example.com/photo.jpg"}])
+    assert result["input"]["contents"] == [{"image": "https://cdn.example.com/photo.jpg"}]
+
+
+def test_dashscope_prepare_multimodal_input_text_item_preserved():
+    from nexent.core.models.embedding_model import DashScopeMultimodalEmbedding
+
+    emb = DashScopeMultimodalEmbedding(
+        api_key="k",
+        base_url="https://dashscope.example.com",
+        model_name="text-embedding-vision",
+    )
+    result = emb._prepare_multimodal_input([{"text": "hello dashscope"}])
+    assert result["input"]["contents"] == [{"text": "hello dashscope"}]
+
+
+# ---------------------------------------------------------------------------
+# Tests for DashScopeMultimodalEmbedding exhausted-retries [] path
+# ---------------------------------------------------------------------------
+
+
+def test_dashscope_get_embeddings_exhausted_retries_returns_empty(dashscope_embedding_instance):
+    result = dashscope_embedding_instance.get_embeddings(
+        ["x"], with_metadata=False, timeout=None, retries=-1
+    )
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for MultimodalEmbedding abstract base class super().__init__
+# ---------------------------------------------------------------------------
+
+
+def test_multimodal_embedding_super_init_executes():
+    """Create a concrete subclass of MultimodalEmbedding that calls super().__init__."""
+    from nexent.core.models.embedding_model import MultimodalEmbedding
+
+    class ConcreteMultimodal(MultimodalEmbedding):  # type: ignore[misc]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+        def get_embeddings(self, *args, **kwargs):
+            return []
+
+        def get_multimodal_embeddings(self, *args, **kwargs):
+            return []
+
+        async def dimension_check(self, timeout: float = 5.0):
+            return []
+
+    inst = ConcreteMultimodal(
+        model_name="m",
+        base_url="u",
+        api_key="k",
+        embedding_dim=512,
+        ssl_verify=False,
+    )
+    assert inst is not None
+    assert isinstance(inst, MultimodalEmbedding)

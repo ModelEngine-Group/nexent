@@ -7,16 +7,19 @@ import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 
 import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import UserList from "./resources/UserList";
 import ModelList from "./resources/ModelList";
-import KnowledgeList from "./resources/KnowledgeList";
+import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
+import ProjectConfigTab from "./resources/projectConfig";
 
 export default function AssetOwnerResourcesComp() {
   const { t } = useTranslation("common");
+  const { enableAidpKnowledge } = useDeployment();
   const userListRefreshKey = 0;
   const invitationListRefreshKey = 0;
 
@@ -71,11 +74,17 @@ export default function AssetOwnerResourcesComp() {
                 label: t("tenantResources.tabs.models"),
                 children: <ModelList tenantId={ASSET_OWNER_TENANT_ID} />,
               },
-              {
-                key: "knowledge",
-                label: t("tenantResources.tabs.knowledge"),
-                children: <KnowledgeList tenantId={ASSET_OWNER_TENANT_ID} />,
-              },
+              // When AIDP knowledge is enabled, the knowledge tab is managed
+              // via the unified `/knowledges` entry and must not appear here.
+              ...(!enableAidpKnowledge
+                ? [
+                    {
+                      key: "knowledge",
+                      label: t("tenantResources.tabs.knowledge"),
+                      children: <PlatformQuotaPanel />,
+                    },
+                  ]
+                : []),
               {
                 key: "agents",
                 label: t("tenantResources.tabs.agents"),

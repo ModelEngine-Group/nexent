@@ -21,6 +21,9 @@ export default function McpRegistryCard({
 }: McpRegistryCardProps) {
   const { t } = useTranslation("common");
   const server = service.server;
+  const canQuickAdd
+    = (Array.isArray(server.remotes) && server.remotes.length > 0)
+    || (Array.isArray(server.packages) && server.packages.length > 0);
   const officialMeta = ((
     service._meta as Record<string, unknown> | undefined
   )?.["io.modelcontextprotocol.registry/official"] || {}) as Record<
@@ -65,16 +68,28 @@ export default function McpRegistryCard({
       </div>
 
       <div className="mt-2 flex shrink-0 justify-end">
-        <Button
-          size="small"
-          type="primary"
-          onClick={(event) => {
-            event.stopPropagation();
-            onQuickAdd(service);
-          }}
-        >
-          {t("mcpTools.registry.quickAdd")}
-        </Button>
+        {canQuickAdd ? (
+          <Button
+            size="small"
+            type="primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              onQuickAdd(service);
+            }}
+          >
+            {t("mcpTools.registry.quickAdd")}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(service);
+            }}
+          >
+            {t("mcpTools.registry.viewDetail")}
+          </Button>
+        )}
       </div>
     </div>
   );

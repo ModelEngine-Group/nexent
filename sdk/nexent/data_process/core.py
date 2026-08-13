@@ -12,7 +12,7 @@ from .unstructured_processor import UnstructuredProcessor
 
 
 logger = logging.getLogger("data_process.core")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class DataProcessCore:

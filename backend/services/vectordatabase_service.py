@@ -11,23 +11,43 @@ Main features include:
 """
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, OpenAICompatibleMultimodalEmbedding, JinaMultimodalEmbedding, SiliconMultimodalEmbedding, DashScopeMultimodalEmbedding, BaseEmbedding, VolcengineMultimodalEmbedding
+from nexent.core.models.embedding_model import (
+    BaseEmbedding,
+    DashScopeMultimodalEmbedding,
+    JinaEmbedding,
+    OpenAICompatibleEmbedding,
+    SiliconflowMultimodalEmbedding,
+)
 from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ, ASSET_OWNER_TENANT_ID
+from consts.const import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
+    ASSET_OWNER_TENANT_ID,
+    CAN_EDIT_ALL_USER_ROLES,
+    DATAMATE_URL,
+    ES_API_KEY,
+    ES_HOST,
+    IS_SPEED_MODE,
+    LANGUAGE,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+    VectorDatabaseType,
+)
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
@@ -41,7 +61,11 @@ from database.knowledge_db import (
     update_last_summary_time,
     update_embedding_model_by_index_name,
 )
-
+from database.knowledge_storage_object_db import list_committed_storage_objects
+from services.knowledge_storage_service import (
+    release_storage_charge,
+    resolve_storage_reference,
+)
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
@@ -225,6 +249,11 @@ ALLOWED_CHUNK_FIELDS = {
 # Configure logging
 logger = logging.getLogger("vectordatabase_service")
 
+_QUOTA_LIMIT_UNSET = object()
+_SKIP_INDEX_SOURCE_CLEANUP: ContextVar[bool] = ContextVar(
+    "skip_index_source_cleanup", default=False
+)
+
 
 def get_vector_db_core(
     db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
@@ -329,6 +358,7 @@ def _build_model_config(model: dict) -> dict:
 
 def _create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
+    model_type = model.get("model_type", "embedding")
     common_kwargs = {
         "api_key": model_config.get("api_key", ""),
         "base_url": model_config.get("base_url", ""),
@@ -336,17 +366,22 @@ def _create_embedding_model(model: dict) -> Any:
         "embedding_dim": model_config.get("max_tokens", 1024),
         "ssl_verify": model_config.get("ssl_verify", True),
     }
-    if model.get("model_type", "embedding") == "multi_embedding":
+
+    if model_type == "multi_embedding":
         model_factory = model.get("model_factory", "").lower()
         if model_factory == "dashscope":
             return DashScopeMultimodalEmbedding(**common_kwargs)
-        elif model_factory == "silicon":
-            return SiliconMultimodalEmbedding(**common_kwargs)
-        elif model_factory == "volcengine":
-            return VolcengineMultimodalEmbedding(**common_kwargs)
-        elif model_factory == "jina":
-            return JinaMultimodalEmbedding(**common_kwargs)
-        return OpenAICompatibleMultimodalEmbedding(**common_kwargs)
+        if model_factory == "silicon":
+            return SiliconflowMultimodalEmbedding(**common_kwargs)
+        return JinaEmbedding(**common_kwargs)
+
+    if model_type != "embedding":
+        raise ValueError(
+            f"Invalid model_type '{model_type}' for model '{common_kwargs['model_name']}'. "
+            f"Expected 'embedding' or 'multi_embedding', got '{model_type}'. "
+            f"Please check the model configuration in the model management page."
+        )
+
     return OpenAICompatibleEmbedding(**common_kwargs)
 
 def get_embedding_model(
@@ -419,8 +454,7 @@ def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[A
     try:
         model = get_model_by_model_id(model_id, tenant_id)
         if model and model.get("model_type") in ["embedding", "multi_embedding"]:
-            embedding_model = _create_embedding_model(model)
-            return embedding_model, model.get("model_id")
+            return _create_embedding_model(model), model.get("model_id")
         else:
             logger.warning(f"Model with id {model_id} not found or is not an embedding model")
     except Exception as e:
@@ -475,6 +509,158 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
 
 
 class ElasticSearchService:
+    CREATOR_PERMISSION = "CREATOR"
+
+    @staticmethod
+    def resolve_knowledge_base_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve the current user's permission for one knowledge base."""
+        record = get_knowledge_record({"index_name": index_name})
+        if not record:
+            raise ValueError(f"Knowledge base '{index_name}' not found")
+
+        if record.get("knowledge_sources") == "datamate":
+            return PERMISSION_READ
+
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant and not IS_SPEED_MODE:
+            return None
+
+        user_role = (user_tenant or {}).get("user_role")
+        user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
+        effective_user_role = user_role
+        if user_id == user_tenant_id:
+            effective_user_role = "ADMIN"
+            logger.info(f"User {user_id} identified as legacy admin")
+        elif IS_SPEED_MODE:
+            effective_user_role = "SPEED"
+            logger.info("User under SPEED version is treated as admin")
+
+        role = (effective_user_role or "").upper()
+        record_tenant_id = str(record.get("tenant_id") or "")
+        is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
+
+        if is_asset_owner_record:
+            if role == "ASSET_OWNER":
+                return PERMISSION_EDIT
+            if role in {"SU", "ADMIN", "SPEED", "DEV"}:
+                return PERMISSION_READ
+            return None
+
+        if record_tenant_id and user_tenant_id and record_tenant_id != user_tenant_id:
+            return None
+
+        if role in CAN_EDIT_ALL_USER_ROLES:
+            return PERMISSION_EDIT
+
+        if role in {"USER", "DEV"}:
+            if str(record.get("created_by")) == str(user_id):
+                return ElasticSearchService.CREATOR_PERMISSION
+
+            kb_group_ids_str = record.get("group_ids")
+            kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
+            user_group_ids = query_group_ids_by_user(user_id)
+
+            kb_groups_empty = (
+                kb_group_ids_str is None
+                or (isinstance(kb_group_ids_str, str) and kb_group_ids_str.strip() == "")
+                or len(kb_group_ids) == 0
+            )
+            user_groups_empty = len(user_group_ids) == 0
+
+            has_group_intersection = (
+                True
+                if kb_groups_empty and user_groups_empty
+                else bool(set(user_group_ids) & set(kb_group_ids))
+            )
+            if not has_group_intersection:
+                return None
+
+            ingroup_permission = record.get("ingroup_permission") or PERMISSION_READ
+            if ingroup_permission == PERMISSION_EDIT:
+                return PERMISSION_EDIT
+            if ingroup_permission == PERMISSION_READ:
+                return PERMISSION_READ
+            if ingroup_permission == "PRIVATE":
+                return None
+
+        return None
+
+    @staticmethod
+    def require_knowledge_base_edit_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> str:
+        """Raise when the current user cannot modify the knowledge base."""
+        permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=index_name,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if permission not in {PERMISSION_EDIT, ElasticSearchService.CREATOR_PERMISSION}:
+            raise PermissionError("No permission to modify this knowledge base")
+        return permission
+
+    @staticmethod
+    def require_knowledge_base_read_permission(
+        index_name: str,
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> str:
+        """Raise when the current user cannot read the knowledge base.
+
+        Accepts any non-None permission level (READ_ONLY, EDIT, or CREATOR).
+        """
+        permission = ElasticSearchService.resolve_knowledge_base_permission(
+            index_name=index_name,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if permission is None:
+            raise PermissionError("No permission to access this knowledge base")
+        return permission
+
+    @staticmethod
+    def filter_accessible_indices(
+        index_names: List[str],
+        user_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return only the indices the user has at least read access to.
+
+        Indices whose knowledge base record cannot be found, or whose permission
+        check fails for any reason, are treated as inaccessible and dropped.
+        Order of the accessible subset is preserved.
+        """
+        accessible: List[str] = []
+        for index_name in index_names:
+            try:
+                permission = ElasticSearchService.resolve_knowledge_base_permission(
+                    index_name=index_name,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except ValueError:
+                # Knowledge base record not found in the DB - treat as inaccessible.
+                logger.warning(
+                    "Knowledge base '%s' not found during permission check, skipping",
+                    index_name,
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    "Permission check failed for knowledge base '%s': %s", index_name, e
+                )
+                continue
+
+            if permission is not None:
+                accessible.append(index_name)
+        return accessible
+
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
         """
@@ -484,59 +670,11 @@ class ElasticSearchService:
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
         try:
-            # 1. Get all files associated with the index from Elasticsearch
-            logger.debug(
-                f"Step 1/4: Retrieving file list for index: {index_name}")
-            try:
-                file_list_result = await ElasticSearchService.list_files(index_name, include_chunks=False,
-                                                                         vdb_core=vdb_core)
-                files_to_delete = file_list_result.get("files", [])
-                logger.debug(
-                    f"Found {len(files_to_delete)} files to delete from MinIO for index '{index_name}'.")
-            except Exception as e:
-                logger.error(
-                    f"Failed to retrieve file list for index '{index_name}': {str(e)}")
-                # We can still proceed to delete the index itself even if listing files fails
-                files_to_delete = []
-
-            # 2. Delete files from MinIO
-            minio_deletion_success_count = 0
-            minio_deletion_failure_count = 0
-            if files_to_delete:
-                logger.debug(
-                    f"Step 2/4: Starting deletion of {len(files_to_delete)} files from MinIO.")
-                for file_info in files_to_delete:
-                    object_name = file_info.get("path_or_url")
-                    if not object_name:
-                        logger.warning(
-                            f"Could not find 'path_or_url' for file entry: {file_info}. Skipping deletion.")
-                        minio_deletion_failure_count += 1
-                        continue
-
-                    try:
-                        logger.debug(
-                            f"Deleting object: '{object_name}' from MinIO for index '{index_name}'")
-                        delete_result = delete_file(object_name=object_name)
-                        if delete_result.get("success"):
-                            logger.debug(
-                                f"Successfully deleted object: '{object_name}' from MinIO.")
-                            minio_deletion_success_count += 1
-                        else:
-                            minio_deletion_failure_count += 1
-                            error_msg = delete_result.get(
-                                "error", "Unknown error")
-                            logger.error(
-                                f"Failed to delete object: '{object_name}' from MinIO. Reason: {error_msg}")
-                    except Exception as e:
-                        minio_deletion_failure_count += 1
-                        logger.error(
-                            f"An exception occurred while deleting object: '{object_name}' from MinIO. Error: {str(e)}")
-
-                logger.info(f"MinIO file deletion summary for index '{index_name}': "
-                            f"{minio_deletion_success_count} succeeded, {minio_deletion_failure_count} failed.")
-            else:
-                logger.debug(
-                    f"Step 2/4: No files found in index '{index_name}', skipping MinIO deletion.")
+            minio_cleanup = await ElasticSearchService._delete_kb_source_objects(
+                index_name=index_name,
+                vdb_core=vdb_core,
+                updated_by=user_id,
+            )
 
             # 3. Mark all related tasks as cancelled and clean up Redis records BEFORE deleting ES index
             # This ensures ongoing indexing tasks will detect cancellation and stop immediately
@@ -559,22 +697,25 @@ class ElasticSearchService:
             # 4. Delete Elasticsearch index and its DB record
             logger.debug(
                 f"Step 4/5: Deleting Elasticsearch index '{index_name}' and its database record.")
-            delete_index_result = await ElasticSearchService.delete_index(index_name, vdb_core, user_id)
+            cleanup_token = _SKIP_INDEX_SOURCE_CLEANUP.set(True)
+            try:
+                delete_index_result = await ElasticSearchService.delete_index(
+                    index_name, vdb_core, user_id
+                )
+            finally:
+                _SKIP_INDEX_SOURCE_CLEANUP.reset(cleanup_token)
 
             # Construct final result
             result = {
                 "status": "success",
                 "message": (
                     f"Index {index_name} deleted successfully. "
-                    f"MinIO: {minio_deletion_success_count} files deleted, {minio_deletion_failure_count} failed. "
+                    f"MinIO: {minio_cleanup['deleted_count']} files deleted, "
+                    f"{minio_cleanup['failed_count']} failed. "
                     f"Redis: Cleaned up {redis_cleanup_result.get('total_deleted', 0)} records."
                 ),
                 "es_delete_result": delete_index_result,
-                "minio_cleanup": {
-                    "total_files_found": len(files_to_delete),
-                    "deleted_count": minio_deletion_success_count,
-                    "failed_count": minio_deletion_failure_count
-                },
+                "minio_cleanup": minio_cleanup,
                 "redis_cleanup": redis_cleanup_result
             }
 
@@ -589,6 +730,153 @@ class ElasticSearchService:
             logger.error(
                 f"Error during full deletion of index '{index_name}': {str(e)}", exc_info=True)
             raise e
+
+    @staticmethod
+    async def _delete_kb_source_objects(
+        index_name: str,
+        vdb_core: VectorDatabaseCore,
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Delete the canonical union of ES references and active ledger objects."""
+        try:
+            knowledge = get_knowledge_record({"index_name": index_name}) or {}
+        except Exception:
+            logger.exception(
+                "Failed to retrieve knowledge record for index '%s'",
+                index_name,
+            )
+            knowledge = {}
+        tenant_id = knowledge.get("tenant_id")
+        knowledge_id = knowledge.get("knowledge_id")
+
+        ledger_objects: List[Dict[str, Any]] = []
+        if tenant_id and knowledge_id is not None:
+            try:
+                ledger_objects = list_committed_storage_objects(
+                    tenant_id=tenant_id,
+                    knowledge_id=knowledge_id,
+                ) or []
+            except Exception:
+                logger.exception(
+                    "Failed to retrieve active storage ledger objects for index '%s'",
+                    index_name,
+                )
+
+        try:
+            file_list_result = await ElasticSearchService.list_files(
+                index_name,
+                include_chunks=False,
+                vdb_core=vdb_core,
+            )
+            files_to_delete = file_list_result.get("files", [])
+        except Exception:
+            logger.exception(
+                "Failed to retrieve file list for index '%s'",
+                index_name,
+            )
+            files_to_delete = []
+
+        targets, invalid_entries = ElasticSearchService._collect_kb_source_targets(
+            ledger_objects,
+            files_to_delete,
+        )
+
+        deleted_count = 0
+        failed_count = invalid_entries
+        for target in targets.values():
+            if ElasticSearchService._delete_kb_source_target(
+                target=target,
+                tenant_id=tenant_id,
+                updated_by=updated_by,
+            ):
+                deleted_count += 1
+            else:
+                failed_count += 1
+
+        logger.info(
+            "MinIO file deletion summary for index '%s': %s succeeded, %s failed.",
+            index_name,
+            deleted_count,
+            failed_count,
+        )
+        return {
+            "total_files_found": len(targets) + invalid_entries,
+            "deleted_count": deleted_count,
+            "failed_count": failed_count,
+        }
+
+    @staticmethod
+    def _collect_kb_source_targets(
+        ledger_objects: List[Dict[str, Any]],
+        es_files: List[Dict[str, Any]],
+    ) -> tuple[Dict[tuple, Dict[str, str]], int]:
+        """Build canonical deletion targets and skip ambiguous ES references."""
+        targets: Dict[tuple, Dict[str, str]] = {}
+        ledger_aliases = set()
+        for row in ledger_objects:
+            bucket_name = row.get("bucket_name")
+            object_name = row.get("object_name")
+            if not bucket_name or not object_name:
+                continue
+            identity = (bucket_name, object_name)
+            targets[identity] = {
+                "bucket_name": bucket_name,
+                "object_name": object_name,
+            }
+            ledger_aliases.update({
+                object_name,
+                f"s3://{bucket_name}/{object_name}",
+                f"/{bucket_name}/{object_name}",
+            })
+
+        invalid_entries = 0
+        for file_info in es_files:
+            raw_path = file_info.get("path_or_url")
+            if not raw_path or raw_path in ledger_aliases:
+                invalid_entries += int(not raw_path)
+                continue
+            reference = resolve_storage_reference(raw_path)
+            if reference is None:
+                invalid_entries += 1
+                logger.warning("Skipping non-canonical KB source reference during deletion")
+                continue
+            identity = (reference.bucket_name, reference.object_name)
+            targets.setdefault(identity, {
+                "bucket_name": reference.bucket_name,
+                "object_name": reference.object_name,
+            })
+        return targets, invalid_entries
+
+    @staticmethod
+    def _delete_kb_source_target(
+        *,
+        target: Dict[str, str],
+        tenant_id: Optional[str],
+        updated_by: Optional[str],
+    ) -> bool:
+        """Delete one canonical source target and release its ledger charge."""
+        object_name = target["object_name"]
+        bucket_name = target["bucket_name"]
+        try:
+            delete_result = delete_file(object_name=object_name, bucket=bucket_name)
+            if not delete_result.get("success"):
+                logger.error("Failed to delete a canonical KB source object from MinIO")
+                return False
+        except Exception:
+            logger.exception("Failed to delete a canonical KB source object from MinIO")
+            return False
+
+        if tenant_id:
+            try:
+                release_storage_charge(
+                    tenant_id=tenant_id,
+                    bucket_name=bucket_name,
+                    object_name=object_name,
+                    updated_by=updated_by,
+                )
+            except Exception:
+                logger.exception("Failed to release a deleted KB source object's charge")
+        return True
 
     @staticmethod
     def create_index(
@@ -637,9 +925,9 @@ class ElasticSearchService:
             tenant_id: Optional[str],
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
-            embedding_model_name: Optional[str] = None,
-            is_multimodal: Optional[bool] = None,
+            embedding_model_id: Optional[int] = None,
             preserve_source_file: Optional[bool] = None,
+            quota_limit_bytes: Optional[int] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -657,8 +945,7 @@ class ElasticSearchService:
             tenant_id: Tenant ID
             ingroup_permission: Permission level (optional)
             group_ids: List of group IDs (optional)
-            embedding_model_name: Specific embedding model name to use (optional).
-                                   If provided, will use this model instead of tenant default.
+            embedding_model_id: Unique ID of the selected embedding model.
             preserve_source_file: Whether to preserve uploaded source documents after
                                    vectorization (optional; defaults to True when omitted).
 
@@ -666,24 +953,19 @@ class ElasticSearchService:
         with an explicit index_name.
         """
         try:
-            # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            selected_model_type = None
-            if is_multimodal is True:
-                selected_model_type = "multi_embedding"
-            elif is_multimodal is False and embedding_model_name:
-                selected_model_type = "embedding"
+            if embedding_model_id is None:
+                raise ValueError("embedding_model_id is required")
 
-            embedding_model, model_id = get_embedding_model(
-                tenant_id,
-                embedding_model_name,
-                selected_model_type
-            )
+            model = get_model_by_model_id(embedding_model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Embedding model with id {embedding_model_id} not found")
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model with id {embedding_model_id} is not an embedding model"
+                )
 
-            # Determine the embedding model name to save: use user-provided name if available,
-            # otherwise use the model's display name
-            saved_embedding_model_name = embedding_model_name
-            if not saved_embedding_model_name and embedding_model:
-                saved_embedding_model_name = embedding_model.model
+            embedding_model = _create_embedding_model(model)
+            saved_embedding_model_name = model.get("display_name") or model.get("model_name")
 
             # Create knowledge record first to obtain knowledge_id and generated index_name
             knowledge_data = {
@@ -692,7 +974,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
-                "embedding_model_id": model_id,
+                "embedding_model_id": embedding_model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -702,6 +984,8 @@ class ElasticSearchService:
                 knowledge_data["group_ids"] = group_ids
             if preserve_source_file is not None:
                 knowledge_data["preserve_source_file"] = preserve_source_file
+            if quota_limit_bytes is not None:
+                knowledge_data["quota_limit_bytes"] = quota_limit_bytes
 
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
@@ -719,9 +1003,13 @@ class ElasticSearchService:
                 "status": "success",
                 "message": f"Index {index_name} created successfully",
                 "id": index_name,
+                "embedding_model_name": saved_embedding_model_name,
+                "model_type": model.get("model_type"),
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except ValueError:
+            raise
         except Exception as e:
             raise Exception(f"Error creating knowledge base: {str(e)}")
 
@@ -733,6 +1021,7 @@ class ElasticSearchService:
             group_ids: Optional[List[int]] = None,
             tenant_id: Optional[str] = None,
             user_id: Optional[str] = None,
+            quota_limit_bytes: Any = _QUOTA_LIMIT_UNSET,
     ) -> bool:
         """
         Update knowledge base information (name, group permission, group assignments).
@@ -744,6 +1033,7 @@ class ElasticSearchService:
             group_ids: List of group IDs to assign (optional)
             tenant_id: ID of the tenant (optional, for validation)
             user_id: ID of the user making the update
+            quota_limit_bytes: New soft quota in bytes; None removes the quota
 
         Returns:
             bool: Whether the update was successful
@@ -772,6 +1062,9 @@ class ElasticSearchService:
         if group_ids is not None:
             # Convert list to string for database storage
             update_data["group_ids"] = convert_list_to_string(group_ids)
+
+        if quota_limit_bytes is not _QUOTA_LIMIT_UNSET:
+            update_data["quota_limit_bytes"] = quota_limit_bytes
 
         # Call database update function
         result = update_knowledge_record(update_data)
@@ -862,31 +1155,25 @@ class ElasticSearchService:
                 None, description="ID of the user delete the knowledge base"),
     ):
         try:
-            # 1. Get list of files from the index
-            try:
-                files_to_delete = await ElasticSearchService.list_files(index_name, vdb_core=vdb_core)
-                if files_to_delete and files_to_delete.get("files"):
-                    # 2. Delete files from MinIO storage
-                    for file_info in files_to_delete["files"]:
-                        object_name = file_info.get("path_or_url")
-                        source_type = file_info.get("source_type")
-                        if object_name and source_type == "minio":
-                            logger.info(
-                                f"Deleting file {object_name} from MinIO for index {index_name}")
-                            delete_file(object_name)
-            except Exception as e:
-                # Log the error but don't block the index deletion
-                logger.error(
-                    f"Error deleting associated files from MinIO for index {index_name}: {str(e)}")
+            if not _SKIP_INDEX_SOURCE_CLEANUP.get():
+                try:
+                    await ElasticSearchService._delete_kb_source_objects(
+                        index_name=index_name,
+                        vdb_core=vdb_core,
+                        updated_by=user_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error deleting associated files from MinIO for index {index_name}: {str(e)}")
 
-            # 3. Delete the index in Elasticsearch
+            # Delete the index in Elasticsearch
             success = vdb_core.delete_index(index_name)
             if not success:
                 # Even if deletion fails, we proceed to database record cleanup
                 logger.warning(
                     f"Index {index_name} not found in Elasticsearch or could not be deleted, but proceeding with DB cleanup.")
 
-            # 4. Delete the knowledge base record from the database
+            # Delete the knowledge base record from the database
             update_data = {
                 "updated_by": user_id,
                 "index_name": index_name
@@ -995,39 +1282,39 @@ class ElasticSearchService:
                 kb_ingroup_permission = record.get(
                     "ingroup_permission") or PERMISSION_READ
 
-                # Check if user belongs to any of the knowledgebase groups
-                # Compatibility logic for legacy data:
-                # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
-                #   consider them intersecting (backward compatibility)
-                # - If either side has groups but they don't intersect, no intersection
-                kb_groups_empty = kb_group_ids_str is None or (isinstance(
-                    kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
-                user_groups_empty = len(user_group_ids) == 0
-
-                if kb_groups_empty and user_groups_empty:
-                    # Both are empty/None - consider intersecting for backward compatibility
-                    has_group_intersection = True
+                if str(kb_created_by) == str(user_id):
+                    permission = "CREATOR"
                 else:
-                    # Normal intersection check
-                    has_group_intersection = bool(
-                        set(user_group_ids) & set(kb_group_ids))
+                    # Check if user belongs to any of the knowledgebase groups
+                    # Compatibility logic for legacy data:
+                    # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
+                    #   consider them intersecting (backward compatibility)
+                    # - If either side has groups but they don't intersect, no intersection
+                    kb_groups_empty = kb_group_ids_str is None or (isinstance(
+                        kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
+                    user_groups_empty = len(user_group_ids) == 0
 
-                if has_group_intersection:
-                    # Determine permission level
-                    permission = PERMISSION_READ  # Default
+                    if kb_groups_empty and user_groups_empty:
+                        # Both are empty/None - consider intersecting for backward compatibility
+                        has_group_intersection = True
+                    else:
+                        # Normal intersection check
+                        has_group_intersection = bool(
+                            set(user_group_ids) & set(kb_group_ids))
 
-                    # User is creator: creator permission
-                    if kb_created_by == user_id:
-                        permission = "CREATOR"
-                    # Group permission allows editing
-                    elif kb_ingroup_permission == PERMISSION_EDIT:
-                        permission = PERMISSION_EDIT
-                    # Group permission is read-only: already set
-                    elif kb_ingroup_permission == PERMISSION_READ:
-                        permission = PERMISSION_READ
-                    # Group permission is private: not visible
-                    elif kb_ingroup_permission == "PRIVATE":
-                        permission = None
+                    if has_group_intersection:
+                        # Determine permission level
+                        permission = PERMISSION_READ  # Default
+
+                        # Group permission allows editing
+                        if kb_ingroup_permission == PERMISSION_EDIT:
+                            permission = PERMISSION_EDIT
+                        # Group permission is read-only: already set
+                        elif kb_ingroup_permission == PERMISSION_READ:
+                            permission = PERMISSION_READ
+                        # Group permission is private: not visible
+                        elif kb_ingroup_permission == "PRIVATE":
+                            permission = None
 
             # Add to visible list if permission is granted
             if permission:
@@ -1060,6 +1347,10 @@ class ElasticSearchService:
         response = {
             "indices": indices,
             "count": len(indices),
+            "index_permissions": {
+                record["index_name"]: record["permission"]
+                for record in visible_knowledgebases
+            },
         }
 
         if include_stats:
@@ -1241,7 +1532,7 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
-                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "embedding" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
                     key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)
@@ -1529,15 +1820,38 @@ class ElasticSearchService:
         status = file_data.get("status", "")
         if status != "COMPLETED":
             return True
-        if path_or_url.startswith("knowledge_base/"):
+        if path_or_url.startswith((
+            "knowledge_base/",
+            f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/",
+        )):
             return file_exists(path_or_url)
         return True
 
     @staticmethod
-    def delete_source_file(path_or_url: str) -> Dict[str, Any]:
+    def delete_source_file(
+        path_or_url: str,
+        tenant_id: Optional[str] = None,
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Remove MinIO source (and preview cache); does not touch Elasticsearch."""
         minio_result = delete_file(path_or_url)
         deleted_minio = bool(minio_result.get("success"))
+
+        if deleted_minio and tenant_id:
+            reference = resolve_storage_reference(path_or_url)
+            if reference:
+                try:
+                    release_storage_charge(
+                        tenant_id=tenant_id,
+                        bucket_name=reference.bucket_name,
+                        object_name=reference.object_name,
+                        updated_by=updated_by,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to release storage charge after deleting '%s'",
+                        path_or_url,
+                    )
 
         if path_or_url.startswith("knowledge_base/"):
             preview_key = ElasticSearchService._preview_pdf_cache_object_name(
@@ -1587,15 +1901,29 @@ class ElasticSearchService:
             await ElasticSearchService._assert_source_only_deletable(
                 index_name, path_or_url
             )
-            minio_part = ElasticSearchService.delete_source_file(path_or_url)
+            try:
+                knowledge = get_knowledge_record({"index_name": index_name}) or {}
+            except Exception:
+                logger.exception(
+                    "Failed to resolve storage ownership for index '%s'",
+                    index_name,
+                )
+                knowledge = {}
+            minio_part = ElasticSearchService.delete_source_file(
+                path_or_url,
+                tenant_id=knowledge.get("tenant_id"),
+            )
+            deleted_minio = minio_part.get("deleted_minio", False)
             return {
-                "status": "success",
+                "status": "success" if deleted_minio else "failed",
                 "scope": scope,
                 "deleted_es_count": 0,
-                "deleted_minio": minio_part.get("deleted_minio", False),
-                "source_available": False,
+                "deleted_minio": deleted_minio,
+                "source_available": not deleted_minio,
                 "message": (
                     "Source file deleted; index chunks and vectors preserved."
+                    if deleted_minio
+                    else "Source file deletion failed; index chunks and vectors preserved."
                 ),
             }
 
@@ -1603,7 +1931,7 @@ class ElasticSearchService:
             index_name, path_or_url, vdb_core
         )
         result["scope"] = scope
-        result["source_available"] = False
+        result["source_available"] = not result.get("deleted_minio", False)
         return result
 
     @staticmethod
@@ -1618,6 +1946,22 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+        if minio_result.get("success"):
+            try:
+                knowledge = get_knowledge_record({"index_name": index_name}) or {}
+                tenant_id = knowledge.get("tenant_id")
+                reference = resolve_storage_reference(path_or_url)
+                if tenant_id and reference:
+                    release_storage_charge(
+                        tenant_id=tenant_id,
+                        bucket_name=reference.bucket_name,
+                        object_name=reference.object_name,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to reconcile storage ledger after deleting '%s'",
+                    path_or_url,
+                )
 
         # Update last_doc_update_time for auto-summary tracking
         update_last_doc_update_time(index_name)

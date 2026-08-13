@@ -154,13 +154,13 @@ class StubOpenAICompatibleEmbedding(StubBaseEmbedding):
     pass
 
 
-class StubJinaMultimodalEmbedding(StubBaseEmbedding):
+class StubJinaEmbedding(StubBaseEmbedding):
     pass
 
 
 embedding_mod.BaseEmbedding = StubBaseEmbedding
 embedding_mod.OpenAICompatibleEmbedding = StubOpenAICompatibleEmbedding
-embedding_mod.JinaMultimodalEmbedding = StubJinaMultimodalEmbedding
+embedding_mod.JinaEmbedding = StubJinaEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_mod
 
 # Mock rerank model

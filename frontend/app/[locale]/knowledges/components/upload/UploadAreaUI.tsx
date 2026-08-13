@@ -12,13 +12,13 @@ const { Dragger } = Upload;
 interface UploadAreaUIProps {
   fileList: UploadFile[];
   uploadProps: UploadProps;
-  onStartNewSelection?: () => void;
   isLoading: boolean;
   isKnowledgeBaseReady: boolean;
   isCreatingMode: boolean;
   nameStatus: string;
   isUploading: boolean;
   disabled: boolean;
+  disabledMessage?: string;
   componentHeight: string;
   newKnowledgeBaseName: string;
   selectedFiles: File[];
@@ -28,13 +28,13 @@ interface UploadAreaUIProps {
 const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   fileList,
   uploadProps,
-  onStartNewSelection,
   isLoading,
   isKnowledgeBaseReady,
   isCreatingMode,
   nameStatus,
   isUploading,
   disabled,
+  disabledMessage,
   componentHeight,
   newKnowledgeBaseName,
   modelMismatch = false,
@@ -87,7 +87,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
         <div className="border-2 border-dashed border-gray-300 bg-white rounded-md p-4 text-center flex flex-col items-center justify-center h-full">
           <div className="mb-0.5 text-blue-500 text-lg">📄</div>
           <p className="mb-0.5 text-gray-700 text-xs font-medium">
-            {t("knowledgeBase.hint.selectFirst")}
+            {disabledMessage || t("knowledgeBase.hint.selectFirst")}
           </p>
         </div>
       </div>
@@ -164,13 +164,14 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                 e.stopPropagation();
               }}
             >
-              <div className="h-full" onClick={() => onStartNewSelection?.()}>
+              <div className="h-full">
                 <Dragger
                   {...uploadProps}
                   className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
                   showUploadList={false}
+                  style={{ height: "100%", overflow: "auto" }}
                 >
-                  <div className="flex flex-col items-center justify-center h-full">
+                  <div className="flex flex-col items-center justify-center">
                     <p className="ant-upload-drag-icon !mb-4">
                       <Inbox size={48} className="text-blue-600" />
                     </p>
@@ -179,6 +180,9 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                     </p>
                     <p className="ant-upload-hint text-gray-500">
                       {t("knowledgeBase.upload.supportedFormats")}
+                    </p>
+                    <p className="ant-upload-hint !mt-1 text-gray-500">
+                      {t("knowledgeBase.upload.fileSizeLimit")}
                     </p>
                   </div>
                 </Dragger>

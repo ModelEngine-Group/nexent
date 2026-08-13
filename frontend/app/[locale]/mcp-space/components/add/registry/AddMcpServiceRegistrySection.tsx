@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Form, Input, Modal, Radio } from "antd";
+import { CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type {
   RegistryMcpCard,
@@ -14,6 +15,10 @@ import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "../../shared/ContainerPortField";
 import { McpTransportType } from "@/const/mcpTools";
+import {
+  hasUnresolvedUrlTemplate,
+  resolveHttpServerUrl,
+} from "@/lib/mcpTools";
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;
@@ -25,8 +30,23 @@ export default function AddMcpServiceRegistrySection({
   onAdded,
 }: AddMcpServiceRegistrySectionProps) {
   const [selected, setSelected] = useState<RegistryMcpCard | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<RegistryMcpCard | null>(null);
   const browser = useMcpRegistryBrowser(active);
   const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded });
+
+  const handleSelect = async (service: RegistryMcpCard) => {
+    setSelected(service);
+    setSelectedDetail(service);
+  };
+
+  const handleQuickAdd = async (service: RegistryMcpCard) => {
+    quickAdd.open(service);
+  };
+
+  const handleCloseDetail = () => {
+    setSelected(null);
+    setSelectedDetail(null);
+  };
 
   if (!active) return null;
 
@@ -38,6 +58,7 @@ export default function AddMcpServiceRegistrySection({
           version={browser.filters.version}
           updatedSince={browser.filters.updatedSince}
           includeDeleted={browser.filters.includeDeleted}
+          source={browser.filters.source}
           page={browser.page}
           resultCount={browser.services.length}
           onSearchChange={(value) => browser.updateFilter("search", value)}
@@ -48,6 +69,7 @@ export default function AddMcpServiceRegistrySection({
           onIncludeDeletedChange={(value) =>
             browser.updateFilter("includeDeleted", value)
           }
+          onSourceChange={(value) => browser.updateFilter("source", value)}
         />
 
         <McpRegistryCardList
@@ -57,15 +79,15 @@ export default function AddMcpServiceRegistrySection({
           hasNextPage={browser.hasNextPage}
           onPrevPage={browser.prevPage}
           onNextPage={browser.nextPage}
-          onSelect={setSelected}
-          onQuickAdd={quickAdd.open}
+          onSelect={handleSelect}
+          onQuickAdd={handleQuickAdd}
         />
       </div>
 
-      {selected ? (
+      {selected && selectedDetail ? (
         <McpRegistryDetailModal
-          service={selected}
-          onClose={() => setSelected(null)}
+          service={selectedDetail}
+          onClose={handleCloseDetail}
           onQuickAdd={quickAdd.open}
         />
       ) : null}
@@ -91,7 +113,11 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
     selectedKey,
     values,
     containerPort,
+    customName,
     submitting,
+    testingConnection,
+    connectionResult,
+    testConnection,
   } = controller;
   const unsupportedOci =
     selectedOption?.sourceType === "package" &&
@@ -101,6 +127,15 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
     if (!visible) return;
     form.setFieldsValue({ selectedKey, containerPort, ...values });
   }, [visible, form, selectedKey, containerPort, values]);
+
+  const isUrlBased =
+    selectedOption?.transportType !== McpTransportType.CONTAINER &&
+    Boolean(selectedOption?.serverUrl);
+  const canTest = useMemo(() => {
+    if (!isUrlBased || !selectedOption) return false;
+    const url = resolveHttpServerUrl(selectedOption, values);
+    return Boolean(url && !hasUnresolvedUrlTemplate(url));
+  }, [isUrlBased, selectedOption, values]);
 
   const handleConfirm = async () => {
     try {
@@ -263,6 +298,18 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
           })}
         </p>
 
+        {/* Editable service name */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            {t("mcpTools.registry.quickAddPicker.serviceName")}
+          </label>
+          <Input
+            value={customName}
+            onChange={(e) => controller.setCustomName(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+
         <Form.Item
           name="selectedKey"
           className="mb-0"
@@ -365,16 +412,43 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
           </>
         )}
 
-        <div className="flex justify-end gap-2">
-          <Button onClick={controller.close}>{t("common.cancel")}</Button>
-          <Button
-            type="primary"
-            loading={submitting}
-            disabled={!selectedKey || unsupportedOci}
-            onClick={handleConfirm}
-          >
-            {t("mcpTools.registry.quickAddPicker.confirm")}
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            {connectionResult?.success === true ? (
+              <span className="flex items-center gap-1 text-sm text-green-600">
+                <CheckCircleOutlined />{" "}
+                {t("mcpTools.registry.quickAddPicker.connectionSuccess")}
+              </span>
+            ) : connectionResult?.success === false ? (
+              <span className="flex items-center gap-1 text-sm text-red-500">
+                <CloseCircleOutlined />{" "}
+                {t("mcpTools.registry.quickAddPicker.connectionFailed")}
+                {connectionResult.error
+                  ? `: ${connectionResult.error}`
+                  : ""}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={!canTest || testingConnection || submitting}
+              loading={testingConnection}
+              onClick={testConnection}
+            >
+              {t("mcpTools.registry.quickAddPicker.testConnection")}
+            </Button>
+            <Button onClick={controller.close}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="primary"
+              loading={submitting}
+              disabled={!selectedKey || unsupportedOci}
+              onClick={handleConfirm}
+            >
+              {t("mcpTools.registry.quickAddPicker.confirm")}
+            </Button>
+          </div>
         </div>
       </Form>
     </Modal>

@@ -364,21 +364,30 @@ export default function PromptOptimizeModal({
               onKeyUp={handleContentSelect}
             />
           </Card>
-          <Card title={t("systemPrompt.optimize.optimized")}>
+          <Card
+            title={t("systemPrompt.optimize.optimized")}
+            styles={{ body: { padding: 0 } }}
+          >
             {isOptimizing ? (
-              <div className="flex flex-col items-center justify-center py-8 gap-3 min-h-[200px]">
+              <div className="flex flex-col items-center justify-center py-8 gap-3 min-h-[200px] bg-white">
                 <Spin size="medium" />
                 <span className="text-gray-500 text-sm">
                   {t("systemPrompt.optimize.generating")}
                 </span>
               </div>
             ) : (
-              <Paragraph
-                style={{ whiteSpace: "pre-wrap", minHeight: 200, marginBottom: 0 }}
-                className="font-mono text-sm"
-              >
-                {optimizedContent || t("systemPrompt.optimize.empty")}
-              </Paragraph>
+              <TextArea
+                value={optimizedContent}
+                onChange={(event) => setOptimizedContent(event.target.value)}
+                placeholder={t("systemPrompt.optimize.empty")}
+                rows={10}
+                className="border-0 rounded-none font-mono text-sm"
+                style={{
+                  resize: "none",
+                  background: "#fff",
+                  minHeight: 200,
+                }}
+              />
             )}
           </Card>
         </div>

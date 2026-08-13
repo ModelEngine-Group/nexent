@@ -27,14 +27,11 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
-  configuredEmbeddingModels?: Array<{
-    displayName: string;
-    type: string;
-  }>;
   isLoading?: boolean;
   syncLoading?: boolean;
   onClick: (kb: KnowledgeBase) => void;
@@ -59,7 +56,6 @@ interface KnowledgeBaseListProps {
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
-  configuredEmbeddingModels = [],
   isLoading = false,
   syncLoading = false,
   onClick,
@@ -130,30 +126,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
   };
 
-  const configuredModelTypesByName = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    configuredEmbeddingModels.forEach((model) => {
-      const modelName = (model.displayName || "").trim();
-      const modelType = (model.type || "").trim().toLowerCase();
-      if (!modelName) return;
-      if (modelType !== "embedding" && modelType !== "multi_embedding") return;
-      if (!map.has(modelName)) {
-        map.set(modelName, new Set<string>());
-      }
-      map.get(modelName)!.add(modelType);
-    });
-    return map;
-  }, [configuredEmbeddingModels]);
-
-  const isModelMismatch = (kb: KnowledgeBase) => {
-    if (kb.embeddingModel === "unknown") return false;
-    if (kb.source === "datamate") return false;
-    const modelTypes = configuredModelTypesByName.get(
-      (kb.embeddingModel || "").trim()
-    );
-    return !modelTypes;
-  };
-
   const hasIndexedDocumentsAndChunks = (kb: KnowledgeBase) => {
     return (kb.documentCount || 0) > 0 && (kb.chunkCount || 0) > 0;
   };
@@ -214,21 +186,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const handleModelsChange = (values: string[]) => {
     if (onModelFilterChange) onModelFilterChange(values);
     else setSelectedModels(values);
-  };
-
-  // Format date function, only keep date part
-  const formatDate = (dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
-    } catch (e) {
-      return String(dateValue ?? ""); // If parsing fails, return original string
-    }
   };
 
   // Helper to safely extract timestamp for sorting
@@ -319,7 +276,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   ]);
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
+    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
       {/* Fixed header area */}
       <div
         className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
@@ -332,7 +289,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center min-w-0" style={{ gap: "6px" }}>
+          <div className="flex items-center min-w-0 overflow-x-auto" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -391,16 +348,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   backgroundColor: "#1677ff",
                   color: "white",
                   border: "none",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  minWidth: 0,
+                  flexShrink: 0,
                 }}
                 className="hover:!bg-blue-600"
                 type="primary"
                 onClick={onDataMateConfig}
                 icon={<SettingOutlined />}
               >
-                <span className="overflow-hidden text-ellipsis">
+                <span className="truncate max-w-[120px]">
                   {t("knowledgeBase.button.dataMateConfig")}
                 </span>
               </Button>
@@ -409,13 +364,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
 
         {/* Search and filter area */}
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex items-start gap-3 flex-wrap">
           <Input
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<SearchOutlined />}
             value={effectiveSearchKeyword}
             onChange={(e) => handleSearchChange(e.target.value)}
-            style={{ width: 250 }}
+            className="flex-1 min-w-0"
             allowClear
           />
 
@@ -425,7 +380,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               placeholder={t("knowledgeBase.filter.source.placeholder")}
               value={effectiveSelectedSources}
               onChange={handleSourcesChange}
-              style={{ minWidth: 150 }}
+              className="flex-1 min-w-0"
               allowClear
               maxTagCount={2}
             >
@@ -445,7 +400,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               placeholder={t("knowledgeBase.filter.model.placeholder")}
               value={effectiveSelectedModels}
               onChange={handleModelsChange}
-              style={{ minWidth: 180 }}
+              className="flex-1 min-w-0"
               allowClear
               maxTagCount={2}
             >
@@ -591,7 +546,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                             >
                               {t("knowledgeBase.tag.createdAt", {
-                                date: formatDate(kb.createdAt),
+                                date: formatDateOrFallback(kb.createdAt),
                               })}
                             </span>
 
@@ -618,13 +573,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 multimodal
                               </span>
                             )}
-                            {isModelMismatch(kb) && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
-                              >
-                                {t("knowledgeBase.tag.modelMismatch")}
-                              </span>
-                            )}
+
+                            {/* Model mismatch is shown in the knowledge-base detail header only. */}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">

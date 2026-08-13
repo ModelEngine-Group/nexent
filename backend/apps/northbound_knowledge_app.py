@@ -11,7 +11,8 @@ from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
 )
-from consts.model import ProcessParams
+from consts.model import HybridSearchRequest, ProcessParams
+from database.knowledge_db import get_index_name_by_knowledge_name
 from services.file_management_service import (
     upload_files_impl,
     get_file_url_impl,
@@ -20,7 +21,11 @@ from services.file_management_service import (
 )
 from services.northbound_service import NorthboundContext
 from services.redis_service import get_redis_service
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from services.vectordatabase_service import (
+    ElasticSearchService,
+    KnowledgeBaseNeedsModelConfigError,
+    get_vector_db_core,
+)
 from utils.auth_utils import generate_session_jwt
 from utils.file_management_utils import trigger_data_process
 
@@ -93,7 +98,7 @@ async def create_new_index(
         Optional[Dict[str, Any]],
         Body(
             description=(
-                "Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"
+                "Request body containing embedding_model_id and optional knowledge-base settings"
             ),
         ),
     ] = None,
@@ -110,13 +115,16 @@ async def create_new_index(
 
         ingroup_permission = None
         group_ids = None
-        embedding_model_name = None
+        embedding_model_id = None
         preserve_source_file = None
         if body:
             ingroup_permission = body.get("ingroup_permission")
             group_ids = body.get("group_ids")
-            embedding_model_name = body.get("embedding_model_name")
+            embedding_model_id = body.get("embedding_model_id")
             preserve_source_file = body.get("preserve_source_file")
+
+        if isinstance(embedding_model_id, bool) or not isinstance(embedding_model_id, int):
+            raise ValueError("embedding_model_id must be an integer")
 
         return ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
@@ -126,7 +134,7 @@ async def create_new_index(
             tenant_id=ctx.tenant_id,
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
-            embedding_model_name=embedding_model_name,
+            embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
         )
     except LimitExceededError as e:
@@ -139,6 +147,9 @@ async def create_new_index(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception:
         logger.exception("Error creating index")
         raise HTTPException(
@@ -219,6 +230,132 @@ async def get_index_files(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Error getting index files")
+
+
+@router.post("/indices/{index_name}/chunks")
+async def get_index_chunks(
+    request: Request,
+    index_name: Annotated[str, Path(..., description="Name of the index")],
+    page: Annotated[
+        Optional[int],
+        Query(description="Page number (1-based) for pagination"),
+    ] = None,
+    page_size: Annotated[
+        Optional[int],
+        Query(description="Number of records per page for pagination"),
+    ] = None,
+    path_or_url: Annotated[
+        Optional[str],
+        Query(description="Filter chunks by document path_or_url"),
+    ] = None,
+):
+    """Get chunks from the specified index, with optional pagination.
+
+    Restricted to asset administrators (same auth as get_list_indices).
+    """
+    try:
+        ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+
+        if path_or_url is not None and not check_file_access(
+            path_or_url, ctx.user_id, ctx.tenant_id
+        ):
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file",
+            )
+
+        return ElasticSearchService.get_index_chunks(
+            index_name=index_name,
+            page=page,
+            page_size=page_size,
+            path_or_url=path_or_url,
+            vdb_core=vdb_core,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail=str(e)
+        )
+    except LimitExceededError as e:
+        logger.exception("Rate limit exceeded while getting chunks")
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
+    except UnauthorizedError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error getting chunks for index")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Error getting chunks")
+
+
+@router.post("/indices/search/hybrid")
+async def hybrid_search(
+    request: Request,
+    payload: HybridSearchRequest,
+):
+    """Run a hybrid (accurate + semantic) search across indices.
+
+    Restricted to asset administrators (same auth as get_list_indices).
+    """
+    try:
+        ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+
+        resolved_index_names: List[str] = []
+        for requested_name in payload.index_names:
+            try:
+                resolved_name = get_index_name_by_knowledge_name(
+                    requested_name, ctx.tenant_id
+                )
+            except Exception:
+                resolved_name = requested_name
+            resolved_index_names.append(resolved_name)
+
+        return ElasticSearchService.search_hybrid(
+            index_names=resolved_index_names,
+            query=payload.query,
+            tenant_id=ctx.tenant_id,
+            top_k=payload.top_k,
+            weight_accurate=payload.weight_accurate,
+            vdb_core=vdb_core,
+        )
+    except KnowledgeBaseNeedsModelConfigError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "error_type": "KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG",
+                "index_name": exc.index_name,
+                "message": exc.message,
+                "suggestion": (
+                    "Please select an embedding model for this knowledge base "
+                    "before searching."
+                ),
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
+        )
+    except LimitExceededError as e:
+        logger.exception("Rate limit exceeded while running hybrid search")
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
+    except UnauthorizedError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error executing hybrid search")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Error executing hybrid search")
 
 
 @router.delete("/indices/{index_name}/documents")

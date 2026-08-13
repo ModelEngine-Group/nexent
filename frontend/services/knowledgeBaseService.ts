@@ -5,7 +5,11 @@ import i18n from "i18next";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
+import {
+  FILE_TYPES,
+  EXTENSION_TO_TYPE_MAP,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+} from "@/const/knowledgeBase";
 import {
   Document,
   KnowledgeBase,
@@ -17,7 +21,9 @@ import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
 } from "@/types/agentConfig";
+import type { QuotaStatusResponse } from "@/types/quota";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { emitQuotaUsageChanged } from "@/lib/quotaEvents";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -148,6 +154,65 @@ class KnowledgeBaseService {
       return difyKnowledgeBases;
     } catch (error) {
       log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get RAGFlow knowledge bases as KnowledgeBase array
+  async getRagflowKnowledgeBases(
+    ragflowApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(API_ENDPOINTS.ragflow.datasets, globalThis.location.origin);
+      url.searchParams.set("ragflow_api_base", ragflowApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch RAGFlow datasets";
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      const datasets: KnowledgeBase[] = (result.data || []).map((ds: any) => {
+        const stats = ds.stats || {};
+        return {
+          id: ds.id || ds.dataset_id || "",
+          name: ds.name || ds.dataset_name || "Unnamed",
+          display_name: ds.name || ds.dataset_name || "Unnamed",
+          description: ds.description || "",
+          documentCount: stats.doc_count || ds.doc_count || 0,
+          chunkCount: stats.chunk_count || ds.chunk_count || 0,
+          createdAt: ds.create_time || ds.create_date || null,
+          updatedAt: ds.update_time || ds.update_date || null,
+          embeddingModel: ds.embedding_model || "unknown",
+          knowledge_sources: "ragflow",
+          ingroup_permission: "",
+          group_ids: [],
+          store_size: "",
+          process_source: "RAGFlow",
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: "ragflow",
+          tenant_id: "",
+        };
+      });
+
+      return datasets;
+    } catch (error) {
+      log.error("Failed to get RAGFlow knowledge bases:", error);
       throw error;
     }
   }
@@ -442,34 +507,70 @@ class KnowledgeBaseService {
     }
   }
 
-  async getAidpKnowledgeBasesAll(
-    serverUrl: string,
-    apiKey: string
-  ): Promise<AidpKnowledgeBaseListResponse> {
+  async getAidpKnowledgeBasesAll(): Promise<AidpKnowledgeBaseListResponse> {
+    // Loop through pages until has_more is false, accumulating all items.
+    // The mgmt endpoint caps page_size at 100 (backend performance guard),
+    // so we paginate at the maximum allowed size to minimize requests.
+    // Safety cap: we never fetch more than 2000 KBs to prevent runaway
+    // loop in case of a bug (e.g. has_more not being cleared).
+    const AIDP_LIST_PAGE_MAX = 100;
+    const AIDP_LIST_ITEM_CAP = 2000;
+    const allItems: AidpKnowledgeBaseItem[] = [];
+    let page = 1;
+    let totalFromServer = 0;
+    let totalReliableFromServer = true;
+    let hasMore = true;
+
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
+      while (hasMore && allItems.length < AIDP_LIST_ITEM_CAP) {
+        const url = new URL(
+          API_ENDPOINTS.aidpMgmt.knowledgeBases,
+          globalThis.location.origin,
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("page_size", String(AIDP_LIST_PAGE_MAX));
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+        const pageResult = await response.json();
 
-      if (result.code !== undefined && result.code !== 0) {
-        const errorCode = result.code || response.status;
-        const errorMessage =
-          result.message || "Failed to fetch all AIDP knowledge bases";
-        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
-        throw new ApiError(errorCode, errorMessage);
+        if (pageResult.code !== undefined && pageResult.code !== 0) {
+          const errorCode = pageResult.code || response.status;
+          const errorMessage =
+            pageResult.message || "Failed to fetch all AIDP knowledge bases";
+          log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+          throw new ApiError(errorCode, errorMessage);
+        }
+
+        const pageItems: AidpKnowledgeBaseItem[] = Array.isArray(pageResult.value)
+          ? pageResult.value
+          : [];
+        allItems.push(...pageItems);
+
+        // total_count from the server represents ALL KBs the user can access
+        // (not just the current page), so use it from the first response.
+        if (page === 1 && typeof pageResult.total_count === "number") {
+          totalFromServer = pageResult.total_count;
+        }
+        if (
+          page === 1 &&
+          typeof pageResult.total_reliable === "boolean"
+        ) {
+          totalReliableFromServer = pageResult.total_reliable;
+        }
+
+        hasMore = !!pageResult.has_more && pageItems.length > 0;
+        page += 1;
       }
 
       return {
-        value: Array.isArray(result.value) ? result.value : [],
-        total_count:
-          typeof result.total_count === "number" ? result.total_count : undefined,
-        next_link: typeof result.next_link === "string" ? result.next_link : null,
+        value: allItems,
+        total_count: totalFromServer || allItems.length,
+        next_link: null,
+        has_more: allItems.length >= AIDP_LIST_ITEM_CAP,
+        total_reliable: totalReliableFromServer,
       };
     } catch (error) {
       log.error("Failed to fetch all AIDP knowledge bases:", error);
@@ -478,15 +579,18 @@ class KnowledgeBaseService {
   }
 
   async getAidpKnowledgeBases(
-    serverUrl: string,
-    apiKey: string,
     page: number = 1,
     pageSize: number = 20
   ): Promise<AidpKnowledgeBaseListResponse> {
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
-      url.searchParams.set("server_url", serverUrl);
-      url.searchParams.set("api_key", apiKey);
+      // Use the permission-filtered mgmt endpoint instead of the legacy
+      // `/aidp/knowledge-bases` proxy. The mgmt endpoint applies the current
+      // user's role / group intersection, ensuring the agent config KB picker
+      // only shows KBs the user has access to.
+      const url = new URL(
+        API_ENDPOINTS.aidpMgmt.knowledgeBases,
+        globalThis.location.origin,
+      );
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
 
@@ -509,6 +613,12 @@ class KnowledgeBaseService {
         total_count:
           typeof result.total_count === "number" ? result.total_count : undefined,
         next_link: typeof result.next_link === "string" ? result.next_link : null,
+        has_more:
+          typeof result.has_more === "boolean" ? result.has_more : undefined,
+        total_reliable:
+          typeof result.total_reliable === "boolean"
+            ? result.total_reliable
+            : undefined,
       };
     } catch (error) {
       log.error("Failed to fetch AIDP knowledge bases:", error);
@@ -519,6 +629,10 @@ class KnowledgeBaseService {
   mapAidpKnowledgeBasesToKnowledgeBases(
     items: AidpKnowledgeBaseItem[]
   ): KnowledgeBase[] {
+    // Map the mgmt-endpoint item shape (which already carries
+    // ``permission``, ``ingroup_permission``, ``group_ids`` and the
+    // AIDP-normalized ``created_at`` / ``updated_at`` / ``embedding_model``
+    // fields) onto the ``KnowledgeBase`` shape shared across all tool types.
     return items.map((item) => ({
       id: String(item.kds_id),
       name: item.kds_name || String(item.kds_id),
@@ -526,12 +640,12 @@ class KnowledgeBaseService {
       description: item.description || "AIDP knowledge base",
       documentCount: item.document_count || 0,
       chunkCount: item.chunk_count || 0,
-      createdAt: null,
-      updatedAt: null,
-      embeddingModel: "unknown",
+      createdAt: item.created_at || null,
+      updatedAt: item.updated_at || null,
+      embeddingModel: item.embedding_model || "unknown",
       knowledge_sources: "aidp",
-      ingroup_permission: "",
-      group_ids: [],
+      ingroup_permission: item.ingroup_permission || "",
+      group_ids: item.group_ids || [],
       store_size: "",
       process_source: "AIDP",
       avatar: "",
@@ -539,7 +653,7 @@ class KnowledgeBaseService {
       language: "",
       nickname: "",
       parserId: "",
-      permission: "",
+      permission: item.permission || "",
       tokenNum: 0,
       source: "aidp",
       tenant_id: "",
@@ -690,6 +804,7 @@ class KnowledgeBaseService {
                       indexInfo.embedding_model_name ||
                       stats.embedding_model ||
                       "unknown",
+                    embeddingModelId: indexInfo.embedding_model_id ?? null,
                     summaryFrequency: indexInfo.summary_frequency || null,
                     lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
@@ -883,16 +998,15 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embeddingModel?: string;
+        embedding_model_id: number;
         ingroup_permission?: string;
         group_ids?: number[];
-        is_multimodal?: boolean;
         preserve_source_file?: boolean;
+        quota_limit_bytes?: number | null;
       } = {
         name: params.name,
         description: params.description || "",
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embedding_model_id: params.embeddingModelId,
       };
 
       // Include group permission and user groups if provided
@@ -905,6 +1019,9 @@ class KnowledgeBaseService {
       if (params.preserve_source_file !== undefined) {
         requestBody.preserve_source_file = params.preserve_source_file;
       }
+      if (params.quota_limit_bytes !== undefined) {
+        requestBody.quota_limit_bytes = params.quota_limit_bytes;
+      }
 
       const response = await fetch(
         API_ENDPOINTS.knowledgeBase.indexDetail(params.name),
@@ -916,9 +1033,10 @@ class KnowledgeBaseService {
       );
 
       const result = await response.json();
-      // Modify judgment logic, backend returns status field instead of success field
-      if (result.status !== "success") {
-        throw new Error(result.message || "Failed to create knowledge base");
+      if (!response.ok || result.status !== "success") {
+        throw new Error(
+          result.detail || result.message || "Failed to create knowledge base"
+        );
       }
 
       // Create a full KnowledgeBase object with default values
@@ -929,8 +1047,9 @@ class KnowledgeBaseService {
         documentCount: 0,
         chunkCount: 0,
         createdAt: new Date().toISOString(),
-        embeddingModel: params.embeddingModel || "",
-        is_multimodal: params.is_multimodal || false,
+        embeddingModel: result.embedding_model_name || "",
+        embeddingModelId: params.embeddingModelId,
+        is_multimodal: result.model_type === "multi_embedding",
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -962,6 +1081,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete knowledge base");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete knowledge base:", error);
       throw error;
@@ -1042,8 +1162,16 @@ class KnowledgeBaseService {
     files: File[],
     chunkingStrategy?: string,
     modelId?: number
-  ): Promise<void> {
+  ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
+      if (
+        files.some(
+          (file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES
+        )
+      ) {
+        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+      }
+
       // Create FormData object
       const formData = new FormData();
       formData.append("index_name", kbId);
@@ -1121,7 +1249,8 @@ class KnowledgeBaseService {
 
       // Handle successful response (201)
       if (processResponse.status === 201) {
-        return;
+        emitQuotaUsageChanged();
+        return { quota_status: uploadResult?.quota_status };
       }
 
       throw new Error("Unknown response status during processing");
@@ -1149,6 +1278,7 @@ class KnowledgeBaseService {
       if (result.status !== "success") {
         throw new Error(result.message || "Failed to delete document");
       }
+      emitQuotaUsageChanged();
     } catch (error) {
       log.error("Failed to delete document:", error);
       throw error;
@@ -1278,6 +1408,26 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to change summary");
+    }
+  }
+
+  async fetchSummaryFrequencyOptions(): Promise<{ value: string; label: string }[]> {
+    const response = await fetch(API_ENDPOINTS.knowledgeBase.summaryFrequencyOptions, {
+      headers: getAuthHeaders(),
+    });
+    const data = await response.json();
+    return data.options || [];
+  }
+
+  async updateKnowledgeBaseQuota(indexName: string, limitBytes: number | null): Promise<void> {
+    const response = await fetch(API_ENDPOINTS.knowledgeBase.updateIndex(indexName), {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ quota_limit_bytes: limitBytes }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || data.message || "Failed to update quota");
     }
   }
 

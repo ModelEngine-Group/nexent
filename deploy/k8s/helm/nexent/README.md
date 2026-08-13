@@ -69,7 +69,7 @@ bash uninstall.sh k8s delete-all
 bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
-K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses `docker/.env`, then falls back to `deploy/env/.env.example`. Do not edit generated Helm values by hand; they are recreated from `deploy/env/.env` and deployment options.
+K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Before every deployment, existing values, comments, ordering, and old-only variables are preserved while assignments newly introduced by the current `deploy/env/.env.example` are appended. If `.env` is missing, the deploy script first reuses legacy `docker/.env`, then falls back to the current template. A readable template is required before deployment starts. Do not edit generated Helm values by hand; they are recreated from the merged `deploy/env/.env` and deployment options.
 
 When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
@@ -83,8 +83,8 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
 | `--monitoring-provider` | Provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `--use-local-config` | Reuse saved local deployment config | Flag |
-| `--reconfigure` | Ignore saved local config and run full configuration | Flag |
-| `--config` | Deployment config path | YAML file |
+| `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
+| `--config` | Open the interactive deployment configuration | Flag |
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |

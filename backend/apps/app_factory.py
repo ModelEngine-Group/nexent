@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import AppException
+from consts.exceptions import AppException, QuotaExceededError
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,86 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "details": exc.details if exc.details else None
             },
         )
+
+    @app.exception_handler(QuotaExceededError)
+    async def quota_exceeded_exception_handler(request, exc):
+        logger.warning("QuotaExceededError: %s", exc)
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "TenantStorageFull",
+                "message": str(exc),
+                "usage_bytes": exc.usage_bytes,
+                "hard_limit_bytes": exc.hard_limit_bytes,
+                "exceeded_by_bytes": exc.exceeded_by_bytes,
+            },
+        )
+
+    # ---- AIDP permission subsystem exceptions (v7.1) ----
+    # These are domain exceptions (inherit from plain Exception) that map to
+    # HTTP status codes per v7.1 design. Without explicit handlers they would
+    # fall through to the generic handler below and surface as 500, hiding
+    # the real error from the client.
+    try:
+        from ext_components.aidp.consts.aidp_exceptions import (
+            AidpKbNotFoundError,
+            AidpKbPermissionDeniedError,
+            AidpKbConflictError,
+            AidpKbSyncError,
+            AidpGroupValidationError,
+        )
+
+        @app.exception_handler(AidpKbNotFoundError)
+        async def aidp_kb_not_found_handler(request, exc):
+            logger.warning("AidpKbNotFoundError: %s", exc)
+            return JSONResponse(
+                status_code=404,
+                content={"message": str(exc), "code": "AIDP_KB_NOT_FOUND", "kb_id": exc.kb_id},
+            )
+
+        @app.exception_handler(AidpKbPermissionDeniedError)
+        async def aidp_permission_denied_handler(request, exc):
+            logger.warning("AidpKbPermissionDeniedError: user=%s kb=%s required=%s", exc.user_id, exc.kb_id, exc.required)
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "message": str(exc),
+                    "code": "AIDP_PERMISSION_DENIED",
+                    "kb_id": exc.kb_id,
+                    "required": exc.required,
+                },
+            )
+
+        @app.exception_handler(AidpKbConflictError)
+        async def aidp_conflict_handler(request, exc):
+            logger.warning("AidpKbConflictError: %s", exc)
+            return JSONResponse(
+                status_code=409,
+                content={"message": str(exc), "code": "AIDP_KB_CONFLICT", "kb_id": exc.kb_id},
+            )
+
+        @app.exception_handler(AidpKbSyncError)
+        async def aidp_sync_error_handler(request, exc):
+            logger.error("AidpKbSyncError: %s", exc)
+            return JSONResponse(
+                status_code=502,
+                content={"message": str(exc), "code": "AIDP_SYNC_ERROR", "operation": exc.operation},
+            )
+
+        @app.exception_handler(AidpGroupValidationError)
+        async def aidp_group_validation_handler(request, exc):
+            logger.warning("AidpGroupValidationError: %s", exc)
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "message": str(exc),
+                    "code": "AIDP_GROUP_VALIDATION",
+                    "invalid_ids": exc.invalid_ids,
+                },
+            )
+    except ImportError:
+        # AIDP subsystem not installed in this deployment; safe to skip
+        logger.debug("AIDP exception classes not available, skipping AIDP exception handlers")
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request, exc):

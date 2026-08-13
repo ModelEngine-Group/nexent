@@ -33,7 +33,12 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { Document } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
 import { formatScoreAsPercentage, getScoreColor } from "@/lib/utils";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Chunk {
   id: string;
@@ -66,6 +71,11 @@ interface DocumentChunkProps {
 const PAGE_SIZE = 10;
 
 const TABS_ROOT_CLASS = "document-chunk-tabs";
+
+const CHUNK_TAG_LAYOUT_STYLE: React.CSSProperties = {
+  flexShrink: 0,
+  whiteSpace: "nowrap",
+};
 
 const { TextArea } = Input;
 
@@ -155,6 +165,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const isReadOnlyMode = React.useMemo(() => {
     return permission === "READ_ONLY" || isEmbeddingModelMismatch;
   }, [permission, isEmbeddingModelMismatch]);
+
+  const isSearchDisabled = isEmbeddingModelMismatch;
+
+  useEffect(() => {
+    if (isSearchDisabled) {
+      setSearchValue("");
+      resetChunkSearch();
+    }
+  }, [isSearchDisabled, resetChunkSearch]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -293,26 +312,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   }, [resetChunkSearch]);
 
   const handleSearch = React.useCallback(async () => {
+    if (isSearchDisabled) {
+      return;
+    }
+
     const trimmedValue = searchValue.trim();
 
     if (!trimmedValue) {
       resetChunkSearch();
-      return;
-    }
-
-    // Check embedding model consistency before searching
-    if (
-      isEmbeddingModelMismatch &&
-      currentEmbeddingModel &&
-      knowledgeBaseEmbeddingModel &&
-      knowledgeBaseEmbeddingModel !== "unknown"
-    ) {
-      message.error(
-        t("document.chunk.error.searchFailed", {
-          currentModel: currentEmbeddingModel,
-          knowledgeBaseModel: knowledgeBaseEmbeddingModel,
-        })
-      );
       return;
     }
 
@@ -333,23 +340,56 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         }
       );
 
-      const parsedChunks = (response.results || []).map((item) => {
-        // Backend returns document fields at the top level
-        return {
-          id: item.id || "",
-          content: item.content || "",
-          path_or_url: item.path_or_url || item.url || item.pathOrUrl,
-          filename: item.filename,
-          create_time: item.create_time,
-          score: item.score, // Preserve search score for display
-          source_type:
-            item.source_type === "local" || item.source_type === "minio"
-              ? "file"
-              : item.source_type, // Preserve source type for display
-        };
-      });
+      const parsedChunks = (response.results || [])
+        .map((item) => {
+          // Backend returns document fields at the top level
+          return {
+            id: item.id || "",
+            content: item.content || "",
+            path_or_url: item.path_or_url || item.url || item.pathOrUrl,
+            filename: item.filename,
+            create_time: item.create_time,
+            score: item.score, // Preserve search score for display
+            source_type:
+              item.source_type === "local" || item.source_type === "minio"
+                ? "file"
+                : item.source_type, // Preserve source type for display
+          };
+        })
+        .sort((left, right) => {
+          const leftScore =
+            typeof left.score === "number" && Number.isFinite(left.score)
+              ? left.score
+              : Number.NEGATIVE_INFINITY;
+          const rightScore =
+            typeof right.score === "number" && Number.isFinite(right.score)
+              ? right.score
+              : Number.NEGATIVE_INFINITY;
+          if (rightScore === leftScore) {
+            return 0;
+          }
+          return rightScore > leftScore ? 1 : -1;
+        });
 
       setChunkSearchResult(parsedChunks);
+
+      const matchedDocumentIds = new Set(
+        parsedChunks
+          .map((chunk) => chunk.path_or_url)
+          .filter((docId): docId is string => Boolean(docId))
+      );
+      if (
+        matchedDocumentIds.size > 0 &&
+        !matchedDocumentIds.has(activeDocumentKey)
+      ) {
+        const firstMatchedDocument = documents.find((doc) =>
+          matchedDocumentIds.has(doc.id)
+        );
+        if (firstMatchedDocument) {
+          setActiveDocumentKey(firstMatchedDocument.id);
+          setPagination((prev) => ({ ...prev, page: 1 }));
+        }
+      }
 
       if (parsedChunks.length === 0) {
         message.info(t("document.chunk.search.noChunk"));
@@ -363,9 +403,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
   }, [
     effectiveIndexName,
-    currentEmbeddingModel,
-    isEmbeddingModelMismatch,
-    knowledgeBaseEmbeddingModel,
+    activeDocumentKey,
+    documents,
+    isSearchDisabled,
     message,
     pagination.pageSize,
     resetChunkSearch,
@@ -564,21 +604,24 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     const displayName = getDisplayName(doc.name || "");
 
     return (
-      <Tooltip title={displayName} placement="top">
-        <div className="flex w-full items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span>{getFileIcon(doc.type)}</span>
-            <span className="truncate text-sm font-medium text-gray-800 max-w-[150px]">
-              {displayName}
-            </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex w-full items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span>{getFileIcon(doc.type)}</span>
+              <span className="truncate text-sm font-medium text-gray-800 max-w-[150px]">
+                {displayName}
+              </span>
+            </div>
+            <Badge
+              color="#1677ff"
+              showZero
+              count={chunkCount}
+              className="flex-shrink-0 chunk-count-badge"
+            />
           </div>
-          <Badge
-            color="#1677ff"
-            showZero
-            count={chunkCount}
-            className="flex-shrink-0 chunk-count-badge"
-          />
-        </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{displayName}</TooltipContent>
       </Tooltip>
     );
   };
@@ -601,7 +644,13 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }, {});
   }, [chunkSearchResult]);
 
-  const tabItems = documents.map((doc) => {
+  const visibleDocuments = isChunkSearchActive && !chunkSearchLoading
+    ? documents.filter(
+        (doc) => (chunkSearchResultMap?.[doc.id]?.length ?? 0) > 0
+      )
+    : documents;
+
+  const tabItems = visibleDocuments.map((doc) => {
     const chunkCount = isChunkSearchActive
       ? (chunkSearchResultMap?.[doc.id]?.length ?? 0)
       : (documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0);
@@ -650,69 +699,97 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                     title={
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex flex-wrap gap-1">
-                          <Tag className="inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md">
-                            <FieldNumberOutlined className="text-[12px]" />
-                            <span>
-                              {(pagination.page - 1) * pagination.pageSize +
-                                index +
-                                1}
+                          <Tag
+                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
+                            style={CHUNK_TAG_LAYOUT_STYLE}
+                          >
+                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                <FieldNumberOutlined className="text-[12px] leading-none" />
+                              </span>
+                              <span>
+                                {(pagination.page - 1) * pagination.pageSize +
+                                  index +
+                                  1}
+                              </span>
                             </span>
                           </Tag>
-                          <Tag className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md">
-                            <ScanText size={14} />
-                            <span>
-                              {t("document.chunk.characterCount", {
-                                count: (chunk.content || "").length,
-                              })}
+                          <Tag
+                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
+                            style={CHUNK_TAG_LAYOUT_STYLE}
+                          >
+                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                <ScanText size={14} className="block" />
+                              </span>
+                              <span>
+                                {t("document.chunk.characterCount", {
+                                  count: (chunk.content || "").length,
+                                })}
+                              </span>
                             </span>
                           </Tag>
                           {chunk.score !== undefined && (
                             <Tag
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium border rounded-md"
+                              className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium border rounded-md"
                               style={{
+                                ...CHUNK_TAG_LAYOUT_STYLE,
                                 backgroundColor: getScoreColor(chunk.score),
                                 color: "#000",
                                 borderColor: getScoreColor(chunk.score),
                               }}
                             >
-                              <Goal size={14} />
-                              <span>
-                                {formatScoreAsPercentage(chunk.score)}
+                              <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                                <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                  <Goal size={14} className="block" />
+                                </span>
+                                <span>
+                                  {formatScoreAsPercentage(chunk.score)}
+                                </span>
                               </span>
                             </Tag>
                           )}
                         </div>
                         <div className="flex items-center gap-1">
                           {!isReadOnlyMode && (
-                            <Tooltip title={t("document.chunk.tooltip.edit")}>
-                              <Button
-                                type="text"
-                                icon={<SquarePen size={16} />}
-                                onClick={() => openEditChunkModal(chunk)}
-                                size="small"
-                                className="self-center"
-                              />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  icon={<SquarePen size={16} />}
+                                  onClick={() => openEditChunkModal(chunk)}
+                                  size="small"
+                                  className="self-center"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>{t("document.chunk.tooltip.edit")}</TooltipContent>
                             </Tooltip>
                           )}
-                          <Tooltip title={t("document.chunk.tooltip.download")}>
-                            <Button
-                              type="text"
-                              icon={<Download size={16} />}
-                              onClick={() => handleDownloadChunk(chunk)}
-                              size="small"
-                              className="self-center"
-                            />
-                          </Tooltip>
-                          {!isReadOnlyMode && (
-                            <Tooltip title={t("document.chunk.tooltip.delete")}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
                               <Button
                                 type="text"
-                                danger
-                                icon={<Trash2 size={16} />}
-                                onClick={() => handleDeleteChunk(chunk)}
+                                icon={<Download size={16} />}
+                                onClick={() => handleDownloadChunk(chunk)}
                                 size="small"
                                 className="self-center"
                               />
+                            </TooltipTrigger>
+                            <TooltipContent>{t("document.chunk.tooltip.download")}</TooltipContent>
+                          </Tooltip>
+                          {!isReadOnlyMode && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  danger
+                                  icon={<Trash2 size={16} />}
+                                  onClick={() => handleDeleteChunk(chunk)}
+                                  size="small"
+                                  className="self-center"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>{t("document.chunk.tooltip.delete")}</TooltipContent>
                             </Tooltip>
                           )}
                         </div>
@@ -789,9 +866,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
             <Input
-              placeholder={t("document.chunk.search.placeholder")}
+              placeholder={t(
+                isSearchDisabled
+                  ? "document.chunk.search.disabledPlaceholder"
+                  : "document.chunk.search.placeholder"
+              )}
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
+              disabled={isSearchDisabled}
               onPressEnter={() => {
                 void handleSearch();
               }}
@@ -815,6 +897,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                     }}
                     size="small"
                     loading={chunkSearchLoading}
+                    disabled={isSearchDisabled}
                   />
                 </div>
               }
@@ -822,12 +905,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           </div>
           {/* Create Chunk button - hide when user has READ_ONLY permission */}
           {!isReadOnlyMode && (
-            <Tooltip title={t("document.chunk.tooltip.create")}>
-              <Button
-                type="text"
-                icon={<FilePlus2 size={16} />}
-                onClick={openCreateChunkModal}
-              ></Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="text"
+                  icon={<FilePlus2 size={16} />}
+                  onClick={openCreateChunkModal}
+                />
+              </TooltipTrigger>
+              <TooltipContent>{t("document.chunk.tooltip.create")}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -840,6 +926,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           className={`h-full w-full min-h-0 ${TABS_ROOT_CLASS}`}
           rootClassName="h-full"
         />
+        {/* Scoped to .document-chunk-tabs only; targets antd v6's renamed
+            content-holder classes (ant-tabs-body-holder / ant-tabs-body) so
+            height: 100% propagates down to the scrollable chunk list. */}
+        <style jsx global>{`
+          .${TABS_ROOT_CLASS} .ant-tabs-body-holder,
+          .${TABS_ROOT_CLASS} .ant-tabs-body {
+            height: 100%;
+          }
+        `}</style>
         {shouldShowPagination && (
           <div className="sticky bottom-0 left-0 z-10 flex w-full justify-center bg-white px-8 pb-4 pt-2 shadow-[0_-4px_12px_rgba(15,23,42,0.04)]">
             <Pagination
