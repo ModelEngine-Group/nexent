@@ -130,7 +130,7 @@ def parse_a2ui_response(content: str) -> list[A2UIResponsePart]:
         close_idx = text.find(A2UI_CLOSE_TAG, open_idx + len(A2UI_OPEN_TAG))
         body_text = text[open_idx + len(A2UI_OPEN_TAG):close_idx] if close_idx > 0 else ""
 
-        messages = parse_raw_json(body_text)
+        messages = parse_raw_json(body_text) or parse_jsonl(body_text)
         if messages is not None:
             parts.append(A2UIResponsePart(kind="a2ui", messages=messages))
         else:

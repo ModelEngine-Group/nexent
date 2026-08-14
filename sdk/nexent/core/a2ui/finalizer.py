@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .constants import A2UI_OPEN_TAG
+from .constants import A2UI_CLOSE_TAG, A2UI_OPEN_TAG
 from .validator import validate_a2ui_response
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,19 @@ class A2UIResponseFinalizer:
         else:
             last_error = validation.error
 
-        # Try to repair
+        # Try auto-close truncated JSON before LLM repair
+        auto_closed = self._try_auto_close_truncated_json(repaired_content)
+        if auto_closed is not None:
+            validation = validate_a2ui_response(auto_closed)
+            if validation.valid:
+                logger.info(
+                    "A2UI finalizer auto-close repair succeeded: request_id=%s",
+                    request_id,
+                )
+                return A2UIFinalizationResult(content=auto_closed, status="repaired")
+            last_error = validation.error
+
+        # Try to repair via LLM
         repaired_content = content
         for attempt in range(1, max_repair_attempts + 1):
             if repair_call is None:
@@ -166,6 +178,65 @@ class A2UIResponseFinalizer:
         except (json.JSONDecodeError, ImportError):
             pass
         return False
+
+    def _try_auto_close_truncated_json(self, content: str) -> str | None:
+        """Auto-close truncated JSON by adding missing brackets and closing tag.
+
+        Handles the case where the model output was cut off by token limits,
+        leaving unclosed JSON objects and no </a2ui-json> tag.
+        """
+        if not content:
+            return None
+
+        # Find the last <a2ui-json> opening tag
+        tag_start = content.rfind(A2UI_OPEN_TAG)
+        if tag_start == -1:
+            return None
+
+        # Content after the opening tag
+        json_content = content[tag_start + len(A2UI_OPEN_TAG):]
+        # Check if there's already a closing tag
+        if A2UI_CLOSE_TAG in json_content:
+            return None  # Already closed, nothing to do
+
+        # Count unclosed braces and brackets
+        open_braces = 0
+        open_brackets = 0
+        in_string = False
+        escape_next = False
+
+        for ch in json_content:
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+            if not in_string:
+                if ch == '{':
+                    open_braces += 1
+                elif ch == '}':
+                    open_braces -= 1
+                elif ch == '[':
+                    open_brackets += 1
+                elif ch == ']':
+                    open_brackets -= 1
+
+        if open_braces <= 0 and open_brackets <= 0:
+            return None  # Nothing to close
+
+        # Auto-close: add missing brackets and closing tag
+        suffix = ']' * max(0, open_brackets) + '}' * max(0, open_braces)
+        fixed = content + suffix + '\n' + A2UI_CLOSE_TAG
+
+        logger.info(
+            "[A2UI_AUTO_CLOSE] auto-closed truncated JSON: added %d brackets, %d braces",
+            max(0, open_brackets),
+            max(0, open_braces),
+        )
+        return fixed
 
     def _build_repair_prompt(
         self,

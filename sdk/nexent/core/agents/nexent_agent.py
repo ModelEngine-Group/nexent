@@ -697,13 +697,35 @@ class NexentAgent:
                 self._sandbox_scope = self.sandbox_config.scope.value
 
             # Create the agent
-            a2ui_instructions = agent_config.instructions or ""
+            # Inject A2UI system prompt as a high-priority SYSTEM context item
+            # so it reaches the model (instructions param is lost due to empty system_prompt template).
             if is_a2ui_enabled():
                 a2ui_prompt = get_a2ui_system_prompt(self.observer.lang)
-                if a2ui_instructions:
-                    a2ui_instructions = f"{a2ui_instructions}\n\n{a2ui_prompt}"
+                if a2ui_prompt:
+                    from .context import ContextItemInput, ContextItemType
+                    a2ui_item = ContextItemInput(
+                        id="system:a2ui-protocol",
+                        type=ContextItemType.SYSTEM,
+                        content={"text": a2ui_prompt},
+                        metadata={"layout_order": -10, "source": "a2ui"},
+                    )
+                    context_items = list(context_items) if context_items else []
+                    context_items.append(a2ui_item)
+                    logger.info(
+                        "[A2UI_INJECT] A2UI system prompt injected as context item: "
+                        "length=%d, context_items_count=%d",
+                        len(a2ui_prompt), len(context_items),
+                    )
                 else:
-                    a2ui_instructions = a2ui_prompt
+                    logger.warning("[A2UI_INJECT] A2UI system prompt is empty, skipping injection")
+            else:
+                logger.info("[A2UI_INJECT] A2UI is disabled, skipping injection")
+
+            # Re-create context_runtime with updated context_items
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                items=context_items,
+            )
 
             agent = CoreAgent(
                 observer=self.observer,
@@ -716,7 +738,6 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
-                instructions=a2ui_instructions,
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,

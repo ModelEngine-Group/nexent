@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from .constants import A2UI_MESSAGE_KEYS
-from .parser import coerce_message_list, iter_tagged_block_bodies
+from .parser import coerce_message_list, is_a2ui_message, iter_tagged_block_bodies
 from .types import A2UIValidationResult
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,55 @@ def validate_a2ui_messages(messages: list[dict[str, Any]]) -> A2UIValidationResu
     return A2UIValidationResult(valid=True)
 
 
+def _parse_body_as_messages(body: str) -> list[dict[str, Any]] | None:
+    """Parse a tagged block body into A2UI messages.
+
+    Supports JSONL, multi-line JSON objects, JSON array, and single JSON object.
+    Uses json.JSONDecoder().raw_decode() for robust multi-object extraction.
+    """
+    body = body.strip()
+    if not body:
+        return None
+
+    logger.info("[A2UI_PARSE_DEBUG] body (first 500 chars): %r", body[:500])
+
+    # Try to extract multiple JSON objects using raw_decode
+    decoder = json.JSONDecoder()
+    messages: list[dict[str, Any]] = []
+    idx = 0
+    body_len = len(body)
+
+    while idx < body_len:
+        # Skip whitespace
+        while idx < body_len and body[idx] in " \t\n\r":
+            idx += 1
+        if idx >= body_len:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(body, idx)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, dict) and is_a2ui_message(obj):
+            messages.append(obj)
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict) and is_a2ui_message(item):
+                    messages.append(item)
+        idx = end_idx
+
+    if messages:
+        logger.info("[A2UI_PARSE_DEBUG] parsed %d A2UI messages", len(messages))
+        return messages
+
+    # Fallback: try single JSON object or array
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        logger.warning("[A2UI_PARSE_DEBUG] could not parse body as any A2UI format")
+        return None
+    return coerce_message_list(parsed)
+
+
 def validate_a2ui_response(content: str) -> A2UIValidationResult:
     """Validate a complete A2UI response string.
 
@@ -155,18 +204,13 @@ def validate_a2ui_response(content: str) -> A2UIValidationResult:
             body = body.strip()
             if not body:
                 continue
-            try:
-                parsed = json.loads(body)
-            except json.JSONDecodeError as exc:
-                return A2UIValidationResult(
-                    valid=False,
-                    error=f"A2UI block {block_index}: invalid JSON ({exc.msg})",
-                )
-            messages = coerce_message_list(parsed)
+            # Try JSONL first (multiple JSON objects separated by newlines),
+            # then fall back to single JSON object/array.
+            messages = _parse_body_as_messages(body)
             if messages is None:
                 return A2UIValidationResult(
                     valid=False,
-                    error=f"A2UI block {block_index}: expected A2UI message list",
+                    error=f"A2UI block {block_index}: invalid JSON or A2UI message format",
                 )
             result = validate_a2ui_messages(messages)
             if not result.valid:

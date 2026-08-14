@@ -87,7 +87,16 @@ class ContextManager:
                 metadata={"layout_order": -1, "runtime_fallback": True},
             )))
         policy = resolve_policy(self.config.policy_layers)
+        # Debug: log A2UI items in source
+        a2ui_source = [item for item in source if getattr(item, 'id', '').startswith('system:a2ui')]
+        if a2ui_source:
+            logger.info("[A2UI_CTX] A2UI item found in source: id=%s", a2ui_source[0].id)
         selected, decision = select_context_items(source, policy)
+        a2ui_selected = [item for item in selected if getattr(item, 'id', '').startswith('system:a2ui')]
+        if a2ui_selected:
+            logger.info("[A2UI_CTX] A2UI item SELECTED: id=%s", a2ui_selected[0].id)
+        elif a2ui_source:
+            logger.warning("[A2UI_CTX] A2UI item was in source but NOT selected (filtered by policy)")
         messages = self.build_context_messages(selected)
         stable = [message for message in messages if message_role(message) in {"system", "developer"}]
         dynamic = [message for message in messages if message_role(message) not in {"system", "developer"}]

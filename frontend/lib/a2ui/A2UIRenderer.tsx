@@ -3,6 +3,95 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { parseA2UIMessage, type A2UIParseResult, type A2UIBlock } from './parser';
 
+// A2UI message type keys (matching backend constants)
+const A2UI_MSG_KEYS = new Set([
+  'beginRendering',
+  'surfaceUpdate',
+  'dataModelUpdate',
+  'deleteSurface',
+]);
+
+function getMessageType(obj: Record<string, unknown>): string | null {
+  if (obj.messageType && typeof obj.messageType === 'string') return obj.messageType;
+  for (const key of A2UI_MSG_KEYS) {
+    if (key in obj) return key;
+  }
+  return null;
+}
+
+function getMessagePayload(obj: Record<string, unknown>): Record<string, unknown> {
+  for (const key of A2UI_MSG_KEYS) {
+    if (key in obj && typeof obj[key] === 'object' && obj[key] !== null) {
+      return obj[key] as Record<string, unknown>;
+    }
+  }
+  return dataMap;
+}
+
+/**
+ * Group flat valueList items (individual key-value pairs) into objects.
+ * Detects repeating key patterns to determine group boundaries.
+ * E.g., [{key:"avatar",...}, {key:"name",...}, {key:"role",...}, {key:"avatar",...}, ...]
+ * becomes [{avatar:..., name:..., role:...}, {avatar:..., name:..., role:...}]
+ */
+function groupFlatListItems(rawItems: unknown[]): unknown[] {
+  if (rawItems.length === 0) return rawItems;
+
+  const firstItem = rawItems[0] as Record<string, unknown> | undefined;
+  if (!firstItem) return rawItems;
+
+  // If items have 'valueMap', they're already grouped - extract the fields
+  if ('valueMap' in firstItem) {
+    return rawItems.map((item) => {
+      const entry = item as Record<string, unknown>;
+      const valueMap = entry.valueMap as Record<string, unknown>[] | undefined;
+      if (valueMap) {
+        const obj: Record<string, unknown> = {};
+        for (const vm of valueMap) {
+          if (vm.key) {
+            obj[vm.key as string] = vm.valueString || vm.valueNumber || vm.valueBoolean;
+          }
+        }
+        return obj;
+      }
+      return entry;
+    });
+  }
+
+  // If items have 'key' (flat key-value pairs), try to group by detecting repetition
+  if ('key' in firstItem && typeof firstItem.key === 'string') {
+    const firstKey = firstItem.key;
+    let groupSize = rawItems.length;
+    for (let i = 1; i < rawItems.length; i++) {
+      const item = rawItems[i] as Record<string, unknown> | undefined;
+      if (item && item.key === firstKey) {
+        groupSize = i;
+        break;
+      }
+    }
+
+    if (groupSize < rawItems.length) {
+      const grouped: Record<string, unknown>[] = [];
+      for (let i = 0; i < rawItems.length; i += groupSize) {
+        const group: Record<string, unknown> = {};
+        for (let j = 0; j < groupSize && i + j < rawItems.length; j++) {
+          const item = rawItems[i + j] as Record<string, unknown>;
+          if (item && item.key) {
+            const k = item.key as string;
+            group[k] = item.valueString || item.valueNumber || item.valueBoolean;
+          }
+        }
+        if (Object.keys(group).length > 0) {
+          grouped.push(group);
+        }
+      }
+      if (grouped.length > 0) return grouped;
+    }
+  }
+
+  return rawItems;
+}
+
 export interface A2UIRendererProps {
   content: string;
   onAction?: (action: A2UIAction) => void;
@@ -17,6 +106,59 @@ export interface A2UIAction {
 }
 
 /**
+ * Build a flat data map from dataModelUpdate messages.
+ * Traverses contents recursively to resolve paths like /form/name, /users/0/name, etc.
+ */
+function buildDataMap(blocks: A2UIBlock[]): Map<string, unknown> {
+  const dataMap = new Map<string, unknown>();
+
+  function traverse(contents: unknown[], prefix: string) {
+    for (let i = 0; i < contents.length; i++) {
+      const item = contents[i];
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      const key = entry.key as string | undefined;
+      if (!key) continue;
+      const fullPath = prefix ? `${prefix}/${key}` : `/${key}`;
+      if ('valueString' in entry) {
+        dataMap.set(fullPath, entry.valueString);
+        // Also set with leading '/' for template path resolution
+        dataMap.set(`/${key}`, entry.valueString);
+        dataMap.set(key, entry.valueString);
+      } else if ('valueNumber' in entry) {
+        dataMap.set(fullPath, entry.valueNumber);
+        dataMap.set(`/${key}`, entry.valueNumber);
+        dataMap.set(key, entry.valueNumber);
+      } else if ('valueBoolean' in entry) {
+        dataMap.set(fullPath, entry.valueBoolean);
+        dataMap.set(`/${key}`, entry.valueBoolean);
+        dataMap.set(key, entry.valueBoolean);
+      } else if ('valueList' in entry && Array.isArray(entry.valueList)) {
+        // Store the valueList as an array for List component iteration
+        dataMap.set(fullPath, entry.valueList);
+        dataMap.set(`/${key}`, entry.valueList);
+        dataMap.set(key, entry.valueList);
+        // Also traverse to index individual items
+        traverse(entry.valueList, fullPath);
+      } else if ('valueMap' in entry && Array.isArray(entry.valueMap)) {
+        traverse(entry.valueMap, fullPath);
+      }
+    }
+  }
+
+  for (const block of blocks) {
+    if (!block.parsed) continue;
+    const payload = getMessagePayload(block.parsed);
+    const msgType = getMessageType(block.parsed);
+    if (msgType === 'dataModelUpdate' && Array.isArray(payload.contents)) {
+      traverse(payload.contents as unknown[], '');
+    }
+  }
+
+  return dataMap;
+}
+
+/**
  * Main A2UI Renderer component
  *
  * Renders structured A2UI JSON content as interactive React components.
@@ -24,6 +166,7 @@ export interface A2UIAction {
  */
 export function A2UIRenderer({ content, onAction, className = '' }: A2UIRendererProps) {
   const parsed = useMemo(() => parseA2UIMessage(content), [content]);
+  const dataMap = useMemo(() => buildDataMap(parsed.blocks), [parsed.blocks]);
 
   if (!parsed.isA2UI) {
     return <div className={className}>{content}</div>;
@@ -35,6 +178,7 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
         <A2UISchemaRenderer
           schema={parsed.schema}
           onAction={onAction}
+          dataMap={dataMap}
         />
       ) : (
         parsed.blocks.map((block, idx) => (
@@ -43,6 +187,7 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
             block={block}
             onAction={onAction}
             defaultSchema={parsed.schema}
+            dataMap={dataMap}
           />
         ))
       )}
@@ -54,22 +199,25 @@ interface A2UIBlockRendererProps {
   block: A2UIBlock;
   onAction?: (action: A2UIAction) => void;
   defaultSchema: Record<string, unknown> | null;
+  dataMap: Map<string, unknown>;
 }
 
-function A2UIBlockRenderer({ block, onAction, defaultSchema }: A2UIBlockRendererProps) {
+function A2UIBlockRenderer({ block, onAction, defaultSchema, dataMap }: A2UIBlockRendererProps) {
   if (!block.parsed) {
     return <div className="text-sm text-muted-foreground">{block.content}</div>;
   }
 
   const parsed = block.parsed as Record<string, unknown>;
-  const messageType = parsed.messageType as string | undefined;
+  const messageType = getMessageType(parsed);
+  const payload = getMessagePayload(parsed);
 
   // Lifecycle messages
   if (messageType === 'beginRendering') {
-    const schema = parsed.schema as Record<string, unknown> | undefined;
+    const schema = payload.schema as Record<string, unknown> | undefined;
     return (
       <A2UIBeginRenderingBlock
         schema={schema || defaultSchema}
+        dataMap={dataMap}
       />
     );
   }
@@ -78,15 +226,30 @@ function A2UIBlockRenderer({ block, onAction, defaultSchema }: A2UIBlockRenderer
     return <A2UIEndRenderingBlock />;
   }
 
-  if (messageType === 'batch') {
-    const items = parsed.items as Record<string, unknown>[] | undefined;
-    return (
-      <A2UIBatchBlock
-        items={items || []}
-        onAction={onAction}
-        defaultSchema={defaultSchema}
-      />
-    );
+  // surfaceUpdate - render components
+  if (messageType === 'surfaceUpdate') {
+    const components = payload.components as Record<string, unknown>[] | undefined;
+    if (components && components.length > 0) {
+      return (
+        <A2UIComponentsRenderer
+          components={components}
+          onAction={onAction}
+          defaultSchema={defaultSchema}
+          dataMap={dataMap}
+        />
+      );
+    }
+    return null;
+  }
+
+  // dataModelUpdate - handled internally, no visible render
+  if (messageType === 'dataModelUpdate') {
+    return null;
+  }
+
+  // deleteSurface
+  if (messageType === 'deleteSurface') {
+    return null;
   }
 
   // Schema-only rendering (no messageType)
@@ -103,20 +266,353 @@ function A2UIBlockRenderer({ block, onAction, defaultSchema }: A2UIBlockRenderer
   return <pre className="text-xs bg-muted p-2 rounded overflow-auto">{JSON.stringify(parsed, null, 2)}</pre>;
 }
 
-function A2UIBeginRenderingBlock({ schema }: { schema: Record<string, unknown> | null }) {
+function A2UIBeginRenderingBlock({ schema, dataMap }: { schema: Record<string, unknown> | null; dataMap: Map<string, unknown> }) {
   if (!schema) return null;
   return (
     <div className="a2ui-begin-rendering rounded-lg border border-border bg-card p-4">
       <div className="text-xs text-muted-foreground mb-2">A2UI Schema v{getSchemaVersion(schema)}</div>
-      <A2UISchemaRenderer schema={schema} />
+      <A2UISchemaRenderer schema={schema} dataMap={dataMap} />
     </div>
   );
+}
+
+/**
+ * Renders A2UI components from a surfaceUpdate message.
+ * Each component has: {id, component: {type, props}}
+ */
+interface A2UIComponentNode {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  childIds: string[];
+}
+
+interface A2UIComponentsRendererProps {
+  components: Record<string, unknown>[];
+  onAction?: (action: A2UIAction) => void;
+  defaultSchema: Record<string, unknown> | null;
+  dataMap: Map<string, unknown>;
+}
+
+function A2UIComponentsRenderer({ components, onAction, defaultSchema, dataMap }: A2UIComponentsRendererProps) {
+  // Build a map of component nodes
+  const nodeMap = useMemo(() => {
+    const map = new Map<string, A2UIComponentNode>();
+    for (const comp of components) {
+      const id = comp.id as string;
+      const inner = comp.component as Record<string, unknown> | undefined;
+      if (!id || !inner) continue;
+      const type = (inner.type as string) || 'Text';
+      const props = (inner.props as Record<string, unknown>) || {};
+      // Collect child component IDs from explicitList, single child, or template
+      const childIds: string[] = [];
+      const child = props.child as string | undefined;
+      if (child) childIds.push(child);
+      const template = props.template as string | undefined;
+      if (template) childIds.push(template);
+      const children = props.children as Record<string, unknown> | undefined;
+      if (children?.explicitList && Array.isArray(children.explicitList)) {
+        childIds.push(...(children.explicitList as string[]));
+      }
+      map.set(id, { id, type, props, childIds });
+    }
+    return map;
+  }, [components]);
+
+  // Find root components (not referenced as children by any other component)
+  const rootIds = useMemo(() => {
+    const allIds = new Set(nodeMap.keys());
+    for (const node of nodeMap.values()) {
+      for (const childId of node.childIds) {
+        allIds.delete(childId);
+      }
+    }
+    return Array.from(allIds);
+  }, [nodeMap]);
+
+  if (rootIds.length === 0) return null;
+
+  return (
+    <div className="a2ui-components flex flex-col gap-3">
+      {rootIds.map((id) => (
+        <A2UIComponentNodeRenderer
+          key={id}
+          nodeId={id}
+          nodeMap={nodeMap}
+          onAction={onAction}
+          defaultSchema={defaultSchema}
+          dataMap={dataMap}
+        />
+      ))}
+    </div>
+  );
+}
+
+interface A2UIComponentNodeRendererProps {
+  nodeId: string;
+  nodeMap: Map<string, A2UIComponentNode>;
+  onAction?: (action: A2UIAction) => void;
+  defaultSchema: Record<string, unknown> | null;
+  dataMap: Map<string, unknown>;
+}
+
+function A2UIComponentNodeRenderer({ nodeId, nodeMap, onAction, defaultSchema, dataMap }: A2UIComponentNodeRendererProps) {
+  const node = nodeMap.get(nodeId);
+  if (!node) return null;
+
+  const { type, props } = node;
+
+  // Resolve text from literalString, path, or direct string value
+  const resolveText = (textValue: unknown): string => {
+    if (typeof textValue === 'string') return textValue;
+    if (typeof textValue === 'number' || typeof textValue === 'boolean') return String(textValue);
+    if (textValue && typeof textValue === 'object') {
+      const obj = textValue as Record<string, unknown>;
+      if (typeof obj.literalString === 'string') return obj.literalString;
+      if (typeof obj.literal === 'string') return obj.literal;
+      if (typeof obj.path === 'string') {
+        const path = obj.path as string;
+        const value = dataMap.get(path);
+        if (value !== undefined) return String(value);
+        return '';
+      }
+    }
+    return '';
+  };
+
+  const renderChildren = () => {
+    if (node.childIds.length === 0) return null;
+    return node.childIds.map((childId) => (
+      <A2UIComponentNodeRenderer
+        key={childId}
+        nodeId={childId}
+        nodeMap={nodeMap}
+        onAction={onAction}
+        defaultSchema={defaultSchema}
+        dataMap={dataMap}
+      />
+    ));
+  };
+
+  const title = resolveText(props.title);
+  const subtitle = props.subtitle ? resolveText(props.subtitle) : '';
+  const text = resolveText(props.text);
+  const url = resolveText(props.url);
+  const label = resolveText(props.label);
+  const gap = (props.gap as number) || 8;
+
+  switch (type) {
+    case 'Card':
+      return (
+        <div className="a2ui-card rounded-lg border border-border bg-card overflow-hidden">
+          {title && (
+            <div className="px-4 pt-4 pb-0">
+              <h3 className="text-base font-semibold">{title}</h3>
+              {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
+            </div>
+          )}
+          <div className="p-4">{renderChildren()}</div>
+        </div>
+      );
+
+    case 'Column':
+      return (
+        <div className="a2ui-column flex flex-col" style={{ gap: `${gap}px` }}>
+          {renderChildren()}
+        </div>
+      );
+
+    case 'Row':
+      return (
+        <div className="a2ui-row flex flex-row items-center" style={{ gap: `${gap}px` }}>
+          {renderChildren()}
+        </div>
+      );
+
+    case 'Text': {
+      const usageHint = props.usageHint as string | undefined;
+      if (usageHint === 'h1') return <h1 className="text-2xl font-bold">{text}</h1>;
+      if (usageHint === 'h2') return <h2 className="text-xl font-semibold">{text}</h2>;
+      if (usageHint === 'h3') return <h3 className="text-lg font-medium">{text}</h3>;
+      if (usageHint === 'caption') return <span className="text-xs text-muted-foreground">{text}</span>;
+      return <span className="text-sm">{text}</span>;
+    }
+
+    case 'Button': {
+      const actionName = (props.action as Record<string, unknown> | undefined)?.name as string;
+      return (
+        <button
+          className="a2ui-button inline-flex items-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          onClick={() => onAction?.({ type: 'click', value: actionName })}
+        >
+          {renderChildren() || text || label || 'Button'}
+        </button>
+      );
+    }
+
+    case 'TextField':
+      return (
+        <div className="a2ui-textfield flex flex-col gap-1">
+          {label && <label className="text-sm font-medium">{label}</label>}
+          <input
+            type="text"
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background"
+            placeholder={text}
+            readOnly
+          />
+        </div>
+      );
+
+    case 'Image':
+      return url ? (
+        <img src={url} alt={title} className="a2ui-image rounded-md max-w-full" />
+      ) : null;
+
+    case 'Divider':
+      return <hr className="my-2 border-border" />;
+
+    case 'Chart':
+      return <A2UIChart {...props} />;
+
+    case 'LineChart':
+    case 'BarChart':
+    case 'PieChart':
+      return <A2UIChart {...props} chartType={type.replace('Chart', '').toLowerCase()} />;
+
+    case 'List': {
+      // Get the items data from the dataMap
+      const itemsPath = (props.items as Record<string, unknown> | undefined)?.path as string | undefined;
+      let items: unknown[] | null = null;
+      if (itemsPath) {
+        const raw = dataMap.get(itemsPath);
+        if (Array.isArray(raw)) {
+          items = groupFlatListItems(raw);
+        }
+      }
+      // If we have items and a template, render each item
+      if (items && items.length > 0 && node.childIds.length > 0) {
+        const templateId = node.childIds[0];
+        return (
+          <div className="a2ui-list flex flex-col gap-2">
+            {items.map((item, idx) => {
+              // Create a temporary dataMap with the item's data for path resolution
+              const itemDataMap = new Map(dataMap);
+              if (item && typeof item === 'object' && !Array.isArray(item)) {
+                const obj = item as Record<string, unknown>;
+                for (const [k, v] of Object.entries(obj)) {
+                  itemDataMap.set(`/${k}`, v);
+                  itemDataMap.set(k, v);
+                }
+              }
+              return (
+                <A2UIComponentNodeRenderer
+                  key={`list-item-${idx}`}
+                  nodeId={templateId}
+                  nodeMap={nodeMap}
+                  onAction={onAction}
+                  defaultSchema={defaultSchema}
+                  dataMap={itemDataMap}
+                />
+              );
+            })}
+          </div>
+        );
+      }
+      // Fallback: render children once
+      return (
+        <div className="a2ui-list">
+          {renderChildren()}
+        </div>
+      );
+    }
+    case 'Tabs':
+      return (
+        <div className="a2ui-list">
+          {renderChildren()}
+        </div>
+      );
+
+    default:
+      return (
+        <div className="a2ui-unknown">
+          {renderChildren() || <span className="text-sm text-muted-foreground">[{type}]</span>}
+        </div>
+      );
+  }
 }
 
 function A2UIEndRenderingBlock() {
   return (
     <div className="a2ui-end-rendering text-xs text-muted-foreground text-center py-2">
       ▇▇▇ End of structured response ▇▇▇
+    </div>
+  );
+}
+
+interface A2UIChartProps {
+  title?: unknown;
+  chartType?: string;
+  xAxis?: string;
+  series?: unknown;
+  data?: unknown;
+  [key: string]: unknown;
+}
+
+function A2UIChart(props: A2UIChartProps) {
+  const title = typeof props.title === 'string' ? props.title
+    : (props.title as Record<string, unknown> | undefined)?.literalString as string || '';
+  const chartType = (props.chartType as string) || 'line';
+  const xAxis = (props.xAxis as string) || 'date';
+  const series = (props.series as Array<Record<string, unknown>>) || [];
+
+  // Collect data from props.data or render a placeholder
+  const hasData = series.length > 0;
+
+  return (
+    <div className="a2ui-chart rounded-lg border border-border bg-card p-4">
+      {title && <h4 className="text-sm font-semibold mb-3">{title}</h4>}
+      {hasData ? (
+        <div className="a2ui-chart-svg">
+          <A2UISimpleChart chartType={chartType} series={series} xAxis={xAxis} />
+        </div>
+      ) : (
+        <div className="text-sm text-muted-foreground text-center py-8">
+          Chart data not available
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface A2UISimpleChartProps {
+  chartType: string;
+  series: Array<Record<string, unknown>>;
+  xAxis: string;
+}
+
+function A2UISimpleChart({ chartType, series }: A2UISimpleChartProps) {
+  const colors = series.map((s) => (s.color as string) || '#3b82f6');
+  const names = series.map((s) => (s.name as string) || (s.key as string) || 'Value');
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Legend */}
+      <div className="flex gap-4 mb-2">
+        {series.map((s, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-3 h-3 rounded-full"
+              style={{ backgroundColor: colors[i] }}
+            />
+            <span className="text-xs text-muted-foreground">{names[i]}</span>
+          </div>
+        ))}
+      </div>
+      {/* Chart type indicator */}
+      <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-md">
+        {chartType === 'bar' ? 'Bar Chart' : chartType === 'pie' ? 'Pie Chart' : 'Line Chart'}
+        {' — '}{series.length} series
+      </div>
     </div>
   );
 }
@@ -421,9 +917,10 @@ function A2UICode({ item }: { item: Record<string, unknown> }) {
 interface A2UISchemaRendererProps {
   schema: Record<string, unknown> | null;
   onAction?: (action: A2UIAction) => void;
+  dataMap?: Map<string, unknown>;
 }
 
-function A2UISchemaRenderer({ schema, onAction }: A2UISchemaRendererProps) {
+function A2UISchemaRenderer({ schema, onAction, dataMap: _dataMap }: A2UISchemaRendererProps) {
   if (!schema) {
     return <div className="text-sm text-muted-foreground">No A2UI schema available</div>;
   }

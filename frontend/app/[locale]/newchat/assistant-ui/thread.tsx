@@ -92,6 +92,9 @@ import {
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
 import { VerificationPanel } from "../ui/verification-panel";
+import { A2UIChatMessage } from "../../chat/a2ui/A2UIRenderer";
+import type { A2UISurface } from "@/types/chat";
+import { A2UIRenderer as A2UITextRenderer, mightContainA2UI } from "@/lib/a2ui";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -1005,6 +1008,11 @@ const AssistantMessage: FC<{
                       <span className="break-all">{textPart.text}</span>
                     </div>
                   );
+                }
+                const textContent = textPart.text || "";
+                if (mightContainA2UI(textContent)) {
+                  console.log("[A2UI_DEBUG] Rendering text part with A2UI protocol, content length:", textContent.length);
+                  return <A2UITextRenderer content={textContent} className="a2ui-chat-message" />;
                 }
                 return <MarkdownText />;
               }
