@@ -4,7 +4,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(override=True)
+# Explicitly sourced deployment variables take precedence over a nearby
+# developer .env file. This is required for tmux/K8s-local verification and
+# avoids silently replacing operator-provided service addresses.
+load_dotenv(override=False)
 
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
@@ -323,10 +326,12 @@ SPEED_RATIO = float(os.getenv("SPEED_RATIO", "1.3"))
 
 # Memory Feature
 MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
+DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
+DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
@@ -354,13 +359,22 @@ MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
 # Dreaming promotion thresholds
 LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
 RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
-MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.75"))
 MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
-MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
-# Scheduling/cron constants are intentionally not defined here: the
-# background Dreaming scheduler is not part of Phase 2 (an agent-driven
-# timer will be added in a later phase, at which point the cron expression
-# and heartbeat can be reintroduced).
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "3"))
+DREAMING_SOURCE_LIMIT = int(os.getenv("DREAMING_SOURCE_LIMIT", "10"))
+DREAMING_LONG_TERM_MAX_CHARS = int(
+    os.getenv("DREAMING_LONG_TERM_MAX_CHARS", "10000")
+)
+DREAMING_SUMMARIZATION_MAX_ATTEMPTS = int(
+    os.getenv("DREAMING_SUMMARIZATION_MAX_ATTEMPTS", "2")
+)
+DREAMING_SCHEDULER_POLL_SECONDS = float(os.getenv("DREAMING_SCHEDULER_POLL_SECONDS", "5.0"))
+DREAMING_SCHEDULER_LEASE_SECONDS = float(os.getenv("DREAMING_SCHEDULER_LEASE_SECONDS", "120.0"))
+DREAMING_SCHEDULER_MAX_CONCURRENCY = int(os.getenv("DREAMING_SCHEDULER_MAX_CONCURRENCY", "1"))
+DREAMING_SCHEDULER_ENABLED = os.getenv("DREAMING_SCHEDULER_ENABLED", "true").lower() in ("true", "1", "yes")
+DREAMING_MAX_AGE_DAYS = int(os.getenv("DREAMING_MAX_AGE_DAYS", "30"))
+DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS = float(os.getenv("DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS", "1.0"))
 
 # External provider retry / timeout
 PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))

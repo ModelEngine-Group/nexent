@@ -427,7 +427,7 @@ def build_context_inputs(
     memory_search_query: Optional[str] = None,
     memory_tool_policy: Optional[str] = None,
     automation_tool_policy: Optional[str] = None,
-    long_term_memory_prompt: Optional[str] = None,
+    long_term_memory_items: Optional[List[dict[str, Any]]] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
     restricted_python_authorized_imports: Optional[List[str]] = None,
@@ -469,13 +469,8 @@ def build_context_inputs(
     if automation_tool_policy:
         add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
 
-    if include_memory and long_term_memory_prompt:
-        add_system(
-            "long_term_memory",
-            long_term_memory_prompt,
-            90,
-            "retrieved",
-        )
+    if include_memory and long_term_memory_items:
+        memory_list = [*long_term_memory_items, *(memory_list or [])]
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):
@@ -485,7 +480,21 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"memory:{index}", type=ContextItemType.MEMORY, content=payload,
                 source=(f"memory:{memory_search_query or 'run'}",), priority=90,
-                metadata={"render_group": "memory", "language": language, "authority": "retrieved"},
+                metadata={
+                    "render_group": "memory",
+                    "language": language,
+                    "authority": "retrieved",
+                    **(
+                        {
+                            "version_id": payload.get("version_id") or payload.get("dreaming_version_id"),
+                            "memory_type": "long_term",
+                            "scope": payload.get("scope") or payload.get("memory_level"),
+                            "source": payload.get("source"),
+                        }
+                        if payload.get("version_id") is not None or payload.get("dreaming_version_id") is not None
+                        else {}
+                    ),
+                },
             ))
 
     if duty:

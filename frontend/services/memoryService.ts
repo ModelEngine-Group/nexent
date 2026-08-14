@@ -1,10 +1,10 @@
-import i18next from 'i18next';
+import i18next from "i18next";
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { fetchAllAgents } from "./agentConfigService";
 
 import { MemoryItem, MemoryGroup } from "@/types/memory";
-import { getAuthHeaders } from '@/lib/auth';
+import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +59,7 @@ async function requestJson(
 // ---------------------------------------------------------------------------
 export interface MemoryConfig {
   memoryEnabled: boolean;
+  dreamingEnabled: boolean;
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
@@ -67,6 +68,66 @@ export interface MemoryConfig {
 export interface MemoryEmbeddingStatus {
   configured: boolean;
   current_es_index_name: string | null;
+}
+
+export type LongTermScope = "tenant" | "user";
+export interface LongTermMemoryVersion {
+  version_id: number;
+  version_no: number;
+  parent_version_id: number | null;
+  is_active: boolean;
+  content?: string;
+  source: "manual" | "dreaming";
+  author_user_id: string;
+  editor_user_id: string;
+  authored_at: string;
+  dreaming_run_id: number | null;
+  character_count: number;
+  fallback_details: Record<string, unknown>;
+}
+
+export async function fetchLongTermActive(scope: LongTermScope) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.active(scope), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<{ empty: boolean; version: LongTermMemoryVersion | null }>;
+}
+export async function fetchLongTermVersions(scope: LongTermScope) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.versions(scope), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<{ items: LongTermMemoryVersion[]; count: number }>;
+}
+export async function fetchLongTermVersion(scope: LongTermScope, id: number) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.detail(scope, id), {
+    method: "GET",
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  }) as Promise<LongTermMemoryVersion>;
+}
+export async function saveLongTermVersion(
+  scope: LongTermScope,
+  content: string,
+  expected: number | null
+) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.versions(scope), {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ content, expected_active_version_id: expected }),
+  }) as Promise<LongTermMemoryVersion>;
+}
+export async function activateLongTermVersion(
+  scope: LongTermScope,
+  id: number,
+  expected: number | null
+) {
+  return requestJson(API_ENDPOINTS.memory.longTerm.activate(scope, id), {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ expected_active_version_id: expected }),
+  }) as Promise<LongTermMemoryVersion>;
 }
 
 export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus> {
@@ -97,6 +158,7 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
+      dreamingEnabled: (cfg.DREAMING_SWITCH ?? "Y") === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
@@ -106,11 +168,27 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
     // fall back to defaults
     return {
       memoryEnabled: true,
+      dreamingEnabled: true,
       shareOption: "always",
       disableAgentIds: [],
       disableUserAgentIds: [],
     };
   }
+}
+
+export async function setDreamingConfig(
+  enabled: boolean,
+  deleteHistory = false
+): Promise<boolean> {
+  const res = await requestJson(
+    `${API_ENDPOINTS.memory.config.load.replace("/load", "/dreaming")}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ enabled, delete_history: deleteHistory }),
+    }
+  );
+  return !!res?.success;
 }
 
 export async function setMemorySwitch(enabled: boolean): Promise<boolean> {
@@ -443,4 +521,116 @@ export async function deleteMemory(
     log.error("deleteMemory error", e);
     throw e;
   }
+}
+
+export interface DreamingAudit {
+  run_id: number;
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  current_phase?: "light" | "rem" | "deep" | "summarization" | null;
+  started_at?: string;
+  finished_at?: string;
+  light_count: number;
+  rem_count: number;
+  promoted_count: number;
+  deferred_count: number;
+  error?: string | null;
+  decisions?: Array<{
+    memory_id: number;
+    score: number;
+    noise: boolean;
+    signal_count: number;
+    context_diversity: number;
+    event: "SELECT" | "DEFER";
+    reason: string;
+    evidence_ids?: string[];
+    archive_suggested?: boolean;
+  }>;
+  published_version_id?: number | null;
+  reason?: string | null;
+}
+
+export interface DreamingParameters {
+  source_limit: number;
+  long_term_max_chars: number;
+  summarization_max_attempts: number;
+}
+
+export interface DreamingSchedule {
+  schedule_id?: number;
+  agent_id: string;
+  enabled: boolean;
+  rule_type: "CRON" | "INTERVAL";
+  timezone: string;
+  start_at?: string | null;
+  cron_expr?: string | null;
+  interval_seconds?: number | null;
+  next_fire_at?: string | null;
+  last_fire_at?: string | null;
+  fire_count: number;
+  min_score?: number | null;
+  min_recall_count?: number | null;
+  min_unique_queries?: number | null;
+  source_limit?: number | null;
+  long_term_max_chars?: number | null;
+  summarization_max_attempts?: number | null;
+}
+
+export async function fetchDreamingAgents() {
+  const response = await fetchAllAgents();
+  const agents = (response as any)?.success ? (response as any).data : [];
+  return (agents || []).map((agent: any) => ({
+    value: String(agent.agent_id),
+    label: agent.display_name || agent.name || String(agent.agent_id),
+  }));
+}
+
+export async function fetchDreamingParameters(): Promise<DreamingParameters> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.parameters, {
+    headers: getAuthHeaders(),
+  });
+}
+
+export async function fetchDreamingSchedule(
+  targetUserId?: string
+): Promise<DreamingSchedule> {
+  const params = new URLSearchParams();
+  if (targetUserId) params.set("target_user_id", targetUserId);
+  return requestJson(
+    `${API_ENDPOINTS.memory.dreaming.schedule}?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
+}
+
+export async function saveDreamingSchedule(
+  schedule: Omit<DreamingSchedule, "fire_count"> & { target_user_id?: string }
+): Promise<DreamingSchedule> {
+  return requestJson(API_ENDPOINTS.memory.dreaming.schedule, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(schedule),
+  });
+}
+
+export async function runDreaming(agentId: string, targetUserId?: string) {
+  return requestJson(API_ENDPOINTS.memory.dreaming.run, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      ...(targetUserId ? { target_user_id: targetUserId } : {}),
+    }),
+  }) as Promise<{ run_id: number; task_id: string; status: "queued" }>;
+}
+
+export async function fetchDreamingAudits(
+  limit = 20,
+  targetUserId?: string
+): Promise<DreamingAudit[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+  });
+  if (targetUserId) params.set("target_user_id", targetUserId);
+  return requestJson(
+    `${API_ENDPOINTS.memory.dreaming.audits}?${params.toString()}`,
+    { headers: getAuthHeaders() }
+  );
 }

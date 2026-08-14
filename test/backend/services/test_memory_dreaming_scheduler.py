@@ -1,425 +1,316 @@
-"""Unit tests for ``backend.services.memory_dreaming_scheduler`` (Phase 2)."""
+"""Unit tests for memory_dreaming_scheduler (DreamingLeaseStore, execute_dreaming, DreamingScheduler)."""
 
-import sys
-import types
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-# Path setup
-sys.path.insert(
-    0,
-    __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."),
-)
+pytestmark = pytest.mark.anyio
 
 
-# Stub consts
-consts_pkg = types.ModuleType("consts")
-consts_pkg.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 14
-consts_pkg.LIGHT_SLEEP_WINDOW_DAYS = 7
-consts_pkg.MIN_PROMOTION_SCORE = 0.72
-consts_pkg.MIN_RECALL_COUNT = 3
-consts_pkg.MIN_UNIQUE_QUERIES = 2
-consts_pkg.RECENCY_HALF_LIFE_DAYS = 14
-consts_mod = types.ModuleType("consts.const")
-for name, value in vars(consts_pkg).items():
-    if not name.startswith("_"):
-        setattr(consts_mod, name, value)
-sys.modules["consts"] = types.ModuleType("consts")
-sys.modules["consts.const"] = consts_mod
-
-
-# Stub database
-database_pkg = types.ModuleType("database")
-database_pkg.memory_record_db = MagicMock(name="memory_record_db")
-database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
-sys.modules["database"] = database_pkg
-sys.modules["backend.database"] = database_pkg
-
-
-# Stub services.memory_record_service
-memory_record_service_mod = types.ModuleType("services.memory_record_service")
-memory_record_service_mod.MemoryRecordError = type("MemoryRecordError", (Exception,), {})
-
-
-class _RecordService:
-    pass
-
-
-memory_record_service_mod.MemoryRecordService = _RecordService
-memory_record_service_mod.get_memory_record_service = MagicMock(
-    name="get_memory_record_service"
-)
-sys.modules["services.memory_record_service"] = memory_record_service_mod
-
-
-from backend.services import memory_dreaming_scheduler
-
-
-def test_compute_promotion_score_no_signal():
-    score = memory_dreaming_scheduler.compute_promotion_score({})
-    assert 0.0 <= score <= 1.0
-
-
-def test_compute_promotion_score_increases_with_recall():
-    low = memory_dreaming_scheduler.compute_promotion_score(
-        {"recall_count": 1, "daily_count": 1, "grounded_count": 1, "light_hits": 0,
-         "rem_hits": 0, "last_recalled_at": datetime.utcnow(), "concept_tags": [],
-         "query_hashes": []}
+@pytest.fixture
+def mock_consts(monkeypatch):
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_ENABLED", True
     )
-    high = memory_dreaming_scheduler.compute_promotion_score(
-        {"recall_count": 12, "daily_count": 5, "grounded_count": 4,
-         "light_hits": 3, "rem_hits": 3,
-         "last_recalled_at": datetime.utcnow(), "concept_tags": ["python"],
-         "query_hashes": ["a", "b", "c", "d", "e"]}
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
     )
-    assert high > low
-
-
-def test_run_light_sleep_aggregates_into_rows():
-    memory_dreaming_scheduler.memory_retrieval_hit_db.aggregate_memory_stats.return_value = [
-        {
-            "memory_id": 1,
-            "hit_count": 5,
-            "grounded_count": 2,
-            "days": {"2026-07-13", "2026-07-12"},
-            "query_hashes": {"q1", "q2"},
-        }
-    ]
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.return_value = True
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.return_value = True
-
-    touched = memory_dreaming_scheduler.run_light_sleep(
-        tenant_id="t1", user_id="u1"
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
     )
-
-    assert touched == 1
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.assert_called_once()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.assert_called_once_with(
-        1, "t1", phase="light"
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
     )
 
 
-def test_run_rem_sleep_writes_concept_tags():
-    memory_dreaming_scheduler.memory_record_db.list_memory_records.return_value = [
-        {
-            "memory_id": 1,
-            "tenant_id": "t1",
-            "user_id": "u1",
-            "content": "Python Python Java Python Java C++",
-            "layer": "agent",
-            "memory_type": "short_term",
-            "concept_tags": [],
-        }
-    ]
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.return_value = True
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.return_value = True
+@pytest.fixture
+def inline_to_thread(monkeypatch):
+    """Keep adapter unit tests deterministic and free of executor threads."""
 
-    touched = memory_dreaming_scheduler.run_rem_sleep(
-        tenant_id="t1", user_id="u1"
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.asyncio.to_thread",
+        run_inline,
     )
 
-    assert touched == 1
-    # Update payload should carry the new tags.
-    update_call = memory_dreaming_scheduler.memory_record_db.update_memory_record.call_args
-    payload = update_call.args[2]
-    assert "python" in payload["concept_tags"]
-    assert "java" in payload["concept_tags"]
+
+# ---------------------------------------------------------------------------
+# DreamingLeaseStore
+# ---------------------------------------------------------------------------
 
 
-def test_run_deep_sleep_skips_low_signal():
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.return_value = [
-        {
-            "memory_id": 1,
-            "content": "low signal",
-            "layer": "agent",
-            "recall_count": 1,
-            "daily_count": 0,
-            "grounded_count": 0,
-            "query_hashes": ["q1"],
-            "concept_tags": [],
-            "last_recalled_at": datetime.utcnow(),
-            "light_hits": 0,
-            "rem_hits": 0,
-        }
-    ]
-    memory_record_service_mod.get_memory_record_service.return_value.create_memory.return_value = {
-        "memory_id": 999,
-        "event": "ADD",
+@pytest.mark.asyncio
+async def test_lease_store_recover(monkeypatch, inline_to_thread):
+    from services.memory_dreaming_scheduler import DreamingLeaseStore
+
+    mock_recover = MagicMock(return_value=3)
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.recover_stale",
+        mock_recover,
+    )
+
+    store = DreamingLeaseStore()
+    await store.recover()
+
+    mock_recover.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_lease_store_claim_due_returns_job(monkeypatch, inline_to_thread):
+    from services.memory_dreaming_scheduler import DreamingLeaseStore
+
+    row = {
+        "run_id": 42,
+        "tenant_id": "t",
+        "user_id": "u",
+        "agent_id": "a",
+        "trigger_source": "manual",
     }
-
-    promoted = memory_dreaming_scheduler.run_deep_sleep(
-        tenant_id="t1", user_id="u1", min_score=0.99
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.claim_queued",
+        lambda owner_id, lease_seconds: row,
+    )
+    materialize = MagicMock(return_value=1)
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.materialize_due_schedules",
+        materialize,
     )
 
-    assert promoted == []
-    memory_record_service_mod.get_memory_record_service.return_value.create_memory.assert_not_called()
+    store = DreamingLeaseStore()
+    jobs = await store.claim_due("worker-1", 1, 120.0)
+
+    assert len(jobs) == 1
+    assert jobs[0].job_id == 42
+    assert jobs[0].payload == row
+    materialize.assert_called_once_with(1)
 
 
-def test_run_deep_sleep_promotes_high_signal():
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.return_value = [
-        {
-            "memory_id": 1,
-            "content": "user prefers dark mode",
-            "layer": "agent",
-            "recall_count": 8,
-            "daily_count": 4,
-            "grounded_count": 2,
-            "query_hashes": ["q1", "q2", "q3"],
-            "concept_tags": ["preference"],
-            "last_recalled_at": datetime.utcnow(),
-            "light_hits": 2,
-            "rem_hits": 1,
-            "agent_id": "a1",
-            "conversation_id": "c1",
-        }
-    ]
-    memory_record_service_mod.get_memory_record_service.return_value.create_memory.return_value = {
-        "memory_id": 999,
-        "event": "ADD",
-    }
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.return_value = True
+@pytest.mark.asyncio
+async def test_lease_store_claim_due_returns_empty(monkeypatch, inline_to_thread):
+    from services.memory_dreaming_scheduler import DreamingLeaseStore
 
-    promoted = memory_dreaming_scheduler.run_deep_sleep(
-        tenant_id="t1", user_id="u1", min_score=0.5
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.claim_queued",
+        lambda owner_id, lease_seconds: None,
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.materialize_due_schedules",
+        lambda limit: 0,
     )
 
-    assert len(promoted) == 1
-    create_kwargs = memory_record_service_mod.get_memory_record_service.return_value.create_memory.call_args.kwargs
-    assert create_kwargs["layer"] == "user"
-    assert create_kwargs["memory_type"] == "long_term"
-    assert create_kwargs["actor"] == "dreaming"
+    store = DreamingLeaseStore()
+    jobs = await store.claim_due("worker-1", 1, 120.0)
+
+    assert jobs == []
 
 
-def test_scoring_helpers_cover_bounds_and_decay(mocker):
-    assert memory_dreaming_scheduler._clamp01(-1.0) == 0.0
-    assert memory_dreaming_scheduler._clamp01(2.0) == 1.0
-    assert memory_dreaming_scheduler._clamp01(0.5) == 0.5
-    assert memory_dreaming_scheduler._relevance(0, 10.0) == 0.0
-    assert memory_dreaming_scheduler._relevance(2, 3.0) == 1.0
-    assert memory_dreaming_scheduler._diversity(100) == 1.0
-    assert memory_dreaming_scheduler._consolidation(0, 0) == 0.0
-    assert memory_dreaming_scheduler._concept([]) == 0.0
-    assert memory_dreaming_scheduler._phase_boost(0, 1) == 0.0
-    assert memory_dreaming_scheduler._phase_boost(10, 10) == 0.05
-    assert memory_dreaming_scheduler._normalize_weights({}) == {}
+@pytest.mark.asyncio
+async def test_lease_store_renew(monkeypatch, inline_to_thread):
+    from services.memory_dreaming_scheduler import DreamingLeaseStore
 
-    future = datetime.utcnow() + timedelta(days=1)
-    old = datetime.utcnow() - timedelta(days=14)
-    assert memory_dreaming_scheduler._recency(future) == 1.0
-    assert 0.49 < memory_dreaming_scheduler._recency(old) < 0.51
-    assert memory_dreaming_scheduler._recency(None) == 0.0
-    mocker.patch.object(memory_dreaming_scheduler, "RECENCY_HALF_LIFE_DAYS", 0)
-    assert 0.0 < memory_dreaming_scheduler._recency(old) <= 1.0
+    mock_renew = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.renew_lease",
+        mock_renew,
+    )
+
+    store = DreamingLeaseStore()
+    result = await store.renew(42, "worker-1", 120.0)
+
+    assert result is True
+    mock_renew.assert_called_once_with(42, "worker-1", 120.0)
 
 
-def test_run_light_sleep_handles_empty_hit_days():
-    memory_dreaming_scheduler.memory_retrieval_hit_db.aggregate_memory_stats.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.reset_mock()
-    memory_dreaming_scheduler.memory_retrieval_hit_db.aggregate_memory_stats.return_value = [
-        {
-            "memory_id": 2,
-            "hit_count": 1,
-            "grounded_count": 0,
-            "days": set(),
-            "query_hashes": set(),
-        }
-    ]
+@pytest.mark.asyncio
+async def test_lease_store_release(monkeypatch, inline_to_thread):
+    from services.memory_dreaming_scheduler import DreamingLeaseStore
 
-    assert memory_dreaming_scheduler.run_light_sleep(
-        tenant_id="t1", user_id="u1", window_days=0
-    ) == 1
-    payload = memory_dreaming_scheduler.memory_record_db.update_memory_record.call_args.args[2]
-    assert payload["last_recalled_at"] is None
-    assert payload["query_hashes"] == []
-    assert payload["recall_days"] == []
+    mock_release = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.memory_dreaming_db.release_lease",
+        mock_release,
+    )
+
+    store = DreamingLeaseStore()
+    result = await store.release(42, "worker-1")
+
+    assert result is True
+    mock_release.assert_called_once_with(42, "worker-1")
 
 
-def test_run_rem_sleep_skips_empty_content_and_merges_limited_tags():
-    memory_dreaming_scheduler.memory_record_db.list_memory_records.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.list_memory_records.return_value = [
-        {"memory_id": 1, "content": "the and"},
-        {
-            "memory_id": 2,
-            "content": "Python Python Java Java Rust",
-            "concept_tags": ["existing"],
+# ---------------------------------------------------------------------------
+# execute_dreaming
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_dreaming_success(monkeypatch, inline_to_thread):
+    from nexent.scheduler import ClaimedJob
+    from services.memory_dreaming_scheduler import execute_dreaming
+
+    mock_run = MagicMock()
+    mock_service = MagicMock()
+    mock_service.run = mock_run
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.get_memory_dreaming_service",
+        lambda: mock_service,
+    )
+
+    job = ClaimedJob(
+        job_id=42,
+        payload={
+            "tenant_id": "t",
+            "user_id": "u",
+            "agent_id": "a",
+            "trigger_source": "scheduler",
         },
-    ]
+    )
+    lease = MagicMock()
 
-    assert memory_dreaming_scheduler.run_rem_sleep(
-        tenant_id="t1", user_id="u1", max_keywords=2
-    ) == 1
-    payload = memory_dreaming_scheduler.memory_record_db.update_memory_record.call_args.args[2]
-    assert payload["concept_tags"] == ["existing", "python"]
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.assert_called_once_with(
-        2, "t1", phase="rem"
+    await execute_dreaming(job, lease)
+
+    mock_run.assert_called_once_with(
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        run_id=42,
+        trigger_source="scheduler",
     )
 
 
-def test_run_deep_sleep_skips_duplicate_queries_and_promotion_errors():
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.reset_mock()
-    service = memory_record_service_mod.get_memory_record_service.return_value
-    service.create_memory.reset_mock()
-    service.create_memory.side_effect = memory_record_service_mod.MemoryRecordError(
-        "already promoted"
+@pytest.mark.asyncio
+async def test_execute_dreaming_default_trigger_source(monkeypatch, inline_to_thread):
+    from nexent.scheduler import ClaimedJob
+    from services.memory_dreaming_scheduler import execute_dreaming
+
+    mock_run = MagicMock()
+    mock_service = MagicMock()
+    mock_service.run = mock_run
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.get_memory_dreaming_service",
+        lambda: mock_service,
     )
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.return_value = [
-        {
-            "memory_id": 1,
-            "query_hashes": ["same", "same"],
-            "recall_count": 10,
+
+    job = ClaimedJob(
+        job_id=10,
+        payload={
+            "tenant_id": "t",
+            "user_id": "u",
+            "agent_id": "a",
         },
-        {
-            "memory_id": 2,
-            "query_hashes": ["q1", "q2"],
-            "recall_count": 10,
-            "daily_count": 5,
-            "grounded_count": 2,
-            "concept_tags": ["tag"],
-            "last_recalled_at": datetime.utcnow(),
-            "light_hits": 2,
-            "rem_hits": 2,
-            "content": "promote me",
+    )
+    lease = MagicMock()
+
+    await execute_dreaming(job, lease)
+
+    mock_run.assert_called_once_with(
+        tenant_id="t",
+        user_id="u",
+        agent_id="a",
+        run_id=10,
+        trigger_source="scheduler",
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_dreaming_failure_raises(monkeypatch, inline_to_thread):
+    from nexent.scheduler import ClaimedJob
+    from services.memory_dreaming_scheduler import execute_dreaming
+
+    mock_service = MagicMock()
+    mock_service.run = MagicMock(side_effect=RuntimeError("model down"))
+    monkeypatch.setattr(
+        "services.memory_dreaming_service.get_memory_dreaming_service",
+        lambda: mock_service,
+    )
+
+    job = ClaimedJob(
+        job_id=42,
+        payload={
+            "tenant_id": "t",
+            "user_id": "u",
+            "agent_id": "a",
+            "trigger_source": "manual",
         },
-    ]
-
-    assert memory_dreaming_scheduler.run_deep_sleep(
-        tenant_id="t1", user_id="u1", min_score=0.0, min_unique_queries=2
-    ) == []
-    service.create_memory.assert_called_once()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.assert_not_called()
-
-
-def test_run_once_aggregates_tenants_and_handles_iteration_errors(mocker):
-    mocker.patch.object(
-        memory_dreaming_scheduler, "list_distinct_tenants",
-        return_value=[("t1", "u1"), ("t2", "u2")],
     )
-    light = mocker.patch.object(
-        memory_dreaming_scheduler, "run_light_sleep", side_effect=[2, RuntimeError("db")]
+    lease = MagicMock()
+
+    with pytest.raises(RuntimeError, match="model down"):
+        await execute_dreaming(job, lease)
+
+
+# ---------------------------------------------------------------------------
+# DreamingScheduler
+# ---------------------------------------------------------------------------
+
+
+def test_dreaming_scheduler_properties(monkeypatch, mock_consts):
+    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+        mock_instance = MagicMock()
+        mock_instance.owner_id = "worker-abc"
+        mock_instance.is_running = True
+        MockScheduler.return_value = mock_instance
+
+        from services.memory_dreaming_scheduler import DreamingScheduler
+
+        scheduler = DreamingScheduler()
+
+        assert scheduler.instance_id == "worker-abc"
+        assert scheduler.is_running is True
+
+
+@pytest.mark.asyncio
+async def test_dreaming_scheduler_start_disabled(monkeypatch):
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_ENABLED", False
     )
-    rem = mocker.patch.object(memory_dreaming_scheduler, "run_rem_sleep", return_value=3)
-    deep = mocker.patch.object(
-        memory_dreaming_scheduler, "run_deep_sleep",
-        return_value=[{"memory_id": 8, "score": 0.8, "event": "PROMOTE"}],
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
+    )
+    monkeypatch.setattr(
+        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
     )
 
-    summary = memory_dreaming_scheduler.run_once(timeout_seconds=60)
+    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+        mock_instance = AsyncMock()
+        MockScheduler.return_value = mock_instance
 
-    assert summary["tenants"] == 2
-    assert summary["light_rows"] == 2
-    assert summary["rem_rows"] == 3
-    assert summary["promotions"] == [{"memory_id": 8, "score": 0.8, "event": "PROMOTE"}]
-    assert light.call_count == 2
-    rem.assert_called_once_with(tenant_id="t1", user_id="u1")
-    deep.assert_called_once_with(tenant_id="t1", user_id="u1")
+        from services.memory_dreaming_scheduler import DreamingScheduler
 
+        scheduler = DreamingScheduler()
+        await scheduler.start()
 
-def test_run_once_stops_before_work_when_deadline_reached(mocker):
-    mocker.patch.object(
-        memory_dreaming_scheduler, "list_distinct_tenants",
-        return_value=[("t1", "u1")],
-    )
-    mocker.patch.object(
-        memory_dreaming_scheduler.time, "time", side_effect=[100.0, 2000.0, 2000.0, 2000.0]
-    )
-    light = mocker.patch.object(memory_dreaming_scheduler, "run_light_sleep")
-
-    summary = memory_dreaming_scheduler.run_once(timeout_seconds=1)
-
-    assert summary["tenants"] == 1
-    assert summary["light_rows"] == 0
-    assert summary["rem_rows"] == 0
-    assert summary["promotions"] == []
-    light.assert_not_called()
+        mock_instance.start.assert_not_called()
 
 
-def test_list_distinct_tenants_returns_filtered_pairs_and_handles_errors(monkeypatch):
-    class Column:
-        def isnot(self, value):
-            return (self, value)
+@pytest.mark.asyncio
+async def test_dreaming_scheduler_start_enabled(monkeypatch, mock_consts):
+    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+        mock_instance = AsyncMock()
+        MockScheduler.return_value = mock_instance
 
-    class MemoryRetrievalHit:
-        tenant_id = Column()
-        user_id = Column()
+        from services.memory_dreaming_scheduler import DreamingScheduler
 
-    class Query:
-        def filter(self, *conditions):
-            self.conditions = conditions
-            return self
+        scheduler = DreamingScheduler()
+        await scheduler.start()
 
-        def all(self):
-            return [("t1", "u1"), ("", "u2"), ("t2", None), ("t3", "u3")]
-
-    class Session:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def query(self, *columns):
-            self.columns = columns
-            return Query()
-
-    client = types.ModuleType("database.client")
-    client.get_db_session = lambda: Session()
-    db_models = types.ModuleType("database.db_models")
-    db_models.MemoryRetrievalHit = MemoryRetrievalHit
-    sqlalchemy = types.ModuleType("sqlalchemy")
-    sqlalchemy.distinct = lambda value: ("distinct", value)
-    monkeypatch.setitem(sys.modules, "database.client", client)
-    monkeypatch.setitem(sys.modules, "database.db_models", db_models)
-    monkeypatch.setitem(sys.modules, "sqlalchemy", sqlalchemy)
-
-    assert memory_dreaming_scheduler.list_distinct_tenants() == [("t1", "u1"), ("t3", "u3")]
-
-    client.get_db_session = MagicMock(side_effect=RuntimeError("db unavailable"))
-    assert memory_dreaming_scheduler.list_distinct_tenants() == []
+        mock_instance.start.assert_called_once()
 
 
-def test_run_rem_sleep_skips_when_keyword_limit_is_zero():
-    memory_dreaming_scheduler.memory_record_db.list_memory_records.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.list_memory_records.return_value = [
-        {"memory_id": 3, "content": "python java"},
-    ]
+@pytest.mark.asyncio
+async def test_dreaming_scheduler_stop(monkeypatch, mock_consts):
+    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+        mock_instance = AsyncMock()
+        MockScheduler.return_value = mock_instance
 
-    assert memory_dreaming_scheduler.run_rem_sleep(
-        tenant_id="t1", user_id="u1", max_keywords=0
-    ) == 0
-    memory_dreaming_scheduler.memory_record_db.update_memory_record.assert_not_called()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.assert_not_called()
+        from services.memory_dreaming_scheduler import DreamingScheduler
 
+        scheduler = DreamingScheduler()
+        await scheduler.stop()
 
-def test_run_deep_sleep_skips_record_below_score_threshold():
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.reset_mock()
-    service = memory_record_service_mod.get_memory_record_service.return_value
-    service.create_memory.reset_mock()
-    memory_dreaming_scheduler.memory_record_db.list_memories_for_dreaming.return_value = [
-        {
-            "memory_id": 4,
-            "query_hashes": ["q1", "q2"],
-            "recall_count": 1,
-            "daily_count": 0,
-            "grounded_count": 0,
-            "concept_tags": [],
-            "last_recalled_at": None,
-            "light_hits": 0,
-            "rem_hits": 0,
-        },
-    ]
-
-    assert memory_dreaming_scheduler.run_deep_sleep(
-        tenant_id="t1", user_id="u1", min_score=0.99
-    ) == []
-    service.create_memory.assert_not_called()
-    memory_dreaming_scheduler.memory_record_db.apply_dreaming_phase.assert_not_called()
+        mock_instance.stop.assert_called_once()
