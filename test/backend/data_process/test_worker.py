@@ -44,39 +44,39 @@ def setup_mocks_for_worker(mocker, initialized=False):
     # Mock ray module
     mocker.patch.dict(sys.modules, {"ray": fake_ray})
     
-    # Stub consts.const module
+    # Stub consts.const with deterministic values even when another test has
+    # already imported the real configuration module.
     if "consts" not in sys.modules:
         sys.modules["consts"] = types.ModuleType("consts")
         setattr(sys.modules["consts"], "__path__", [])
-    if "consts.const" not in sys.modules:
-        const_mod = types.ModuleType("consts.const")
-        const_mod.CELERY_TASK_TIME_LIMIT = 3600
-        const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-        const_mod.ELASTICSEARCH_SERVICE = "http://elasticsearch:9200"
-        const_mod.QUEUES = "process_q,process_part_q,forward_q"
-        const_mod.RAY_ADDRESS = "auto"
-        const_mod.RAY_preallocate_plasma = False
-        const_mod.REDIS_URL = "redis://localhost:6379"
-        const_mod.REDIS_BACKEND_URL = "redis://localhost:6379"
-        const_mod.WORKER_CONCURRENCY = 4
-        const_mod.WORKER_NAME = None
-        const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
-        const_mod.FORWARD_REDIS_RETRY_MAX = 1
-        const_mod.DISABLE_RAY_DASHBOARD = False
-        const_mod.DATA_PROCESS_SERVICE = "http://data-process"
-        const_mod.ROOT_DIR = "/mock/root"
-        const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
-        const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 100
-        const_mod.RAY_ACTOR_NUM_CPUS = 1
-        const_mod.RAY_NUM_CPUS = 4
-        const_mod.DP_PART_PROCESSOR_COUNT = 3
-        const_mod.DP_FILE_SPLIT_SIZE_MB = 5
-        const_mod.PER_WAVE_TIMEOUT = 300
-        const_mod.MAX_TIMEOUT = 3600
-        const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
-        const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
-        const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
-        sys.modules["consts.const"] = const_mod
+    const_mod = types.ModuleType("consts.const")
+    const_mod.CELERY_TASK_TIME_LIMIT = 3600
+    const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+    const_mod.ELASTICSEARCH_SERVICE = "http://elasticsearch:9200"
+    const_mod.QUEUES = "process_q,process_part_q,forward_q"
+    const_mod.RAY_ADDRESS = "auto"
+    const_mod.RAY_preallocate_plasma = False
+    const_mod.REDIS_URL = "redis://localhost:6379"
+    const_mod.REDIS_BACKEND_URL = "redis://localhost:6379"
+    const_mod.WORKER_CONCURRENCY = 4
+    const_mod.WORKER_NAME = None
+    const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
+    const_mod.FORWARD_REDIS_RETRY_MAX = 1
+    const_mod.DISABLE_RAY_DASHBOARD = False
+    const_mod.DATA_PROCESS_SERVICE = "http://data-process"
+    const_mod.ROOT_DIR = "/mock/root"
+    const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
+    const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 100
+    const_mod.RAY_ACTOR_NUM_CPUS = 1
+    const_mod.RAY_NUM_CPUS = 4
+    const_mod.DP_PART_PROCESSOR_COUNT = 3
+    const_mod.DP_FILE_SPLIT_SIZE_MB = 5
+    const_mod.PER_WAVE_TIMEOUT = 300
+    const_mod.MAX_TIMEOUT = 3600
+    const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
+    const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
+    const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
+    mocker.patch.dict(sys.modules, {"consts.const": const_mod})
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
     if "celery.backends.base" not in sys.modules:
@@ -856,10 +856,9 @@ def test_validate_service_connections_handles_redis_exception(mocker):
     assert result is False
 
 
-def test_worker_state_keys_exist():
+def test_worker_state_keys_exist(mocker):
     """Test worker_state has all required keys."""
-    # Test that worker module has worker_state with required structure
-    import backend.data_process.worker as worker_module
+    worker_module, _ = setup_mocks_for_worker(mocker)
 
     assert "initialized" in worker_module.worker_state
     assert "ready" in worker_module.worker_state
