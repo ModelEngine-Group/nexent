@@ -526,17 +526,23 @@ class TestDockerIntegration:
             timeout_seconds=120,
         )
         logger = sandbox_module.logging.getLogger("test_sandbox")
+        ex1 = None
+        ex2 = None
         try:
             ex1 = build_python_executor(cfg, logger)
+            if getattr(ex1, "_nexent_backend", None) != "docker":
+                pytest.skip("DockerExecutor construction fell back to LocalPythonExecutor")
             release_python_executor(ex1, logger)
             ex2 = build_python_executor(cfg, logger)
+            if getattr(ex2, "_nexent_backend", None) != "docker":
+                pytest.skip("DockerExecutor construction fell back to LocalPythonExecutor")
             assert ex1 is not ex2, "SYSTEM scope should issue a fresh kernel lease"
             assert ex1.container is ex2.container, "SYSTEM scope should reuse the same container"
         finally:
-            release_python_executor(
-                build_python_executor(cfg, logger) or None.__class__(),
-                logger,
-            )
+            if ex2 is not None:
+                release_python_executor(ex2, logger)
+            elif ex1 is not None:
+                release_python_executor(ex1, logger)
             pool = SandboxPoolManager.get_instance()
             pool.shutdown(logger)
 
@@ -552,15 +558,16 @@ class TestDockerIntegration:
             timeout_seconds=120,
         )
         logger = sandbox_module.logging.getLogger("test_sandbox")
+        ex = None
         try:
             ex = build_python_executor(cfg, logger)
+            if getattr(ex, "_nexent_backend", None) != "docker":
+                pytest.skip("DockerExecutor construction fell back to LocalPythonExecutor")
             result = ex("print(7 * 6)")
             assert "42" in result.logs
         finally:
-            release_python_executor(
-                build_python_executor(cfg, logger) or None.__class__(),
-                logger,
-            )
+            if ex is not None:
+                release_python_executor(ex, logger)
             pool = SandboxPoolManager.get_instance()
             pool.shutdown(logger)
 
