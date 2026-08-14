@@ -2,10 +2,11 @@ import logging
 from typing import Optional
 
 from nexent.core import MessageObserver
-from nexent.core.models import OpenAIModel, OpenAIVLModel
+from nexent.core.models import OpenAIModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models.rerank_model import OpenAICompatibleRerank
+from services.model_gateway_service import build_adapter_fresh
 
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
@@ -247,13 +248,12 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await OpenAIVLModel(
-            observer,
-            model_id=model_name,
-            api_base=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify
-        ).check_connectivity()
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify},
+            "vlm", "vlm", None, model_name=model_name,
+            observer=observer, display_name=display_name,
+        ).health_check()
     elif model_type == 'stt':
         voice_service = get_voice_service()
 

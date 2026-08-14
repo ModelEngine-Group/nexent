@@ -1,12 +1,4 @@
-"""Transport-layer abstraction, orthogonal to modality logic.
-
-Inspired by Pipecat's ``WebsocketService`` mixin design: transport concerns
-(HTTP base_url/api_key vs WebSocket ws_url/auth_headers) live in mixins that
-are multiply-inherited alongside a modality ABC, decoupling the STT/TTS
-adapters from a hardcoded WebSocket assumption. An HTTP-only vendor (e.g.
-ModelEngine STT/TTS) can therefore take :class:`HttpTransportMixin` instead of
-``WebSocketTransportMixin``.
-"""
+"""Transport-layer mixins (HTTP / WebSocket), orthogonal to modality logic."""
 
 from typing import Optional
 

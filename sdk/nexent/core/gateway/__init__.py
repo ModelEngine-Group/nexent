@@ -1,17 +1,7 @@
 """Multimodal model unified adaptation gateway.
 
-Provides a protocol-agnostic adapter layer that *composes* the existing,
-stable model classes (``OpenAIModel`` / embedding / rerank …) behind a single
-:class:`MultimodalGateway` entry point. For STT/TTS/VLM the protocol lives
-directly in the adapter (no wrapped model class); LLM/LongContext stay as thin
-``has-a`` delegation to ``OpenAIModel``. Adding a vendor becomes one
-``@register_adapter(factory, modality)`` decorator — backend services no
-longer hardcode ``if model_factory == ...`` dispatch.
-
-Importing :mod:`nexent.core.gateway` (or its :mod:`.modality` subpackage)
-registers all built-in adapters with the process-wide registry.
-
-See ``doc/multimodal-gateway-design.md`` for the full design.
+A protocol-agnostic adapter layer behind a single :class:`MultimodalGateway`
+entry point; importing this package registers all built-in adapters.
 """
 
 from .multimodal_adapter import ModelInfo, MultimodalAdapter

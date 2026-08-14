@@ -1,9 +1,4 @@
-"""Adapter registry: maps ``(factory, modality)`` → adapter class.
-
-Paradigm aligned with :mod:`sdk.nexent.memory.providers.registry`. Vendors opt
-in via the ``@register_adapter(factory, modality)`` decorator on their adapter
-class; the backend never hardcodes vendor dispatch (``if model_factory == ...``).
-"""
+"""Process-wide adapter registry keyed by ``(factory, modality)``."""
 
 from __future__ import annotations
 

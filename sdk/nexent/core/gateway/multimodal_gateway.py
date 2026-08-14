@@ -1,10 +1,4 @@
-"""MultimodalGateway: the unified entry point replacing hardcoded dispatch.
-
-Backend services (``image_service``/``voice_service``/``vectordatabase_service``)
-resolve an adapter through :meth:`get_adapter` instead of ``if model_factory``
-branches. The gateway caches adapter instances per ``(tenant, modality, slot,
-model_name, factory)`` so a given model is constructed once.
-"""
+"""MultimodalGateway: the unified entry point replacing hardcoded dispatch."""
 
 from __future__ import annotations
 
@@ -56,7 +50,7 @@ class MultimodalGateway:
         return await self.get_adapter(context).invoke(request)
 
     def stream(self, context: ModelContext, request: Any):
-        """Returns the adapter's async iterator (not awaited — it's a generator).
+        """Returns the adapter's async iterator (not awaited - it's a generator).
 
         Args:
             context: The construction context identifying the desired model.

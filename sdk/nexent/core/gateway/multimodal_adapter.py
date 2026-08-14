@@ -34,7 +34,7 @@ class MultimodalAdapter(ABC):
     :meth:`invoke`, :meth:`health_check`, :meth:`get_model_info`.
 
     The root carries no wrapped-model state. Callers reach the model only
-    through the uniform interface above — never by tunnelling into a wrapped
+    through the uniform interface above - never by tunnelling into a wrapped
     instance's attributes.
     """
 

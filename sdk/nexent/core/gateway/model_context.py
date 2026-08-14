@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 @dataclass
 class ModelContext:
-    """Base construction context — common + cross-cutting fields.
+    """Base construction context - common + cross-cutting fields.
 
     Subclasses add modality-specific fields. Passing a field the subclass
     doesn't declare raises TypeError at construction time.
