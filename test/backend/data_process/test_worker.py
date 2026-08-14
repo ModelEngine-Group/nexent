@@ -1124,6 +1124,155 @@ def test_setup_worker_process_resources_handles_monitoring_exception(mocker):
         pass  # May or may not raise depending on import structure
 
 
+def test_setup_worker_environment_logs_missing_sensitive_variables(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=True)
+    worker_module.REDIS_URL = ""
+    worker_module.ELASTICSEARCH_SERVICE = ""
+    error_calls = []
+    mocker.patch.object(
+        worker_module.logger,
+        "error",
+        side_effect=lambda msg, *args, **kwargs: error_calls.append(msg % args if args else msg),
+    )
+
+    worker_module.setup_worker_environment()
+
+    assert any("REDIS_URL: NOT SET" in message for message in error_calls)
+    assert any("ELASTICSEARCH_SERVICE: NOT SET" in message for message in error_calls)
+
+
+def test_setup_worker_process_resources_logs_monitoring_status(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    monitoring_module = types.ModuleType("utils.monitoring")
+    monitoring_module.monitoring_manager = types.SimpleNamespace(is_enabled=True)
+    mocker.patch.dict(sys.modules, {"utils.monitoring": monitoring_module})
+    mocker.patch.object(worker_module, "validate_service_connections", return_value=True)
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.setup_worker_process_resources()
+
+    assert any(
+        call.args[:2] == (
+            "Knowledge telemetry initialized in worker process: enabled=%s",
+            True,
+        )
+        for call in info.call_args_list
+    )
+    assert worker_module.worker_state["services_validated"] is True
+
+
+@pytest.mark.parametrize("should_fail", [False, True])
+def test_worker_ready_handler_runs_prewarm_background(mocker, should_fail):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.QUEUES = "process_q"
+    prewarm_calls = []
+
+    def prewarm(target_size):
+        prewarm_calls.append(target_size)
+        if should_fail:
+            raise RuntimeError("warm failed")
+        return 2
+
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = prewarm
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+
+    class ImmediateThread:
+        def __init__(self, target=None, daemon=None):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    mocker.patch.object(worker_module.threading, "Thread", ImmediateThread)
+    warning = mocker.patch.object(worker_module.logger, "warning")
+
+    worker_module.worker_ready_handler()
+
+    assert prewarm_calls == [worker_module.DP_PART_PROCESSOR_COUNT]
+    if should_fail:
+        assert any("Background prewarm failed" in call.args[0] for call in warning.call_args_list)
+
+
+def test_worker_ready_handler_collects_part_concurrency_once(mocker):
+    worker_module, fake_ray = setup_mocks_for_worker(mocker, initialized=True)
+    worker_module.QUEUES = "process_part_q"
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = lambda target_size: 1
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+
+    targets = []
+
+    class CapturingThread:
+        def __init__(self, target=None, daemon=None):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    inspector = types.SimpleNamespace(
+        active=lambda: {
+            "worker-1": [
+                {"name": "data_process.tasks.process_part"},
+                {"name": "another.task"},
+            ],
+            "worker-2": None,
+        }
+    )
+    worker_module.app.control = types.SimpleNamespace(
+        inspect=lambda timeout: inspector
+    )
+    fake_ray.available_resources = lambda: {"CPU": 3.5}
+    mocker.patch.object(worker_module.threading, "Thread", CapturingThread)
+    mocker.patch.object(worker_module.time, "sleep", side_effect=StopIteration)
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.worker_ready_handler()
+    assert len(targets) == 2
+    with pytest.raises(StopIteration):
+        targets[1]()
+
+    assert any(
+        "active=1, ray_available_cpu=3.5" in call.args[0]
+        for call in info.call_args_list
+    )
+
+
+def test_worker_ready_handler_logs_thread_schedule_failures(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.QUEUES = "process_part_q"
+    tasks_module = types.ModuleType("data_process.tasks")
+    tasks_module.prewarm_ray_actors = lambda target_size: 1
+    mocker.patch.dict(sys.modules, {"data_process.tasks": tasks_module})
+    mocker.patch.object(worker_module.threading, "Thread", side_effect=RuntimeError("thread failed"))
+    warning = mocker.patch.object(worker_module.logger, "warning")
+
+    worker_module.worker_ready_handler()
+
+    messages = [call.args[0] for call in warning.call_args_list]
+    assert any("Failed to schedule Ray actor prewarm" in message for message in messages)
+    assert any("Failed to start process_part concurrency logger" in message for message in messages)
+
+
+def test_start_worker_logs_successful_monitoring_initialization(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    monitoring_module = types.ModuleType("utils.monitoring")
+    monitoring_module.monitoring_manager = types.SimpleNamespace(is_enabled=True)
+    mocker.patch.dict(sys.modules, {"utils.monitoring": monitoring_module})
+    mocker.patch.object(worker_module.app, "worker_main")
+    info = mocker.patch.object(worker_module.logger, "info")
+
+    worker_module.start_worker()
+
+    assert any(
+        call.args[:2] == (
+            "Knowledge telemetry initialized before worker start: enabled=%s",
+            True,
+        )
+        for call in info.call_args_list
+    )
+
+
 def test_validate_service_connections_returns_true_on_success(mocker):
     """Test validate_service_connections returns True when all checks pass."""
     worker_module, _ = setup_mocks_for_worker(mocker)

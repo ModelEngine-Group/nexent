@@ -1058,3 +1058,67 @@ def test_run_file_process_with_telemetry_context(monkeypatch):
     assert result[0]["content"] == "test content"
     assert len(captured_spans) == 1
     assert captured_spans[0].kwargs["telemetry_context"] == {"trace_id": "abc123"}
+
+
+def test_actor_initializes_monitoring_when_available(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    manager = types.SimpleNamespace(is_enabled=True)
+    monitoring_module = types.SimpleNamespace(monitoring_manager=manager)
+    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+
+    assert actor._monitoring_manager is manager
+
+
+def test_actor_degrades_when_monitoring_status_fails(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class BrokenManager:
+        @property
+        def is_enabled(self):
+            raise RuntimeError("monitoring unavailable")
+
+    monitoring_module = types.SimpleNamespace(monitoring_manager=BrokenManager())
+    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+
+    assert actor._monitoring_manager is None
+
+
+def test_split_file_fetches_stream_and_model_type_is_optional(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class Part:
+        def getvalue(self):
+            return b"part"
+
+    class RecordingCore(FakeDataProcessCore):
+        captured_file_data = None
+
+        def file_split(self, file_data, **kwargs):
+            RecordingCore.captured_file_data = file_data
+            return [Part()]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecordingCore)
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: io.BytesIO(b"stream-data"))
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 100,
+            "maximum_chunk_size": 200,
+            "display_name": "model-without-type",
+            "model_type": None,
+        },
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    params = {}
+    actor._apply_model_chunk_sizes(model_id=1, tenant_id="tenant", params=params)
+    parts = actor.split_file("s3://bucket/source.pdf", "minio")
+
+    assert "model_type" not in params
+    assert parts == [b"part"]
+    assert RecordingCore.captured_file_data == b"stream-data"

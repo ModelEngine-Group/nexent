@@ -3710,3 +3710,183 @@ def test_get_split_actor(monkeypatch):
 
     actor = tasks._get_split_actor()
     assert actor is expected_actor
+
+
+def test_fetch_minio_source_success_and_missing_stream(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    attributes = []
+    monkeypatch.setattr(tasks, "set_span_attributes", lambda **kwargs: attributes.append(kwargs))
+    monkeypatch.setattr(tasks, "get_file_stream", lambda source: io.BytesIO(b"payload"))
+
+    assert tasks._fetch_minio_source("s3://bucket/file") == b"payload"
+    assert attributes == [{"file_size_bytes": 7, "stage": "minio.fetch"}]
+
+    monkeypatch.setattr(tasks, "get_file_stream", lambda source: None)
+    with pytest.raises(FileNotFoundError, match="Unable to fetch"):
+        tasks._fetch_minio_source("s3://bucket/missing")
+
+
+def test_wait_for_split_ready_handles_missing_and_non_list_payloads(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class Client:
+        def __init__(self, cached):
+            self.cached = cached
+
+        def get(self, key):
+            return "1" if key.endswith(":ready") else self.cached
+
+    current = {"client": Client(None)}
+    monkeypatch.setitem(
+        sys.modules,
+        "redis",
+        types.SimpleNamespace(
+            Redis=types.SimpleNamespace(from_url=lambda *args, **kwargs: current["client"])
+        ),
+    )
+
+    assert tasks._wait_for_split_ready("dp:key", 1, 1) == 0
+    current["client"] = Client('{"chunk": 1}')
+    assert tasks._wait_for_split_ready("dp:key", 1, 1) == 0
+
+
+def test_distribute_chunks_reports_capacity_context(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="while distributing text chunks"):
+        tasks._distribute_chunks_round_robin(
+            batches=[[{"content": "full"}]],
+            chunks=[{"content": "extra"}],
+            batch_size=1,
+            error_context="text chunks",
+        )
+
+
+def test_extract_error_code_handles_regex_failure(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks.re, "search", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("regex")))
+
+    assert tasks.extract_error_code("plain error") == "unknown_error"
+    assert tasks._extract_error_code_from_es_response(None, "plain error") is None
+
+
+def test_delete_source_file_handles_non_json_response(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class Response:
+        status_code = 503
+        text = "service unavailable"
+
+        def json(self):
+            raise ValueError("not json")
+
+    monkeypatch.setattr(tasks.requests, "delete", lambda *args, **kwargs: Response())
+
+    result = tasks._delete_source_file_via_http_sync(
+        base_url="http://api/",
+        index_name="index",
+        path_or_url="s3://bucket/file",
+        scope="source_only",
+    )
+
+    assert result == {
+        "http_status": 503,
+        "response_json": None,
+        "response_text": "service unavailable",
+    }
+
+
+def test_global_pool_manager_tolerates_actor_kill_failures(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        ping = types.SimpleNamespace(remote=lambda: "ping-ref")
+
+    monkeypatch.setattr(
+        tasks,
+        "DataProcessorRayActor",
+        types.SimpleNamespace(remote=lambda: Actor()),
+    )
+    monkeypatch.setattr(tasks.ray, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("warm")))
+    monkeypatch.setattr(tasks.ray, "kill", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("kill")), raising=False)
+    manager = tasks.GlobalRayActorPoolManager(warm_timeout_s=1)
+
+    assert manager._create_and_warm_actor() is None
+    manager.actors = [Actor()]
+    assert manager.ensure_pool(desired=0, max_allowed=1) == 0
+
+
+def test_get_or_create_pool_manager_creates_and_recovers_from_name_race(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "init_ray_in_worker", lambda: None)
+
+    class Options:
+        def __init__(self, remote_result=None, remote_error=None):
+            self.remote_result = remote_result
+            self.remote_error = remote_error
+
+        def remote(self, timeout):
+            if self.remote_error:
+                raise self.remote_error
+            return self.remote_result
+
+    class ManagerFactory:
+        def __init__(self, options):
+            self.options_result = options
+
+        def options(self, **kwargs):
+            if kwargs.get("get_if_exists"):
+                raise TypeError("unsupported")
+            return self.options_result
+
+    calls = {"count": 0}
+
+    def get_actor(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("missing")
+        return "raced-manager"
+
+    monkeypatch.setattr(tasks.ray, "get_actor", get_actor, raising=False)
+    monkeypatch.setattr(tasks, "GlobalRayActorPoolManager", ManagerFactory(Options(remote_result="new-manager")))
+    assert tasks._get_or_create_global_pool_manager() == "new-manager"
+
+    calls["count"] = 0
+    monkeypatch.setattr(
+        tasks,
+        "GlobalRayActorPoolManager",
+        ManagerFactory(Options(remote_error=RuntimeError("name race"))),
+    )
+    assert tasks._get_or_create_global_pool_manager() == "raced-manager"
+
+
+def test_logging_task_delegates_lifecycle_hooks(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks.Task, "on_success", lambda self, *args: "success", raising=False)
+    monkeypatch.setattr(tasks.Task, "on_failure", lambda self, *args: "failure", raising=False)
+    monkeypatch.setattr(tasks.Task, "on_retry", lambda self, *args: "retry", raising=False)
+    task = tasks.LoggingTask()
+    task.name = "logging-task"
+
+    assert task.on_success({}, "task-1", (), {}) == "success"
+    assert task.on_failure(ValueError("bad"), "task-1", (), {}, None) == "failure"
+    assert task.on_retry(RuntimeError("later"), "task-1", (), {}, None) == "retry"
+
+
+def test_process_sync_without_celery_id_skips_state_updates(monkeypatch, tmp_path):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch, initialized=True)
+    source = tmp_path / "sync.txt"
+    source.write_text("text", encoding="utf-8")
+
+    class Actor:
+        process_file = types.SimpleNamespace(remote=lambda *args, **kwargs: "chunks-ref")
+
+    fake_ray.get_returns = {"chunks-ref": [{"content": "one"}, {"content": "two"}]}
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    self = FakeSelf(None)
+
+    result = tasks.process_sync(self, str(source), "local")
+
+    assert result["text"] == "one\n\ntwo"
+    assert self.states == []

@@ -229,3 +229,126 @@ def test_knowledge_span_degrades_when_setup_fails(monkeypatch):
 
     with knowledge_telemetry.knowledge_span("knowledge.process", "process") as span:
         assert span is None
+
+
+def test_helpers_degrade_when_otel_is_unavailable(monkeypatch):
+    monkeypatch.setattr(knowledge_telemetry, "OTEL_AVAILABLE", False)
+
+    assert knowledge_telemetry._safe_hash("") == ""
+    assert knowledge_telemetry.inject_trace_context() == {}
+    assert knowledge_telemetry._safe_attributes({"file_size": "invalid"}) == {}
+    knowledge_telemetry._record_metrics("process", 1.0, {})
+    knowledge_telemetry.set_span_attributes(task_id="task-1")
+    with knowledge_telemetry.knowledge_span("knowledge.process", "process") as span:
+        assert span is None
+
+
+def test_resource_snapshot_returns_empty_when_psutil_fails(monkeypatch):
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "psutil":
+            raise RuntimeError("psutil unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    assert knowledge_telemetry._resource_snapshot() == {}
+
+
+def test_record_metrics_swallows_meter_failures(monkeypatch):
+    monkeypatch.setattr(knowledge_telemetry, "OTEL_AVAILABLE", True)
+    metrics = MagicMock()
+    metrics.get_meter.side_effect = RuntimeError("meter unavailable")
+    monkeypatch.setattr(knowledge_telemetry, "metrics", metrics, raising=False)
+
+    knowledge_telemetry._record_metrics("forward", 2.5, {})
+
+    metrics.get_meter.assert_called_once_with("nexent.knowledge_ingestion")
+
+
+def test_knowledge_span_success_continues_and_detaches_remote_context(monkeypatch):
+    span, span_cm, _, propagate, context, status_code = _install_otel_stubs(monkeypatch)
+    context.attach.return_value = "context-token"
+    monkeypatch.setattr(
+        knowledge_telemetry,
+        "_resource_snapshot",
+        MagicMock(side_effect=[{"process.rss_memory_mb": 2.0}, {"process.cpu_percent": 3.0}]),
+    )
+
+    carrier = {"traceparent": "00-test"}
+    with knowledge_telemetry.knowledge_span(
+        "knowledge.process",
+        "process",
+        telemetry_context=carrier,
+        filename="report.PDF",
+    ) as active_span:
+        assert active_span is span
+
+    propagate.extract.assert_called_once_with(carrier)
+    context.attach.assert_called_once_with(propagate.extract.return_value)
+    context.detach.assert_called_once_with("context-token")
+    span.set_status.assert_called_with((status_code.OK, None))
+    span.set_attribute.assert_any_call("ingestion.status", "success")
+    assert span_cm.__exit__.call_count == 1
+
+
+def test_knowledge_span_cleans_up_when_enter_fails(monkeypatch):
+    _, span_cm, trace, propagate, context, _ = _install_otel_stubs(monkeypatch)
+    context.attach.return_value = "context-token"
+    span_cm.__enter__.side_effect = RuntimeError("enter failed")
+    span_cm.__exit__.side_effect = RuntimeError("close failed")
+    context.detach.side_effect = RuntimeError("detach failed")
+    trace.get_tracer.return_value.start_as_current_span.return_value = span_cm
+
+    with knowledge_telemetry.knowledge_span(
+        "knowledge.process",
+        "process",
+        telemetry_context={"traceparent": "00-test"},
+    ) as span:
+        assert span is None
+
+    propagate.extract.assert_called_once()
+    span_cm.__exit__.assert_called_once_with(None, None, None)
+    context.detach.assert_called_once_with("context-token")
+
+
+def test_knowledge_span_swallows_reporting_and_cleanup_failures(monkeypatch):
+    span, span_cm, _, _, context, _ = _install_otel_stubs(monkeypatch)
+    context.attach.return_value = "context-token"
+    span.set_status.side_effect = RuntimeError("status failed")
+    span.set_attribute.side_effect = RuntimeError("attribute failed")
+    span_cm.__exit__.side_effect = RuntimeError("close failed")
+    context.detach.side_effect = RuntimeError("detach failed")
+
+    with knowledge_telemetry.knowledge_span(
+        "knowledge.process",
+        "process",
+        telemetry_context={"traceparent": "00-test"},
+    ):
+        pass
+
+
+def test_knowledge_span_preserves_error_when_failure_reporting_fails(monkeypatch):
+    span, _, _, _, _, _ = _install_otel_stubs(monkeypatch)
+    span.record_exception.side_effect = RuntimeError("record failed")
+
+    with pytest.raises(ValueError, match="original"), knowledge_telemetry.knowledge_span(
+        "knowledge.process", "process"
+    ):
+        raise ValueError("original")
+
+
+def test_set_span_attributes_handles_inactive_and_failing_spans(monkeypatch):
+    monkeypatch.setattr(knowledge_telemetry, "OTEL_AVAILABLE", True)
+    trace = MagicMock()
+    inactive_span = MagicMock()
+    inactive_span.is_recording.return_value = False
+    trace.get_current_span.return_value = inactive_span
+    monkeypatch.setattr(knowledge_telemetry, "trace", trace, raising=False)
+
+    knowledge_telemetry.set_span_attributes(task_id="task-1")
+    inactive_span.set_attributes.assert_not_called()
+
+    trace.get_current_span.side_effect = RuntimeError("span unavailable")
+    knowledge_telemetry.set_span_attributes(task_id="task-2")
