@@ -173,6 +173,13 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
+# Tenant resource hard limits. These values are intentionally not configurable.
+MAX_TENANT_COUNT = 100
+MAX_USERS_PER_TENANT = 10_000
+MAX_GROUPS_PER_TENANT = 1_000
+MAX_SUPER_ADMIN_COUNT = 1
+MAX_ADMINS_PER_TENANT = 1_000
+
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
 

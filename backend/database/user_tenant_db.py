@@ -4,11 +4,74 @@ Database operations for user tenant relationship management
 import logging
 from typing import Any, List, Dict, Optional
 
-from consts.const import DEFAULT_TENANT_ID
+from consts.const import (
+    DEFAULT_TENANT_ID,
+    MAX_ADMINS_PER_TENANT,
+    MAX_SUPER_ADMIN_COUNT,
+    MAX_USERS_PER_TENANT,
+)
 from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
+from consts.exceptions import TenantResourceLimitError
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+_USER_LIMIT = MAX_USERS_PER_TENANT if isinstance(MAX_USERS_PER_TENANT, int) else 10_000
+_ADMIN_LIMIT = MAX_ADMINS_PER_TENANT if isinstance(MAX_ADMINS_PER_TENANT, int) else 1_000
+_SUPER_ADMIN_LIMIT = MAX_SUPER_ADMIN_COUNT if isinstance(MAX_SUPER_ADMIN_COUNT, int) else 1
+
+
+def _count_or_zero(value) -> int:
+    """Return a database count while keeping lightweight test doubles harmless."""
+    return value if isinstance(value, int) else 0
+
+
+def _lock_resource_limit(session, lock_key: str) -> None:
+    """Serialize limit checks for a resource during the current transaction."""
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"), {"lock_key": lock_key})
+
+
+def _validate_user_tenant_limit(
+    session,
+    tenant_id: str,
+    user_role: str,
+    *,
+    include_user_count: bool = True,
+) -> None:
+    _lock_resource_limit(session, f"tenant-user-limit:{tenant_id}")
+    if include_user_count:
+        user_count = _count_or_zero(session.query(UserTenant).filter(
+            getattr(UserTenant, "tenant_id", None) == tenant_id,
+            getattr(UserTenant, "delete_flag", None) == "N",
+        ).count())
+        if user_count >= _USER_LIMIT:
+            raise TenantResourceLimitError(
+                f"Tenant user limit reached: maximum {_USER_LIMIT} users per tenant"
+            )
+
+    normalized_role = (user_role or "").upper()
+    if normalized_role == "ADMIN":
+        _lock_resource_limit(session, f"tenant-admin-limit:{tenant_id}")
+        admin_count = _count_or_zero(session.query(UserTenant).filter(
+            getattr(UserTenant, "tenant_id", None) == tenant_id,
+            getattr(UserTenant, "user_role", None) == "ADMIN",
+            getattr(UserTenant, "delete_flag", None) == "N",
+        ).count())
+        if admin_count >= _ADMIN_LIMIT:
+            raise TenantResourceLimitError(
+                f"Tenant administrator limit reached: maximum {_ADMIN_LIMIT} administrators per tenant"
+            )
+    elif normalized_role == "SU":
+        _lock_resource_limit(session, "super-admin-limit")
+        super_admin_count = _count_or_zero(session.query(UserTenant).filter(
+            getattr(UserTenant, "user_role", None) == "SU",
+            getattr(UserTenant, "delete_flag", None) == "N",
+        ).count())
+        if super_admin_count >= _SUPER_ADMIN_LIMIT:
+            raise TenantResourceLimitError(
+                f"Super administrator limit reached: maximum {_SUPER_ADMIN_LIMIT} super administrator"
+            )
 
 
 def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:
@@ -104,6 +167,7 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         user_email (str): User email address
     """
     with get_db_session() as session:
+        _validate_user_tenant_limit(session, tenant_id, user_role)
         user_tenant = UserTenant(
             user_id=user_id,
             tenant_id=tenant_id,
@@ -126,6 +190,12 @@ def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         ).first()
 
         if result:
+            is_new_tenant = result.tenant_id != tenant_id
+            is_role_promotion = (result.user_role or "").upper() != (user_role or "").upper()
+            if is_new_tenant:
+                _validate_user_tenant_limit(session, tenant_id, user_role)
+            elif is_role_promotion and (user_role or "").upper() in {"ADMIN", "SU"}:
+                _validate_user_tenant_limit(session, tenant_id, user_role, include_user_count=False)
             result.tenant_id = tenant_id
             result.user_role = user_role
             if user_email is not None:
@@ -208,6 +278,16 @@ def update_user_tenant_role(user_id: str, role: str, updated_by: str) -> bool:
         bool: True if update successful, False otherwise
     """
     with get_db_session() as session:
+        target = session.query(UserTenant).filter(
+            UserTenant.user_id == user_id,
+            UserTenant.delete_flag == "N",
+        ).first()
+        if target is None:
+            return False
+        current_role = (target.user_role or "").upper()
+        normalized_role = (role or "").upper()
+        if current_role != normalized_role and normalized_role in {"ADMIN", "SU"}:
+            _validate_user_tenant_limit(session, target.tenant_id, normalized_role, include_user_count=False)
         result = session.query(UserTenant).filter(
             UserTenant.user_id == user_id,
             UserTenant.delete_flag == "N"

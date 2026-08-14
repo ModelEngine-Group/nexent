@@ -856,3 +856,84 @@ def test_soft_delete_users_by_tenant_id_database_error(monkeypatch, mock_session
 
     with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
         soft_delete_users_by_tenant_id("tenant123", "admin_user")
+
+
+def test_user_limit_rejects_new_user(monkeypatch):
+    """A tenant cannot exceed its hard user limit."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    query = MagicMock()
+    query.filter.return_value.count.return_value = 1
+    session = MagicMock()
+    session.query.return_value = query
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "_USER_LIMIT", 1)
+
+    with pytest.raises(ResourceLimitError, match="user limit"):
+        module._validate_user_tenant_limit(session, "tenant-1", "USER")
+
+
+def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
+    """Administrator limits are enforced independently of the user limit."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "_ADMIN_LIMIT", 1)
+    monkeypatch.setattr(module, "_SUPER_ADMIN_LIMIT", 1)
+
+    admin_session = MagicMock()
+    admin_user_count = MagicMock()
+    admin_user_count.filter.return_value.count.return_value = 0
+    admin_role_count = MagicMock()
+    admin_role_count.filter.return_value.count.return_value = 1
+    admin_session.query.side_effect = [admin_user_count, admin_role_count]
+    with pytest.raises(ResourceLimitError, match="administrator limit"):
+        module._validate_user_tenant_limit(admin_session, "tenant-1", "ADMIN")
+
+    su_session = MagicMock()
+    su_user_count = MagicMock()
+    su_user_count.filter.return_value.count.return_value = 0
+    su_role_count = MagicMock()
+    su_role_count.filter.return_value.count.return_value = 1
+    su_session.query.side_effect = [su_user_count, su_role_count]
+    with pytest.raises(ResourceLimitError, match="Super administrator limit"):
+        module._validate_user_tenant_limit(su_session, "tenant-1", "SU")
+
+
+@pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
+@pytest.mark.parametrize("role, limit_name", [("USER", "_USER_LIMIT"), ("ADMIN", "_ADMIN_LIMIT"), ("SU", "_SUPER_ADMIN_LIMIT")])
+def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, role, limit_name):
+    """All user-role limits allow below cap and reject at or above cap."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session = MagicMock()
+    query = MagicMock()
+    query.filter.return_value.count.return_value = current_count
+    session.query.return_value = query
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, limit_name, 1)
+
+    if should_reject:
+        with pytest.raises(ResourceLimitError):
+            module._validate_user_tenant_limit(
+                session,
+                "tenant-1",
+                role,
+                include_user_count=role == "USER",
+            )
+    else:
+        module._validate_user_tenant_limit(
+            session,
+            "tenant-1",
+            role,
+            include_user_count=role == "USER",
+        )
