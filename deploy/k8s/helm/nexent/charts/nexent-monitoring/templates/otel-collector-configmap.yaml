@@ -66,10 +66,26 @@ data:
         attributes:
           - key: service.name
             value: nexent-backend
-            action: upsert
+            action: insert
           - key: service.version
             from_attribute: version
             action: insert
+      transform/knowledge_project:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - 'set(resource.attributes["openinference.project.name"], "knowledge-base-monitor") where IsMatch(span.name, "^knowledge\\.")'
+      filter/knowledge_only:
+        error_mode: ignore
+        traces:
+          span:
+            - 'not IsMatch(span.name, "^knowledge\\.")'
+      filter/non_knowledge:
+        error_mode: ignore
+        traces:
+          span:
+            - 'IsMatch(span.name, "^knowledge\\.")'
     exporters:
       debug:
         verbosity: normal
@@ -85,12 +101,30 @@ data:
           initial_interval: 1s
           max_interval: 30s
           max_elapsed_time: 300s
+      otlphttp/phoenix_knowledge:
+        endpoint: http://nexent-phoenix:6006
+        headers:
+          x-project-name: knowledge-base-monitor
+        timeout: 5s
+        sending_queue:
+          enabled: true
+          num_consumers: 4
+          queue_size: 2000
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 300s
     service:
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter, resource, filter/non_knowledge, batch]
           exporters: [otlphttp/phoenix, debug]
+        traces/knowledge:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, filter/knowledge_only, transform/knowledge_project, batch]
+          exporters: [otlphttp/phoenix_knowledge, debug]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
