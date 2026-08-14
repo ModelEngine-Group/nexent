@@ -24,6 +24,7 @@ export function AuthDialogs() {
     isAuthPromptModalOpen,
     isSessionExpiredModalOpen,
     closeSessionExpiredModal,
+    openLoginModalAfterSessionExpired,
     closeAuthPromptModal,
     openLoginModal,
     openRegisterModal,
@@ -142,10 +143,7 @@ export function AuthDialogs() {
       <Modal
         title={t("login.expired.title")}
         open={isSessionExpiredModalOpen}
-        onOk={() => {
-          closeSessionExpiredModal();
-          openLoginModal();
-        }}
+        onOk={openLoginModalAfterSessionExpired}
         onCancel={closeSessionExpiredModal}
         okText={t("login.expired.okText")}
         cancelText={t("login.expired.cancelText")}
