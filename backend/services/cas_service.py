@@ -16,6 +16,7 @@ from defusedxml.common import DefusedXmlException
 from consts.const import (
     CAS_CA_BUNDLE,
     CAS_CALLBACK_BASE_URL,
+    CAS_DEFAULT_ROLE,
     CAS_DEFAULT_TENANT_ID,
     CAS_EMAIL_ATTRIBUTE,
     CAS_ENABLED,
@@ -172,7 +173,7 @@ def parse_service_validate_response(xml_text: str, fallback_session_index: str =
 
     email = _attribute_or_default(attrs, CAS_EMAIL_ATTRIBUTE, "")
     username = attrs.get("displayName") or attrs.get("name") or cas_user_id
-    role = _map_role(_attribute_or_default(attrs, CAS_ROLE_ATTRIBUTE, "USER"))
+    role = _map_role(_attribute_or_default(attrs, CAS_ROLE_ATTRIBUTE, ""))
     default_tenant_id = CAS_DEFAULT_TENANT_ID or DEFAULT_TENANT_ID
     tenant_id = _attribute_or_default(attrs, CAS_TENANT_ATTRIBUTE, default_tenant_id) or default_tenant_id
     session_index = attrs.get("SessionIndex") or attrs.get("sessionIndex") or fallback_session_index
@@ -396,13 +397,19 @@ def _attribute_or_default(attrs: Dict[str, str], key: str, default: str) -> str:
 
 
 def _map_role(raw_role: str) -> str:
-    role = (raw_role or "USER").upper()
+    configured_default_role = str(CAS_DEFAULT_ROLE or "").strip().upper()
+    default_role = configured_default_role if configured_default_role in VALID_ROLES else "USER"
+    normalized_role = str(raw_role or "").strip()
+    if not normalized_role:
+        return default_role
+
+    role = normalized_role.upper()
     try:
         role_map = json.loads(CAS_ROLE_MAP_JSON) if CAS_ROLE_MAP_JSON else {}
-        role = str(role_map.get(raw_role, role_map.get(role, role))).upper()
+        role = str(role_map.get(normalized_role, role_map.get(role, role))).strip().upper()
     except Exception:
         logger.warning("Invalid CAS_ROLE_MAP_JSON; falling back to raw role")
-    return role if role in VALID_ROLES else "USER"
+    return role if role in VALID_ROLES else default_role
 
 
 def _resolve_expires_at(attrs: Dict[str, str]) -> datetime:

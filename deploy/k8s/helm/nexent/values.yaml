@@ -69,6 +69,7 @@ nexent-common:
       userAttribute: ""
       emailAttribute: "email"
       roleAttribute: "role"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
       defaultTenantId: "tenant_id"
       roleMapJson: ""

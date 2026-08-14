@@ -395,6 +395,7 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | 用户标识属性。为空时使用 `<cas:user>` |
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | 邮箱属性 |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | 角色属性 |
+| `nexent-common.config.cas.defaultRole` | `CAS_DEFAULT_ROLE` | CAS 角色缺失、为空或不受支持时使用的 Nexent 默认角色，默认 `USER` |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | 租户属性 |
 | `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | CAS 未返回租户属性或属性为空时使用的默认租户 |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
@@ -456,6 +457,7 @@ nexent-common:
       userAttribute: "userName"
       emailAttribute: "email"
       roleAttribute: "userType"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
       defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'

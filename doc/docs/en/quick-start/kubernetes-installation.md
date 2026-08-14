@@ -392,6 +392,7 @@ Configurable CAS values:
 | `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | User identifier attribute. Empty means use `<cas:user>` |
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | Email attribute |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | Role attribute |
+| `nexent-common.config.cas.defaultRole` | `CAS_DEFAULT_ROLE` | Default Nexent role when the CAS role is missing, empty, or unsupported; default `USER` |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | Tenant attribute |
 | `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | Default tenant when CAS omits the tenant attribute or returns it empty |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
@@ -453,6 +454,7 @@ nexent-common:
       userAttribute: "userName"
       emailAttribute: "email"
       roleAttribute: "userType"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
       defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'

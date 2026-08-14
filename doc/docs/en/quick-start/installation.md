@@ -354,6 +354,7 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
 CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
@@ -372,6 +373,8 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+When CAS omits the role attribute selected by `CAS_ROLE_ATTRIBUTE`, returns it empty, or returns an unsupported role after mapping, Nexent uses `CAS_DEFAULT_ROLE`. Supported default roles are `SU`, `ADMIN`, `DEV`, and `USER`; invalid values fall back to `USER`.
 
 When CAS omits the tenant attribute selected by `CAS_TENANT_ATTRIBUTE` or returns it empty, Nexent uses `CAS_DEFAULT_TENANT_ID`.
 
@@ -416,6 +419,7 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
 CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}

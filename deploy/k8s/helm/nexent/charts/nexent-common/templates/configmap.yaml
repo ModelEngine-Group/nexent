@@ -190,6 +190,7 @@ data:
   CAS_USER_ATTRIBUTE: {{ .Values.config.cas.userAttribute | quote }}
   CAS_EMAIL_ATTRIBUTE: {{ .Values.config.cas.emailAttribute | quote }}
   CAS_ROLE_ATTRIBUTE: {{ .Values.config.cas.roleAttribute | quote }}
+  CAS_DEFAULT_ROLE: {{ .Values.config.cas.defaultRole | quote }}
   CAS_TENANT_ATTRIBUTE: {{ .Values.config.cas.tenantAttribute | quote }}
   CAS_DEFAULT_TENANT_ID: {{ .Values.config.cas.defaultTenantId | quote }}
   CAS_ROLE_MAP_JSON: {{ .Values.config.cas.roleMapJson | quote }}

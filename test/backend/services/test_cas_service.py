@@ -25,6 +25,7 @@ consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 consts_mock.const.CAS_CA_BUNDLE = ""
 consts_mock.const.CAS_CALLBACK_BASE_URL = "http://localhost:3000"
+consts_mock.const.CAS_DEFAULT_ROLE = "USER"
 consts_mock.const.CAS_DEFAULT_TENANT_ID = "cas-default-tenant"
 consts_mock.const.CAS_EMAIL_ATTRIBUTE = "mail"
 consts_mock.const.CAS_ENABLED = True
@@ -145,6 +146,61 @@ class TestCasServiceParsing(unittest.TestCase):
         principal = parse_service_validate_response(xml)
 
         self.assertEqual(principal.tenant_id, "cas-default-tenant")
+
+    def test_parse_response_uses_configured_default_role_when_attribute_is_missing(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "DEV"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "DEV")
+
+    def test_parse_response_uses_default_role_for_invalid_cas_role(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+            <cas:attributes><cas:memberOf>unknown-role</cas:memberOf></cas:attributes>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "ADMIN"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "ADMIN")
+
+    def test_parse_response_falls_back_to_user_for_invalid_default_role(self):
+        xml = """
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>cas-user-1</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+        role_globals = parse_service_validate_response.__globals__
+        original_default = role_globals["CAS_DEFAULT_ROLE"]
+        role_globals["CAS_DEFAULT_ROLE"] = "unsupported-role"
+        try:
+            principal = parse_service_validate_response(xml)
+        finally:
+            role_globals["CAS_DEFAULT_ROLE"] = original_default
+
+        self.assertEqual(principal.role, "USER")
 
     def test_parse_response_uses_global_default_tenant_when_cas_default_is_empty(self):
         xml = """

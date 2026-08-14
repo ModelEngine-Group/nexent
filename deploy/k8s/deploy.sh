@@ -517,6 +517,7 @@ render_k8s_runtime_config_values() {
     printf '      userAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_USER_ATTRIBUTE "")")"
     printf '      emailAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_EMAIL_ATTRIBUTE "email")")"
     printf '      roleAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_ROLE_ATTRIBUTE "role")")"
+    printf '      defaultRole: %s\n' "$(yaml_quote "$(env_or_default CAS_DEFAULT_ROLE "USER")")"
     printf '      tenantAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_TENANT_ATTRIBUTE "tenant_id")")"
     printf '      defaultTenantId: %s\n' "$(yaml_quote "$(env_or_default CAS_DEFAULT_TENANT_ID "tenant_id")")"
     printf '      roleMapJson: %s\n' "$(yaml_quote "$(env_or_default CAS_ROLE_MAP_JSON "")")"
