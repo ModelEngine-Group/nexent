@@ -407,7 +407,6 @@ export default function SkillManagement({
           skill={configModalSkill}
           initialParams={configModalSkill.config_schemas || []}
           currentAgentId={currentAgentId}
-          isCreatingMode={isCreatingMode}
           zIndex={dialogZIndex}
           maskClosable
         />

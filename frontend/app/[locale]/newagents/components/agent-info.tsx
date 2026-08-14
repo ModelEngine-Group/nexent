@@ -4,12 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Form, Input, Row, Col, Flex, Avatar } from "antd";
 import { Upload } from "lucide-react";
 
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentInfo() {
   const { t } = useTranslation("common");
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgent = useAgentConfigStore((state) => state.updateAgentConfig);
+  const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const updateDraft = useAgentStore((state) => state.updateDraft);
 
   return (
     <div className="w-full">
@@ -18,26 +18,24 @@ export default function AgentInfo() {
         <Col xs={24} md={18}>
           <Row gutter={[12, 0]}>
             <Col xs={24} sm={12}>
-              <Form.Item
-                label={t("agent.field.displayName")}
-                className="mb-3"
-              >
+              <Form.Item label={t("agent.field.displayName")} className="mb-3">
                 <Input
                   placeholder={t("agent.field.displayNamePlaceholder")}
                   value={editedAgent.display_name}
-                  onChange={(e) => updateAgent({ display_name: e.target.value })}
+                  onChange={(event) =>
+                    updateDraft({ display_name: event.target.value })
+                  }
                 />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item
-                label={t("agent.field.name")}
-                className="mb-3"
-              >
+              <Form.Item label={t("agent.field.name")} className="mb-3">
                 <Input
                   placeholder={t("agent.field.namePlaceholder")}
                   value={editedAgent.name}
-                  onChange={(e) => updateAgent({ name: e.target.value })}
+                  onChange={(event) =>
+                    updateDraft({ name: event.target.value })
+                  }
                 />
               </Form.Item>
             </Col>
@@ -45,28 +43,26 @@ export default function AgentInfo() {
 
           <Row gutter={[12, 0]}>
             <Col xs={24} sm={12}>
-              <Form.Item
-                label={t("agent.field.author")}
-                className="mb-3"
-              >
+              <Form.Item label={t("agent.field.author")} className="mb-3">
                 <Input
                   placeholder={t("agent.field.authorPlaceholder")}
                   value={editedAgent.author}
-                  onChange={(e) => updateAgent({ author: e.target.value })}
+                  onChange={(event) =>
+                    updateDraft({ author: event.target.value })
+                  }
                 />
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item
-            label={t("agent.field.description")}
-            className="mb-0"
-          >
+          <Form.Item label={t("agent.field.description")} className="mb-0">
             <Input.TextArea
               placeholder={t("agent.field.descriptionPlaceholder")}
               rows={3}
               value={editedAgent.description}
-              onChange={(e) => updateAgent({ description: e.target.value })}
+              onChange={(event) =>
+                updateDraft({ description: event.target.value })
+              }
             />
           </Form.Item>
         </Col>

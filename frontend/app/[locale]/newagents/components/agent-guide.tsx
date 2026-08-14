@@ -3,13 +3,13 @@
 import { Button, Form, Input } from "antd";
 import { Plus, Trash2 } from "lucide-react";
 
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 
 const MAX_EXAMPLE_QUESTIONS = 6;
 
 export default function AgentConversationGuide() {
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgentConfig = useAgentConfigStore(
+  const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const updateAgentConfig = useAgentStore(
     (state) => state.updateAgentConfig
   );
   const exampleQuestions = editedAgent.example_questions || [];

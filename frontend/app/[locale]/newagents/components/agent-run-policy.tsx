@@ -4,13 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Form, InputNumber, Switch, Row, Col, Flex, Alert } from "antd";
 import { Info } from "lucide-react";
 
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 
 export default function AgentRunPolicy() {
   const { t } = useTranslation("common");
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgent = useAgentConfigStore((state) => state.updateAgentConfig);
+  const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const updateAgent = useAgentStore((state) => state.updateAgentConfig);
 
   return (
     <div className="w-full">
@@ -46,7 +46,9 @@ export default function AgentRunPolicy() {
               step={128}
               className="w-full"
               value={editedAgent.requested_output_tokens ?? 4096}
-              onChange={(val) => updateAgent({ requested_output_tokens: val ?? 4096 })}
+              onChange={(val) =>
+                updateAgent({ requested_output_tokens: val ?? 4096 })
+              }
               addonAfter="tokens"
             />
           </Form.Item>
@@ -64,7 +66,9 @@ export default function AgentRunPolicy() {
             <Flex align="center" gap={8}>
               <Switch
                 checked={editedAgent.provide_run_summary}
-                onChange={(checked) => updateAgent({ provide_run_summary: checked })}
+                onChange={(checked) =>
+                  updateAgent({ provide_run_summary: checked })
+                }
               />
               <span className="text-xs text-gray-500">
                 {editedAgent.provide_run_summary
@@ -75,10 +79,7 @@ export default function AgentRunPolicy() {
           </Form.Item>
         </Col>
         <Col xs={24} sm={12}>
-          <Form.Item
-            label={t("agent.field.selfValidate")}
-            className="mb-2"
-          >
+          <Form.Item label={t("agent.field.selfValidate")} className="mb-2">
             <Switch
               checked={editedAgent.verification_config?.enabled ?? false}
               onChange={(checked) =>

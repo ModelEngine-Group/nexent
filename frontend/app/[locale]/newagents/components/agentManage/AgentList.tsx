@@ -3,7 +3,19 @@
 import React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Col, Flex, Tooltip, Divider, Table, theme, App, Modal, Spin, message } from "antd";
+import {
+  Button,
+  Col,
+  Flex,
+  Tooltip,
+  Divider,
+  Table,
+  theme,
+  App,
+  Modal,
+  Spin,
+  message,
+} from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { Copy, FileOutput, Network, Trash2, Globe } from "lucide-react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
@@ -19,7 +31,7 @@ import {
   updateToolConfig,
 } from "@/services/agentConfigService";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
+import { useAgentStore } from "@/stores/agentStore";
 import { clearAgentNewMark } from "@/services/agentConfigService";
 import { a2aClientService } from "@/services/a2aService";
 import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
@@ -30,9 +42,7 @@ interface AgentListProps {
   agentList: Agent[];
 }
 
-export default function AgentList({
-  agentList,
-}: AgentListProps) {
+export default function AgentList({ agentList }: AgentListProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { message } = App.useApp();
@@ -47,12 +57,17 @@ export default function AgentList({
 
   // A2A settings modal state
   const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(null);
+  const [selectedAgentForA2A, setSelectedAgentForA2A] = useState<Agent | null>(
+    null
+  );
 
   // A2A settings modal state
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
-  const hasUnsavedChanges = useAgentConfigStore((state) => state.hasUnsavedChanges);
+  const waitForAutosave = useAgentStore((state) => state.waitForIdle);
+  const isSaving = useAgentStore(
+    (state) => state.isSaving || state.queue.length > 0
+  );
 
   // Mutations
   const updateAgentMutation = useMutation({
@@ -62,14 +77,11 @@ export default function AgentList({
   const deleteAgentMutation = useMutation({
     mutationFn: (agentId: number) => deleteAgent(agentId),
   });
-
-    // Unsaved changes guard
-  const checkUnsavedChanges = useSaveGuard();
-
   // Fetch A2A Server Settings when modal opens
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
     queryKey: ["a2aServerSettings", selectedAgentForA2A?.id],
-    queryFn: () => a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
+    queryFn: () =>
+      a2aClientService.getServerSettings(Number(selectedAgentForA2A!.id)),
     enabled: showA2ASettings && !!selectedAgentForA2A,
   });
 
@@ -81,7 +93,9 @@ export default function AgentList({
     const interfaces = data.supported_interfaces;
     const endpointId = data.endpoint_id;
     const restEndpoints = interfaces.filter(
-      (iface: any) => iface.protocolBinding.toLowerCase() === "http+json" || iface.protocolBinding.toLowerCase() === "httprest"
+      (iface: any) =>
+        iface.protocolBinding.toLowerCase() === "http+json" ||
+        iface.protocolBinding.toLowerCase() === "httprest"
     );
     const jsonrpcEndpoints = interfaces.filter(
       (iface: any) =>
@@ -144,19 +158,13 @@ export default function AgentList({
       currentAgentId !== null &&
       String(currentAgentId) === String(agent.id)
     ) {
-      const canDeselect = await checkUnsavedChanges.saveWithModal();
-      if (canDeselect) {
-        setCurrentAgent(null);
-      }
+      await waitForAutosave();
+      setCurrentAgent(null);
       return;
     }
 
-    // Only guard when leaving an existing agent or exiting create mode
-    if (currentAgentId !== null || useAgentConfigStore.getState().isCreatingMode) {
-      const canSwitch = await checkUnsavedChanges.saveWithModal();
-      if (!canSwitch) {
-        return;
-      }
+    if (currentAgentId !== null) {
+      await waitForAutosave();
     }
 
     // Load agent detail and set as current
@@ -165,7 +173,9 @@ export default function AgentList({
       if (result.success && result.data) {
         setCurrentAgent(result.data);
       } else {
-        message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
       }
     } catch (error) {
       log.error("Failed to load agent detail:", error);
@@ -178,7 +188,9 @@ export default function AgentList({
     try {
       const result = await exportAgent(Number(agent.id));
       if (!result.success) {
-        message.error(result.message || t("businessLogic.config.error.agentExportFailed"));
+        message.error(
+          result.message || t("businessLogic.config.error.agentExportFailed")
+        );
         return;
       }
 
@@ -243,7 +255,8 @@ export default function AgentList({
       // using the agent's first available legacy model_id (single-select) when
       // model_ids is empty in the response.
       const modelIdsForCopy = (() => {
-        if (detail.model_ids && detail.model_ids.length > 0) return detail.model_ids;
+        if (detail.model_ids && detail.model_ids.length > 0)
+          return detail.model_ids;
         const legacySingleId = (detail as { model_id?: number }).model_id;
         if (legacySingleId) return [legacySingleId];
         return undefined;
@@ -265,7 +278,8 @@ export default function AgentList({
         duty_prompt: detail.duty_prompt,
         constraint_prompt: detail.constraint_prompt,
         few_shots_prompt: detail.few_shots_prompt,
-        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_name:
+          detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         prompt_template_id: detail.prompt_template_id ?? 0,
         prompt_template_name: detail.prompt_template_name ?? "system_default",
@@ -394,10 +408,7 @@ export default function AgentList({
                 agent.is_available === false
                   ? "opacity-60 cursor-not-allowed"
                   : "hover:bg-gray-50 cursor-pointer"
-              } ${
-                isSelected ? "bg-blue-50 selected-row pl-3"
-                  : ""
-              }`;
+              } ${isSelected ? "bg-blue-50 selected-row pl-3" : ""}`;
             }}
             onRow={(agent: any) => ({
               onClick: (e: any) => {
@@ -440,17 +451,27 @@ export default function AgentList({
                             <Tooltip
                               title={(() => {
                                 const reasons = agent.unavailable_reasons || [];
-                                const labels = getUnavailableReasonLabels(reasons, t);
-                                return labels.join(", ") || t('subAgentPool.tooltip.unavailableAgent');
+                                const labels = getUnavailableReasonLabels(
+                                  reasons,
+                                  t
+                                );
+                                return (
+                                  labels.join(", ") ||
+                                  t("subAgentPool.tooltip.unavailableAgent")
+                                );
                               })()}
                             >
                               <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
                             </Tooltip>
                           )}
                           {isNew && (
-                            <Tooltip title={t("space.new", "New imported agent")}>
+                            <Tooltip
+                              title={t("space.new", "New imported agent")}
+                            >
                               <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none">
-                                <span className="px-0.5">{t("space.new", "NEW")}</span>
+                                <span className="px-0.5">
+                                  {t("space.new", "NEW")}
+                                </span>
                               </span>
                             </Tooltip>
                           )}
@@ -459,10 +480,10 @@ export default function AgentList({
                               {displayName}
                             </span>
                           )}
-                          {hasUnsavedChanges && isSelected && (
+                          {isSaving && isSelected && (
                             <span
-                              aria-label="unsaved-indicator"
-                              title="Unsaved changes"
+                              aria-label="saving-indicator"
+                              title="Saving changes"
                               className="ml-2 inline-block w-2.5 h-2.5 rounded-full bg-blue-500"
                             />
                           )}
@@ -496,28 +517,28 @@ export default function AgentList({
                       justifyContent: "flex-end",
                     }}
                   >
-                        {agent.is_a2a_server && (
-                          <Tooltip title={t("a2a.agent.viewA2ASettings")}>
-                            <span>
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={
-                                  <Globe
-                                    className="w-4 h-4"
-                                    style={{ color: token.colorPrimary }}
-                                  />
-                                }
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  handleViewA2AAgentSettings(agent);
-                                }}
-                                className="agent-action-button agent-action-button-blue"
+                    {agent.is_a2a_server && (
+                      <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+                        <span>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={
+                              <Globe
+                                className="w-4 h-4"
+                                style={{ color: token.colorPrimary }}
                               />
-                            </span>
-                          </Tooltip>
-                        )}
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleViewA2AAgentSettings(agent);
+                            }}
+                            className="agent-action-button agent-action-button-blue"
+                          />
+                        </span>
+                      </Tooltip>
+                    )}
                     <Tooltip title={t("agent.contextMenu.copy")}>
                       <span>
                         <Button
@@ -656,13 +677,20 @@ export default function AgentList({
         ) : selectedAgentForA2A && constructedA2AAgentCard ? (
           <A2AServerSettingsPanel
             agentId={Number(selectedAgentForA2A.id)}
-            agentName={selectedAgentForA2A.display_name || selectedAgentForA2A.name}
+            agentName={
+              selectedAgentForA2A.display_name || selectedAgentForA2A.name
+            }
             endpointId={constructedA2AAgentCard.endpoint_id}
             a2aAgentCard={constructedA2AAgentCard}
           />
         ) : (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
-            {t("a2a.service.getServerSettingsFailed", "Failed to load A2A settings")}
+          <div
+            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
+          >
+            {t(
+              "a2a.service.getServerSettingsFailed",
+              "Failed to load A2A settings"
+            )}
           </div>
         )}
       </Modal>

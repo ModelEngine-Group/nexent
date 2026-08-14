@@ -6,7 +6,7 @@ import { Tooltip } from "antd";
 import { ChevronRight, Eye, Pencil, Settings, X } from "lucide-react";
 
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
@@ -49,23 +49,21 @@ function toSourceKey(source?: string): SkillSourceKey {
 }
 
 interface SelectedSkillManagementProps {
-  readonly isCreatingMode?: boolean;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
   readonly onEditSkill?: (skill: Skill) => void;
 }
 
 export default function SelectedSkillManagement({
-  isCreatingMode,
   currentAgentId,
   isReadOnly = false,
   onEditSkill,
 }: SelectedSkillManagementProps) {
   const { t } = useTranslation("common");
-  const selectedSkills = useAgentConfigStore(
-    (state) => state.editedAgent.skills
+  const selectedSkills = useAgentStore(
+    (state) => state.editedAgent?.skills ?? []
   );
-  const updateSkills = useAgentConfigStore((state) => state.updateSkills);
+  const updateSkills = useAgentStore((state) => state.updateSkills);
   const { skills: catalogSkillData } = useSkillList({ enabled: true });
   const catalogSkills = catalogSkillData as Skill[];
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
@@ -307,7 +305,6 @@ export default function SelectedSkillManagement({
           skill={configSkill}
           initialParams={configSkill.config_schemas || []}
           currentAgentId={currentAgentId}
-          isCreatingMode={isCreatingMode}
         />
       ) : null}
     </>

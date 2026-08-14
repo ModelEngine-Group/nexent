@@ -4,17 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Form, Input, Select, Row, Col } from "antd";
 
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { useMemo } from "react";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { useCallback, useMemo } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const { TextArea } = Input;
 
@@ -23,9 +19,17 @@ export default function AgentPrompt() {
   const { user } = useAuthorizationContext();
   const { models } = useModelList();
   const { isSpeedMode } = useDeployment();
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgent = useAgentConfigStore((state) => state.updateAgentConfig);
-  const defaultLlmConfig = useAgentConfigStore((state) => state.defaultLlmConfig);
+  const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const updateDraft = useAgentStore((state) => state.updateDraft);
+  const flushDraft = useAgentStore((state) => state.flushDraft);
+  const updateAgent = useAgentStore((state) => state.updateAgentConfig);
+  const defaultLlmConfig = useAgentConfigStore(
+    (state) => state.defaultLlmConfig
+  );
+
+  const handlePromptTabChange = useCallback(() => {
+    flushDraft();
+  }, [flushDraft]);
 
   const modelOptions = useMemo(() => {
     return (models ?? []).map((m: any) => ({
@@ -42,7 +46,11 @@ export default function AgentPrompt() {
       {/* Model Selection */}
       <Row gutter={[12, 0]}>
         <Col xs={24} sm={12}>
-          <Form.Item label={t("agent.field.model")} className="mb-3" layout="horizontal">
+          <Form.Item
+            label={t("agent.field.model")}
+            className="mb-3"
+            layout="horizontal"
+          >
             <Select
               placeholder={t("agent.field.modelPlaceholder")}
               options={modelOptions}
@@ -55,7 +63,9 @@ export default function AgentPrompt() {
               }}
               showSearch
               filterOption={(input, option) =>
-                (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                (option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
               }
               disabled={!canManage && !isSpeedMode}
             />
@@ -63,11 +73,13 @@ export default function AgentPrompt() {
         </Col>
       </Row>
 
-      <Tabs defaultValue="duty" className="w-full">
+      <Tabs
+        defaultValue="duty"
+        onValueChange={handlePromptTabChange}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="duty">
-            {t("agent.field.dutyPrompt")}
-          </TabsTrigger>
+          <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
           <TabsTrigger value="constraint">
             {t("agent.field.constraintPrompt")}
           </TabsTrigger>
@@ -82,7 +94,9 @@ export default function AgentPrompt() {
               placeholder={t("agent.field.dutyPromptPlaceholder")}
               rows={6}
               value={editedAgent.duty_prompt}
-              onChange={(e) => updateAgent({ duty_prompt: e.target.value })}
+              onChange={(event) =>
+                updateDraft({ duty_prompt: event.target.value })
+              }
             />
           </Form.Item>
         </TabsContent>
@@ -93,7 +107,9 @@ export default function AgentPrompt() {
               placeholder={t("agent.field.constraintPromptPlaceholder")}
               rows={6}
               value={editedAgent.constraint_prompt}
-              onChange={(e) => updateAgent({ constraint_prompt: e.target.value })}
+              onChange={(event) =>
+                updateDraft({ constraint_prompt: event.target.value })
+              }
             />
           </Form.Item>
         </TabsContent>
@@ -104,7 +120,9 @@ export default function AgentPrompt() {
               placeholder={t("agent.field.fewShotsPromptPlaceholder")}
               rows={6}
               value={editedAgent.few_shots_prompt}
-              onChange={(e) => updateAgent({ few_shots_prompt: e.target.value })}
+              onChange={(event) =>
+                updateDraft({ few_shots_prompt: event.target.value })
+              }
             />
           </Form.Item>
         </TabsContent>

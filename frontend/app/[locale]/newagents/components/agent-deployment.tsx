@@ -4,21 +4,21 @@ import { useTranslation } from "react-i18next";
 import { Form, Select, Switch, Row, Col, Flex } from "antd";
 import { Globe } from "lucide-react";
 
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 export default function AgentDeployment() {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgent = useAgentConfigStore((state) => state.updateAgentConfig);
+  const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const { data: groupData } = useGroupList(user?.tenantId ?? null);
   const allGroups = groupData?.groups ?? [];
 
-  const groupOptions = allGroups.map((g: any) => ({
-    value: g.id,
-    label: g.name,
+  const groupOptions = allGroups.map((group) => ({
+    value: group.group_id,
+    label: group.group_name,
   }));
 
   const permissionOptions = [

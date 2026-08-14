@@ -9,13 +9,14 @@ import {
   Spin,
   Switch,
   Tag,
+
 } from "antd";
-import { Database, Settings2 } from "lucide-react";
+import { Settings, Plus } from "lucide-react";
 
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -135,9 +136,9 @@ interface KnowledgeBaseConfigState {
 }
 
 function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
-  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const selectedTools = useAgentStore((state) => state.editedAgent?.tools ?? []);
+  const updateTools = useAgentStore((state) => state.updateTools);
+  const isReadOnly = useAgentStore((state) => state.isReadOnly);
 
   const { availableTools, isLoading: isToolsLoading } = useToolList({
     enabled: true,
@@ -251,21 +252,22 @@ export function KnowledgeBaseConfigActions() {
   return (
     <>
       <Button
-        size="small"
-        icon={<Database size={14} />}
-        disabled={state.isReadOnly}
-        onClick={() => setSelectorOpen(true)}
-      >
-        选择知识库
-      </Button>
-      <Button
-        size="small"
-        icon={<Settings2 size={14} />}
+        size="middle"
+        icon={<Settings size={14} />}
         disabled={state.isReadOnly}
         onClick={() => setConfigOpen(true)}
       >
         配置
       </Button>
+      <Button
+        size="middle"
+        icon={<Plus size={14} />}
+        disabled={state.isReadOnly}
+        onClick={() => setSelectorOpen(true)}
+      >
+        选择知识库
+      </Button>
+
       <KnowledgeBaseSelectorModal
         isOpen={selectorOpen}
         onClose={() => setSelectorOpen(false)}
@@ -355,7 +357,6 @@ export default function KnowledgeBaseConfig() {
       ) : (
         <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
           <div className="flex items-center gap-3">
-        
             <div>
               <p className="text-sm font-medium text-gray-700"></p>
               <p className="mt-0.5 text-xs text-gray-400">
@@ -363,7 +364,6 @@ export default function KnowledgeBaseConfig() {
               </p>
             </div>
           </div>
-      
         </div>
       )}
     </div>

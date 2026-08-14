@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { MessageSquare, Settings, X } from "lucide-react";
+import { Button } from "antd";
+import { Bug, MessageSquare, Settings, Sparkles, X } from "lucide-react";
 
 import AgentSelectorHeader from "./components/agent-selector-header";
 import AgentConfig from "./agent-config";
@@ -40,11 +41,7 @@ export default function AgentSetupOrchestrator() {
     <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
       <div className="h-auto min-h-0 shrink-0 bg-white">
         <AgentSelectorHeader
-          onToggleGeneration={() => setIsGenerationVisible((visible) => !visible)}
-          onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
           onToggleVersionManage={() => setIsShowVersionManagePanel((visible) => !visible)}
-          isGenerationVisible={isGenerationVisible}
-          isDebugVisible={isDebugVisible}
           isVersionManageVisible={isShowVersionManagePanel}
         />
       </div>
@@ -75,6 +72,24 @@ export default function AgentSetupOrchestrator() {
         <PanelCard
           title="Agent配置"
           className={!isGenerationVisible && isDebugVisible ? "flex-[1]" : "flex-[2]"}
+          action={
+            <div className="flex items-center gap-2">
+              <Button
+                icon={<Sparkles size={16} />}
+                onClick={() => setIsGenerationVisible((visible) => !visible)}
+                type={isGenerationVisible ? "primary" : "default"}
+              >
+                智能生成
+              </Button>
+              <Button
+                icon={<Bug size={16} />}
+                onClick={() => setIsDebugVisible((visible) => !visible)}
+                type={isDebugVisible ? "primary" : "default"}
+              >
+                调试
+              </Button>
+            </div>
+          }
         >
           <div className="min-h-0 flex-1 overflow-auto p-4 pt-2">
             <AgentConfig />

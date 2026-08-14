@@ -7,7 +7,7 @@ import { Wrench, RefreshCw, Plug, BlocksIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { updateToolList } from "@/services/mcpService";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import ToolManagement from "./agentConfig/ToolManagement";
@@ -22,11 +22,14 @@ export default function AgentCapability() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
-  const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
-  const selectedSkills = useAgentConfigStore((state) => state.editedAgent.skills);
+  const currentAgentId = useAgentStore((state) => state.agentId);
+  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const selectedTools = useAgentStore(
+    (state) => state.editedAgent?.tools ?? []
+  );
+  const selectedSkills = useAgentStore(
+    (state) => state.editedAgent?.skills ?? []
+  );
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -69,10 +72,7 @@ export default function AgentCapability() {
 
   return (
     <>
-      <Tabs
-        defaultValue="tools"
-        className="w-full"
-      >
+      <Tabs defaultValue="tools" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="tools">
             <span className="inline-flex items-center gap-1">
@@ -86,7 +86,11 @@ export default function AgentCapability() {
             <span className="inline-flex items-center gap-1">
               {t("skillPool.title")}
               {selectedSkills && selectedSkills.length > 0 && (
-                <Badge count={selectedSkills.length} size="small" color="blue" />
+                <Badge
+                  count={selectedSkills.length}
+                  size="small"
+                  color="blue"
+                />
               )}
             </span>
           </TabsTrigger>
@@ -122,7 +126,7 @@ export default function AgentCapability() {
                   size="small"
                   icon={<Wrench size={14} />}
                   onClick={() => setIsToolSelectOpen(true)}
-                  disabled={currentAgentId === null && !isCreatingMode}
+                  disabled={currentAgentId === null || isReadOnly}
                   className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                 >
                   <span className="inline-flex items-center self-center leading-none">
@@ -133,10 +137,7 @@ export default function AgentCapability() {
             </Col>
           </Row>
 
-          <ToolManagement
-            isCreatingMode={isCreatingMode}
-            currentAgentId={currentAgentId ?? undefined}
-          />
+          <ToolManagement currentAgentId={currentAgentId ?? undefined} />
         </TabsContent>
 
         {/* Skills Tab */}
@@ -160,7 +161,7 @@ export default function AgentCapability() {
                   size="small"
                   icon={<Wrench size={14} />}
                   onClick={() => setIsSkillSelectOpen(true)}
-                  disabled={currentAgentId === null && !isCreatingMode}
+                  disabled={currentAgentId === null || isReadOnly}
                   className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                 >
                   <span className="inline-flex items-center self-center leading-none">
@@ -172,7 +173,6 @@ export default function AgentCapability() {
           </Row>
 
           <SelectedSkillManagement
-            isCreatingMode={isCreatingMode}
             currentAgentId={currentAgentId ?? undefined}
             isReadOnly={isReadOnly}
           />
@@ -189,7 +189,6 @@ export default function AgentCapability() {
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
         onOpenManageLabels={() => setLabelModalOpen(true)}
-        isCreatingMode={isCreatingMode}
         currentAgentId={currentAgentId ?? undefined}
       />
 
@@ -204,7 +203,6 @@ export default function AgentCapability() {
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
         onEditSkill={() => {}}
-        isCreatingMode={isCreatingMode}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />

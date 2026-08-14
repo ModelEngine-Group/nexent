@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { Button, Form, Input } from "antd";
+import { useTranslation } from "react-i18next";
+import { App, Form } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -10,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
@@ -17,7 +19,9 @@ import AgentCapability from "./components/agent-capability";
 import AgentRunPolicy from "./components/agent-run-policy";
 import AgentGuide from "./components/agent-guide";
 import AgentDeployment from "./components/agent-deployment";
-import CollaborativeAgent from "./components/collaborative-agent";
+import CollaborativeAgent, {
+  CollaborativeAgentActions,
+} from "./components/collaborative-agent";
 import GuardrailConfigContent from "./components/agentInfo/GuardrailConfigContent";
 import KnowledgeBaseConfig, {
   KnowledgeBaseConfigActions,
@@ -62,9 +66,11 @@ function ConfigSection({
       defaultOpen={defaultOpen}
       className="overflow-hidden rounded-lg border border-gray-200 bg-white"
     >
-      <div className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-gray-50">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-4 text-left">
+      <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
           <div className="flex min-w-0 items-center gap-2">
+            <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+
             <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
               {icon}
               <span>{title}</span>
@@ -75,14 +81,10 @@ function ConfigSection({
           </div>
         </CollapsibleTrigger>
         {headerActions && (
-          <div className="flex shrink-0 items-center gap-2">{headerActions}</div>
+          <div className="flex shrink-0 items-center gap-2">
+            {headerActions}
+          </div>
         )}
-        <CollapsibleTrigger
-          aria-label={`切换${title}配置区域`}
-          className="group flex shrink-0 items-center"
-        >
-          <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
       </div>
       <CollapsibleContent className="border-t border-gray-200 bg-gray-50/70 px-4 py-4">
         {children}
@@ -92,20 +94,27 @@ function ConfigSection({
 }
 
 export default function AgentConfig() {
+  const { t } = useTranslation("common");
   const [form] = Form.useForm();
-  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
-  const updateAgentConfig = useAgentConfigStore(
-    (state) => state.updateAgentConfig
-  );
+  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const flushDraft = useAgentStore((state) => state.flushDraft);
+  const updateAgentConfig = useAgentStore((state) => state.updateAgentConfig);
   const { availableLlmModels } = useModelList();
+  const { message } = App.useApp();
+  const saveError = useAgentStore((state) => state.saveError);
+  const clearSaveError = useAgentStore((state) => state.clearSaveError);
   const setSaveValidation = useAgentConfigStore(
     (state) => state.setSaveValidation
   );
+  const handleTabChange = useCallback(() => {
+    flushDraft();
+  }, [flushDraft]);
+
   const handleGuardrailDraftChange = useCallback(
     (guardrailConfig: GuardrailConfig) => {
       const verificationConfig =
-        useAgentConfigStore.getState().editedAgent.verification_config;
+        useAgentStore.getState().editedAgent?.verification_config;
       if (
         JSON.stringify(verificationConfig?.guardrail_config) ===
         JSON.stringify(guardrailConfig)
@@ -124,7 +133,20 @@ export default function AgentConfig() {
   );
 
   useEffect(() => {
+    if (!saveError) {
+      return;
+    }
+
+    message.error(saveError);
+    clearSaveError();
+  }, [clearSaveError, message, saveError]);
+
+  useEffect(() => {
     setSaveValidation(async () => {
+      if (!editedAgent) {
+        return;
+      }
+
       const errors = [];
 
       if (!editedAgent.name.trim()) {
@@ -166,6 +188,27 @@ export default function AgentConfig() {
     return () => setSaveValidation(null);
   }, [editedAgent, form, setSaveValidation]);
 
+  if (!editedAgent) {
+    return (
+      <div className="relative flex h-full min-h-0 items-center justify-center">
+        <div className="space-y-3 text-center animate-in fade-in-50 duration-400">
+          <div className="flex items-center justify-center gap-3 animate-in slide-in-from-bottom-2 duration-300 delay-150">
+            <Info
+              className="text-gray-400 transition-all duration-300 animate-in zoom-in-75 delay-100"
+              size={48}
+            />
+            <h3 className="text-lg font-medium text-gray-700 transition-all duration-300">
+              {t("systemPrompt.nonEditing.title")}
+            </h3>
+          </div>
+          <p className="text-sm text-gray-500 transition-all duration-300">
+            {t("systemPrompt.nonEditing.subtitle")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Form
       form={form}
@@ -174,7 +217,11 @@ export default function AgentConfig() {
       className="flex h-full min-h-0 flex-col"
       initialValues={editedAgent}
     >
-      <Tabs defaultValue="basic" className="flex h-full min-h-0 flex-col">
+      <Tabs
+        defaultValue="basic"
+        onValueChange={handleTabChange}
+        className="flex h-full min-h-0 flex-col"
+      >
         <TabsList className="flex h-10 w-full shrink-0 items-end justify-start gap-4 rounded-none border-b border-gray-200 bg-transparent p-0">
           <TabsTrigger
             value="basic"
@@ -198,7 +245,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="展示信息"
             description="配置图标、展示名称、变量名、作者和简介"
-            icon={<Info className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Info className="h-4 w-4 shrink-0 text-blue-500" />}
             defaultOpen
           >
             <AgentInfo />
@@ -208,7 +255,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="角色与模型"
             description="配置大语言模型以及智能体角色、使用要求和示例"
-            icon={<Cpu className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
             defaultOpen
           >
             <AgentPrmopt />
@@ -218,7 +265,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="工具与技能"
             description="管理 Agent 可使用的工具和技能"
-            icon={<Wrench className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentCapability />
           </ConfigSection>
@@ -227,7 +274,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="运行策略"
             description="配置最大运行步数、输出预留、结果自验证和运行摘要"
-            icon={<Play className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentRunPolicy />
           </ConfigSection>
@@ -236,7 +283,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="发布属性"
             description="配置用户组、组内权限、设为主智能体和 A2A 发布"
-            icon={<Globe className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentDeployment />
           </ConfigSection>
@@ -249,7 +296,8 @@ export default function AgentConfig() {
           <ConfigSection
             title="协作智能体"
             description="添加内部或外部智能体，并配置协作关系"
-            icon={<Cpu className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
+            headerActions={<CollaborativeAgentActions />}
           >
             <CollaborativeAgent />
           </ConfigSection>
@@ -257,7 +305,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="知识库"
             description="选择知识库后自动启用知识库检索能力并建立关联"
-            icon={<Database className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<Database className="h-4 w-4 shrink-0 text-blue-500" />}
             headerActions={<KnowledgeBaseConfigActions />}
           >
             <KnowledgeBaseConfig />
@@ -266,7 +314,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="会话引导"
             description="配置用户首次进入会话时的开场白和示例问题"
-            icon={<MessageSquare className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<MessageSquare className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <AgentGuide />
           </ConfigSection>
@@ -274,7 +322,7 @@ export default function AgentConfig() {
           <ConfigSection
             title="安全护栏"
             description="配置内容匹配规则、处理动作和规则测试"
-            icon={<ShieldCheck className="h-4 w-4 shrink-0 text-gray-500" />}
+            icon={<ShieldCheck className="h-4 w-4 shrink-0 text-blue-500" />}
           >
             <GuardrailConfigContent
               config={

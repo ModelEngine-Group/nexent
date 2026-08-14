@@ -30,6 +30,7 @@ export type AgentConfigUpdate = Partial<
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
+    | "enable_a2a"
     | "greeting_message"
     | "example_questions"
   >
@@ -147,6 +148,7 @@ export interface Agent {
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
+  enable_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
