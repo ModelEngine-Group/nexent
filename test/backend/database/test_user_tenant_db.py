@@ -904,3 +904,36 @@ def test_admin_and_super_admin_limits_reject_role_promotion(monkeypatch):
     su_session.query.side_effect = [su_user_count, su_role_count]
     with pytest.raises(ResourceLimitError, match="Super administrator limit"):
         module._validate_user_tenant_limit(su_session, "tenant-1", "SU")
+
+
+@pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
+@pytest.mark.parametrize("role, limit_name", [("USER", "_USER_LIMIT"), ("ADMIN", "_ADMIN_LIMIT"), ("SU", "_SUPER_ADMIN_LIMIT")])
+def test_user_role_limit_boundaries(monkeypatch, current_count, should_reject, role, limit_name):
+    """All user-role limits allow below cap and reject at or above cap."""
+    import backend.database.user_tenant_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session = MagicMock()
+    query = MagicMock()
+    query.filter.return_value.count.return_value = current_count
+    session.query.return_value = query
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, limit_name, 1)
+
+    if should_reject:
+        with pytest.raises(ResourceLimitError):
+            module._validate_user_tenant_limit(
+                session,
+                "tenant-1",
+                role,
+                include_user_count=role == "USER",
+            )
+    else:
+        module._validate_user_tenant_limit(
+            session,
+            "tenant-1",
+            role,
+            include_user_count=role == "USER",
+        )

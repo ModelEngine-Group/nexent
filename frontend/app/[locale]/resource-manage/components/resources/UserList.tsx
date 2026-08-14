@@ -133,10 +133,9 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       form.resetFields();
       refetch();
     } catch (err: any) {
-      // validation errors already shown by form
-      if (err.response?.data?.message) {
-        message.error(err.response.data.message);
-      }
+      message.error(
+        err?.message || err?.response?.data?.message || t("common.unknownError")
+      );
     }
   };
 
@@ -159,9 +158,9 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       // Refresh groups list
       // Note: useGroupList will automatically refetch on tenant change
     } catch (err: any) {
-      if (err.response?.data?.message) {
-        message.error(err.response.data.message);
-      }
+      message.error(
+        err?.message || err?.response?.data?.message || t("common.unknownError")
+      );
     }
   };
 

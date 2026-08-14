@@ -743,6 +743,10 @@ export const fetchWithErrorHandling = async (
         if (errorDetail?.code) {
           errorCode = errorDetail.code;
           errorMessage = errorDetail.message || errorMessage;
+        } else if (typeof errorData?.detail === "string") {
+          errorMessage = errorData.detail;
+        } else if (typeof errorData?.message === "string") {
+          errorMessage = errorData.message;
         } else {
           errorMessage = errorText || errorMessage;
         }
