@@ -1,5 +1,6 @@
 import asyncio
 import io
+import math
 import sys
 import types
 import json
@@ -696,12 +697,6 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     if not hasattr(tasks, "DataProcessorRayActor") or not hasattr(getattr(tasks, "DataProcessorRayActor"), "remote"):
         tasks.DataProcessorRayActor = types.SimpleNamespace(
             remote=lambda: default_actor)
-    # Keep split path stable across tests even when get_ray_actor is monkeypatched.
-    tasks._get_split_actor = lambda: types.SimpleNamespace(
-        split_file=types.SimpleNamespace(
-            remote=lambda *a, **k: "__split_parts__")
-    )
-
     # Preprocess for forward: drop empty/whitespace-only chunks before calling real run
     def _forward_preprocess(args, kwargs):
         pd = kwargs.get("processed_data")
@@ -3496,15 +3491,14 @@ def test_process_sync_with_celery_context(monkeypatch, tmp_path):
 
     class FakeActor:
         def __init__(self):
-            pass
-
-        def process_file(self, *args, **kwargs):
-            class Ref:
-                pass
-            return Ref()
+            self.process_file = types.SimpleNamespace(
+                remote=lambda *args, **kwargs: "__process_ref__"
+            )
 
     fake_ray = sys.modules.get("ray")
-    fake_ray.get_returns = [{"content": "hello world", "metadata": {}}]
+    fake_ray.get_returns = {
+        "__process_ref__": [{"content": "hello world", "metadata": {}}]
+    }
 
     monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
 
@@ -3686,15 +3680,17 @@ def test_prewarm_ray_actors(monkeypatch):
 
     class MockManager:
         def __init__(self, warm_timeout_s):
-            pass
+            self.ensure_pool = types.SimpleNamespace(remote=self._ensure_pool)
 
-        def ensure_pool(self, desired, max_allowed):
+        @staticmethod
+        def _ensure_pool(desired, max_allowed):
             captured["desired"] = desired
             captured["max_allowed"] = max_allowed
-            return 3
+            return "__pool_ref__"
 
     monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", lambda: MockManager(60))
     monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 2)
+    sys.modules["ray"].get_returns = {"__pool_ref__": 3}
 
     result = tasks.prewarm_ray_actors(target_size=5)
     assert result == 3
@@ -3709,19 +3705,8 @@ def test_get_split_actor(monkeypatch):
     class MockActor:
         pass
 
-    class MockManager:
-        def get_actor(self):
-            return MockActor()
-
-    captured_manager = []
-
-    def mock_get_manager():
-        manager = MockManager()
-        captured_manager.append(manager)
-        return manager
-
-    monkeypatch.setattr(tasks, "_get_or_create_global_pool_manager", mock_get_manager)
+    expected_actor = MockActor()
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: expected_actor)
 
     actor = tasks._get_split_actor()
-    assert actor is MockActor
-    assert len(captured_manager) == 1
+    assert actor is expected_actor

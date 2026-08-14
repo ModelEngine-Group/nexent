@@ -6,6 +6,14 @@ import types
 import pytest
 
 
+class _NoopKnowledgeSpan:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+
 def make_fake_ray_module_identity_decorator():
     fake_ray = types.ModuleType("ray")
 
@@ -88,6 +96,10 @@ def import_module(monkeypatch):
 
     # Stub DataProcessCore and get_file_stream
     monkeypatch.setitem(sys.modules, "nexent.data_process", types.SimpleNamespace(DataProcessCore=FakeDataProcessCore))
+    telemetry_module = types.SimpleNamespace(
+        knowledge_span=lambda *args, **kwargs: _NoopKnowledgeSpan()
+    )
+    monkeypatch.setitem(sys.modules, "utils.knowledge_telemetry", telemetry_module)
 
     # Provide a full stub module for database.attachment_db to avoid importing real Minio client
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
@@ -792,8 +804,8 @@ def test_append_image_chunks_skips_invalid_entries(monkeypatch):
             return (
                 [{"content": "text", "metadata": {}}],
                 [
-                    {"not": "dict"},  # Not a dict
-                    {"image_bytes": b"img"},  # Missing image_format
+                    "not-a-dict",
+                    {"image_format": "png"},  # Missing image_bytes
                 ],
             )
 
@@ -812,8 +824,8 @@ def test_append_image_chunks_skips_invalid_entries(monkeypatch):
     actor = ray_actors.DataProcessorRayActor()
     chunks = [{"content": "text", "metadata": {}}]
     images = [
-        {"not": "dict"},
-        {"image_bytes": b"img"},
+        "not-a-dict",
+        {"image_format": "png"},
     ]
     actor._append_image_chunks("source.pdf", chunks, images)
     # Only valid text chunk should remain, no image chunks added
@@ -1010,6 +1022,7 @@ def test_run_file_process_with_telemetry_context(monkeypatch):
             self.name = name
             self.operation = operation
             self.kwargs = kwargs
+            captured_spans.append(self)
 
         def __enter__(self):
             return self
@@ -1026,11 +1039,8 @@ def test_run_file_process_with_telemetry_context(monkeypatch):
             return [{"content": "test content", "metadata": {"creation_date": "2024-01-01"}}]
 
     monkeypatch.setattr(ray_actors, "DataProcessCore", RecordingCore)
-    monkeypatch.setattr(
-        ray_actors,
-        "knowledge_span",
-        MockKnowledgeSpan,
-    )
+    telemetry_module = types.SimpleNamespace(knowledge_span=MockKnowledgeSpan)
+    monkeypatch.setitem(sys.modules, "utils.knowledge_telemetry", telemetry_module)
 
     actor = ray_actors.DataProcessorRayActor()
     result = actor._run_file_process(
@@ -1046,4 +1056,5 @@ def test_run_file_process_with_telemetry_context(monkeypatch):
 
     assert len(result) == 1
     assert result[0]["content"] == "test content"
-
+    assert len(captured_spans) == 1
+    assert captured_spans[0].kwargs["telemetry_context"] == {"trace_id": "abc123"}

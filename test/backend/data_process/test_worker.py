@@ -1,3 +1,4 @@
+import builtins
 import sys
 import types
 import importlib
@@ -69,6 +70,7 @@ def setup_mocks_for_worker(mocker, initialized=False):
         const_mod.RAY_ACTOR_NUM_CPUS = 1
         const_mod.RAY_NUM_CPUS = 4
         const_mod.DP_PART_PROCESSOR_COUNT = 3
+        const_mod.DP_FILE_SPLIT_SIZE_MB = 5
         const_mod.PER_WAVE_TIMEOUT = 300
         const_mod.MAX_TIMEOUT = 3600
         const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
@@ -467,11 +469,7 @@ def test_start_worker_with_custom_name(mocker):
     worker_module, _ = setup_mocks_for_worker(mocker)
     
     # Set custom worker name
-    if "consts.const" in sys.modules:
-        sys.modules["consts.const"].WORKER_NAME = "custom-worker"
-    
-    # Reload to pick up new constant value
-    importlib.reload(worker_module)
+    worker_module.WORKER_NAME = "custom-worker"
     
     call_args = []
     
@@ -797,18 +795,19 @@ def test_setup_worker_environment_sets_logging_level(mocker):
     logger_capture = []
 
     class FakeCeleryWorkerStrategyLogger:
-        def __init__(self):
-            pass
-
         def setLevel(self, level):
             logger_capture.append(level)
 
     import logging
-    mocker.patch.dict(sys.modules, {
-        "celery.worker.strategy": types.SimpleNamespace(
-            Logger=FakeCeleryWorkerStrategyLogger
-        )
-    })
+    strategy_logger = FakeCeleryWorkerStrategyLogger()
+    real_get_logger = logging.getLogger
+    mocker.patch.object(
+        worker_module.logging,
+        "getLogger",
+        side_effect=lambda name=None: strategy_logger
+        if name == "celery.worker.strategy"
+        else real_get_logger(name),
+    )
 
     worker_module.setup_worker_environment()
     assert logging.WARNING in logger_capture
@@ -880,8 +879,7 @@ def test_worker_ready_handler_with_process_part_queue(mocker):
     mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
 
     # Mock QUEUES to include process_part_q
-    if "consts.const" in sys.modules:
-        sys.modules["consts.const"].QUEUES = "process_part_q"
+    worker_module.QUEUES = "process_part_q"
 
     calls = []
 
@@ -893,10 +891,6 @@ def test_worker_ready_handler_with_process_part_queue(mocker):
             pass
 
     mocker.patch.object(worker_module.threading, "Thread", FakeThread)
-
-    # Need to reload to pick up new QUEUES value
-    import importlib
-    importlib.reload(worker_module)
 
     worker_module.worker_ready_handler()
     # Should have started prewarm thread and potentially part concurrency thread
@@ -980,7 +974,7 @@ def test_start_worker_logs_configuration(mocker):
     worker_module.start_worker()
 
     # Verify configuration logging
-    assert any("broker_url" in str(call) or "result_backend" in str(call) for call in debug_calls)
+    assert any("Broker URL" in str(call) or "Backend URL" in str(call) for call in debug_calls)
 
 
 def test_task_failure_handler_logs_exception_details(mocker):
@@ -1052,8 +1046,7 @@ def test_start_worker_with_multiple_queues(mocker):
     worker_module, _ = setup_mocks_for_worker(mocker)
 
     # Set multiple queues
-    if "consts.const" in sys.modules:
-        sys.modules["consts.const"].QUEUES = "process_q,forward_q,custom_q"
+    worker_module.QUEUES = "process_q,forward_q,custom_q"
 
     mocker.patch("backend.data_process.worker.os.getpid", return_value=12345)
 
@@ -1079,8 +1072,7 @@ def test_worker_ready_handler_schedules_prewarm_for_process_queue(mocker):
     mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
 
     # Set QUEUES to include process_q
-    if "consts.const" in sys.modules:
-        sys.modules["consts.const"].QUEUES = "process_q,forward_q"
+    worker_module.QUEUES = "process_q,forward_q"
 
     prewarm_calls = []
 
