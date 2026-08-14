@@ -1707,6 +1707,7 @@ class TestDataProcessService(unittest.TestCase):
                 'authorization': 'Bearer test_token',
                 'embedding_model_id': None,
                 'tenant_id': None,
+                'telemetry_context': {},
             },
             {
                 'source': 'http://example.com/doc2.pdf',
@@ -1717,6 +1718,7 @@ class TestDataProcessService(unittest.TestCase):
                 'authorization': 'Bearer test_token',
                 'embedding_model_id': None,
                 'tenant_id': None,
+                'telemetry_context': {},
             },
         ]
         actual_calls = [kwargs for args, kwargs in mock_submit_chain.call_args_list]

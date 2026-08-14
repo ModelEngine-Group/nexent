@@ -17,6 +17,7 @@ from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
 from database.knowledge_db import get_knowledge_record
 from utils.auth_utils import get_current_user_id
+from utils.knowledge_telemetry import inject_trace_context, set_span_attributes, trace_knowledge_operation
 
 logger = logging.getLogger("file_management_utils")
 
@@ -40,6 +41,7 @@ async def save_upload_file(file: UploadFile, upload_path: Path) -> bool:
         return False
 
 
+@trace_knowledge_operation("knowledge.process.submit", "process.submit")
 async def trigger_data_process(files: List[dict], process_params: ProcessParams):
     """Trigger data processing service to handle uploaded files"""
     try:
@@ -72,6 +74,8 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
         headers = {
             "Authorization": f"Bearer {process_params.authorization}"
         }
+        telemetry_context = inject_trace_context()
+        headers.update(telemetry_context)
 
         # Build source data list
         if len(files) == 1:
@@ -86,6 +90,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                 "embedding_model_id": embedding_model_id,
                 "tenant_id": tenant_id
             }
+            payload["telemetry_context"] = telemetry_context
 
             try:
                 async with httpx.AsyncClient() as client:
@@ -117,6 +122,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     "embedding_model_id": embedding_model_id,
                     "tenant_id": tenant_id
                 }
+                source["telemetry_context"] = telemetry_context
                 sources.append(source)
 
             payload = {"sources": sources}
@@ -126,6 +132,7 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
                     response = await client.post(f"{DATA_PROCESS_SERVICE}/tasks/batch", headers=headers, json=payload, timeout=30.0)
 
                 if response.status_code == 201:
+                    set_span_attributes(stage="process.submitted")
                     return response.json()
                 else:
                     logger.error(

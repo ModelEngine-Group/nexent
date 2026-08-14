@@ -32,8 +32,25 @@ class DataProcessorRayActor:
     """
 
     def __init__(self):
+        # Ray actors are independent processes and must initialize their own
+        # provider before DataProcessCore creates typed preprocessing spans.
+        try:
+            from utils.monitoring import monitoring_manager
+
+            self._monitoring_manager = monitoring_manager
+            telemetry_enabled = monitoring_manager.is_enabled
+        except Exception:
+            self._monitoring_manager = None
+            telemetry_enabled = False
+            logger.warning(
+                "Knowledge telemetry initialization failed in Ray actor; processing will continue",
+                exc_info=True,
+            )
         logger.info(
-            f"Ray actor initialized using {RAY_ACTOR_NUM_CPUS} CPU cores...")
+            "Ray actor initialized using %s CPU cores; telemetry_enabled=%s",
+            RAY_ACTOR_NUM_CPUS,
+            telemetry_enabled,
+        )
         self._processor = DataProcessCore()
 
     def ping(self) -> bool:
@@ -71,12 +88,22 @@ class DataProcessorRayActor:
         process_params: Dict[str, Any],
         log_subject: str,
     ) -> List[Dict[str, Any]]:
-        result = self._processor.file_process(
-            file_data=file_data,
+        from utils.knowledge_telemetry import knowledge_span
+
+        with knowledge_span(
+            "knowledge.process.ray_actor",
+            "process.ray_actor",
+            telemetry_context=process_params.get("telemetry_context"),
             filename=filename,
-            chunking_strategy=chunking_strategy,
-            **process_params
-        )
+            file_size_bytes=len(file_data),
+            task_id=process_params.get("task_id"),
+        ):
+            result = self._processor.file_process(
+                file_data=file_data,
+                filename=filename,
+                chunking_strategy=chunking_strategy,
+                **process_params
+            )
         
         chunks, images_info = self._normalize_processor_result(result)
         if images_info:
@@ -304,7 +331,8 @@ class DataProcessorRayActor:
         source: str,
         destination: str,
         task_id: Optional[str] = None,
-        max_size: int = 5 * 1024 * 1024,
+        max_size: Optional[int] = None,
+        target_parts: Optional[int] = None,
         file_data: Optional[bytes] = None,
         **params
     ) -> List[bytes]:
@@ -312,7 +340,8 @@ class DataProcessorRayActor:
         Split file into parts using DataProcessCore.file_split and return raw bytes list.
         """
         logger.info(
-            f"[RayActor] Splitting file: source='{source}', destination='{destination}', task_id='{task_id}', max_size={max_size}"
+            f"[RayActor] Splitting file: source='{source}', destination='{destination}', "
+            f"task_id='{task_id}', max_size={max_size}, target_parts={target_parts}"
         )
 
         if file_data is None:
@@ -336,6 +365,7 @@ class DataProcessorRayActor:
             file_data=file_data,
             filename=source,
             max_size=max_size,
+            target_parts=target_parts,
             **params
         )
         split_elapsed = time.perf_counter() - split_start
