@@ -58,7 +58,8 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
         original_filename=request.original_filename,
         authorization=authorization,
         embedding_model_id=request.embedding_model_id,
-        tenant_id=request.tenant_id
+        tenant_id=request.tenant_id,
+        telemetry_context=getattr(request, "telemetry_context", {}) or {},
     )
     return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_result.id})
 
