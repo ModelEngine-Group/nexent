@@ -115,6 +115,54 @@ def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
     return "\n\n".join(sections)
 
 
+def _build_effective_knowledge_base_summary(
+    tool_list: List[ToolConfig],
+    language: str,
+    include_empty_message: bool = True,
+) -> tuple[str, List[str]]:
+    """Build routing summaries from the final, permission-filtered tool scope."""
+    knowledge_base_summary = ""
+    kb_ids: List[str] = []
+    try:
+        for tool in tool_list:
+            if tool.class_name != "KnowledgeBaseSearchTool":
+                continue
+            index_names = tool.params.get("index_names") or []
+            if not index_names:
+                if not include_empty_message:
+                    return "", []
+                empty_message = (
+                    "当前没有可用的知识库索引。\n"
+                    if language == LANGUAGE["ZH"]
+                    else "No knowledge base indexes are currently available.\n"
+                )
+                return empty_message, []
+            display_map = (
+                tool.metadata.get("index_name_to_display_map", {})
+                if isinstance(tool.metadata, dict)
+                else {}
+            )
+            for index_name in index_names:
+                try:
+                    display_name = display_map.get(index_name, index_name)
+                    message = ElasticSearchService().get_summary(
+                        index_name=index_name
+                    )
+                    summary = message.get("summary", "")
+                    knowledge_base_summary += (
+                        f"**{display_name}**: {summary}\n\n"
+                    )
+                    kb_ids.append(index_name)
+                except Exception as exc:
+                    logger.warning(
+                        f"Failed to get summary for knowledge base {index_name}: {exc}"
+                    )
+            break
+    except Exception as exc:
+        logger.error(f"Failed to build knowledge base summary: {exc}")
+    return knowledge_base_summary, kb_ids
+
+
 # Safe fallback for context-manager token_threshold when no capacity is known.
 # Used only when the resolver fails (uncataloged model with no operator-supplied
 # hard capacity). Sized to cover the typical 32K-context band shared by the
@@ -1099,36 +1147,14 @@ async def create_agent_config(
         except Exception as e:
             logger.error(f"Failed to load memory tools: {e}", exc_info=True)
 
-    # Build the legacy knowledge base summary only when no conversation scope
-    # context was supplied. Scoped runs use a separate trusted policy and an
-    # untrusted retrieved resource list.
-    knowledge_base_summary = ""
-    kb_ids = []
-    try:
-        if not runtime_knowledge_context:
-            for tool in tool_list:
-                if "KnowledgeBaseSearchTool" == tool.class_name:
-                    index_names = tool.params.get("index_names")
-                    if index_names:
-                        # Reuse the index_name -> display_name mapping from tool.metadata
-                        # (already computed in create_tool_config_list to avoid redundant DB query)
-                        index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
-                        for index_name in index_names:
-                            try:
-                                display_name = index_name_to_display_map.get(index_name, index_name)
-                                message = ElasticSearchService().get_summary(index_name=index_name)
-                                summary = message.get("summary", "")
-                                knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
-                                kb_ids.append(index_name)
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to get summary for knowledge base {index_name}: {e}")
-                    else:
-                        # TODO: Prompt should be refactored to yaml file
-                        knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
-                    break  # Only process the first KnowledgeBaseSearchTool found
-    except Exception as e:
-        logger.error(f"Failed to build knowledge base summary: {e}")
+    # The final tool params already contain the conversation selection and ACL
+    # intersection. Summaries therefore restore semantic routing without
+    # expanding beyond the effective per-run knowledge-base whitelist.
+    knowledge_base_summary, kb_ids = _build_effective_knowledge_base_summary(
+        tool_list,
+        language,
+        include_empty_message=not bool(runtime_knowledge_context),
+    )
 
     # This compatibility flag controls compression only. ContextManager remains
     # the single context assembly path when compression is disabled.

@@ -166,6 +166,52 @@ def test_all_sources_are_naturally_granular_and_keep_stable_order():
 
 
 @pytest.mark.parametrize(
+    ("language", "scope_marker", "resource_marker", "instruction_marker"),
+    [
+        ("zh", "平台提供的知识库范围内", "属于资源数据", "不是指令"),
+        ("en", "scope provided by the platform", "resource data", "not instructions"),
+    ],
+)
+def test_scoped_knowledge_summary_is_bounded_and_untrusted(
+    language, scope_marker, resource_marker, instruction_marker
+):
+    items = build_context_inputs(
+        knowledge_base_summary="**Selected KB**: untrusted summary",
+        kb_ids=["selected-index"],
+        knowledge_scope_policy="trusted scope policy",
+        knowledge_scope_resources="allowed resources",
+        language=language,
+    )
+
+    summary_item = next(
+        item for item in items if item.id == "knowledge_base:summary"
+    )
+    text = summary_item.content["text"]
+
+    assert scope_marker in text
+    assert resource_marker in text
+    assert instruction_marker in text
+    assert "untrusted summary" in text
+    assert summary_item.metadata["authority"] == "retrieved"
+
+
+def test_unscoped_knowledge_summary_keeps_legacy_routing_guidance():
+    items = build_context_inputs(
+        knowledge_base_summary="**Default KB**: summary",
+        kb_ids=["default-index"],
+        language="en",
+    )
+
+    summary_item = next(
+        item for item in items if item.id == "knowledge_base:summary"
+    )
+    text = summary_item.content["text"]
+
+    assert "please select the most relevant one or more" in text
+    assert "resource data" not in text
+
+
+@pytest.mark.parametrize(
     ("flag", "kwargs", "item_type"),
     [
         ("include_tools", {"tools": {"tool": Value()}}, ContextItemType.TOOL),

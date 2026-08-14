@@ -250,6 +250,10 @@ sys.modules['services.image_service'] = _create_stub_module(
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
 )
+sys.modules['services.ind_aidp_service'] = _create_stub_module(
+    "services.ind_aidp_service",
+    create_ind_aidp_image_url_builder=MagicMock(),
+)
 sys.modules['services.memory_config_service'] = MagicMock()
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
@@ -2484,7 +2488,13 @@ class TestCreateAgentConfig:
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+            )
 
             # Verify that fixed search memory tool's forward was called
             search_instance = mock_search_tool.return_value
@@ -3190,7 +3200,17 @@ class TestCreateAgentConfig:
             ]
             mock_es_service.return_value = mock_es_instance
 
-            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                runtime_knowledge_context={
+                    "policy": "scope policy",
+                    "resources": "selected resources",
+                },
+            )
 
             assert mock_es_instance.get_summary.call_args_list == [
                 ((), {"index_name": "idx_a"}),
@@ -3203,9 +3223,72 @@ class TestCreateAgentConfig:
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == "**idx_a**: AAA\n\n"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_policy"
+            ] == "scope policy"
+            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+                "knowledge_scope_resources"
+            ] == "selected resources"
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
+
+    def test_scoped_summary_uses_only_effective_tool_indices(self):
+        """Scoped runs build routing summaries from the final tool whitelist."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["selected-index"]},
+            metadata={
+                "index_name_to_display_map": {
+                    "selected-index": "Selected Knowledge Base"
+                }
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Selected summary"
+            }
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == (
+            "**Selected Knowledge Base**: Selected summary\n\n"
+        )
+        assert kb_ids == ["selected-index"]
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="selected-index"
+        )
+
+    def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
+        """An empty effective scope stays empty instead of adding legacy text."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": []},
+            metadata={},
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == ""
+        assert kb_ids == []
+        mock_es_service.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_agent_config_uses_metadata_index_name_to_display_map(self):
