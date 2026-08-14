@@ -1160,8 +1160,7 @@ class KnowledgeBaseService {
   async uploadDocuments(
     kbId: string,
     files: File[],
-    chunkingStrategy?: string,
-    modelId?: number
+    chunkingStrategy?: string
   ): Promise<{ quota_status?: QuotaStatusResponse }> {
     try {
       if (
@@ -1231,7 +1230,6 @@ class KnowledgeBaseService {
           files: filesToProcess,
           chunking_strategy: chunkingStrategy,
           destination: "minio",
-          model_id: modelId,
         }),
       });
 
