@@ -48,6 +48,59 @@ def test_file_process_docx_multi_parts_returns_pdf_parts(monkeypatch):
     assert parts == expected_parts
 
 
+def test_file_process_docx_target_parts_uses_converted_pdf(monkeypatch):
+    splitter = FileSplitter()
+    captured = {}
+    expected_parts = [BytesIO(b"p1"), BytesIO(b"p2"), BytesIO(b"p3")]
+    monkeypatch.setattr(
+        splitter,
+        "_convert_bytes_with_libreoffice",
+        lambda *args, **kwargs: b"converted-pdf-bytes",
+    )
+
+    def _split_pdf(pdf_bytes, target_parts):
+        captured["pdf_bytes"] = pdf_bytes
+        captured["target_parts"] = target_parts
+        return expected_parts
+
+    monkeypatch.setattr(splitter, "split_pdf_by_parts", _split_pdf)
+
+    parts = splitter.file_process(
+        b"compressed-word-bytes", "sample.docx", target_parts=3)
+
+    assert parts == expected_parts
+    assert captured == {
+        "pdf_bytes": b"converted-pdf-bytes",
+        "target_parts": 3,
+    }
+
+
+def test_split_pdf_by_parts_caps_output_at_target(monkeypatch):
+    splitter = FileSplitter()
+
+    class FakeReader:
+        def __init__(self, *_args, **_kwargs):
+            self.pages = [object() for _ in range(11)]
+
+    class FakeWriter:
+        def __init__(self):
+            self.pages = []
+
+        def add_page(self, page):
+            self.pages.append(page)
+
+        def write(self, buffer):
+            buffer.write(b"x" * len(self.pages))
+
+    monkeypatch.setattr("pypdf.PdfReader", FakeReader)
+    monkeypatch.setattr("pypdf.PdfWriter", FakeWriter)
+
+    parts = splitter.split_pdf_by_parts(b"%PDF", target_parts=5)
+
+    assert len(parts) == 5
+    assert [len(part.getvalue()) for part in parts] == [3, 2, 2, 2, 2]
+
+
 def test_file_process_csv_routes_to_split_csv(monkeypatch):
     splitter = FileSplitter()
     captured = {}

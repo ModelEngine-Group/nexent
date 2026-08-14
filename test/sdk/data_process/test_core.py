@@ -403,8 +403,8 @@ class TestDataProcessCore:
         assert isinstance(parts[0], BytesIO)
         assert parts[0].getvalue() == data
 
-    def test_file_split_uses_splitter_with_default_max_size(self, core):
-        """file_split should call FileSplitter with default max_size when omitted."""
+    def test_file_split_passes_optional_split_parameters(self, core):
+        """file_split should pass optional split parameters explicitly."""
         splitter = Mock()
         splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
         core.processors["FileSplitter"] = splitter
@@ -413,7 +413,19 @@ class TestDataProcessCore:
 
         assert len(parts) == 2
         splitter.file_process.assert_called_once_with(
-            b"csv-data", "data.csv", max_size=5 * 1024 * 1024
+            b"csv-data", "data.csv", max_size=None, target_parts=None
+        )
+
+    def test_file_split_passes_target_parts(self, core):
+        splitter = Mock()
+        splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
+        core.processors["FileSplitter"] = splitter
+
+        parts = core.file_split(b"csv-data", "data.csv", target_parts=2)
+
+        assert len(parts) == 2
+        splitter.file_process.assert_called_once_with(
+            b"csv-data", "data.csv", max_size=None, target_parts=2
         )
 
     def test_file_split_invalid_split_result_falls_back(self, core):

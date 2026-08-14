@@ -370,13 +370,14 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.DATA_PROCESS_SERVICE = "http://data-process"
         const_mod.RAY_ACTOR_NUM_CPUS = 1
         const_mod.RAY_NUM_CPUS = 4
+        const_mod.DP_PART_PROCESSOR_COUNT = 3
+        const_mod.DP_FILE_SPLIT_SIZE_MB = 5
         const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
         const_mod.FORWARD_REDIS_RETRY_MAX = 1
         const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
         const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 200
         const_mod.PER_WAVE_TIMEOUT = 30
         const_mod.MAX_TIMEOUT = 1800
-        const_mod.RAY_GLOBAL_ACTOR_POOL_SIZE = 3
         const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "nexent_global_data_processor_pool"
         const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent-data-process"
@@ -613,7 +614,6 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
             "RAY_GLOBAL_ACTOR_POOL_NAME",
             "RAY_GLOBAL_ACTOR_POOL_NAMESPACE",
             "RAY_ACTOR_WARM_TIMEOUT_S",
-            "RAY_GLOBAL_ACTOR_POOL_SIZE",
             "RAY_ACTOR_NUM_CPUS",
             "ROOT_DIR",
             "PER_WAVE_TIMEOUT",
@@ -974,7 +974,7 @@ def test_process_minio_path(monkeypatch):
 
     class FakeActor:
         def __init__(self):
-            self.process_file = types.SimpleNamespace(
+            self.process_bytes = types.SimpleNamespace(
                 remote=lambda *a, **k: "ref")
             self.store_chunks_in_redis = types.SimpleNamespace(
                 remote=lambda *a, **k: None)
@@ -2384,7 +2384,7 @@ def test_process_url_source_with_many_chunks(monkeypatch):
 
     class FakeActor:
         def __init__(self):
-            self.process_file = types.SimpleNamespace(
+            self.process_bytes = types.SimpleNamespace(
                 remote=lambda *a, **k: "ref_url")
             self.store_chunks_in_redis = types.SimpleNamespace(
                 remote=lambda *a, **k: None)
@@ -2508,12 +2508,135 @@ def test_estimate_parallel_parts_and_batch_helpers(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "RAY_NUM_CPUS", 8)
     monkeypatch.setattr(tasks, "RAY_ACTOR_NUM_CPUS", 2)
-    assert tasks._estimate_parallel_parts() == 4
+    monkeypatch.setattr(tasks, "DP_PART_PROCESSOR_COUNT", 3)
+    assert tasks._estimate_parallel_parts() == 3
+
+    monkeypatch.setattr(tasks, "RAY_NUM_CPUS", 4)
+    assert tasks._estimate_parallel_parts() == 2
 
     batches = [[{"a": 1}], [{"a": 2}]]
     assert tasks._get_next_available_batch_index(batches, 0, batch_size=2) == 0
     with pytest.raises(RuntimeError):
         tasks._get_next_available_batch_index([[1], [2]], 0, batch_size=1)
+
+
+def test_split_file_for_processing_targets_processor_count(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+    captured = {}
+    spans = []
+
+    class CapturedSpan:
+        def __init__(self):
+            self.attributes = {}
+
+        def set_attribute(self, name, value):
+            self.attributes[name] = value
+
+    @contextmanager
+    def capture_span(name, stage, **attributes):
+        captured_span = CapturedSpan()
+        spans.append((name, stage, attributes, captured_span))
+        yield captured_span
+
+    class Actor:
+        split_file = types.SimpleNamespace(
+            remote=lambda **kwargs: captured.update(kwargs) or "parts-ref")
+
+    monkeypatch.setattr(tasks, "DP_PART_PROCESSOR_COUNT", 4)
+    monkeypatch.setattr(tasks, "_get_split_actor", lambda: Actor())
+    monkeypatch.setattr(tasks, "knowledge_span", capture_span)
+    fake_ray.get_returns = {"parts-ref": [b"part"]}
+
+    params = {"max_size": 1, "encoding": "utf-8"}
+    parts = tasks._split_file_for_processing(
+        request_id="req",
+        source="file.txt",
+        source_type="local",
+        task_id="task",
+        params=params,
+        file_size_bytes=10 * 1024 * 1024,
+    )
+
+    assert parts == [b"part"]
+    assert captured["target_parts"] == 4
+    assert "max_size" not in captured
+    assert "max_size" not in params
+    assert [span[0] for span in spans] == [
+        "knowledge.process.split_actor_acquire",
+        "knowledge.process.file_split_rpc",
+    ]
+    assert spans[1][2]["processor_count"] == 4
+    assert spans[1][3].attributes["file.parts_count"] == 1
+
+
+def test_process_source_below_split_threshold_skips_splitter(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        process_bytes = types.SimpleNamespace(remote=lambda *args, **kwargs: "chunks-ref")
+        store_chunks_in_redis = types.SimpleNamespace(remote=lambda *args, **kwargs: "store-ref")
+
+    monkeypatch.setattr(tasks, "DP_FILE_SPLIT_SIZE_MB", 5)
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    monkeypatch.setattr(
+        tasks,
+        "_split_file_for_processing",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("splitter called")),
+    )
+    fake_ray.get_returns = {
+        "chunks-ref": [{"content": "chunk"}],
+        "store-ref": True,
+    }
+
+    result = tasks._process_source_with_split(
+        request_id="req",
+        source="file.txt",
+        source_type="minio",
+        task_id="task",
+        chunking_strategy="basic",
+        index_name="idx",
+        original_filename="file.txt",
+        embedding_model_id=None,
+        tenant_id=None,
+        params={},
+        file_data=b"small file",
+    )
+
+    assert result == (False, [{"content": "chunk"}], None)
+
+
+def test_process_source_above_split_threshold_uses_splitter(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr(tasks, "DP_FILE_SPLIT_SIZE_MB", 1)
+    monkeypatch.setattr(
+        tasks,
+        "_split_file_for_processing",
+        lambda **kwargs: captured.update(kwargs) or [b"a", b"b"],
+    )
+    monkeypatch.setattr(
+        tasks,
+        "_run_processing_for_parts",
+        lambda **kwargs: (True, None, 2),
+    )
+
+    result = tasks._process_source_with_split(
+        request_id="req",
+        source="file.txt",
+        source_type="minio",
+        task_id="task",
+        chunking_strategy="basic",
+        index_name="idx",
+        original_filename="file.txt",
+        embedding_model_id=None,
+        tenant_id=None,
+        params={},
+        file_data=b"x" * (1024 * 1024 + 1),
+    )
+
+    assert result == (True, None, 2)
+    assert captured["file_size_bytes"] == 1024 * 1024 + 1
 
 
 def test_extract_error_code_from_es_response_detail_string(monkeypatch):
@@ -2572,6 +2695,15 @@ def test_global_pool_manager_paths(monkeypatch):
     manager = tasks.GlobalRayActorPoolManager(warm_timeout_s=1)
     assert manager.ensure_pool(desired=2, max_allowed=3) == 2
     assert manager.get_actor() is not None
+    killed = []
+    monkeypatch.setattr(
+        tasks.ray,
+        "kill",
+        lambda actor, **kwargs: killed.append(actor),
+        raising=False,
+    )
+    assert manager.ensure_pool(desired=1, max_allowed=3) == 1
+    assert len(killed) == 1
 
 
 def test_global_pool_manager_warm_fail(monkeypatch):
@@ -2807,6 +2939,14 @@ def test_run_processing_for_parts_single_and_multi(monkeypatch):
     assert split_chunk_count is None
 
     captured = {}
+    spans = []
+
+    @contextmanager
+    def capture_span(name, stage, **attributes):
+        spans.append((name, stage, attributes))
+        yield None
+
+    monkeypatch.setattr(tasks, "knowledge_span", capture_span)
     monkeypatch.setattr(tasks, "process_part", types.SimpleNamespace(
         s=lambda **kwargs: types.SimpleNamespace(kwargs=kwargs)))
     monkeypatch.setattr(tasks, "aggregate_store_chunks", types.SimpleNamespace(
@@ -2836,6 +2976,12 @@ def test_run_processing_for_parts_single_and_multi(monkeypatch):
     assert chunks2 is None
     assert split_chunk_count2 == 6
     assert len(captured["group"]) == 3
+    assert [span[0] for span in spans] == [
+        "knowledge.process.part_dispatch",
+        "knowledge.process.part_wait",
+    ]
+    assert spans[0][2]["part_count"] == 3
+    assert spans[1][2]["timeout_seconds"] == 9
 
 
 def test_process_split_async_redis_image_metadata_count(monkeypatch, tmp_path):
