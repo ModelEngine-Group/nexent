@@ -17,6 +17,8 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
+import type { Skill } from "@/types/agentConfig";
+import type { MyEditableSkillItem } from "@/types/skillRepository";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 
@@ -27,7 +29,6 @@ import {
   Plug,
   BlocksIcon,
   Globe,
-  ListChecks,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -53,6 +54,9 @@ export default function AgentConfigComp() {
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
+    null
+  );
 
   // Use tool list hook for data management
   const { invalidate, availableTools } = useToolList();
@@ -94,6 +98,30 @@ export default function AgentConfigComp() {
     invalidateSkills();
   }, [invalidateSkills]);
 
+  const handleOpenSkillEditor = useCallback((skill: Skill) => {
+    setEditingSkill({
+      skill_id: Number(skill.skill_id),
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      tags: skill.tags || [],
+      group_ids: skill.group_ids || [],
+      ingroup_permission: skill.ingroup_permission || "READ_ONLY",
+      created_by: skill.created_by,
+      updated_by: skill.updated_by,
+      create_time: skill.create_time,
+      update_time: skill.update_time,
+      permission: skill.permission,
+      repository_info: [],
+    });
+    setIsSkillModalOpen(true);
+  }, []);
+
+  const handleCloseSkillModal = useCallback(() => {
+    setIsSkillModalOpen(false);
+    setEditingSkill(null);
+  }, []);
+
   return (
     <>
       {/* Import handled by Ant Design Upload (no hidden input required) */}
@@ -131,7 +159,7 @@ export default function AgentConfigComp() {
                 size="small"
                 icon={<Globe size={16} />}
                 onClick={() => setShowA2ADiscovery(true)}
-                className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
+                className="!text-green-600 hover:!bg-green-50 hover:!text-green-700"
                 title={t("toolManagement.refresh.title")}
               >
                 {t("collaborativeAgent.addExternal")}
@@ -236,9 +264,11 @@ export default function AgentConfigComp() {
                       icon={<Wrench size={14} />}
                       onClick={() => setIsToolSelectOpen(true)}
                       disabled={currentAgentId === null && !isCreatingMode}
-                      className="h-7 gap-1 text-xs bg-white border border-gray-200 hover:!border-gray-300 hover:!bg-gray-50"
+                      className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                     >
-                      {t("toolPool.selectTools")}
+                      <span className="inline-flex items-center self-center leading-none">
+                        {t("toolPool.selectTools")}
+                      </span>
                     </Button>
                   </div>
                 </Flex>
@@ -269,7 +299,7 @@ export default function AgentConfigComp() {
                       icon={<RefreshCw size={16} />}
                       onClick={handleRefreshSkills}
                       loading={isRefreshingSkill}
-                      className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
+                      className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
                       title={t("skillManagement.refresh.title")}
                     >
                       {t("skillManagement.refresh.button")}
@@ -278,8 +308,11 @@ export default function AgentConfigComp() {
                       type="text"
                       size="small"
                       icon={<BlocksIcon size={16} />}
-                      onClick={() => setIsSkillModalOpen(true)}
-                      className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
+                      onClick={() => {
+                        setEditingSkill(null);
+                        setIsSkillModalOpen(true);
+                      }}
+                      className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
                       title={t("skillManagement.build.title")}
                     >
                       {t("skillManagement.build.button")}
@@ -287,12 +320,14 @@ export default function AgentConfigComp() {
                   </div>
                   <Button
                     size="small"
-                    icon={<ListChecks size={14} />}
+                    icon={<Wrench size={14} />}
                     onClick={() => setIsSkillSelectOpen(true)}
                     disabled={currentAgentId === null && !isCreatingMode}
-                    className="h-7 gap-1 border border-gray-200 bg-white text-xs hover:!border-gray-300 hover:!bg-gray-50"
+                    className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
                   >
-                    {t("skillPool.selectSkills")}
+                    <span className="inline-flex items-center self-center leading-none">
+                      {t("skillPool.selectSkills")}
+                    </span>
                   </Button>
                 </Flex>
               </Col>
@@ -304,6 +339,7 @@ export default function AgentConfigComp() {
                   isCreatingMode={isCreatingMode}
                   currentAgentId={currentAgentId ?? undefined}
                   isReadOnly={isReadOnly}
+                  onEditSkill={handleOpenSkillEditor}
                 />
               </Col>
             </Row>
@@ -334,6 +370,9 @@ export default function AgentConfigComp() {
         open={isSkillSelectOpen}
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
+        onEditSkill={(skill) => {
+          handleOpenSkillEditor(skill);
+        }}
         isCreatingMode={isCreatingMode}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
@@ -346,8 +385,10 @@ export default function AgentConfigComp() {
 
       <SkillBuildModal
         isOpen={isSkillModalOpen}
-        onCancel={() => setIsSkillModalOpen(false)}
+        onCancel={handleCloseSkillModal}
         onSuccess={handleSkillBuildSuccess}
+        editingSkill={editingSkill}
+        zIndex={1100}
       />
 
       {/* A2A Discovery Modal */}

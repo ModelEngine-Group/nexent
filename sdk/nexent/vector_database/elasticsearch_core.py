@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 import os
@@ -402,7 +401,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         try:
             processed_docs = self._preprocess_documents(
                 documents, content_field)
-            
+
             # Preprocess documents
             processed_docs, embeddings = self._prepare_small_batch_embeddings(
                 processed_docs, content_field, embedding_model
@@ -455,10 +454,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if doc.get("process_source") == "UniversalImageExtractor":
                     img_bytes = doc.pop("image_bytes", "")
                     if len(img_bytes) > 0:
-                        image_base64_str = base64.b64encode(
-                            img_bytes).decode("utf-8")
-                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                        inputs.append({"image": data})
+                        inputs.append({"image": img_bytes})
                 else:
                     inputs.append({"text": doc[content_field]})
             embeddings = embedding_model.get_multimodal_embeddings(inputs)
@@ -472,6 +468,13 @@ class ElasticSearchCore(VectorDatabaseCore):
             inputs = [doc[content_field] for doc in filtered_docs]
             embeddings = embedding_model.get_embeddings(inputs)
             return filtered_docs, embeddings
+
+    @staticmethod
+    def _normalize_embedding_vector(embedding: Any) -> Any:
+        """Convert numeric vector values to floats for Elasticsearch dense vectors."""
+        if not isinstance(embedding, list):
+            return embedding
+        return [float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else value for value in embedding]
 
     @staticmethod
     def _build_bulk_operations(
@@ -488,7 +491,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if doc.get("process_source") == "UniversalImageExtractor"
                 else "embedding"
             )
-            doc[embedding_field] = embedding
+            doc[embedding_field] = ElasticSearchCore._normalize_embedding_vector(embedding)
             if "embedding_model_name" not in doc:
                 doc["embedding_model_name"] = embedding_model.embedding_model_name
             operations.append(doc)
@@ -551,10 +554,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                                 if doc.get("process_source") == "UniversalImageExtractor":
                                     img_bytes = doc.pop("image_bytes", "")
                                     if len(img_bytes) > 0:
-                                        image_base64_str = base64.b64encode(
-                                            img_bytes).decode('utf-8')
-                                        data = f"data:image/jpeg;base64,{image_base64_str}"
-                                        inputs.append({"image": data})
+                                        inputs.append({"image": img_bytes})
                                         docs_for_embeddings.append(doc)
                                 else:
                                     inputs.append({"text": doc[content_field]})
@@ -609,7 +609,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             for doc, embedding in doc_embedding_pairs:
                 operations.append({"index": {"_index": index_name}})
                 doc["multi_embedding" if doc["process_source"]
-                        == "UniversalImageExtractor" else "embedding"] = embedding
+                        == "UniversalImageExtractor" else "embedding"] = self._normalize_embedding_vector(embedding)
                 if "embedding_model_name" not in doc:
                     doc["embedding_model_name"] = getattr(
                         embedding_model, "embedding_model_name", "unknown")
@@ -996,7 +996,13 @@ class ElasticSearchCore(VectorDatabaseCore):
 
     # ---- SEARCH OPERATIONS ----
 
-    def accurate_search(self, index_names: List[str], query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def accurate_search(
+        self,
+        index_names: List[str],
+        query_text: str,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Search for documents using fuzzy text matching across multiple indices.
 
@@ -1004,6 +1010,10 @@ class ElasticSearchCore(VectorDatabaseCore):
             index_names: Name of the index to search in
             query_text: The text query to search for
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause (e.g. ``{"bool": {"must": [...]}}``).
+                When ``None`` (the default), no extra filter is applied and the
+                legacy behaviour is preserved. When supplied, it is AND-ed with
+                the score-bearing query as an extra ``bool.filter`` clause.
 
         Returns:
             List of search results with scores and document content
@@ -1018,6 +1028,17 @@ class ElasticSearchCore(VectorDatabaseCore):
             "size": top_k,
             "_source": {"excludes": ["embedding"]},
         }
+
+        # Inject an additional AND-filter (memory index isolation, etc.).
+        # When ``filter`` is None we keep the original behaviour bit-for-bit.
+        if filter is not None:
+            extra_filter = filter if isinstance(filter, list) else [filter]
+            search_query["query"] = {
+                "bool": {
+                    "must": [search_query["query"]],
+                    "filter": extra_filter,
+                }
+            }
 
         # Execute the search across multiple indices
         raw_results = self.exec_query(index_pattern, search_query)
@@ -1039,7 +1060,12 @@ class ElasticSearchCore(VectorDatabaseCore):
         return results
 
     def semantic_search(
-        self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
+        self,
+        index_names: List[str],
+        query_text: str,
+        embedding_model: BaseEmbedding,
+        top_k: int = 5,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for similar documents using vector similarity across multiple indices.
@@ -1049,6 +1075,9 @@ class ElasticSearchCore(VectorDatabaseCore):
             query_text: The text query to search for
             embedding_model: The embedding model to use
             top_k: Number of results to return
+            filter: Optional Elasticsearch filter clause applied during kNN
+                candidate selection. When ``None`` (the default), no extra
+                filter is applied and the legacy behaviour is preserved.
 
         Returns:
             List of search results with scores and document content
@@ -1060,6 +1089,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
+        knn_filter = filter if isinstance(filter, dict) else None
         if embedding_model.model_type == "multimodal":
             search_text_query = {
                 "knn": {
@@ -1067,6 +1097,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
@@ -1077,6 +1108,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         "query_vector": query_embedding,
                         "k": top_k,
                         "num_candidates": top_k * 2,
+                        **({"filter": knn_filter} if knn_filter else {}),
                     },
                 "size": top_k,
                 "_source": {"excludes": ["multi_embedding"]},
@@ -1089,12 +1121,13 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "query_vector": query_embedding,
                     "k": top_k,
                     "num_candidates": top_k * 2,
+                    **({"filter": knn_filter} if knn_filter else {}),
                 },
                 "size": top_k,
                 "_source": {"excludes": ["embedding"]},
             }
             raw_results = self.exec_query(index_pattern, search_query)
- 
+
         return raw_results
 
     def hybrid_search(
@@ -1104,6 +1137,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         embedding_model: BaseEmbedding,
         top_k: int = 5,
         weight_accurate: float = 0.3,
+        filter: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search method, combining accurate matching and semantic search results across multiple indices.
@@ -1114,15 +1148,18 @@ class ElasticSearchCore(VectorDatabaseCore):
             embedding_model: The embedding model to use
             top_k: Number of results to return
             weight_accurate: The weight of the accurate matching score (0-1), the semantic search weight is 1-weight_accurate
+            filter: Optional Elasticsearch filter clause applied to both the
+                accurate and semantic sub-queries. When ``None`` (the default),
+                no extra filter is applied and legacy behaviour is preserved.
 
         Returns:
             List of search results sorted by combined score
         """
         # Get results from both searches
         accurate_results = self.accurate_search(
-            index_names, query_text, top_k=top_k)
+            index_names, query_text, top_k=top_k, filter=filter)
         semantic_results = self.semantic_search(
-            index_names, query_text, embedding_model=embedding_model, top_k=top_k)
+            index_names, query_text, embedding_model=embedding_model, top_k=top_k, filter=filter)
 
         # Create a mapping from document ID to results
         combined_results = {}

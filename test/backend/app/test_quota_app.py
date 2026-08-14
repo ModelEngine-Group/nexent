@@ -62,7 +62,7 @@ def mock_auth_su():
          patch("apps.quota_app.get_user_tenant_by_user_id") as mock_tenant, \
          patch("apps.quota_app._get_user_role") as mock_role, \
          patch("apps.quota_app._require_admin_or_su") as mock_require_admin, \
-         patch("apps.quota_app._require_su_or_asset_owner") as mock_require_su:
+         patch("apps.quota_app._require_platform_quota_manager") as mock_require_su:
         mock_auth.return_value = ("su-user-id", "asset_owner_tenant_id")
         mock_tenant.return_value = {"user_role": "SU", "tenant_id": "asset_owner_tenant_id"}
         mock_role.return_value = "SU"
@@ -255,6 +255,75 @@ class TestGetTenantQuotaUsage:
         assert data["usage_pct"] == pytest.approx(50.0)
         assert data["tenant_warning_level"] == "normal"
 
+    def test_returns_composite_values_without_component_fields(
+        self, client, mock_auth_admin, mock_quota_service
+    ):
+        composite_bytes = 500 * 1024 * 1024
+        mock_quota_service.get_usage.return_value = {
+            "total_bytes": composite_bytes,
+            "total_readable": "500.0 MB",
+            "kb_count": 1,
+            "file_count": 1,
+            "hard_limit_bytes": GB,
+            "hard_limit_readable": "1.0 GB",
+            "available_bytes": GB - composite_bytes,
+            "available_readable": "524.0 MB",
+            "usage_pct": 48.83,
+            "tenant_warning_level": "normal",
+            "warning_enabled": True,
+            "warning_threshold_pct": 80,
+            "critical_threshold_pct": 95,
+            "breakdown": [{
+                "knowledge_id": 1,
+                "knowledge_name": "Composite KB",
+                "index_name": "composite-kb",
+                "soft_quota_bytes": GB,
+                "soft_quota_readable": "1.0 GB",
+                "actual_bytes": composite_bytes,
+                "actual_readable": "500.0 MB",
+                "usage_pct": 48.83,
+                "file_count": 1,
+                "kb_warning_level": "normal",
+            }],
+        }
+
+        response = client.get("/api/tenants/test-tenant/quota/usage?detail=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_bytes"] == composite_bytes
+        assert data["breakdown"][0]["actual_bytes"] == composite_bytes
+        assert "minio_bytes" not in data
+        assert "es_bytes" not in data
+
+    def test_unlimited_tenant_preserves_null_limit_fields(
+        self, client, mock_auth_admin, mock_quota_service
+    ):
+        mock_quota_service.get_usage.return_value = {
+            "total_bytes": 300,
+            "total_readable": "300 B",
+            "kb_count": 1,
+            "file_count": 0,
+            "hard_limit_bytes": None,
+            "hard_limit_readable": None,
+            "available_bytes": None,
+            "available_readable": None,
+            "usage_pct": None,
+            "tenant_warning_level": "normal",
+            "warning_enabled": True,
+            "warning_threshold_pct": 80,
+            "critical_threshold_pct": 95,
+        }
+
+        response = client.get("/api/tenants/test-tenant/quota/usage")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_bytes"] == 300
+        assert data["hard_limit_bytes"] is None
+        assert data["available_bytes"] is None
+        assert data["usage_pct"] is None
+
     def test_detail_includes_breakdown(self, client, mock_auth_admin, mock_quota_service):
         mock_quota_service.get_usage.return_value = {
             "total_bytes": 50 * GB,
@@ -374,6 +443,19 @@ class TestPlatformEndpoints:
         resp = client.get("/api/platform/quota/overview")
         assert resp.status_code == 403
 
+    def test_get_overview_allows_speed_role(self, client, mock_platform_static):
+        mock_platform_static["get_platform_overview"].return_value = {
+            "platform_capacity_bytes": None,
+            "tenants": [],
+        }
+        with patch(
+            "apps.quota_app.get_current_user_id",
+            return_value=("speed-user-id", "speed-tenant"),
+        ), patch("apps.quota_app._get_user_role", return_value="SPEED"):
+            resp = client.get("/api/platform/quota/overview")
+
+        assert resp.status_code == 200
+
     def test_put_capacity_requires_su(self, client, mock_auth_su, mock_platform_static):
         mock_platform_static["set_platform_capacity"].return_value = {
             "capacity_bytes": 500 * GB,
@@ -489,11 +571,14 @@ class TestQuotaRoleHelpers:
         with patch("apps.quota_app._get_user_role", return_value="ADMIN"):
             assert quota_app._require_admin_or_su("token") == "ADMIN"
             with pytest.raises(HTTPException) as raised:
-                quota_app._require_su_or_asset_owner("token")
+                quota_app._require_platform_quota_manager("token")
             assert raised.value.status_code == 403
 
         with patch("apps.quota_app._get_user_role", return_value="SU"):
-            assert quota_app._require_su_or_asset_owner("token") == "SU"
+            assert quota_app._require_platform_quota_manager("token") == "SU"
+
+        with patch("apps.quota_app._get_user_role", return_value="SPEED"):
+            assert quota_app._require_platform_quota_manager("token") == "SPEED"
 
     def test_manageable_indices_only_include_edit_permissions(self):
         with patch(

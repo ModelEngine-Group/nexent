@@ -12,6 +12,13 @@ export type AutomationTaskListStatus =
   | "ENABLED"
   | "RUNNING";
 
+export interface AgentAutomationPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface ScheduleTrigger {
   mode: ScheduleMode;
   rule_type: ScheduleRuleType;
@@ -80,8 +87,8 @@ export interface AgentAutomationProposalData {
   proposal_id?: number | null;
   conversation_id?: number | null;
   confidence?: number;
-  intent_analysis_source?: "llm" | "rule";
-  task_content_source?: "llm" | "rule";
+  intent_analysis_source?: "llm" | "rule" | "existing";
+  task_content_source?: "llm" | "rule" | "existing";
   executable?: boolean;
   task?: {
     title?: string;

@@ -136,6 +136,8 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
+  /** Nexent user_id of the agent creator (owner). */
+  created_by?: string | null;
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];
@@ -159,6 +161,7 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
+  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string; version_no: number | null; version_name?: string }>;
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
@@ -170,6 +173,7 @@ export interface Agent {
   /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
   prompts_hidden?: boolean;
   current_version_no?: number;
+  version_name?: string;
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
@@ -219,12 +223,33 @@ export interface AidpKnowledgeBaseItem {
   description?: string;
   document_count?: number;
   chunk_count?: number;
+  /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
+  permission?: "EDIT" | "READ_ONLY" | null;
+  /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  /** Group IDs granted the in-group permission. Ignored when PRIVATE. */
+  group_ids?: number[];
+  /** Nexent user_id of the KB creator (owner). */
+  created_by?: string;
+  /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
+  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
+  created_at?: string;
+  /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
+  updated_at?: string;
+  /** Embedding model name configured for this KB in AIDP. */
+  embedding_model?: string;
 }
 
 export interface AidpKnowledgeBaseListResponse {
   value: AidpKnowledgeBaseItem[];
   total_count?: number;
   next_link?: string | null;
+  has_more?: boolean;
+  /** Whether `total_count` comes from the AIDP Count API (true) or is a
+   *  fallback estimate when Count fails (false). When false the frontend
+   *  should treat the total as approximate and avoid displaying "共 N 条". */
+  total_reliable?: boolean;
 }
 
 export interface SkillParam {
@@ -527,6 +552,7 @@ export interface McpServer {
   service_name: string;
   mcp_url: string;
   status: boolean;
+  enabled: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
@@ -537,6 +563,7 @@ export interface McpServer {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  group_ids?: string;
 }
 
 // MCP tool interface definition

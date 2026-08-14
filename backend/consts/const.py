@@ -108,7 +108,7 @@ SUPABASE_JWT_SECRET = os.getenv(
 
 
 # OAuth Configuration
-OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "").rstrip("/")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 # OAuth login mode:
@@ -211,6 +211,12 @@ CAPACITY_VISIBILITY_ENABLED = os.getenv(
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")
 IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
+
+# AIDP Knowledge Base configuration
+ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
+AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
+AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
 DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
 DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
 DEFAULT_APP_NAME_ZH = "Nexent 智能体"
@@ -249,12 +255,11 @@ NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_S
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
-DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
-    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
-DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
-    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
-FORWARD_REDIS_RETRY_DELAY_S = int(
-    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "300"))
+DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
+REDIS_ERROR_INFO_TTL_SECONDS = int(os.getenv("REDIS_ERROR_INFO_TTL_SECONDS", str(1 * 24 * 60 * 60)))
+REDIS_ERROR_INFO_SCAN_COUNT = int(os.getenv("REDIS_ERROR_INFO_SCAN_COUNT", "500"))
+FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
@@ -331,6 +336,65 @@ DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
+# ===== Memory System =====
+
+# MMR (Maximal Marginal Relevance) configuration
+MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+MMR_CANDIDATE_TOP_K = int(os.getenv("MMR_CANDIDATE_TOP_K", "10"))
+MMR_FINAL_TOP_K = int(os.getenv("MMR_FINAL_TOP_K", "5"))
+MMR_DUPLICATE_THRESHOLD = float(os.getenv("MMR_DUPLICATE_THRESHOLD", "0.92"))
+
+# Temporal decay (only applied to internal agent short-term memory)
+AGENT_SHORT_TERM_HALF_LIFE_DAYS = int(
+    os.getenv("AGENT_SHORT_TERM_HALF_LIFE_DAYS", "14")
+)
+
+# Score fusion source weights
+W_AGENT_SHORT_TERM = float(os.getenv("W_AGENT_SHORT_TERM", "1.0"))
+W_EXTERNAL = float(os.getenv("W_EXTERNAL", "0.8"))
+
+# Token budget selection
+MEMORY_TOKEN_BUDGET = int(os.getenv("MEMORY_TOKEN_BUDGET", "2000"))
+
+# Dreaming promotion thresholds
+LIGHT_SLEEP_WINDOW_DAYS = int(os.getenv("LIGHT_SLEEP_WINDOW_DAYS", "7"))
+RECENCY_HALF_LIFE_DAYS = int(os.getenv("RECENCY_HALF_LIFE_DAYS", "14"))
+MIN_PROMOTION_SCORE = float(os.getenv("MIN_PROMOTION_SCORE", "0.72"))
+MIN_RECALL_COUNT = int(os.getenv("MIN_RECALL_COUNT", "3"))
+MIN_UNIQUE_QUERIES = int(os.getenv("MIN_UNIQUE_QUERIES", "2"))
+# Scheduling/cron constants are intentionally not defined here: the
+# background Dreaming scheduler is not part of Phase 2 (an agent-driven
+# timer will be added in a later phase, at which point the cron expression
+# and heartbeat can be reintroduced).
+
+# External provider retry / timeout
+PROVIDER_RETRY_MAX_ATTEMPTS = int(os.getenv("PROVIDER_RETRY_MAX_ATTEMPTS", "3"))
+PROVIDER_RETRY_BACKOFF_BASE_SECONDS = int(
+    os.getenv("PROVIDER_RETRY_BACKOFF_BASE_SECONDS", "1")
+)
+PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
+)
+
+# External provider toggles (configured per provider elsewhere; these constants
+# describe protocol-level defaults)
+EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "model_output",
+    "model_output_thinking",
+    "model_output_deep_thinking",
+    "model_output_code",
+    "final_answer",
+    "error",
+    "search_content",
+    "tool",
+    "parse",
+    "execution_logs",
+    "picture_web",
+    "memory_search",
+    "verification",
+    "max_steps_reached",
+)
+
 
 DEFAULT_LLM_MAX_TOKENS = 4096
 
@@ -347,6 +411,11 @@ MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 
 # Invite code
 INVITE_CODE = os.getenv("INVITE_CODE")
+
+# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+JWT_EXPIRY_SECONDS = int(os.getenv("JWT_EXPIRY", "7200") or 7200)
+if JWT_EXPIRY_SECONDS <= 0:
+    raise ValueError("JWT_EXPIRY must be a positive number of seconds")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)

@@ -340,14 +340,14 @@ export function MineApplyListingModal({
 
           <section className="space-y-2">
             <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t("agentRepository.mine.applyModal.content")}
+              {t("repository.mine.applyModal.content")}
             </p>
             <Input.TextArea
               value={listingContent}
               onChange={(event) => setListingContent(event.target.value)}
               rows={4}
               placeholder={t(
-                "agentRepository.mine.applyModal.contentPlaceholder"
+                "repository.mine.applyModal.contentPlaceholder"
               )}
             />
           </section>

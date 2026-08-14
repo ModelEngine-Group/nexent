@@ -5,7 +5,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from jinja2 import StrictUndefined, Template
@@ -53,6 +53,8 @@ class _LLMIntentPayload(BaseModel):
     instruction: str = ""
     schedule: Optional[_LLMSchedulePayload] = None
     schedule_error: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    clarification_question: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class AutomationIntentContext:
     timezone: str = "Asia/Shanghai"
     model_id: Optional[int] = None
     reference_time: Optional[datetime] = None
+    force_llm: bool = False
 
 
 def _analysis_time(context: AutomationIntentContext) -> datetime:
@@ -108,6 +111,8 @@ def _invalid_llm_schedule(payload: _LLMIntentPayload, reason: str) -> Dict[str, 
         "output_requirements": {},
         "analysis_source": "llm",
         "task_content_generated": True,
+        "missing_fields": payload.missing_fields,
+        "clarification_question": payload.clarification_question or reason,
     }
 
 
@@ -220,6 +225,8 @@ def _payload_to_result(
         "analysis_source": "llm",
         "task_content_generated": True,
         "task_content_source": task_content_source,
+        "missing_fields": [],
+        "clarification_question": None,
     }
 
 
@@ -251,7 +258,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
 
     async def analyze(self, context: AutomationIntentContext) -> Dict[str, Any]:
         fallback = await self._fallback.analyze(context)
-        if not has_automation_schedule_signal(context.message):
+        if not context.force_llm and not has_automation_schedule_signal(context.message):
             return fallback
         try:
             content = await asyncio.to_thread(self._generate_sync, context)

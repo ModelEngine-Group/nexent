@@ -85,6 +85,7 @@ export default function McpServiceDetailModal({
             deploymentType: draft.deploymentType,
             configJson: draft.configJson,
             serverUrl: draft.serverUrl,
+            source: draft.source,
           })
         : McpDeploymentType.REMOTE_LINK,
     [draft]
@@ -97,6 +98,7 @@ export default function McpServiceDetailModal({
       deploymentType: draft.deploymentType,
       configJson: draft.configJson,
       serverUrl: draft.serverUrl,
+      source: draft.source,
     });
     setDeploymentType(nextDeploymentType);
     setDraftTags(draft.tags ?? []);
@@ -125,7 +127,6 @@ export default function McpServiceDetailModal({
   const isApi = deploymentType === McpDeploymentType.API;
   const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
   const isUnsupported =
-    deploymentType === McpDeploymentType.LOCAL_IMAGE ||
     deploymentType !== originalDeploymentType;
   const isReadOnly = selectedService?.permission === "READ_ONLY";
   const hasRegistryJson = Boolean(draft.registryJson);
@@ -196,7 +197,8 @@ export default function McpServiceDetailModal({
       tags: draftTags,
     };
     detail.setDraft(nextDraft);
-    await detail.save(nextDraft);
+    const ok = await detail.save(nextDraft);
+    if (ok) onClose();
   };
 
   return (
@@ -248,16 +250,12 @@ export default function McpServiceDetailModal({
               </div>
             </div>
 
-            {isLocalImage ? (
+            {isUnsupported ? (
               <Alert
                 type="info"
                 showIcon
                 message={t("mcpTools.addModal.unsupportedTitle")}
-                description={
-                  deploymentType !== originalDeploymentType
-                    ? t("mcpTools.detail.deploymentChangeUnsupported")
-                    : t("mcpTools.addModal.unsupportedDescription")
-                }
+                description={t("mcpTools.detail.deploymentChangeUnsupported")}
               />
             ) : null}
 
@@ -320,7 +318,7 @@ export default function McpServiceDetailModal({
                             setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
                           }}
                         />
-                        共享
+                        {t("mcpTools.detail.share")}
                       </label>
                     </div>
                   </div>
@@ -352,7 +350,7 @@ export default function McpServiceDetailModal({
                             setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
                           }}
                         />
-                        共享
+                        {t("mcpTools.detail.share")}
                       </label>
                     </div>
                   </div>
@@ -381,7 +379,7 @@ export default function McpServiceDetailModal({
                             setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
                           }}
                         />
-                        共享
+                        {t("mcpTools.detail.share")}
                       </label>
                     </div>
                   </div>
@@ -473,11 +471,32 @@ export default function McpServiceDetailModal({
                             setDraft((prev) => prev ? { ...prev, sharedFields: next } : prev);
                           }}
                         />
-                        共享
+                        {t("mcpTools.detail.share")}
                       </label>
                     </div>
                   </div>
 
+                  <Form.Item name="containerPort" className="mb-0">
+                    <ContainerPortField
+                      scope="detail"
+                      enabled={false}
+                      containerPort={containerPort}
+                      setContainerPort={(value) => {
+                        setContainerPort(value);
+                        form.setFieldValue("containerPort", value);
+                      }}
+                    />
+                  </Form.Item>
+                </div>
+              </div>
+            ) : null}
+
+            {isLocalImage ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("mcpTools.detail.serviceConfigTitle")}
+                </label>
+                <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
                   <Form.Item name="containerPort" className="mb-0">
                     <ContainerPortField
                       scope="detail"
@@ -509,7 +528,7 @@ export default function McpServiceDetailModal({
                       label: g.group_name,
                       value: g.group_id,
                     }))}
-                    notFoundContent={t("knowledgeBase.create.permission.groupPlaceholder") || "暂无分组"}
+                    notFoundContent={t("knowledgeBase.create.permission.groupPlaceholder") || t("mcpTools.detail.noGroups")}
                     onChange={(values: number[]) => {
                       const next = values.join(",");
                       setDraft((prev) => prev ? { ...prev, groupIds: next } : prev);
@@ -542,10 +561,9 @@ export default function McpServiceDetailModal({
               </div>
             </Can>
             {isApi ? (
-              <p className="text-xs text-slate-400 -mt-3">此添加方式不支持分组和权限设置</p>
+              <p className="text-xs text-slate-400 -mt-3">{t("mcpTools.detail.groupPermissionUnsupported")}</p>
             ) : null}
 
-            <div className="flex flex-col gap-4">
               <TagEditor
                 title={t("mcpTools.detail.tags")}
                 titleClassName="mb-1 block text-sm font-medium text-slate-700"
@@ -555,11 +573,10 @@ export default function McpServiceDetailModal({
                 removeAriaKey="mcpTools.detail.removeTagAria"
                 placeholderKey="mcpTools.detail.tagInputPlaceholder"
               />
-            </div>
           </Form>
 
-          <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
-            <div className="flex gap-2">
+          <div className="flex flex-col gap-y-3 border-t border-slate-100 bg-white px-6 py-4">
+            <div className="flex flex-wrap gap-2">
               {draft.containerId ? (
                 <Button onClick={() => setLogsOpen(true)}>
                   {t("mcpTools.detail.viewContainerLogs")}
@@ -580,7 +597,7 @@ export default function McpServiceDetailModal({
               </Button>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end gap-3">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
               <Button
                 type="primary"
@@ -588,7 +605,7 @@ export default function McpServiceDetailModal({
                 disabled={isUnsupported || isReadOnly}
                 onClick={handleSave}
               >
-                {isReadOnly ? "无编辑权限" : t("mcpTools.detail.save")}
+                {isReadOnly ? t("mcpTools.detail.noEditPermission") : t("mcpTools.detail.save")}
               </Button>
             </div>
           </div>

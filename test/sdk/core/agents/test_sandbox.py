@@ -2260,7 +2260,6 @@ class TestTargetedSandboxCoverage:
         remote = SimpleNamespace(
             send_variables=MagicMock(),
             install_packages=MagicMock(return_value=["pkg"]),
-            _patch_final_answer_with_exception=MagicMock(),
             send_tools=MagicMock(),
         )
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", SimpleNamespace(RemotePythonExecutor=remote))
@@ -2268,13 +2267,34 @@ class TestTargetedSandboxCoverage:
 
         lease.send_variables({"x": 1})
         assert lease.install_packages(["pkg"]) == ["pkg"]
-        lease._patch_final_answer_with_exception("final")
         lease.send_tools({"tool": object()})
 
         remote.send_variables.assert_called_once_with(lease, {"x": 1})
         remote.install_packages.assert_called_once_with(lease, ["pkg"])
-        remote._patch_final_answer_with_exception.assert_called_once_with(lease, "final")
         remote.send_tools.assert_called_once()
+
+    @pytest.mark.parametrize("wrap_instance_forward", [False, True])
+    def test_kernel_lease_patches_final_answer_with_bound_or_wrapped_forward(self, wrap_instance_forward):
+        class FinalAnswerTool:
+            def forward(self, answer):
+                return answer
+
+        final_answer = FinalAnswerTool()
+        if wrap_instance_forward:
+            original_forward = final_answer.forward
+
+            def observed_forward(*args, **kwargs):
+                return original_forward(*args, **kwargs)
+
+            final_answer.forward = observed_forward
+
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._patch_final_answer_with_exception(final_answer)
+
+        assert final_answer._forward("done") == "done"
+        with pytest.raises(Exception) as exc_info:
+            final_answer.forward("done")
+        assert exc_info.value.value
 
     def test_system_non_docker_acquire_builds_and_tracks_executor(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()

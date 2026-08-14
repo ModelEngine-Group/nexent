@@ -1,5 +1,6 @@
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
+import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
 
 // Types
 export interface Tenant {
@@ -69,10 +70,19 @@ export interface ListTenantsParams {
   page_size?: number;
 }
 
+const VIRTUAL_TENANT_IDS = new Set(["", "tenant_id", ASSET_OWNER_TENANT_ID]);
+
+function isDisplayableTenant(tenant: Tenant): boolean {
+  const normalizedTenantId = tenant.tenant_id?.trim() ?? "";
+  return !VIRTUAL_TENANT_IDS.has(normalizedTenantId);
+}
+
 /**
  * List tenants with pagination support (filtered by user permissions)
  */
-export async function listTenants(params?: ListTenantsParams): Promise<TenantListPaginatedResponse> {
+export async function listTenants(
+  params?: ListTenantsParams
+): Promise<TenantListPaginatedResponse> {
   try {
     const url = API_ENDPOINTS.tenant.list;
 
@@ -88,7 +98,17 @@ export async function listTenants(params?: ListTenantsParams): Promise<TenantLis
     });
 
     const result: TenantListPaginatedResponse = await response.json();
-    return result;
+    const tenants = (result.data || []).filter(isDisplayableTenant);
+    const hiddenCount = (result.data || []).length - tenants.length;
+    const visibleTotal = Math.max(0, (result.total || 0) - hiddenCount);
+    const pageSize = result.page_size || params?.page_size || 20;
+
+    return {
+      ...result,
+      data: tenants,
+      total: visibleTotal,
+      total_pages: visibleTotal === 0 ? 1 : Math.ceil(visibleTotal / pageSize),
+    };
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -187,7 +207,9 @@ export async function deleteTenant(tenantId: string): Promise<void> {
  * Get users belonging to a tenant (using existing users/list endpoint)
  * Returns all users without pagination
  */
-export async function getTenantUsers(tenantId: string): Promise<TenantUsersResponse> {
+export async function getTenantUsers(
+  tenantId: string
+): Promise<TenantUsersResponse> {
   try {
     const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
       method: "POST",

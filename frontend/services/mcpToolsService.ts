@@ -297,13 +297,18 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       source: s.source as McpSource,
       enabled: s.enabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED,
       updatedAt: s.update_time,
+      createTime: s.create_time,
       tags: s.tags || [],
       transportType:
-        s.config_json && typeof s.config_json === "object" && "openapi" in s.config_json
+        s.config_json &&
+        typeof s.config_json === "object" &&
+        "openapi" in s.config_json
           ? McpTransportType.URL
-          : (s.config_json !== undefined && s.config_json !== null) ||
-            (s.container_id !== undefined && s.container_id !== null) ||
-            (s.container_port !== undefined && s.container_port !== null)
+          : (s.container_id !== undefined && s.container_id !== null) ||
+              (s.container_port !== undefined && s.container_port !== null) ||
+              (s.config_json &&
+                typeof s.config_json === "object" &&
+                Object.keys(s.config_json).length > 0)
             ? McpTransportType.CONTAINER
             : McpTransportType.URL,
       serverUrl: s.mcp_url,
@@ -464,13 +469,19 @@ export const cancelCommunityMcpReview = async (reviewId: number) => {
   }
 };
 
-export const approveCommunityMcpTool = async (reviewId: number) => {
+export const approveCommunityMcpTool = async (
+  reviewId: number,
+  content?: string
+) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewApprove,
       {
         method: "POST",
-        body: JSON.stringify({ review_id: reviewId }),
+        body: JSON.stringify({
+          review_id: reviewId,
+          ...(content ? { content } : {}),
+        }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -484,13 +495,19 @@ export const approveCommunityMcpTool = async (reviewId: number) => {
   }
 };
 
-export const rejectCommunityMcpTool = async (reviewId: number) => {
+export const rejectCommunityMcpTool = async (
+  reviewId: number,
+  content?: string
+) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewReject,
       {
         method: "POST",
-        body: JSON.stringify({ review_id: reviewId }),
+        body: JSON.stringify({
+          review_id: reviewId,
+          ...(content ? { content } : {}),
+        }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -516,6 +533,7 @@ export type PublishCommunityMcpToolPayload = {
   group_ids?: number[];
   ingroup_permission?: string;
   shared_fields?: Record<string, boolean>;
+  content?: string;
 };
 
 export const publishCommunityMcpTool = async (
@@ -576,6 +594,7 @@ export const updateCommunityMcpTool = async (payload: {
   group_ids?: number[];
   ingroup_permission?: string;
   shared_fields?: Record<string, boolean>;
+  content?: string;
 }) => {
   try {
     const response = await fetchWithAuth(

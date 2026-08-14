@@ -38,10 +38,18 @@ from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
-from apps.aidp_app import router as aidp_router
+from apps.evaluator_app import router as evaluator_router
+from apps.evaluation_annotation_app import router as evaluation_annotation_router
 from apps.cas_app import router as cas_router
+from apps.memory_config_app import router as memory_config_router
+from apps.memory_record_app import router as memory_record_router
 from apps.quota_app import tenant_quota_router, platform_quota_router
-from consts.const import IS_SPEED_MODE
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    ENABLE_AIDP_KNOWLEDGE,
+    IS_SPEED_MODE,
+)
 from services.prompt_template_service import sync_system_default_prompt_template
 
 # Create logger instance
@@ -53,7 +61,12 @@ app = create_app(title="Nexent Config API", description="Configuration APIs")
 
 @app.on_event("startup")
 async def sync_default_prompt_template_on_startup():
-    """Sync the YAML-backed system default prompt template into the database on startup."""
+    """Sync defaults and validate enabled external service configuration."""
+    if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
+        raise RuntimeError(
+            "AIDP_SERVER_URL and AIDP_API_KEY are required when ENABLE_AIDP_KNOWLEDGE=true"
+        )
+
     try:
         sync_system_default_prompt_template()
         logger.info("System default prompt template synced successfully.")
@@ -104,6 +117,13 @@ app.include_router(a2a_server_router)
 app.include_router(haotian_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
-app.include_router(aidp_router)
+app.include_router(evaluator_router)
+app.include_router(evaluation_annotation_router)
+if ENABLE_AIDP_KNOWLEDGE:
+    from ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
+    app.include_router(aidp_mgmt_router)
+# New memory architecture routers (upstream #3497)
+app.include_router(memory_config_router)
+app.include_router(memory_record_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)

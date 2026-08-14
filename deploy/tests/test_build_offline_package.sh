@@ -106,11 +106,48 @@ assert_common_package_files() {
 create_fake_docker
 
 WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
+echo "$WORKFLOW_CONTENT" | grep -A2 '^  push:$' | grep -q -- "- 'v\*'" || fail "offline package workflow should run automatically for version tags"
+! echo "$WORKFLOW_CONTENT" | grep -A4 '^      version:$' | grep -q "default: 'latest'" || fail "offline package workflow version input should defer to the selected ref"
+echo "$WORKFLOW_CONTENT" | grep -q 'elif \[ "$REF_TYPE" = "tag" \]; then' || fail "offline package workflow should resolve the package version from a tag"
+echo "$WORKFLOW_CONTENT" | grep -q 'VERSION="$REF_NAME"' || fail "offline package workflow should use the tag name as the package version"
+echo "$WORKFLOW_CONTENT" | grep -q "IMAGE_SOURCE=\"\${{ inputs.image_source || 'general' }}\"" || fail "tag builds should default to the general image source"
+echo "$WORKFLOW_CONTENT" | grep -A4 '^      upload_to_obs:$' | grep -q 'default: false' || fail "manual offline package builds should not upload to OBS by default"
+echo "$WORKFLOW_CONTENT" | grep -A4 '^      upload_to_obs:$' | grep -q 'type: boolean' || fail "OBS upload input should be a checkbox"
+echo "$WORKFLOW_CONTENT" | grep -q "UPLOAD_TO_OBS=\"\${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.upload_to_obs }}\"" || fail "tag-triggered builds should enable OBS upload"
+echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Authenticate to Huawei Cloud' | grep -q "if: \${{ steps.set-vars.outputs.upload_to_obs == 'true' }}" || fail "Huawei Cloud authentication should honor the OBS upload switch"
+echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Upload to Huawei Cloud OBS' | grep -q "if: \${{ steps.set-vars.outputs.upload_to_obs == 'true' }}" || fail "Huawei Cloud OBS upload should honor the OBS upload switch"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
 echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
-echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
-echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
-! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
+echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
+echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'packages/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
+echo "$WORKFLOW_CONTENT" | grep -q 'uses: actions/upload-artifact@v7' || fail "offline package workflow should use upload-artifact v7 for unarchived uploads"
+echo "$WORKFLOW_CONTENT" | grep -q "^[[:space:]]*path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip artifact"
+echo "$WORKFLOW_CONTENT" | grep -q '^[[:space:]]*archive: false' || fail "offline package workflow should upload the zip without adding another archive layer"
+echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"
+
+OFFLINE_HELP="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --help)"
+echo "$OFFLINE_HELP" | grep -q -- '--include-sandbox BOOL' || fail "offline package help should document --include-sandbox"
+echo "$OFFLINE_HELP" | grep -q -- '--package-name NAME' || fail "offline package help should document --package-name"
+
+SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
+echo "$SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: true' || fail "offline dry-run should show that the Sandbox image is enabled by default"
+echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "offline packages should include the Sandbox image by default"
+
+NO_SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --include-sandbox false --dry-run)"
+echo "$NO_SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: false' || fail "offline dry-run should show that the Sandbox image is disabled explicitly"
+! echo "$NO_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "--include-sandbox false should exclude the Sandbox image"
+
+if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --include-sandbox invalid --dry-run >"$TMP_DIR/invalid-include-sandbox.log" 2>&1; then
+  fail "--include-sandbox should accept only true or false"
+fi
+grep -q "Include sandbox must be 'true' or 'false'" "$TMP_DIR/invalid-include-sandbox.log" || fail "invalid --include-sandbox error should be explicit"
+
+if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --package-name ../invalid --dry-run >"$TMP_DIR/invalid-package-name.log" 2>&1; then
+  fail "--package-name should reject path traversal"
+fi
+grep -q "Package name may contain only" "$TMP_DIR/invalid-package-name.log" || fail "invalid --package-name error should be explicit"
 
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
@@ -129,6 +166,9 @@ for target in docker k8s all; do
   [ -f "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" ] || fail "zip package should be created for target $target"
   grep -q "target: \"$target\"" "$package_dir/manifest.yaml" || fail "manifest should record target $target"
   grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Nexent image"
+  grep -q 'includeSandbox: "true"' "$package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is included by default"
+  grep -q "nexent/nexent-sandbox:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include the Sandbox image by default"
+  [ -f "$package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "offline package should save the Sandbox image tar by default"
 
   case "$target" in
     docker)
@@ -146,60 +186,119 @@ for target in docker k8s all; do
   esac
 done
 
+sandbox_package_dir="$OUT_DIR/without-sandbox"
+PATH="$BIN_DIR:$PATH" \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 \
+    --platform amd64 \
+    --components infrastructure,application \
+    --image-source general \
+    --target docker \
+    --include-sandbox false \
+    --output-dir "$sandbox_package_dir" >"$TMP_DIR/without-sandbox.log"
+
+assert_common_package_files "$sandbox_package_dir"
+grep -q 'includeSandbox: "false"' "$sandbox_package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is excluded"
+! grep -q 'nexent-sandbox' "$sandbox_package_dir/manifest.yaml" || fail "--include-sandbox false should exclude the Sandbox image"
+[ ! -f "$sandbox_package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "--include-sandbox false should not save the Sandbox image tar"
+
 deploy_wrapper_dir="$OUT_DIR/deploy-wrapper"
-mkdir -p "$deploy_wrapper_dir/deploy"
+mkdir -p "$deploy_wrapper_dir/deploy/common" "$deploy_wrapper_dir/deploy/env"
 cp "$PROJECT_ROOT/deploy.sh" "$deploy_wrapper_dir/deploy.sh"
+cp "$PROJECT_ROOT/deploy/common/common.sh" "$deploy_wrapper_dir/deploy/common/common.sh"
+printf 'WRAPPER_OLD_VALUE=preserved\n' > "$deploy_wrapper_dir/deploy/env/.env"
+printf 'WRAPPER_NEW_DEFAULT=merged-before-actions\n' > "$deploy_wrapper_dir/deploy/env/.env.example"
 cat > "$deploy_wrapper_dir/load-images.sh" <<'SH'
 #!/usr/bin/env bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
 printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/load-images.sh"
 cat > "$deploy_wrapper_dir/push-images.sh" <<'SH'
 #!/usr/bin/env bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
 args=("$@")
 printf 'push:%s:%s\n' "${REGISTRY_PASSWORD:-}" "${args[*]}" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/push-images.sh"
 cat > "$deploy_wrapper_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/env/.env" || exit 1
+fi
+printf 'deploy:%s:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "${NEXENT_DEPLOYMENT_OFFLINE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/deploy/deploy.sh"
 
 deploy_wrapper_log="$TMP_DIR/deploy-wrapper.log"
-DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --foo bar
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" \
+  DEPLOY_WRAPPER_EXPECT_ENV='WRAPPER_NEW_DEFAULT=merged-before-actions' \
+  bash "$deploy_wrapper_dir/deploy.sh" docker --foo bar
 if grep -q '^load-images$' "$deploy_wrapper_log"; then
   fail "deploy.sh should not load images by default"
 fi
-grep -q '^deploy::docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
+grep -q '^deploy::false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args and mark an online deployment"
+grep -q '^WRAPPER_OLD_VALUE=preserved$' "$deploy_wrapper_dir/deploy/env/.env" || fail "online deployment should preserve existing environment values"
+grep -q '^WRAPPER_NEW_DEFAULT=merged-before-actions$' "$deploy_wrapper_dir/deploy/env/.env" || fail "online deployment should merge current template variables"
 
 : > "$deploy_wrapper_log"
-DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" \
+  DEPLOY_WRAPPER_EXPECT_ENV='WRAPPER_NEW_DEFAULT=merged-before-actions' \
+  bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [ "$first_line" = "load-images" ] || fail "deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy::docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+[ "$second_line" = "deploy::false:docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+
+mv "$deploy_wrapper_dir/deploy/env/.env.example" "$deploy_wrapper_dir/deploy/env/.env.example.saved"
+: > "$deploy_wrapper_log"
+if DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar >"$TMP_DIR/wrapper-missing-template.log" 2>&1; then
+  mv "$deploy_wrapper_dir/deploy/env/.env.example.saved" "$deploy_wrapper_dir/deploy/env/.env.example"
+  fail "deploy.sh should require the current .env.example before loading images"
+fi
+mv "$deploy_wrapper_dir/deploy/env/.env.example.saved" "$deploy_wrapper_dir/deploy/env/.env.example"
+[ ! -s "$deploy_wrapper_log" ] || fail "missing .env.example should fail before image loading or deployment"
+grep -q 'deploy/env/.env.example' "$TMP_DIR/wrapper-missing-template.log" || fail "missing template failure should identify deploy/env/.env.example"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --defaults docker --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
+grep -q '^deploy:defaults:false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --defaults --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
+grep -q '^deploy:defaults:false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --config --foo bar
+grep -q '^deploy:tui:false:docker --foo bar$' "$deploy_wrapper_log" || fail "online deploy.sh --config should enable TUI mode without the offline marker"
+
+online_reuse_source="$TMP_DIR/online-reuse-source"
+mkdir -p "$online_reuse_source/deploy/env"
+printf 'ONLINE_REUSE_TEST=yes\n' > "$online_reuse_source/deploy/env/.env"
+if DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --reuse-from "$online_reuse_source" docker --foo bar >"$TMP_DIR/online-reuse.log" 2>&1; then
+  fail "online deploy.sh should reject --reuse-from"
+fi
+grep -q 'offline package entrypoint' "$TMP_DIR/online-reuse.log" || fail "online --reuse-from error should explain that the option is offline-only"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --push-images should delegate push args to push-images.sh"
-[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --push-images should forward image registry prefix to deploy config"
+[ "$second_line" = "deploy::false:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --push-images should forward image registry prefix to deploy config"
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --load-images --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "deploy.sh --load-images --push-images should not load before push login"
-[ "$second_line" = "deploy::docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --load-images --push-images should forward deploy args"
+[ "$second_line" = "deploy::false:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "deploy.sh --load-images --push-images should forward deploy args"
 
 if DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$deploy_wrapper_dir/deploy.sh" --push-images docker --foo bar >/tmp/nexent-deploy-wrapper-missing-prefix.log 2>&1; then
   fail "deploy.sh --push-images should require image registry prefix in non-interactive mode"
@@ -223,6 +322,7 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --image-source general \
     --target docker \
     --compress true \
+    --package-name nexent-custom-latest.zip \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
@@ -230,12 +330,14 @@ assert_common_package_files "$latest_package_dir"
 grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"$' "$latest_package_dir/deploy.sh" || fail "offline deploy.sh should reuse the root entrypoint with defaults mode enabled"
 offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"
 echo "$offline_help" | grep -q "deploys with saved configuration or built-in defaults" || fail "offline deploy help should explain default non-interactive mode"
+echo "$offline_help" | grep -q -- '--reuse-from DIR' || fail "offline deploy help should document --reuse-from"
+printf '\nOFFLINE_TEMPLATE_ONLY=merged-before-actions\n' >> "$latest_package_dir/deploy/env/.env.example"
 
 push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -249,7 +351,7 @@ grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.loca
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \
@@ -266,49 +368,168 @@ grep -q -- '--registry-username is required' /tmp/nexent-offline-package-push-mi
 
 cat > "$latest_package_dir/load-images.sh" <<'SH'
 #!/usr/bin/env bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
+if [ -n "${DEPLOY_WRAPPER_EXPECT_MERGED_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_MERGED_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
 printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/load-images.sh"
 cat > "$latest_package_dir/push-images.sh" <<'SH'
 #!/usr/bin/env bash
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
+if [ -n "${DEPLOY_WRAPPER_EXPECT_MERGED_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_MERGED_ENV" "$script_dir/deploy/env/.env" || exit 1
+fi
 args=("$@")
 printf 'push:%s:%s\n' "${REGISTRY_PASSWORD:-}" "${args[*]}" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/push-images.sh"
 cat > "$latest_package_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/env/.env" || exit 1
+fi
+if [ -n "${DEPLOY_WRAPPER_EXPECT_MERGED_ENV:-}" ]; then
+  grep -Fqx "$DEPLOY_WRAPPER_EXPECT_MERGED_ENV" "$script_dir/env/.env" || exit 1
+fi
+printf 'deploy:%s:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "${NEXENT_DEPLOYMENT_OFFLINE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/deploy/deploy.sh"
 
 offline_deploy_log="$TMP_DIR/offline-deploy-wrapper.log"
 : > "$offline_deploy_log"
+
+missing_template_reuse_source="$TMP_DIR/missing-template-reuse-source"
+mkdir -p "$missing_template_reuse_source/deploy/env"
+printf 'SHOULD_NOT_BE_COPIED=yes\n' > "$missing_template_reuse_source/deploy/env/.env"
+mv "$latest_package_dir/deploy/env/.env.example" "$latest_package_dir/deploy/env/.env.example.saved"
+if DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$missing_template_reuse_source" --load-images docker --foo bar >"$TMP_DIR/offline-missing-template.log" 2>&1; then
+  mv "$latest_package_dir/deploy/env/.env.example.saved" "$latest_package_dir/deploy/env/.env.example"
+  fail "offline deploy.sh should require .env.example before loading images"
+fi
+mv "$latest_package_dir/deploy/env/.env.example.saved" "$latest_package_dir/deploy/env/.env.example"
+[ ! -s "$offline_deploy_log" ] || fail "offline missing template failure should happen before image loading or deployment"
+[ ! -f "$latest_package_dir/deploy/env/.env" ] || fail "offline missing template failure should happen before importing a reused .env"
+grep -q 'deploy/env/.env.example' "$TMP_DIR/offline-missing-template.log" || fail "offline missing template failure should identify deploy/env/.env.example"
+
+reuse_source="$TMP_DIR/previous package"
+mkdir -p "$reuse_source/deploy/env" "$reuse_source/deploy/docker" "$reuse_source/deploy/k8s/helm/nexent"
+printf 'REUSED_SECRET=do-not-print-this-value\n' > "$reuse_source/deploy/env/.env"
+printf 'MONITORING_REUSED=yes\n' > "$reuse_source/deploy/env/monitoring.env"
+printf 'DOCKER_OPTIONS=reused\n' > "$reuse_source/deploy/docker/deploy.options"
+printf 'K8S_OPTIONS=reused\n' > "$reuse_source/deploy/k8s/deploy.options"
+printf 'SOURCE_DERIVED=docker\n' > "$reuse_source/deploy/docker/.env.generated"
+printf 'SOURCE_DERIVED=k8s\n' > "$reuse_source/deploy/k8s/helm/nexent/generated-values.yaml"
+
+mkdir -p "$latest_package_dir/deploy/k8s/helm/nexent"
+printf 'DOCKER_OPTIONS=current\n' > "$latest_package_dir/deploy/docker/deploy.options"
+printf 'K8S_OPTIONS=keep-for-docker\n' > "$latest_package_dir/deploy/k8s/deploy.options"
+printf 'CURRENT_DERIVED=docker\n' > "$latest_package_dir/deploy/docker/.env.generated"
+printf 'CURRENT_DERIVED=k8s\n' > "$latest_package_dir/deploy/k8s/helm/nexent/generated-values.yaml"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" \
+  DEPLOY_WRAPPER_EXPECT_ENV='REUSED_SECRET=do-not-print-this-value' \
+  DEPLOY_WRAPPER_EXPECT_MERGED_ENV='OFFLINE_TEMPLATE_ONLY=merged-before-actions' \
+  bash "$latest_package_dir/deploy.sh" docker --reuse-from "$reuse_source" --load-images --foo bar >"$TMP_DIR/reuse-docker.log" 2>&1
+first_line="$(sed -n '1p' "$offline_deploy_log")"
+second_line="$(sed -n '2p' "$offline_deploy_log")"
+[ "$first_line" = "load-images" ] || fail "--reuse-from should import files before loading images"
+[ "$second_line" = "deploy:defaults:true:docker --foo bar" ] || fail "--reuse-from should be consumed before forwarding Docker deploy arguments"
+grep -q '^REUSED_SECRET=do-not-print-this-value$' "$latest_package_dir/deploy/env/.env" || fail "Docker reuse should copy deploy/env/.env"
+grep -q '^OFFLINE_TEMPLATE_ONLY=merged-before-actions$' "$latest_package_dir/deploy/env/.env" || fail "Docker reuse should merge variables from the current .env.example"
+grep -q '^MONITORING_REUSED=yes$' "$latest_package_dir/deploy/env/monitoring.env" || fail "Docker reuse should copy monitoring.env"
+grep -q '^DOCKER_OPTIONS=reused$' "$latest_package_dir/deploy/docker/deploy.options" || fail "Docker reuse should overwrite Docker deploy.options"
+grep -q '^K8S_OPTIONS=keep-for-docker$' "$latest_package_dir/deploy/k8s/deploy.options" || fail "Docker reuse should not copy K8s deploy.options"
+grep -q '^CURRENT_DERIVED=docker$' "$latest_package_dir/deploy/docker/.env.generated" || fail "Docker reuse should not copy derived .env.generated"
+grep -q '^CURRENT_DERIVED=k8s$' "$latest_package_dir/deploy/k8s/helm/nexent/generated-values.yaml" || fail "Docker reuse should not copy K8s generated values"
+! grep -q 'do-not-print-this-value' "$TMP_DIR/reuse-docker.log" || fail "--reuse-from should not print environment values"
+
+printf 'DOCKER_OPTIONS=keep-for-k8s\n' > "$latest_package_dir/deploy/docker/deploy.options"
+printf 'K8S_OPTIONS=current\n' > "$latest_package_dir/deploy/k8s/deploy.options"
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" \
+  DEPLOY_WRAPPER_EXPECT_ENV='REUSED_SECRET=do-not-print-this-value' \
+  DEPLOY_WRAPPER_EXPECT_MERGED_ENV='OFFLINE_TEMPLATE_ONLY=merged-before-actions' \
+  REGISTRY_PASSWORD=secret \
+  bash "$latest_package_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent --reuse-from "$reuse_source" k8s --foo bar >"$TMP_DIR/reuse-k8s.log" 2>&1
+first_line="$(sed -n '1p' "$offline_deploy_log")"
+second_line="$(sed -n '2p' "$offline_deploy_log")"
+[[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "--reuse-from should import files before pushing images"
+[ "$second_line" = "deploy:defaults:true:k8s --foo bar --image-registry-prefix registry.local/nexent" ] || fail "--reuse-from should be consumed before forwarding K8s deploy arguments"
+grep -q '^K8S_OPTIONS=reused$' "$latest_package_dir/deploy/k8s/deploy.options" || fail "K8s reuse should overwrite K8s deploy.options"
+grep -q '^DOCKER_OPTIONS=keep-for-k8s$' "$latest_package_dir/deploy/docker/deploy.options" || fail "K8s reuse should not copy Docker deploy.options"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$reuse_source" --config docker --foo bar >"$TMP_DIR/reuse-config.log" 2>&1
+grep -q '^deploy:tui:true:docker --foo bar$' "$offline_deploy_log" || fail "--reuse-from should work with --config and preserve TUI mode"
+
+minimal_reuse_source="$TMP_DIR/minimal previous package"
+mkdir -p "$minimal_reuse_source/deploy/env"
+printf 'MINIMAL_REUSE=yes\n' > "$minimal_reuse_source/deploy/env/.env"
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$minimal_reuse_source" --defaults docker --foo bar >"$TMP_DIR/reuse-minimal.log" 2>&1
+grep -q 'optional file not found' "$TMP_DIR/reuse-minimal.log" || fail "missing optional reuse files should produce warnings"
+grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail "missing optional reuse files should not stop deployment"
+
+missing_env_source="$TMP_DIR/missing-env-package"
+mkdir -p "$missing_env_source/deploy/env"
+if DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$missing_env_source" docker --foo bar >"$TMP_DIR/reuse-missing-env.log" 2>&1; then
+  fail "--reuse-from should require deploy/env/.env"
+fi
+grep -q 'deploy/env/.env' "$TMP_DIR/reuse-missing-env.log" || fail "missing reuse .env error should identify the required file"
+
+if DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$TMP_DIR/does-not-exist" docker --foo bar >"$TMP_DIR/reuse-missing-dir.log" 2>&1; then
+  fail "--reuse-from should reject a missing directory"
+fi
+grep -q 'does not exist or is not a directory' "$TMP_DIR/reuse-missing-dir.log" || fail "missing reuse directory error should be explicit"
+
+if DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$latest_package_dir" docker --foo bar >"$TMP_DIR/reuse-same-dir.log" 2>&1; then
+  fail "--reuse-from should reject the current package directory"
+fi
+grep -q 'must differ from the current package directory' "$TMP_DIR/reuse-same-dir.log" || fail "same-directory reuse error should be explicit"
+
+if DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --reuse-from "$reuse_source" >"$TMP_DIR/reuse-missing-target.log" 2>&1; then
+  fail "--reuse-from should require a deployment target"
+fi
+grep -q 'requires a docker or k8s deployment target' "$TMP_DIR/reuse-missing-target.log" || fail "missing reuse target error should be explicit"
+
+: > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
+grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --config --foo bar
-grep -q '^deploy:tui:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and consume the flag"
+grep -q '^deploy:tui:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and propagate the offline marker"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --defaults --foo bar
-grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
+grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
 [ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy:defaults:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
+[ "$second_line" = "deploy:defaults:true:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" REGISTRY_USERNAME=user REGISTRY_PASSWORD=secret bash "$latest_package_dir/deploy.sh" --push-images --image-registry-prefix registry.local/nexent docker --foo bar
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
 [[ "$first_line" == "push:secret:--image-registry-prefix registry.local/nexent --load-images" ]] || fail "offline deploy.sh --push-images should push before deploy"
-[ "$second_line" = "deploy:defaults:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
+[ "$second_line" = "deploy:defaults:true:docker --foo bar --image-registry-prefix registry.local/nexent" ] || fail "offline deploy.sh --push-images should preserve defaults mode and forward registry prefix"
 
-[ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
+[ -f "$OUT_DIR/nexent-custom-latest.zip" ] || fail "zip package should use the requested final package name"
+[ ! -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "custom package name should replace the generated package name"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
 grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
 grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should be pulled"

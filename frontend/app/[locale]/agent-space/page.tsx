@@ -380,7 +380,7 @@ export default function AgentRepositoryPage() {
                     className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                   >
                     <Inbox className="size-4" aria-hidden />
-                    {t("agentRepository.page.tab.repository")}
+                    {t("repository.page.tab.repository")}
                     <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
                       {repositoryTabCount}
                     </span>
@@ -401,7 +401,7 @@ export default function AgentRepositoryPage() {
                       className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
                     >
                       <ShieldCheck className="size-4" aria-hidden />
-                      {t("agentRepository.page.tab.review")}
+                      {t("repository.page.tab.review")}
                       {pendingReviewCount > 0 ? (
                         <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
                           {pendingReviewCount}
@@ -567,19 +567,19 @@ function RepositoryView({
     const title = getListingTitle(listing);
 
     Modal.confirm({
-      title: t("agentRepository.mine.reviewModal.confirmTakeDownTitle"),
-      content: t("agentRepository.mine.reviewModal.confirmTakeDownContent", {
+      title: t("repository.listingStatus.confirmTakeDownTitle"),
+      content: t("repository.listingStatus.confirmTakeDownContent", {
         name: title,
       }),
-      okText: t("agentRepository.mine.reviewModal.takeDown"),
+      okText: t("repository.listingStatus.takeDown"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await onTakeDown(listing);
-          message.success(t("agentRepository.mine.takeDownSuccess"));
+          message.success(t("repository.mine.takeDownSuccess"));
         } catch {
-          message.error(t("agentRepository.mine.takeDownError"));
+          message.error(t("repository.mine.takeDownError"));
           throw new Error("Take down failed");
         }
       },
@@ -613,7 +613,7 @@ function RepositoryView({
             {t("agentRepository.page.loadError")}
           </p>
           <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : listings.length === 0 ? (
@@ -645,7 +645,7 @@ function RepositoryView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-label={t("agentRepository.mine.pagination.prev")}
+                aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </Button>
@@ -656,7 +656,7 @@ function RepositoryView({
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
                     onClick={() => onPageChange(pageNumber)}
-                    aria-label={t("agentRepository.mine.pagination.page", {
+                    aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
                     aria-current={pageNumber === page ? "page" : undefined}
@@ -670,7 +670,7 @@ function RepositoryView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-label={t("agentRepository.mine.pagination.next")}
+                aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
               </Button>
@@ -761,15 +761,15 @@ function ReviewCenterView({
         : onReject(reviewListing, content));
       message.success(
         isApprove
-          ? t("agentRepository.review.approveSuccess", { name: title })
-          : t("agentRepository.review.rejectSuccess", { name: title })
+          ? t("repository.review.approveSuccess", { name: title })
+          : t("repository.review.rejectSuccess", { name: title })
       );
       closeReviewModal();
     } catch {
       message.error(
         isApprove
-          ? t("agentRepository.review.approveError")
-          : t("agentRepository.review.rejectError")
+          ? t("repository.review.approveError")
+          : t("repository.review.rejectError")
       );
       throw new Error("Review action failed");
     }
@@ -788,14 +788,14 @@ function ReviewCenterView({
       ) : isError ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("agentRepository.review.loadError")}
+            {t("repository.review.loadError")}
           </p>
           <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.page.retry")}
+            {t("repository.common.retry")}
           </Button>
         </div>
       ) : listings.length === 0 ? (
-        <Empty className="py-16" description={t("agentRepository.review.empty")} />
+        <Empty className="py-16" description={t("repository.review.empty")} />
       ) : (
         <>
           <ReviewAgentList
@@ -823,7 +823,7 @@ function ReviewCenterView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-label={t("agentRepository.mine.pagination.prev")}
+                aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </Button>
@@ -834,7 +834,7 @@ function ReviewCenterView({
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
                     onClick={() => onPageChange(pageNumber)}
-                    aria-label={t("agentRepository.mine.pagination.page", {
+                    aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
                     aria-current={pageNumber === page ? "page" : undefined}
@@ -848,7 +848,7 @@ function ReviewCenterView({
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-label={t("agentRepository.mine.pagination.next")}
+                aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
               </Button>

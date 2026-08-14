@@ -1,11 +1,20 @@
 """Tests for authorized backend ContextItemInput snapshot construction."""
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
-from backend.utils.context_utils import build_app_context_string, build_context_inputs
-from nexent.core.agents.context import ContextItemRenderer, ContextItemType
+from backend.utils.context_utils import (
+    build_app_context_string,
+    build_authorized_context_input,
+    build_context_inputs,
+)
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextItemRenderer,
+    ContextItemType,
+)
 from nexent.core.agents.context.models import normalize_context_inputs
 
 
@@ -25,6 +34,71 @@ def _messages(**kwargs):
     return ContextItemRenderer().render(normalize_context_inputs(build_context_inputs(**kwargs)))
 
 
+def test_authorized_context_snapshot_merges_config_summary_and_turns_in_order():
+    configured_item = ContextItemInput(
+        id="system:duty",
+        type="system",
+        content={"text": "Answer weather questions."},
+        source=("agent_config",),
+    )
+    run_info = SimpleNamespace(
+        history=[],
+        agent_config=SimpleNamespace(context_items=[configured_item]),
+    )
+    summary = {
+        "unit_id": 42,
+        "summary": "The user is planning a trip.",
+        "covered_through_message_id": 9,
+    }
+    turn = {
+        "user_message": "Will it rain?",
+        "assistant_final_answer": "I will check.",
+        "attachments": [],
+        "user_message_id": 10,
+        "assistant_message_id": 11,
+    }
+
+    context_input = build_authorized_context_input(
+        run_info,
+        historical_context={
+            "history_summary": summary,
+            "conversation_turns": [turn],
+        },
+    )
+
+    assert [item.id for item in context_input.items] == [
+        "system:duty",
+        "history_summary:42",
+        "conversation_turn:10:11",
+    ]
+    assert context_input.items[1].content == summary
+    assert context_input.items[2].content == turn
+    assert context_input.items[2].metadata == {"layout_order": 0}
+
+
+def test_authorized_context_snapshot_ignores_unpaired_assistant_history():
+    run_info = SimpleNamespace(
+        history=[
+            SimpleNamespace(role="assistant", content="Orphaned private output"),
+            SimpleNamespace(role="user", content="Plan a trip"),
+            SimpleNamespace(role="assistant", content="Where are you going?"),
+        ],
+        agent_config=SimpleNamespace(context_items=[]),
+    )
+
+    context_input = build_authorized_context_input(run_info)
+
+    assert len(context_input.items) == 1
+    assert context_input.items[0].content == {
+        "user_message": "Plan a trip",
+        "assistant_final_answer": "Where are you going?",
+        "attachments": [],
+        "user_message_id": -2,
+        "assistant_message_id": -3,
+    }
+    assert "Orphaned private output" not in str(context_input.items)
+
+
 def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
     items = build_context_inputs()
 
@@ -36,6 +110,29 @@ def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
         "system:code_norms",
     ]
     assert all(item.type == ContextItemType.SYSTEM for item in items)
+
+
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_restricted_python_policy_is_injected_before_code_norms(language):
+    items = build_context_inputs(
+        restricted_python_authorized_imports=["json", "csv", "math", "json"],
+        language=language,
+    )
+
+    policy_item = next(
+        item for item in items if item.id == "system:restricted_python_execution"
+    )
+    policy_text = policy_item.content["text"]
+    item_ids = [item.id for item in items]
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.metadata["authority"] == "platform"
+    assert policy_item.priority == 25
+    assert "`csv`, `json`, `math`" in policy_text
+    assert "`requests`" in policy_text
+    assert item_ids.index(policy_item.id) < item_ids.index("system:code_norms")
+    if language == "en":
+        assert "### Python Code Execution Boundary" in policy_text
 
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
@@ -101,6 +198,91 @@ def test_invalid_memory_payload_fails_at_backend_boundary():
         build_context_inputs(memory_list=[object()])
 
 
+def test_memory_tool_policy_is_a_required_system_item_rendered_verbatim():
+    policy = (
+        "### Memory Tool Policy\n"
+        "Evaluate this turn and call `store_memory` when durable memory exists."
+    )
+
+    items = build_context_inputs(memory_tool_policy=policy, language="en")
+    policy_items = [item for item in items if item.id == "system:memory_tool_policy"]
+
+    assert len(policy_items) == 1
+    assert policy_items[0].type == ContextItemType.SYSTEM
+    assert policy_items[0].content == {"text": policy}
+    assert policy_items[0].metadata["authority"] == "platform"
+
+    normalized = normalize_context_inputs(items)
+    normalized_policy = next(item for item in normalized if item.id == "system:memory_tool_policy")
+    assert normalized_policy.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert policy in rendered_text
+    assert rendered_text.count(policy) == 1
+
+
+def test_memory_tool_policy_is_omitted_when_empty():
+    items = build_context_inputs(memory_tool_policy="")
+
+    assert all(item.id != "system:memory_tool_policy" for item in items)
+
+
+def test_automation_tool_policy_is_required_platform_context():
+    policy = "Use create_scheduled_task_proposal without executing the business task."
+
+    items = build_context_inputs(automation_tool_policy=policy, language="en")
+    policy_item = next(item for item in items if item.id == "system:automation_tool_policy")
+
+    assert policy_item.type == ContextItemType.SYSTEM
+    assert policy_item.content == {"text": policy}
+    assert policy_item.metadata["authority"] == "platform"
+    normalized = normalize_context_inputs(items)
+    assert next(
+        item for item in normalized if item.id == "system:automation_tool_policy"
+    ).required is True
+
+
+def test_long_term_memory_prompt_is_a_required_system_item():
+    context = (
+        "### Tenant Long-term Memory\n- Follow company policy\n\n"
+        "### User Long-term Memory\n- Prefers concise answers"
+    )
+
+    items = build_context_inputs(
+        long_term_memory_prompt=context,
+        language="en",
+    )
+    memory_item = next(
+        item for item in items if item.id == "system:long_term_memory"
+    )
+
+    assert memory_item.type == ContextItemType.SYSTEM
+    assert memory_item.content == {"text": context}
+    assert memory_item.metadata["authority"] == "retrieved"
+
+    normalized = normalize_context_inputs(items)
+    normalized_item = next(
+        item for item in normalized if item.id == "system:long_term_memory"
+    )
+    assert normalized_item.required is True
+
+    messages = ContextItemRenderer().render(normalized)
+    system_text = "\n".join(
+        block["text"]
+        for message in messages
+        if message["role"] == "system"
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+    assert context in system_text
+
+
 def test_group_rendering_uses_only_selected_tool_items():
     items = normalize_context_inputs(build_context_inputs(
         tools={
@@ -130,6 +312,24 @@ def test_rendered_roles_and_sections_match_context_semantics():
     assert all(message["role"] == "system" for message in messages[:first_user])
     assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
     assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
+
+
+def test_agent_presearch_result_is_rendered_into_model_context():
+    result_text = "Found 2 relevant memories:\n[1] Likes fish\n[2] Dislikes fish"
+
+    messages = _messages(
+        memory_list=[{"memory": result_text, "memory_level": "agent"}],
+        language="en",
+    )
+    rendered_text = "\n".join(
+        block["text"]
+        for message in messages
+        for block in message.get("content", ())
+        if block.get("type") == "text"
+    )
+
+    assert "**Agent Level Memory:**" in rendered_text
+    assert result_text in rendered_text
 
 
 def test_app_context_compatibility_string_is_unchanged():

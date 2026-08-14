@@ -110,6 +110,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None,
                                          knowledge_base_display_names: Optional[List[str]] = None,
+                                         aidp_kb_display_names: Optional[List[str]] = None,
                                          has_selected_resources: bool = True):
     # Get description of tool and agent from frontend-provided IDs
     # Frontend always provides tool_ids and sub_agent_ids (could be empty arrays)
@@ -137,6 +138,20 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         )
         logger.debug(
             f"Using database query for knowledge base display names: {knowledge_base_display_names}")
+
+    # Get aidp knowledge base display names for few-shot examples
+    # Priority: frontend-provided > database query
+    if aidp_kb_display_names:
+        logger.debug(
+            f"Using frontend-provided aidp knowledge base display names: {aidp_kb_display_names}")
+    else:
+        aidp_kb_display_names = _resolve_aidp_kb_display_names(
+            tool_info_list=tool_info_list,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        logger.debug(
+            f"Using database query for aidp knowledge base display names: {aidp_kb_display_names}")
 
     # Handle sub-agent IDs
     if sub_agent_ids and len(sub_agent_ids) > 0:
@@ -196,7 +211,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         language,
         prompt_template_id,
         knowledge_base_display_names,
-            has_selected_resources
+        aidp_kb_display_names,
+        has_selected_resources
     ):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
@@ -390,6 +406,7 @@ def optimize_prompt_section_impl(
     tool_ids: Optional[List[int]] = None,
     sub_agent_ids: Optional[List[int]] = None,
     knowledge_base_display_names: Optional[List[str]] = None,
+    aidp_kb_display_names: Optional[List[str]] = None,
 ) -> dict:
     normalized_section_type = (section_type or "").strip()
     if normalized_section_type not in {"duty", "constraint", "few_shots"}:
@@ -440,6 +457,7 @@ def optimize_prompt_section_impl(
         sub_agent_info_list=sub_agent_info_list,
         language=language,
         knowledge_base_display_names=knowledge_base_display_names,
+        aidp_kb_display_names=aidp_kb_display_names,
     )
 
     optimized_content = call_llm_for_system_prompt(
@@ -571,7 +589,7 @@ def generate_guardrail_rules_impl(
     )
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     """Main function for generating system prompts"""
     prompt_for_generate = resolve_prompt_generate_template(
         tenant_id=tenant_id,
@@ -588,6 +606,7 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
         tool_info_list=tool_info_list,
         language=language,
         knowledge_base_display_names=knowledge_base_display_names,
+        aidp_kb_display_names=aidp_kb_display_names,
         has_selected_resources=has_selected_resources,
     )
 
@@ -651,6 +670,19 @@ def _resolve_knowledge_base_display_names(
     logger.debug(
         f"Using database query for knowledge base display names: {resolved_names}")
     return resolved_names
+
+
+def _resolve_aidp_kb_display_names(
+    tool_info_list: List[dict],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[List[str]]:
+    """Resolve aidp knowledge base display names from tool list."""
+    return get_aidp_kb_display_names(
+        tool_info_list=tool_info_list,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
 
 
 def _resolve_prompt_generation_sub_agents(
@@ -821,7 +853,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
             last_results[tag] = latest[tag]
 
 
-def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     input_label = "Inputs" if language == 'en' else "接受输入"
     output_label = "Output type" if language == 'en' else "返回输出类型"
 
@@ -839,6 +871,9 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
         # Always include knowledge_base_names to avoid StrictUndefined errors in template.
         # An empty string is falsy, so the {% if knowledge_base_names %} block will be skipped.
         "knowledge_base_names": "",
+        # Always include aidp_kb_names to avoid StrictUndefined errors in template.
+        # An empty string is falsy, so the {% if aidp_kb_names %} block will be skipped.
+        "aidp_kb_names": "",
         # Flag indicating whether tools or sub-agents are selected;
         # templates use this to suppress boilerplate in constraint/few_shots sections
         "has_selected_resources": has_selected_resources,
@@ -853,6 +888,16 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     else:
         kb_names_str = ""
     template_context["knowledge_base_names"] = kb_names_str
+
+    # Always add aidp_kb_names to context (empty string when not available).
+    # This is necessary because Jinja2 StrictUndefined raises an error for any
+    # undefined variable, even inside an {% if %} block.
+    if aidp_kb_display_names:
+        aidp_names_str = ", ".join(
+            f'"{name}"' for name in aidp_kb_display_names)
+    else:
+        aidp_names_str = ""
+    template_context["aidp_kb_names"] = aidp_names_str
 
     # Generate content using template
     content = Template(
@@ -871,6 +916,7 @@ def join_info_for_optimize_prompt_section(
     sub_agent_info_list,
     language: str = LANGUAGE["ZH"],
     knowledge_base_display_names: Optional[List[str]] = None,
+    aidp_kb_display_names: Optional[List[str]] = None,
 ):
     input_label = "Inputs" if language == LANGUAGE["EN"] else "接受输入"
     output_label = "Output type" if language == LANGUAGE["EN"] else "返回输出类型"
@@ -889,6 +935,12 @@ def join_info_for_optimize_prompt_section(
     else:
         kb_names_str = ""
 
+    if aidp_kb_display_names:
+        aidp_names_str = ", ".join(
+            f'"{name}"' for name in aidp_kb_display_names)
+    else:
+        aidp_names_str = ""
+
     template_context = {
         "section_type": section_type,
         "section_title": section_title,
@@ -898,6 +950,7 @@ def join_info_for_optimize_prompt_section(
         "tool_description": tool_description,
         "assistant_description": assistant_description,
         "knowledge_base_names": kb_names_str,
+        "aidp_kb_names": aidp_names_str,
     }
 
     return Template(
@@ -1009,6 +1062,41 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
     logger.debug(
         f"Converted index_names {unique_index_names} to display_names: {display_names}")
     return display_names if display_names else None
+
+
+def get_aidp_kb_display_names(tool_info_list: List[dict], user_id: str, tenant_id: str) -> Optional[List[str]]:
+    """
+    Extract aidp knowledge base display names from tool configurations.
+    This is used to ensure few-shot examples use actual configured aidp knowledge base names.
+
+    Args:
+        tool_info_list: List of tool info dictionaries
+        user_id: User ID for permission queries
+        tenant_id: Tenant ID for database queries
+
+    Returns:
+        List of aidp knowledge base display names if aidp_search tool is configured, None otherwise
+    """
+    # Check if aidp_search tool is in the list
+    aidp_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get('name') == 'aidp_search']
+    if not aidp_tool_ids:
+        logger.debug("No aidp_search tool found in tool list")
+        return None
+
+    try:
+        from ext_components.aidp.services import aidp_permission_service
+        # Get the kds_name_to_id_map from permission service
+        kds_name_to_id_map = aidp_permission_service.get_kds_name_to_id_map(
+            user_id=user_id,
+            tenant_id=tenant_id
+        )
+        # Extract the kds_name keys as display names
+        display_names = list(kds_name_to_id_map.keys())
+        logger.debug(f"Retrieved aidp_kb_display_names: {display_names}")
+        return display_names if display_names else None
+    except Exception as e:
+        logger.warning(f"Failed to get aidp knowledge base display names: {e}")
+        return None
 
 
 def get_enabled_sub_agent_description_for_generate_prompt(agent_id: int, tenant_id: str):

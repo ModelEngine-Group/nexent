@@ -32,6 +32,221 @@ from services.agent_automation.prompt_generator import AutomationTaskContent
 
 
 @pytest.mark.asyncio
+async def test_create_proposal_reuses_source_message_before_extraction(monkeypatch):
+    existing = {
+        "proposal_id": 77,
+        "conversation_id": 100,
+        "proposed_task": {
+            "title": "生成日报",
+            "instruction": "生成日报",
+            "_conversation_unit_id": 9,
+        },
+        "capability_resolution": {"executable": True},
+    }
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_proposal_by_source_message",
+        lambda *args: existing,
+    )
+
+    async def fail_analysis(*args, **kwargs):
+        raise AssertionError("idempotent retries must not run extraction again")
+
+    monkeypatch.setattr(
+        facade_module.automation_intent_analyzer,
+        "analyze",
+        fail_analysis,
+    )
+
+    result = await AgentAutomationFacade().create_proposal(
+        AutomationProposalCreateRequest(
+            conversation_id=100,
+            agent_id=7,
+            message="每天九点生成日报",
+        ),
+        "tenant",
+        "user",
+        source_message_id=55,
+        force_llm=True,
+    )
+
+    assert result["proposal_id"] == 77
+    assert result["task"] == {
+        "title": "生成日报",
+        "instruction": "生成日报",
+    }
+    assert result["intent_analysis_source"] == "existing"
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_recovers_idempotent_insert_race(monkeypatch):
+    trigger = ScheduleTrigger(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="Asia/Shanghai",
+        start_at=datetime(2099, 1, 1, 9, 0, tzinfo=timezone(timedelta(hours=8))),
+        cron_expr="0 9 * * *",
+    )
+    existing = {
+        "proposal_id": 77,
+        "conversation_id": 100,
+        "proposed_task": {"title": "生成日报", "instruction": "生成日报"},
+        "capability_resolution": {"executable": True},
+    }
+    source_lookups = iter([None, existing])
+
+    async def fake_analyze(context):
+        return {
+            "is_automation_intent": True,
+            "confidence": 0.99,
+            "title": "生成日报",
+            "instruction": "生成日报",
+            "schedule_trigger": trigger,
+            "task_content_generated": True,
+            "analysis_source": "llm",
+            "task_content_source": "llm",
+        }
+
+    async def fake_resolve_agent_capabilities(**kwargs):
+        return CapabilityResolution(
+            executable=True,
+            agent_snapshot={"agent_id": 7, "name": "日报助手"},
+        )
+
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_proposal_by_source_message",
+        lambda *args: next(source_lookups),
+    )
+    monkeypatch.setattr(facade_module.automation_intent_analyzer, "analyze", fake_analyze)
+    monkeypatch.setattr(facade_module, "get_conversation", lambda *args: {"conversation_id": 100})
+    monkeypatch.setattr(facade_module, "update_conversation_agent_id_service", lambda *args: True)
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "create_proposal",
+        lambda *args: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("duplicate"))),
+    )
+
+    result = await AgentAutomationFacade().create_proposal(
+        AutomationProposalCreateRequest(
+            conversation_id=100,
+            agent_id=7,
+            message="每天九点生成日报",
+        ),
+        "tenant",
+        "user",
+        source_message_id=55,
+    )
+
+    assert result["proposal_id"] == 77
+    assert result["intent_analysis_source"] == "existing"
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_reraises_non_idempotent_integrity_error(monkeypatch):
+    trigger = ScheduleTrigger(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="Asia/Shanghai",
+        start_at=datetime(2099, 1, 1, 9, 0, tzinfo=timezone(timedelta(hours=8))),
+        cron_expr="0 9 * * *",
+    )
+
+    async def fake_analyze(context):
+        return {
+            "is_automation_intent": True,
+            "confidence": 0.99,
+            "title": "生成日报",
+            "instruction": "生成日报",
+            "schedule_trigger": trigger,
+            "task_content_generated": True,
+        }
+
+    async def fake_resolve_agent_capabilities(**kwargs):
+        return CapabilityResolution(executable=True, agent_snapshot={"agent_id": 7})
+
+    monkeypatch.setattr(facade_module.automation_intent_analyzer, "analyze", fake_analyze)
+    monkeypatch.setattr(facade_module, "get_conversation", lambda *args: {"conversation_id": 100})
+    monkeypatch.setattr(facade_module, "update_conversation_agent_id_service", lambda *args: True)
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "create_proposal",
+        lambda *args: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("duplicate"))),
+    )
+
+    with pytest.raises(IntegrityError):
+        await AgentAutomationFacade().create_proposal(
+            AutomationProposalCreateRequest(
+                conversation_id=100,
+                agent_id=7,
+                message="每天九点生成日报",
+            ),
+            "tenant",
+            "user",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_ignores_conversation_card_persistence_failure(monkeypatch):
+    trigger = ScheduleTrigger(
+        mode=ScheduleMode.RECURRING,
+        rule_type=ScheduleRuleType.CRON,
+        timezone="Asia/Shanghai",
+        start_at=datetime(2099, 1, 1, 9, 0, tzinfo=timezone(timedelta(hours=8))),
+        cron_expr="0 9 * * *",
+    )
+
+    async def fake_analyze(context):
+        return {
+            "is_automation_intent": True,
+            "confidence": 0.99,
+            "title": "生成日报",
+            "instruction": "生成日报",
+            "schedule_trigger": trigger,
+            "task_content_generated": True,
+        }
+
+    async def fake_resolve_agent_capabilities(**kwargs):
+        return CapabilityResolution(
+            executable=True,
+            agent_snapshot={"agent_id": 7, "name": "日报助手"},
+        )
+
+    monkeypatch.setattr(facade_module.automation_intent_analyzer, "analyze", fake_analyze)
+    monkeypatch.setattr(facade_module, "get_conversation", lambda *args: {"conversation_id": 100})
+    monkeypatch.setattr(facade_module, "update_conversation_agent_id_service", lambda *args: True)
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_task_by_conversation", lambda *args: None)
+    monkeypatch.setattr(facade_module, "resolve_agent_capabilities", fake_resolve_agent_capabilities)
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "create_proposal",
+        lambda values, user_id: {"proposal_id": 88, **values},
+    )
+    monkeypatch.setattr(
+        facade_module.automation_conversation_adapter,
+        "append_proposal_exchange",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+    )
+
+    result = await AgentAutomationFacade().create_proposal(
+        AutomationProposalCreateRequest(
+            conversation_id=100,
+            agent_id=7,
+            message="每天九点生成日报",
+        ),
+        "tenant",
+        "user",
+    )
+
+    assert result["proposal_id"] == 88
+    assert result["task"]["title"] == "生成日报"
+
+
+@pytest.mark.asyncio
 async def test_create_proposal_rejects_ambiguous_schedule_before_creating_conversation(monkeypatch):
     created = False
 
@@ -835,6 +1050,75 @@ def test_list_tasks_enabled_filter_excludes_active_runs(monkeypatch):
     assert tasks[0]["is_running"] is False
 
 
+def test_list_tasks_uses_database_pagination_when_no_post_filter(monkeypatch):
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_tasks_paginated",
+        lambda tenant_id, user_id, status, search, page, page_size: {
+            "items": [{"task_id": 1, "agent_id": 3, "agent_version_no": 0}],
+            "total": 12,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {(3, 0): "天气助手"},
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: set(),
+    )
+
+    result = AgentAutomationFacade().list_tasks("tenant", "user", status="ACTIVE", page=2, page_size=5)
+
+    assert result["total"] == 12
+    assert result["page"] == 2
+    assert result["page_size"] == 5
+    assert result["items"][0]["agent_name"] == "天气助手"
+
+
+def test_list_tasks_paginates_after_running_and_agent_name_filters(monkeypatch):
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_tasks",
+        lambda tenant_id, user_id, status, search: [
+            {"task_id": 1, "agent_id": 3, "agent_version_no": 0},
+            {"task_id": 2, "agent_id": 4, "agent_version_no": 0},
+            {"task_id": 3, "agent_id": 5, "agent_version_no": 0},
+        ],
+    )
+    monkeypatch.setattr(
+        facade_module.agent_identity_adapter,
+        "resolve_agent_display_names",
+        lambda references, tenant_id: {
+            (3, 0): "天气助手",
+            (4, 0): "周报助手",
+            (5, 0): "天气查询助手",
+        },
+    )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "get_active_run_task_ids",
+        lambda task_ids, tenant_id, user_id: {1, 3},
+    )
+
+    result = AgentAutomationFacade().list_tasks(
+        "tenant",
+        "user",
+        status="RUNNING",
+        agent_name="天气",
+        page=2,
+        page_size=1,
+    )
+
+    assert result["total"] == 2
+    assert result["page"] == 2
+    assert [task["task_id"] for task in result["items"]] == [3]
+
+
 @pytest.mark.asyncio
 async def test_create_task_maps_unique_conversation_race_to_domain_conflict(monkeypatch):
     class _Diag:
@@ -1148,6 +1432,16 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
         "list_runs",
         lambda *args, **kwargs: [{"run_id": 5}],
     )
+    monkeypatch.setattr(
+        facade_module.agent_automation_db,
+        "list_runs_paginated",
+        lambda task_id, tenant_id, user_id, page, page_size: {
+            "items": [{"run_id": 6}],
+            "total": 6,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
 
     async def fake_execute(task_payload, trigger_type):
         return {"run_id": 5, "trigger_type": trigger_type}
@@ -1161,6 +1455,12 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
     assert service.pause_task(1, "tenant", "user")["status"] == "PAUSED"
     assert service.resume_task(1, "tenant", "user")["status"] == "ACTIVE"
     assert service.list_runs(1, "tenant", "user") == [{"run_id": 5}]
+    assert service.list_runs(1, "tenant", "user", page=2, page_size=3) == {
+        "items": [{"run_id": 6}],
+        "total": 6,
+        "page": 2,
+        "page_size": 3,
+    }
     assert (await service.run_task_now(1, "tenant", "user"))["trigger_type"] == "MANUAL"
     assert service.delete_task(1, "tenant", "user") is True
     assert canceled == [(9, "Automation task was deleted.")]

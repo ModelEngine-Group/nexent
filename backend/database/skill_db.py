@@ -253,6 +253,7 @@ def _replace_skill_tool_relations(
     session,
     skill_id: int,
     tool_ids: List[int],
+    updated_by: Optional[str] = None,
 ) -> None:
     session.query(SkillToolRelation).filter(
         SkillToolRelation.skill_id == skill_id
@@ -261,7 +262,10 @@ def _replace_skill_tool_relations(
         session.add(SkillToolRelation(
             skill_id=skill_id,
             tool_id=tool_id,
+            created_by=updated_by,
             create_time=datetime.now(),
+            updated_by=updated_by,
+            update_time=datetime.now(),
         ))
 
 
@@ -306,6 +310,29 @@ def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
             result["tool_ids"] = _get_tool_ids(session, s.skill_id)
             results.append(result)
         return results
+
+
+def list_skill_permission_summaries(tenant_id: str) -> List[Dict[str, Any]]:
+    """List only the fields required to resolve skill visibility and ownership."""
+    with get_db_session() as session:
+        rows = session.query(
+            SkillInfo.skill_id,
+            SkillInfo.created_by,
+            SkillInfo.group_ids,
+            SkillInfo.ingroup_permission,
+        ).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+        ).all()
+        return [
+            {
+                "skill_id": row.skill_id,
+                "created_by": row.created_by,
+                "group_ids": convert_string_to_list(row.group_ids),
+                "ingroup_permission": row.ingroup_permission,
+            }
+            for row in rows
+        ]
 
 
 def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -426,11 +453,16 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
 
         tool_ids = skill_data.get("tool_ids", [])
         if tool_ids:
+            relation_created_by = skill_data.get("created_by") or skill_data.get("updated_by")
+            relation_updated_by = skill_data.get("updated_by") or relation_created_by
             for tool_id in tool_ids:
                 rel = SkillToolRelation(
                     skill_id=skill_id,
                     tool_id=tool_id,
-                    create_time=datetime.now()
+                    created_by=relation_created_by,
+                    create_time=datetime.now(),
+                    updated_by=relation_updated_by,
+                    update_time=datetime.now(),
                 )
                 session.add(rel)
 
@@ -487,6 +519,7 @@ def update_skill(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()
@@ -555,6 +588,7 @@ def update_skill_by_id(
                 session,
                 skill_id,
                 skill_data["tool_ids"],
+                updated_by=updated_by,
             )
 
         session.commit()

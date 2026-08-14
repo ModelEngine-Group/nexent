@@ -6,7 +6,7 @@ import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
 import { Badge, message, Tabs, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
-import { Info, Trash2, Settings } from "lucide-react";
+import { Eye, Pencil, Trash2, Settings } from "lucide-react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   deleteSkill,
@@ -16,6 +16,11 @@ import log from "@/lib/logger";
 import SkillDetailModal from "./SkillDetailModal";
 import SkillConfigModal from "./skill/SkillConfigModal";
 import SkillRowContent from "./skill/SkillRowContent";
+import {
+  hasMissingRequiredSkillConfig,
+  requiresSkillConfigOnSelection,
+  withEffectiveSkillConfig,
+} from "./skill/utils";
 
 interface SkillManagementProps {
   skillGroups: SkillGroup[];
@@ -120,27 +125,15 @@ export default function SkillManagement({
     } else {
       // In uninstantiated mode, skillInstanceMap is empty — preserve skill.config_values (template defaults)
       const savedConfigValues = skillInstanceMap[skill.skill_id] || null;
-      const skillWithValues: Skill = {
-        ...skill,
-        config_values:
-          savedConfigValues !== null
-            ? savedConfigValues
-            : skill.config_values || {},
-      };
-      const effectiveConfigValues =
-        savedConfigValues !== null
-          ? savedConfigValues
-          : skill.config_values || {};
-      const hasRequiredParams = (skill.config_schemas || []).some(
-        (schema: SkillParam) =>
-          schema.required &&
-          (effectiveConfigValues[schema.name] === undefined ||
-            effectiveConfigValues[schema.name] === null ||
-            effectiveConfigValues[schema.name] === "")
+      const skillWithValues = withEffectiveSkillConfig(
+        skill,
+        savedConfigValues
       );
-      const isKnowledgeBaseSkill = skill.name === "search-knowledge-base";
+      const hasRequiredParams = hasMissingRequiredSkillConfig(skillWithValues);
+      const alwaysRequiresConfig =
+        requiresSkillConfigOnSelection(skillWithValues);
 
-      if (hasRequiredParams || isKnowledgeBaseSkill) {
+      if (hasRequiredParams || alwaysRequiresConfig) {
         setConfigModalSkill(skillWithValues);
         setConfigModalOpen(true);
       } else {
@@ -190,13 +183,7 @@ export default function SkillManagement({
     e.stopPropagation();
     const savedConfigValues = skillInstanceMap[skill.skill_id] || null;
     // In uninstantiated mode, skillInstanceMap is empty — preserve skill.config_values (template defaults)
-    setConfigModalSkill({
-      ...skill,
-      config_values:
-        savedConfigValues !== null
-          ? savedConfigValues
-          : skill.config_values || {},
-    });
+    setConfigModalSkill(withEffectiveSkillConfig(skill, savedConfigValues));
     setConfigModalOpen(true);
   };
 
@@ -245,6 +232,8 @@ export default function SkillManagement({
         const isSelected = originalSelectedSkillIdsSet.has(
           Number(skill.skill_id)
         );
+        const canEditSkill =
+          !isReadOnly && skill.permission === "EDIT" && Boolean(onEditSkill);
         const hasConfigurableParams =
           Array.isArray(skill.config_schemas) &&
           skill.config_schemas.length > 0;
@@ -282,11 +271,23 @@ export default function SkillManagement({
                 <button
                   type="button"
                   onClick={(event) => handleInfoClick(skill, event)}
-                  aria-label={t("skillPool.viewDetails")}
-                  title={t("skillPool.viewDetails")}
+                  aria-label={t(
+                    canEditSkill
+                      ? "skillManagement.edit.title"
+                      : "skillPool.viewDetails"
+                  )}
+                  title={t(
+                    canEditSkill
+                      ? "skillManagement.edit.title"
+                      : "skillPool.viewDetails"
+                  )}
                   className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
                 >
-                  <Info className="size-4" />
+                  {canEditSkill ? (
+                    <Pencil className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
                 </button>
                 <button
                   type="button"

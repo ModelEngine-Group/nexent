@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import threading
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
 
@@ -320,6 +320,36 @@ def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
     stream.close()
 
     agent.context_runtime.finalize_evidence.assert_called_once_with(status="cancelled")
+
+
+def test_get_context_summary_returns_runtime_context_manager_summary():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    context_manager = MagicMock()
+    context_manager.get_summary.return_value = "compressed summary"
+    agent.context_runtime = SimpleNamespace(context_manager=context_manager)
+
+    assert agent._get_context_summary() == "compressed summary"
+    context_manager.get_summary.assert_called_once_with()
+
+
+def test_get_context_summary_returns_none_when_manager_is_unavailable():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent.context_runtime = SimpleNamespace()
+
+    assert agent._get_context_summary() is None
+
+
+def test_get_context_summary_returns_none_when_manager_summary_fails():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    context_manager = MagicMock()
+    context_manager.get_summary.side_effect = RuntimeError("summary unavailable")
+    agent.context_runtime = SimpleNamespace(context_manager=context_manager)
+
+    assert agent._get_context_summary() is None
+    context_manager.get_summary.assert_called_once_with()
+
+
+
 
 
 # ----------------------------------------------------------------------------
@@ -929,6 +959,51 @@ def test_final_answer_error_creation():
     assert isinstance(error, Exception)
     with pytest.raises(core_agent_module.FinalAnswerError):
         raise error
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Step 2:\nCalled tool 'python_interpreter'()",
+        "### Step 2:\n- Called tool 'python_interpreter'()",
+        "Observation: previous result",
+        '{"tool_calls":[{"name":"python_interpreter","arguments":"print(1)"}]}',
+        '```json\n{"action":"search","arguments":{"q":"GAIA"}}\n```',
+        "<code>print('missing closing tag')",
+    ],
+)
+def test_action_like_non_executable_output_is_not_a_final_answer(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        None,
+        42,
+        "",
+        "   ",
+        "The answer is 42.",
+        "I could not find enough evidence to answer.",
+        '{"answer":"42"}',
+        "{not valid json",
+        "```json```",
+        '["not an action record"]',
+    ],
+)
+def test_plain_answer_does_not_look_like_invalid_action(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is False
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "```<RUN>print('missing closing fence')",
+        '[{"action":"search","arguments":{"q":"GAIA"}}]',
+    ],
+)
+def test_additional_action_protocol_variants_are_invalid(output):
+    assert core_agent_module._looks_like_invalid_action_output(output) is True
 
 
 # ----------------------------------------------------------------------------
@@ -1890,6 +1965,7 @@ class TestRunStreamRealExecution:
             FINAL_ANSWER = "FINAL_ANSWER"
             ERROR = "ERROR"
             OTHER = "OTHER"
+            TOOL = "TOOL"
             MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
 
         mock_observer = MagicMock()
@@ -2755,6 +2831,50 @@ def test_coerce_observer_arguments_stringifies_other_values():
     assert core_agent_module._coerce_observer_arguments(value) == str(value)
 
 
+def test_coerce_observer_arguments_replaces_callable_with_name():
+    """Callable objects are replaced with their ``name`` attribute."""
+    tool = type("FakeTool", (), {"name": "my_tool", "__call__": lambda self: None})()
+
+    assert core_agent_module._coerce_observer_arguments(tool) == "my_tool"
+
+
+def test_coerce_observer_arguments_replaces_callable_inside_nested_structures():
+    """Recursively replace callables inside dict/list/tuple — the
+    parallel_executor use case."""
+    tool_a = type("ToolA", (), {"name": "read_skill_config", "__call__": lambda self: None})()
+    tool_b = type("ToolB", (), {"name": "read_skill_md", "__call__": lambda self: None})()
+
+    # Simulate observed_forward kwargs for parallel_executor
+    kwargs = {
+        "tasks": [
+            (tool_a, {"skill_name": "data_analysis"}),
+            (tool_b, {"skill_name": "data_analysis"}, "readme"),
+        ],
+        "timeout": 30,
+        "max_workers": 2,
+    }
+    result = core_agent_module._coerce_observer_arguments(kwargs)
+
+    # callables replaced by name strings; tuples stay tuples; other values unchanged
+    expected_tasks = [
+        ("read_skill_config", {"skill_name": "data_analysis"}),
+        ("read_skill_md", {"skill_name": "data_analysis"}, "readme"),
+    ]
+    assert result == {"tasks": expected_tasks, "timeout": 30, "max_workers": 2}
+
+    # Verify the result is JSON-serializable (the whole point of the fix)
+    import json
+    json.dumps(result)
+
+
+def test_coerce_observer_arguments_preserves_tuple_type():
+    """Tuple without callables keeps its structure."""
+    value = ("a", "b", {"nested": 1})
+    result = core_agent_module._coerce_observer_arguments(value)
+    assert result == ("a", "b", {"nested": 1})
+    assert isinstance(result, tuple)
+
+
 def test_collect_call_arguments_extracts_literals_expressions_and_kwargs():
     """Extract safe literals and retain source for non-literal expressions."""
     call_node = core_agent_module.ast.parse(
@@ -2807,57 +2927,157 @@ def test_scan_code_for_tool_calls_returns_empty_for_invalid_or_unconfigured_code
     assert core_agent_module._scan_code_for_tool_calls("", {"search"}) == []
 
 
-def test_emit_real_tool_chunks_from_code_emits_tool_payloads():
-    """Bridge each matching tool call to the observer with its extracted arguments."""
+def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch):
+    """Associate every actual tool invocation with a distinct observer ID."""
     observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+    tool = type("SearchTool", (), {"name": "search"})()
+    calls = []
 
-    core_agent_module._emit_real_tool_chunks_from_code(
-        observer,
-        "research-agent",
-        "search(query='nexent')\nworker(task='summarize')",
-        {"search", "worker"},
-    )
+    def forward(**kwargs):
+        calls.append(kwargs)
+        return kwargs["query"]
 
-    assert observer.add_message.call_args_list == [
-        call(
-            "research-agent",
-            core_agent_module.ProcessType.TOOL,
-            "",
-            tool_name="search",
-            tool_arguments={"query": "nexent"},
-        ),
-        call(
-            "research-agent",
-            core_agent_module.ProcessType.TOOL,
-            "",
-            tool_name="worker",
-            tool_arguments={"task": "summarize"},
-        ),
+    tool.forward = forward
+    ids = iter(["call-1", "call-2", "call-3"])
+    monkeypatch.setattr(core_agent_module.uuid, "uuid4", lambda: next(ids))
+
+    core_agent_module._wrap_tool_for_observer(tool, observer, "research-agent")
+
+    assert tool.forward(query="first") == "first"
+    assert tool.forward(query="second") == "second"
+    assert tool.forward(query="third") == "third"
+    assert calls == [{"query": "first"}, {"query": "second"}, {"query": "third"}]
+    assert [call.kwargs["tool_call_id"] for call in observer.add_message.call_args_list] == [
+        "call-1", "call-2", "call-3"
     ]
-
-
-def test_emit_real_tool_chunks_from_code_skips_empty_input_and_observer_errors():
-    """Do not propagate missing input or observer failures into agent execution."""
-    observer = MagicMock()
-    observer.add_message.side_effect = RuntimeError("observer unavailable")
-
-    core_agent_module._emit_real_tool_chunks_from_code(None, "agent", "search()", {"search"})
-    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "", {"search"})
-    core_agent_module._emit_real_tool_chunks_from_code(observer, "agent", "search()", {"search"})
-
-    observer.add_message.assert_called_once()
+    assert [call.args[0] for call in observer.tool_call_context.call_args_list] == [
+        "call-1", "call-2", "call-3"
+    ]
 
 
 def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
     """Collect stringified keys from tools and managed agents only."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = type("Agent", (), {})()
-    agent.tools = {"search": MagicMock(), 7: MagicMock()}
-    agent.managed_agents = {"planner": MagicMock()}
+    search_tool = MagicMock()
+    search_tool.emit_tool_event = True
+    hidden_tool = MagicMock()
+    hidden_tool.emit_tool_event = False
+    planner = MagicMock()
+    planner.emit_tool_event = True
+    agent.tools = {"search": search_tool, 7: hidden_tool}
+    agent.managed_agents = {"planner": planner}
 
     assert module.CoreAgent._known_tool_names(agent) == {"search", "7", "planner"}
+    assert module.CoreAgent._managed_agent_names(agent) == {"planner"}
+    assert module.CoreAgent._non_emitting_tool_names(agent) == {"7"}
 
     agent.tools = ["not-a-mapping"]
     agent.managed_agents = None
 
     assert module.CoreAgent._known_tool_names(agent) == set()
+    assert module.CoreAgent._managed_agent_names(agent) == set()
+    assert module.CoreAgent._non_emitting_tool_names(agent) == set()
+
+
+def test_managed_agent_names_reads_names_from_sequence_containers():
+    """Collect managed-agent names when the registry is a sequence."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = type("Agent", (), {})()
+    agent.managed_agents = [
+        type("NamedAgent", (), {"name": "planner"})(),
+        type("UnnamedAgent", (), {})(),
+        type("NamedAgent", (), {"name": "researcher"})(),
+    ]
+
+    assert module.CoreAgent._managed_agent_names(agent) == {"planner", "researcher"}
+
+
+def test_wrap_visible_tool_events_supports_sequence_containers_and_skips_hidden_tools():
+    """Wrap visible sequence tools while leaving explicitly hidden tools untouched."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+
+    class Tool:
+        def __init__(self, name, emit_tool_event=True):
+            self.name = name
+            self.emit_tool_event = emit_tool_event
+            self.calls = []
+
+        def forward(self, **kwargs):
+            self.calls.append(kwargs)
+            return self.name
+
+    visible = Tool("visible")
+    hidden = Tool("hidden", emit_tool_event=False)
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.tools = [visible, hidden]
+    agent.managed_agents = []
+    agent.observer = observer
+    agent.agent_name = "test-agent"
+
+    agent._wrap_visible_tool_events()
+
+    assert visible.forward(query="value") == "visible"
+    assert hidden.forward(query="value") == "hidden"
+    assert visible.calls == [{"query": "value"}]
+    assert hidden.calls == [{"query": "value"}]
+    observer.add_message.assert_called_once()
+    assert observer.add_message.call_args.kwargs["tool_name"] == "visible"
+
+
+def test_wrap_visible_tool_events_skips_tools_without_forward():
+    """Ignore sequence entries that do not expose a callable forward method."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.tools = [type("NoForwardTool", (), {"name": "broken"})()]
+    agent.managed_agents = []
+    agent.observer = MagicMock()
+    agent.agent_name = "test-agent"
+
+    agent._wrap_visible_tool_events()
+
+    assert not hasattr(agent.tools[0], "_tool_call_observer_wrapped")
+
+
+def _create_minimal_core_agent_for_time_tests():
+    """Create a CoreAgent with minimal mocking for time-prefix tests."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.max_steps = 3
+    agent.state = {}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.model.model_id = "test-model"
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent._run_stream_with_context_evidence = MagicMock(return_value=iter([]))
+    return agent
+
+
+def test_run_preserves_existing_current_time_prefix():
+    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    list(agent.run(task=prefixed_task, stream=True))
+
+    assert agent.task == prefixed_task
+
+
+def test_run_injects_current_time_when_missing():
+    """When task has no [Current time: ...] prefix, run() should inject server time."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(task="What time is it?", stream=True))
+
+    assert agent.task.startswith("[Current time:")
+    assert "What time is it?" in agent.task
+

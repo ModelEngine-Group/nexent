@@ -23,6 +23,7 @@ from .core_agent import CoreAgent, convert_code_format
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
+    from .subagent_wrapper import SubAgentToolWrapper
 
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
@@ -35,6 +36,14 @@ SAFE_PYTHON_INTERPRETER_IMPORTS = [
     "json", "csv",
     "uuid", "pprint", "operator", "typing",
 ]
+
+
+def get_local_python_authorized_imports() -> List[str]:
+    """Return the imports permitted by Nexent's default local code executor."""
+    from smolagents.local_python_executor import BASE_BUILTIN_MODULES
+
+    return sorted(set(BASE_BUILTIN_MODULES) | set(SAFE_PYTHON_INTERPRETER_IMPORTS))
+
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +164,9 @@ class NexentAgent:
                  mcp_tool_collection=None,
                  redis_client=None,
                  sandbox_config=None,
-                 minio_client=None):
+                 minio_client=None,
+                 conversation_id=None,
+                 user_id=None):
         """
         Initialize the NexentAgent factory.
 
@@ -169,6 +180,8 @@ class NexentAgent:
                 When None, uses LocalPythonExecutor (backwards-compatible).
             minio_client: Optional MinIO client for output file sync.
                 Required when sandbox_config.auto_sync_outputs is True.
+            conversation_id: Optional conversation id for plan persistence.
+            user_id: Optional user id for plan persistence.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -180,6 +193,8 @@ class NexentAgent:
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
         self.minio_client = minio_client
+        self.conversation_id = conversation_id
+        self.user_id = user_id
 
         self.agent = None
 
@@ -295,22 +310,86 @@ class NexentAgent:
                                        validate_url_access=validate_url_access,
                                        **params)
             elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                metadata = tool_config.metadata or {}
                 tools_obj = tool_class()
+                if tool_config.description is not None:
+                    tools_obj.description = tool_config.description
+                if tool_config.inputs is not None:
+                    tools_obj.inputs = json.loads(tool_config.inputs)
+                if tool_config.output_type is not None:
+                    tools_obj.output_type = tool_config.output_type
                 tools_obj.observer = self.observer
-                tools_obj.memory_config = tool_config.metadata.get(
-                    "memory_config", {}) if tool_config.metadata else {}
-                tools_obj.tenant_id = tool_config.metadata.get(
-                    "tenant_id", "") if tool_config.metadata else ""
-                tools_obj.user_id = tool_config.metadata.get(
-                    "user_id", "") if tool_config.metadata else ""
-                tools_obj.agent_id = tool_config.metadata.get(
-                    "agent_id", "") if tool_config.metadata else ""
-                tools_obj.memory_user_config = tool_config.metadata.get(
-                    "memory_user_config", None) if tool_config.metadata else None
+                tools_obj.memory_config = metadata.get(
+                    "memory_config", {}) if metadata else {}
+                tools_obj.tenant_id = metadata.get(
+                    "tenant_id", "") if metadata else ""
+                tools_obj.user_id = metadata.get(
+                    "user_id", "") if metadata else ""
+                tools_obj.agent_id = metadata.get(
+                    "agent_id", "") if metadata else ""
+                raw_conversation_id = (
+                    metadata.get("conversation_id", "") if metadata else ""
+                )
+                tools_obj.conversation_id = (
+                    str(raw_conversation_id)
+                    if raw_conversation_id not in (None, "")
+                    else ""
+                )
+                tools_obj.memory_user_config = metadata.get(
+                    "memory_user_config", None) if metadata else None
+                tools_obj.memory_service = metadata.get(
+                    "memory_service", None) if metadata else None
+                tools_obj.embedding_configured = metadata.get(
+                    "embedding_configured", True
+                ) if metadata else True
+                if class_name == "SearchMemoryTool":
+                    tools_obj.memory_context_service = metadata.get(
+                        "memory_context_service", None) if metadata else None
+                else:
+                    tools_obj.memory_context_service = None
+            elif class_name == "AidpSearchTool":
+                # kds_name_to_id_map is exclude=True; inject via metadata after init
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["kds_name_to_id_map"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.kds_name_to_id_map = tool_config.metadata.get(
+                    "kds_name_to_id_map", {}) if tool_config.metadata else {}
+                # Install the KDS whitelist so the tool only retrieves from
+                # KBs the current user is permitted to see.  Guard against
+                # ``metadata=None`` the same way every other branch does
+                # (``.get(...) if tool_config.metadata else ...``).
+                allowed_raw = (
+                    tool_config.metadata.get("allowed_kds_set")
+                    if tool_config.metadata else None
+                )
+                if allowed_raw is not None:
+                    try:
+                        tools_obj.set_allowed_kds([str(k) for k in allowed_raw])
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to install Aidp whitelist from metadata: %s; "
+                            "falling back to no-op filtering", exc,
+                        )
+                        tools_obj.set_allowed_kds(None)
+                else:
+                    # Whitelist not set by backend → treat as uninstalled.
+                    tools_obj.set_allowed_kds(None)
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
                     tools_obj.observer = self.observer
+            if tool_config.inputs and hasattr(tools_obj, "inputs"):
+                parsed_inputs = tool_config.inputs
+                if isinstance(parsed_inputs, str):
+                    try:
+                        parsed_inputs = json.loads(parsed_inputs)
+                    except (TypeError, ValueError):
+                        parsed_inputs = None
+                if isinstance(parsed_inputs, dict):
+                    tools_obj.inputs = parsed_inputs
+            if tool_config.output_type and hasattr(tools_obj, "output_type"):
+                tools_obj.output_type = tool_config.output_type
             return tools_obj
 
     def create_langchain_tool(self, tool_config: ToolConfig):
@@ -379,6 +458,7 @@ class NexentAgent:
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
+                config_overrides=params.get("config_overrides"),
             )
         elif class_name == "CreatePlanTool":
             from nexent.core.tools.plan_tools import CreatePlanTool
@@ -386,6 +466,15 @@ class NexentAgent:
         elif class_name == "UpdatePlanStepTool":
             from nexent.core.tools.plan_tools import UpdatePlanStepTool
             return UpdatePlanStepTool()
+        elif class_name == "CreateScheduledTaskProposalTool":
+            from nexent.core.tools.create_scheduled_task_tool import (
+                CreateScheduledTaskProposalTool,
+            )
+            metadata = tool_config.metadata or {}
+            return CreateScheduledTaskProposalTool(
+                create_proposal=metadata.get("create_proposal"),
+                observer=self.observer,
+            )
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
@@ -415,6 +504,39 @@ class NexentAgent:
             return tool_obj
         except Exception as e:
             raise ValueError(f"Error in creating tool: {e}")
+
+    def _wrap_subagent(
+        self,
+        inner_agent: Any,
+        sub_agent_config: Any,
+        agent_id: Any = None,
+    ) -> "SubAgentToolWrapper":
+        """Wrap a sub-agent ``Tool`` so the observer sees nesting boundaries.
+
+        Both internal ``AgentConfig``-derived managed agents and external
+        ``ExternalA2AAgentConfig``-derived wrappers funnel through here, so
+        every nested invocation emits ``subagent_start``/``subagent_end``
+        regardless of which kind of sub-agent was added to ``managed_agents``.
+        """
+        from .subagent_wrapper import SubAgentToolWrapper
+
+        resolved_id = (
+            agent_id
+            if agent_id is not None
+            else getattr(sub_agent_config, "agent_id", None)
+            or getattr(sub_agent_config, "_sub_agent_id", None)
+        )
+        agent_name = (
+            getattr(sub_agent_config, "name", None)
+            or getattr(inner_agent, "name", None)
+            or "subagent"
+        )
+        return SubAgentToolWrapper(
+            inner_agent=inner_agent,
+            observer=self.observer,
+            agent_id=resolved_id,
+            agent_name=str(agent_name),
+        )
 
     def create_single_agent(
         self,
@@ -460,12 +582,17 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Recurse for managed agents.  Mark _managed_context=True so they
-                # do NOT create their own sandbox (smolagents contract: managed
-                # sub-agents share the parent's python_executor).
+                # Create managed agents recursively without creating a second sandbox.
+                raw_managed_agents = []
+                for sub_agent_config in agent_config.managed_agents:
+                    inner_agent = self.create_single_agent(
+                        sub_agent_config,
+                        _managed_context=True,
+                    )
+                    raw_managed_agents.append((inner_agent, sub_agent_config))
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config, _managed_context=True)
-                    for sub_agent_config in agent_config.managed_agents
+                    self._wrap_subagent(inner_agent, sub_agent_config)
+                    for inner_agent, sub_agent_config in raw_managed_agents
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating managed agent: {e}")
@@ -482,7 +609,13 @@ class NexentAgent:
                             stop_event=self.stop_event,
                             observer=self.observer
                         )
-                        managed_agents_list.append(wrapper)
+                        managed_agents_list.append(
+                            self._wrap_subagent(
+                                wrapper,
+                                ext_agent_config,
+                                agent_id=str(ext_agent_config.agent_id),
+                            )
+                        )
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
@@ -572,7 +705,10 @@ class NexentAgent:
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
                 executor=python_executor,
+                verification_config=getattr(agent_config, "verification_config", None),
             )
             agent.stop_event = self.stop_event
 
@@ -669,8 +805,10 @@ class NexentAgent:
                             total_output_tokens += step_output
 
                         estimated_context = None
+                        last_metric = None
                         if hasattr(self.agent, "step_metrics") and self.agent.step_metrics:
-                            estimated_context = self.agent.step_metrics[-1].get(
+                            last_metric = self.agent.step_metrics[-1]
+                            estimated_context = last_metric.get(
                                 "memory_state", {}
                             ).get("estimated_input_tokens")
 
@@ -702,6 +840,39 @@ class NexentAgent:
                                 None,
                             ),
                         }
+                        if last_metric:
+                            compression = last_metric.get("compression", {}) or {}
+                            token_data.update({
+                                "compression_calls": compression.get("calls", 0),
+                                "compression_input_tokens": compression.get("input_tokens", 0),
+                                "compression_output_tokens": compression.get("output_tokens", 0),
+                                "compression_cache_hits": compression.get("cache_hits", 0),
+                                "compression_cache_types": compression.get("cache_types", []),
+                                "compression_ratio": last_metric.get("compression_ratio", 0.0),
+                                "uncompressed_est_tokens": last_metric.get("uncompressed_mem_est_input", 0),
+                            })
+                        active_model = getattr(self.agent, "model", None)
+                        cache_usage = getattr(active_model, "last_prompt_cache_usage", None)
+                        cache_advice = getattr(active_model, "last_provider_cache_advice", None)
+                        if cache_usage is not None:
+                            metrics_source = getattr(cache_usage, "metrics_source", "capability_unknown")
+                            metrics_available = metrics_source not in {"none", "capability_unknown"}
+                            capability_supported = bool(getattr(cache_advice, "supported", False))
+                            token_data.update({
+                                "provider_cache_status": (
+                                    "available" if metrics_available else
+                                    "unavailable" if capability_supported else
+                                    "unsupported"
+                                ),
+                                "provider_cache_metrics_source": metrics_source,
+                                "provider_cache_hit": bool(getattr(cache_usage, "provider_cache_hit", False)),
+                                "provider_cached_input_tokens": int(
+                                    getattr(cache_usage, "cached_input_tokens", 0) or 0
+                                ),
+                                "provider_uncached_input_tokens": int(
+                                    getattr(cache_usage, "uncached_input_tokens", 0) or 0
+                                ),
+                            })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:

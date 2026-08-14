@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextvars
 from typing import Any, Dict
 
 from smolagents.tools import Tool
@@ -44,13 +45,14 @@ class ParallelExecutorTool(Tool):
         "tasks": {
             "type": "array",
             "description": (
-                "Variable number of (callable, kwargs_dict) or "
-                "(callable, kwargs_dict, name) tuples.  "
+                "A list of tasks where each task is a 2-tuple (callable, kwargs_dict) "
+                "or 3-tuple (callable, kwargs_dict, \"name\"). "
                 "kwargs values can be any Python object — just reference "
                 "the variable name, no serialization needed."
             ),
             "description_zh": (
-                "可变数量的 (函数名, 参数字典) 或 (函数名, 参数字典, \"名称\") 元组。"
+                "任务列表，每个任务是一个二元组 (函数名, 参数字典) "
+                "或三元组 (函数名, 参数字典, \"名称\")。"
                 "kwargs 值可以是任意 Python 对象，直接引用变量名即可，无需序列化。"
             ),
         },
@@ -74,29 +76,29 @@ class ParallelExecutorTool(Tool):
     }
     output_type = "any"
 
-    def forward(self, *tasks, timeout: int = 120, max_workers: int = 4):
+    def forward(self, tasks, timeout: int = 120, max_workers: int = 4):
         """Execute the tasks in parallel.
 
-        Each positional argument is a 2-tuple ``(func, kwargs)`` or
-        3-tuple ``(func, kwargs, \"name\")``.
+        ``tasks`` is a list where each element is a 2-tuple ``(func, kwargs)``
+        or 3-tuple ``(func, kwargs, \"name\")``.
 
         Returns a list (all 2-tuples) or dict (all 3-tuples).
         """
-        return _parallel_executor(*tasks, timeout=timeout, max_workers=max_workers)
+        return _parallel_executor(tasks, timeout=timeout, max_workers=max_workers)
 
 
 # ---------------------------------------------------------------------------
 # Internal implementation
 # ---------------------------------------------------------------------------
 
-def _parallel_executor(*tasks, timeout: int = 120, max_workers: int = 4):
+def _validate_tasks(tasks):
+    """Validate task format and return (names, has_names)."""
     if not tasks:
-        return []
+        return [], False
 
     n = len(tasks)
-
-    # ----- detect output mode -----
     has_names = any(len(t) == 3 for t in tasks)
+
     if has_names:
         if not all(len(t) == 3 for t in tasks):
             raise ValueError(
@@ -112,29 +114,33 @@ def _parallel_executor(*tasks, timeout: int = 120, max_workers: int = 4):
             )
         names = [None] * n
 
+    return names, has_names
+
+
+def _execute_tasks(tasks, names, timeout, max_workers):
+    """Submit tasks to a thread pool and collect results."""
+    n = len(tasks)
     results = [None] * n
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_idx: Dict[concurrent.futures.Future, int] = {}
         for idx, t in enumerate(tasks):
             func, kwargs = t[0], t[1]
+            label = names[idx] or f"task-{idx}"
             if not isinstance(kwargs, dict):
                 results[idx] = (
-                    f"[{names[idx] or f'task-{idx}'}] Invalid: "
+                    f"[{label}] Invalid: "
                     f"kwargs must be a dict, got {type(kwargs).__name__}"
                 )
                 continue
             if not callable(func):
                 results[idx] = (
-                    f"[{names[idx] or f'task-{idx}'}] Not callable: "
-                    f"{type(func).__name__}"
+                    f"[{label}] Not callable: {type(func).__name__}"
                 )
                 continue
-            future_to_idx[pool.submit(func, **kwargs)] = idx
+            task_context = contextvars.copy_context()
+            future_to_idx[pool.submit(task_context.run, func, **kwargs)] = idx
 
-        # Iterate directly over futures so that per-task timeout is effective.
-        # as_completed would wait for each future to finish before yielding,
-        # which makes future.result(timeout=…) a no-op.
         for future, idx in future_to_idx.items():
             label = names[idx] or f"task-{idx}"
             try:
@@ -145,6 +151,14 @@ def _parallel_executor(*tasks, timeout: int = 120, max_workers: int = 4):
                 import traceback as _tb
                 results[idx] = f"[{label}] Failed: {_tb.format_exc(limit=1)}"
 
+    return results
+
+
+def _parallel_executor(tasks, timeout: int = 120, max_workers: int = 4):
+    names, has_names = _validate_tasks(tasks)
+    if not tasks:
+        return []
+    results = _execute_tasks(tasks, names, timeout, max_workers)
     if has_names:
-        return {names[idx]: results[idx] for idx in range(n)}
+        return {names[idx]: results[idx] for idx in range(len(tasks))}
     return results

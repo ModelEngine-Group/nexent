@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
-import { ChevronRight, Info, Settings, X } from "lucide-react";
+import { ChevronRight, Eye, Pencil, Settings, X } from "lucide-react";
 
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
@@ -52,20 +52,21 @@ interface SelectedSkillManagementProps {
   readonly isCreatingMode?: boolean;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
+  readonly onEditSkill?: (skill: Skill) => void;
 }
 
 export default function SelectedSkillManagement({
   isCreatingMode,
   currentAgentId,
   isReadOnly = false,
+  onEditSkill,
 }: SelectedSkillManagementProps) {
   const { t } = useTranslation("common");
   const selectedSkills = useAgentConfigStore(
     (state) => state.editedAgent.skills
   );
   const updateSkills = useAgentConfigStore((state) => state.updateSkills);
-  const { skills: catalogSkillData } = useSkillList({ enabled: true });
-  const catalogSkills = catalogSkillData as Skill[];
+  const { availableSkills: catalogSkills } = useSkillList({ enabled: true });
   const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<
@@ -77,7 +78,7 @@ export default function SelectedSkillManagement({
   // them by ID so an agent reloaded after saving keeps both its selection and
   // the canonical card content.
   const groupedSkills = useMemo<SelectedSkillGroup[]>(() => {
-    const catalogById = new Map(
+    const catalogById = new Map<number, Skill>(
       catalogSkills.map((skill: Skill) => [Number(skill.skill_id), skill])
     );
     const grouped = new Map<SkillSourceKey, Skill[]>([
@@ -204,63 +205,86 @@ export default function SelectedSkillManagement({
 
                 {!isCollapsed ? (
                   <div className="divide-y divide-gray-100">
-                    {group.skills.map((skill) => (
-                      <div
-                        key={skill.skill_id}
-                        className="group flex items-center gap-3 px-3 py-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate text-sm font-medium text-gray-800">
-                              {skill.name}
-                            </span>
-                            {(skill.tags || []).slice(0, 2).map((tag) => (
-                              <span
-                                key={tag}
-                                className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
-                              >
-                                {tag}
+                    {group.skills.map((skill) => {
+                      const canEditSkill =
+                        !isReadOnly &&
+                        skill.permission === "EDIT" &&
+                        Boolean(onEditSkill);
+
+                      return (
+                        <div
+                          key={skill.skill_id}
+                          className="group flex items-center gap-3 px-3 py-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-sm font-medium text-gray-800">
+                                {skill.name}
                               </span>
-                            ))}
+                              {(skill.tags || []).slice(0, 2).map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                            {skill.description ? (
+                              <p className="truncate text-xs text-gray-400">
+                                {skill.description}
+                              </p>
+                            ) : null}
                           </div>
-                          {skill.description ? (
-                            <p className="truncate text-xs text-gray-400">
-                              {skill.description}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Tooltip title={t("skillPool.viewDetails")}>
-                          <button
-                            type="button"
-                            className="flex size-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                            onClick={() => setDetailSkill(skill)}
+                          <Tooltip
+                            title={t(
+                              canEditSkill
+                                ? "skillManagement.edit.title"
+                                : "skillPool.viewDetails"
+                            )}
                           >
-                            <Info className="size-4" />
-                          </button>
-                        </Tooltip>
-                        {(skill.config_schemas || []).length > 0 ? (
-                          <Tooltip title={t("skillPool.configure")}>
                             <button
                               type="button"
-                              disabled={isReadOnly}
-                              className="flex size-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
-                              onClick={() => setConfigSkill(skill)}
+                              className="flex size-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                              onClick={() => {
+                                if (canEditSkill) {
+                                  onEditSkill?.(skill);
+                                  return;
+                                }
+                                setDetailSkill(skill);
+                              }}
                             >
-                              <Settings className="size-4" />
+                              {canEditSkill ? (
+                                <Pencil className="size-4" />
+                              ) : (
+                                <Eye className="size-4" />
+                              )}
                             </button>
                           </Tooltip>
-                        ) : null}
-                        <button
-                          type="button"
-                          disabled={isReadOnly}
-                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-transparent transition-colors hover:bg-red-50 hover:text-red-500 group-hover:text-gray-400 group-focus-within:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() => removeSkill(skill.skill_id)}
-                          title={t("skillPool.remove")}
-                        >
-                          <X className="size-4" />
-                        </button>
-                      </div>
-                    ))}
+                          {(skill.config_schemas || []).length > 0 ? (
+                            <Tooltip title={t("skillPool.configure")}>
+                              <button
+                                type="button"
+                                disabled={isReadOnly}
+                                className="flex size-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => setConfigSkill(skill)}
+                              >
+                                <Settings className="size-4" />
+                              </button>
+                            </Tooltip>
+                          ) : null}
+                          <button
+                            type="button"
+                            disabled={isReadOnly}
+                            className="flex size-7 shrink-0 items-center justify-center rounded-md text-transparent transition-colors hover:bg-red-50 hover:text-red-500 group-hover:text-gray-400 group-focus-within:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => removeSkill(skill.skill_id)}
+                            title={t("skillPool.remove")}
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>

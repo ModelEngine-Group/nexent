@@ -10,7 +10,7 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 # Mock external dependencies before any imports
 boto3_module = types.ModuleType("boto3")
@@ -55,7 +55,100 @@ patch('database.group_db.remove_user_from_all_groups').start()
 patch('database.group_db.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
-from backend.services.user_service import get_users, update_user, delete_user_and_cleanup
+from consts.exceptions import ForbiddenError, NotFoundException
+from backend.services.user_service import (
+    delete_user_and_cleanup,
+    get_users,
+    get_users_for_requester,
+    update_user,
+    update_user_for_requester,
+)
+
+
+class TestUserAuthorization:
+    """Test role and tenant enforcement for user management."""
+
+    def test_admin_can_list_own_tenant(self, mocker):
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        result = get_users_for_requester(
+            "tenant-1",
+            requester_tenant_id="tenant-1",
+            requester_role="ADMIN",
+        )
+
+        assert result == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with("tenant-1", 1, 20, "created_at", "desc")
+
+    @pytest.mark.parametrize(
+        "role,target_tenant",
+        [("ADMIN", "tenant-2"), ("DEV", "tenant-1"), ("USER", "tenant-1")],
+    )
+    def test_disallowed_user_listing_is_rejected(self, role, target_tenant):
+        with pytest.raises(ForbiddenError, match="list users"):
+            get_users_for_requester(
+                target_tenant,
+                requester_tenant_id="tenant-1",
+                requester_role=role,
+            )
+
+    @pytest.mark.asyncio
+    async def test_admin_can_update_non_su_in_own_tenant(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"tenant_id": "tenant-1", "user_role": "USER"},
+        )
+        mock_update = mocker.patch(
+            "backend.services.user_service.update_user",
+            return_value={"id": "user-2", "role": "DEV"},
+        )
+
+        result = await update_user_for_requester(
+            "user-2",
+            {"role": "DEV"},
+            updated_by="admin-1",
+            requester_tenant_id="tenant-1",
+            requester_role="ADMIN",
+        )
+
+        assert result["role"] == "DEV"
+        mock_update.assert_awaited_once_with("user-2", {"role": "DEV"}, "admin-1")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {"tenant_id": "tenant-2", "user_role": "USER"},
+            {"tenant_id": "tenant-1", "user_role": "SU"},
+        ],
+    )
+    async def test_admin_cannot_update_cross_tenant_or_su(self, mocker, target):
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=target)
+
+        with pytest.raises(ForbiddenError, match="update this user"):
+            await update_user_for_requester(
+                "user-2",
+                {"role": "DEV"},
+                updated_by="admin-1",
+                requester_tenant_id="tenant-1",
+                requester_role="ADMIN",
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_missing_user_returns_not_found(self, mocker):
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=None)
+
+        with pytest.raises(NotFoundException, match="not found"):
+            await update_user_for_requester(
+                "missing",
+                {"role": "USER"},
+                updated_by="su-1",
+                requester_tenant_id="tenant-1",
+                requester_role="SU",
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -594,13 +687,9 @@ class TestDeleteUserAndCleanup:
             "backend.services.user_service.soft_delete_all_conversations_by_user",
             return_value=5
         )
-        mock_build_config = mocker.patch(
-            "backend.services.user_service.build_memory_config",
-            return_value={"key": "value"}
-        )
-        mock_clear_memory = mocker.patch(
-            "backend.services.user_service.clear_memory",
-            new_callable=AsyncMock
+        mock_soft_delete_oauth = mocker.patch(
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
+            return_value=0
         )
         mock_get_admin = mocker.patch(
             "backend.services.user_service.get_supabase_admin_client"
@@ -621,9 +710,7 @@ class TestDeleteUserAndCleanup:
         mock_remove_groups.assert_called_once_with(user_id, user_id)
         mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
         mock_soft_delete_convs.assert_called_once_with(user_id)
-        mock_build_config.assert_called_once_with(tenant_id)
-        # clear_memory called for user and user_agent
-        assert mock_clear_memory.call_count == 2
+        mock_soft_delete_oauth.assert_called_once_with(user_id, user_id)
         mock_get_admin.assert_called_once()
         mock_admin.auth.admin.delete_user.assert_called_once_with(user_id)
 
@@ -648,13 +735,8 @@ class TestDeleteUserAndCleanup:
             side_effect=Exception("convs failed")
         )
         mocker.patch(
-            "backend.services.user_service.build_memory_config",
-            side_effect=Exception("config failed")
-        )
-        mocker.patch(
-            "backend.services.user_service.clear_memory",
-            new_callable=AsyncMock,
-            side_effect=Exception("memory failed")
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
+            side_effect=Exception("oauth failed")
         )
         mocker.patch(
             "backend.services.user_service.get_supabase_admin_client",
@@ -666,6 +748,55 @@ class TestDeleteUserAndCleanup:
 
         # Should not raise, errors are logged and swallowed
         await delete_user_and_cleanup(user_id, tenant_id)
+
+
+class TestCoverageGaps:
+    """Cover authorization and cleanup fallback branches."""
+
+    def test_superuser_can_list_any_tenant(self, mocker):
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        assert get_users_for_requester(
+            "tenant-2",
+            requester_tenant_id="tenant-1",
+            requester_role="SU",
+        ) == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with("tenant-2", 1, 20, "created_at", "desc")
+
+    @pytest.mark.asyncio
+    async def test_superuser_can_update_any_user(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"tenant_id": "tenant-2", "user_role": "SU"},
+        )
+        mock_update = mocker.patch(
+            "backend.services.user_service.update_user",
+            return_value={"id": "user-2", "role": "USER"},
+        )
+
+        result = await update_user_for_requester(
+            "user-2",
+            {"role": "USER"},
+            updated_by="su-1",
+            requester_tenant_id="tenant-1",
+            requester_role="SU",
+        )
+
+        assert result["id"] == "user-2"
+        mock_update.assert_awaited_once_with("user-2", {"role": "USER"}, "su-1")
+
+    @pytest.mark.asyncio
+    async def test_cleanup_handles_missing_supabase_admin_client(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            return_value=True,
+        )
+        mocker.patch("backend.services.user_service.get_supabase_admin_client", return_value=None)
+
+        await delete_user_and_cleanup("user-1", "tenant-1")
 
 
 # Run tests when executed directly

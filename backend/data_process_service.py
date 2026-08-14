@@ -72,6 +72,9 @@ class ServiceManager:
             import redis
             redis_client = redis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
             redis_client.ping()
+            from services.redis_service import get_redis_service
+            cleanup_stats = get_redis_service().cleanup_error_info_keys()
+            logger.info(f"Redis error info cleanup stats: {cleanup_stats}")
             logger.info(f"✅ Redis connection successful: {redis_url}")
             return True
         except ImportError:

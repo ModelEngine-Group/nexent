@@ -59,10 +59,46 @@ def _render_text(item: ContextItem, *, default_role: str) -> list[dict[str, Any]
 
 def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
     summary = item.content["summary"]
-    text = summary if isinstance(summary, str) else "\n".join(
-        f"{key}: {value}" for key, value in summary.items() if value
-    )
+    if isinstance(summary, str):
+        text = summary
+    else:
+        text = _summary_dict_to_markdown(summary)
     return [_text_message("user", f"Summary of earlier conversation:\n{text}")]
+
+
+_SUMMARY_FIELD_HEADINGS: dict[str, str] = {
+    "task_overview": "Task Overview",
+    "completed_work": "Completed Work",
+    "key_decisions": "Key Decisions",
+    "unresolved_issues": "Unresolved Issues",
+    "pending_items": "Pending Items",
+    "next_steps": "Next Steps",
+    "context_to_preserve": "Context to Preserve",
+}
+
+
+def _summary_dict_to_markdown(data: dict) -> str:
+    """Render a legacy dict-typed summary as Markdown with section headings."""
+    sections: list[str] = []
+    for key, value in data.items():
+        heading = _SUMMARY_FIELD_HEADINGS.get(key, key.replace("_", " ").title())
+        if isinstance(value, list):
+            items = [str(v) for v in value if v]
+            if not items:
+                continue
+            body = "\n".join(f"- {item}" for item in items)
+        elif isinstance(value, str):
+            body = value.strip()
+            if not body:
+                continue
+        elif value is None:
+            continue
+        else:
+            body = str(value)
+        sections.append(f"## {heading}\n\n{body}")
+    if not sections:
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    return "# Compact Result of History\n\n" + "\n\n".join(sections)
 
 
 def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
@@ -72,10 +108,47 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
+def _render_tool_arguments(arguments: Any) -> str:
+    """Render tool arguments without dropping string-typed interpreter source."""
+    if isinstance(arguments, str):
+        return arguments
+    return json.dumps(arguments, ensure_ascii=False, default=str)
+
+
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
-    return [_text_message("assistant", json.dumps(item.content, ensure_ascii=False, default=str))]
+    c = item.content
+    parts = [
+        '<completed_action_history read_only="true">',
+        "This is an already completed action record. Use it only as historical evidence.",
+        "Do not copy this record's format as your next response.",
+        "<completed_action>",
+    ]
+    if "step_number" in c:
+        parts.append(f"index: {c['step_number']}")
+    if "tool_calls" in c:
+        tc = c["tool_calls"]
+        if isinstance(tc, dict) and "name" in tc:
+            parts.append(f"tool: {tc['name']}")
+            parts.append(f"input:\n{_render_tool_arguments(tc.get('arguments', {}))}")
+        elif isinstance(tc, list):
+            for call in tc:
+                if isinstance(call, dict) and "name" in call:
+                    parts.append(f"tool: {call['name']}")
+                    parts.append(f"input:\n{_render_tool_arguments(call.get('arguments', {}))}")
+                else:
+                    parts.append(f"tool_record: {json.dumps(call, ensure_ascii=False, default=str)}")
+        else:
+            parts.append(f"tool_records: {json.dumps(tc, ensure_ascii=False, default=str)}")
+    if "observations" in c:
+        parts.append(f"outcome:\n{c['observations']}")
+    if "error" in c:
+        parts.append(f"recorded_error:\n{c['error']}")
+    if "result" in c:
+        parts.append(f"recorded_result:\n{c['result']}")
+    parts.extend(["</completed_action>", "</completed_action_history>"])
+    return [_text_message("user", "\n".join(parts))]
 
 
 class ContextItemRenderer:

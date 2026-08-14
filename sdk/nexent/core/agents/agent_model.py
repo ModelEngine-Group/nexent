@@ -280,6 +280,13 @@ class AgentConfig(BaseModel):
         description="Authorized fine-grained context item inputs for SDK assembly",
         default=None
     )
+    pre_run_tool_events: List[Dict[str, Any]] = Field(
+        description=(
+            "Structured tool and result events completed before the model loop "
+            "and emitted through the normal streaming persistence path."
+        ),
+        default_factory=list,
+    )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
@@ -353,6 +360,8 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
+    user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,
@@ -396,7 +405,6 @@ class AgentRunInfo(BaseModel):
 
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
-    memory_config: Dict[str, Any] = Field(description="Memory llm/embedder/vectorstore configuration")
     tenant_id: str = Field(description="Tenant id")
     user_id: str = Field(description="User id")
     agent_id: str = Field(description="Agent id")

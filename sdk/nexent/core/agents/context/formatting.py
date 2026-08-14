@@ -19,15 +19,18 @@ def _format_memory_context(
     if not memory_list:
         return ""
 
-    # Group memories by level in correct order: tenant, user_agent, user, agent
-    level_order = ["tenant", "user_agent", "user", "agent"]
+    # Group memories by the supported hierarchy: tenant, user, agent.
+    level_order = ["tenant", "user", "agent"]
     memory_by_level: Dict[str, List[Any]] = {}
     for mem in memory_list:
         if isinstance(mem, dict):
             level = mem.get("memory_level", "user")
-            if level not in memory_by_level:
-                memory_by_level[level] = []
-            memory_by_level[level].append(mem)
+            if level not in level_order:
+                continue
+            memory_by_level.setdefault(level, []).append(mem)
+
+    if not memory_by_level:
+        return ""
 
     lines = []
 
@@ -40,7 +43,6 @@ def _format_memory_context(
             if level in memory_by_level:
                 level_title = {
                     "tenant": "Tenant",
-                    "user_agent": "User_agent",
                     "user": "User",
                     "agent": "Agent",
                 }.get(level, level.title())
@@ -64,7 +66,6 @@ def _format_memory_context(
         lines.append("")
         lines.append("3. **级别特定说明**：")
         lines.append("  - **tenant（租户级）**：组织层面的约束和政策（不可违背）")
-        lines.append("  - **user_agent（用户-代理级）**：特定用户在代理中的交互模式和既定工作流程")
         lines.append("  - **user（用户级）**：用户的个人偏好、技能水平和历史上下文")
         lines.append("  - **agent（代理级）**：您的既定行为模式和能力特征，通常对所有用户共享（重要性最低）")
     else:
@@ -94,7 +95,6 @@ def _format_memory_context(
         lines.append("")
         lines.append("3. **Level-Specific Considerations**:")
         lines.append("   - **tenant**: Organizational constraints and policies (non-negotiable)")
-        lines.append("   - **user_agent**: Specific interaction dynamics and established workflow patterns")
         lines.append("   - **user**: Individual preferences, skills, and historical context")
         lines.append("   - **agent**: Your established behavioral patterns and capabilities, usually shared by all users (least important)")
 

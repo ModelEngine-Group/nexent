@@ -22,7 +22,7 @@ from services.agent_automation.prompt_generator import AutomationTaskContent
 
 
 @pytest.mark.asyncio
-async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monkeypatch):
+async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(monkeypatch):
     """Exercise the service lifecycle without sending the schedule command to the Agent."""
     messages = []
     proposals = {}
@@ -188,6 +188,16 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
         })
         return {"assistant_message_id": messages[-1]["message_id"]}
 
+    def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id):
+        message_id = len(messages) + 1
+        messages.append({
+            "message_id": message_id,
+            "message_idx": len(messages),
+            "role": "user",
+            "message": [{"type": "string", "content": prompt}],
+        })
+        return {"user_message_id": message_id, "history": []}
+
     def fake_create_run(values, user_id):
         run = {
             "run_id": 21,
@@ -211,9 +221,11 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
     monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module, "is_agent_running", lambda *args: False)
-    monkeypatch.setattr(runner_module, "get_conversation_history_service", fake_history)
-    monkeypatch.setattr(runner_module, "save_message", fake_save_message)
-    monkeypatch.setattr(runner_module, "save_message_unit", fake_save_message_unit)
+    monkeypatch.setattr(
+        runner_module.automation_conversation_adapter,
+        "append_run_prompt",
+        fake_append_run_prompt,
+    )
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(runner_module.agent_automation_db, "create_run", fake_create_run)
     monkeypatch.setattr(runner_module.agent_automation_db, "update_run", fake_update_run)
@@ -227,6 +239,7 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     )
 
     assert run["status"] == "SUCCEEDED"
+    assert run["conversation_id"] == 321
     assert captured["agent_calls"] == 1
     assert captured["agent_request"].conversation_id == 321
     assert captured["agent_request"].query == "整理一份项目周报"
@@ -238,3 +251,4 @@ async def test_chat_proposal_confirm_and_manual_run_share_one_conversation(monke
     ]
     assert messages[2]["message"][0]["type"] == "string"
     assert messages[2]["message"][0]["content"] == run["generated_prompt"]
+    assert messages[2]["message_id"] == run["user_message_id"]

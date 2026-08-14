@@ -178,6 +178,12 @@
   background-color: #fafafa !important;
 }
 
+/* Keep Ant Design Tag content consistently left-aligned across layouts. */
+.ant-tag {
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
 /* Ant Design Button Icon with Lucide icons */
 .ant-btn-icon {
   display: inline-flex !important;
@@ -531,6 +537,12 @@ tr.selected-row > td:first-child::before {
 /* Dropdown menu title content full width */
 .ant-dropdown-menu-title-content {
   @apply w-full;
+}
+
+/* The agent selector popup delegates scrolling to its list container. */
+.agent-selector-dropdown .ant-dropdown-menu {
+  max-height: none !important;
+  overflow-y: visible !important;
 }
 
 /* Automation date-time picker */

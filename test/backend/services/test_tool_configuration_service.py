@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+
 # Environment variables are now configured in conftest.py
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1088,6 +1089,27 @@ class TestListAllToolsWithLabels:
         assert result[0]["tool_id"] == 1
         mock_query.assert_called_once_with("tenant1")
 
+    @patch('backend.services.tool_configuration_service.get_user_email_map')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    async def test_list_all_tools_resolves_updated_by_name(
+        self, mock_query, mock_descriptions, mock_user_email_map
+    ):
+        """The tool list exposes a readable last editor instead of an internal ID."""
+        mock_query.return_value = [
+            {"tool_id": 1, "name": "t1", "description": "d1", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": "",
+             "updated_by": "internal-user-id"}
+        ]
+        mock_descriptions.return_value = {}
+        mock_user_email_map.return_value = {"internal-user-id": "editor@example.com"}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert result[0]["updated_by_name"] == "editor@example.com"
+        mock_user_email_map.assert_called_once_with(["internal-user-id"])
+
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_tools_by_labels')
     async def test_list_all_tools_with_labels(self, mock_query_by_labels, mock_descriptions):
@@ -1858,7 +1880,8 @@ class TestIntegrationScenarios:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    async def test_full_tool_update_workflow(self, mock_get_remote_tools, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_full_tool_update_workflow(self, mock_get_mcp_records, mock_get_remote_tools, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
         """Test complete tool update workflow"""
         # 1. Mock local tools
         local_tools = [
@@ -1896,7 +1919,8 @@ class TestIntegrationScenarios:
         mock_update_table.assert_called_once_with(
             tenant_id="test_tenant",
             user_id="test_user",
-            tool_list=local_tools + mcp_tools
+            tool_list=local_tools + mcp_tools,
+            enabled_mcp_names=set(),
         )
 
 
@@ -3978,7 +4002,8 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.get_all_mcp_tools', new_callable=AsyncMock)
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
-    async def test_update_tool_list_success(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_update_tool_list_success(self, mock_get_mcp_records, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
         """Test successful tool list update"""
         # Mock tools
         mock_local_tools = [MagicMock(), MagicMock()]
@@ -4003,7 +4028,8 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.get_all_mcp_tools', new_callable=AsyncMock)
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
-    async def test_update_tool_list_combines_all_sources(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+    @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant', return_value=[])
+    async def test_update_tool_list_combines_all_sources(self, mock_get_mcp_records, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
         """Test that update_tool_list combines tools from all sources"""
         mock_local_tools = [MagicMock(name="local_tool_1")]
         mock_langchain_tools = [MagicMock(name="langchain_tool_1")]
@@ -5193,6 +5219,250 @@ class TestValidateToolImplBranches:
         req = ToolValidateRequest(name="t", source="unknown", usage="", inputs={}, params={})
         with pytest.raises(ToolExecutionException):
             await validate_tool_impl(req, tenant_id="tid", user_id="uid")
+
+    @pytest.mark.asyncio
+    async def test_validate_tool_impl_propagates_not_found_exception(self):
+        """NotFoundException from inner validators must be re-raised as NotFoundException."""
+        from backend.services.tool_configuration_service import validate_tool_impl
+        req = ToolValidateRequest(
+            name="missing_tool", source=ToolSourceEnum.MCP.value,
+            usage="outer-apis", inputs={}, params={},
+        )
+        with patch(
+            "backend.services.tool_configuration_service._validate_mcp_tool_nexent",
+            new=AsyncMock(side_effect=NotFoundException("tool gone")),
+        ):
+            with pytest.raises(NotFoundException, match="tool gone"):
+                await validate_tool_impl(req, tenant_id="tid", user_id="uid")
+
+    @pytest.mark.asyncio
+    async def test_validate_tool_impl_propagates_mcp_connection_error(self):
+        """MCPConnectionError from inner validators must be re-raised as MCPConnectionError."""
+        from backend.services.tool_configuration_service import validate_tool_impl
+        req = ToolValidateRequest(
+            name="remote_tool", source=ToolSourceEnum.MCP.value,
+            usage="some-server", inputs={}, params={},
+        )
+        with patch(
+            "backend.services.tool_configuration_service._validate_mcp_tool_remote",
+            new=AsyncMock(side_effect=MCPConnectionError("server unreachable")),
+        ):
+            with pytest.raises(MCPConnectionError, match="server unreachable"):
+                await validate_tool_impl(req, tenant_id="tid", user_id="uid")
+
+
+class TestUpdateToolInfoImplAidpPermission:
+    """Coverage for lines 367-390: AIDP permission validation in update_tool_info_impl."""
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_with_list_kds_all_allowed(self, mock_create_update):
+        """When all kds_list entries pass permission check, update proceeds normally."""
+        mock_create_update.return_value = {"id": 1}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = {"kds_list": ["kb1", "kb2"]}
+        tool_info.version_no = 0
+
+        mock_perm = MagicMock()
+        with patch.dict(
+            sys.modules,
+            {"ext_components.aidp.services": MagicMock(
+                aidp_permission_service=mock_perm,
+            )},
+        ):
+            mock_perm.require_permission = MagicMock()
+            from backend.services.tool_configuration_service import update_tool_info_impl
+            result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 1}
+        assert mock_perm.require_permission.call_count == 2
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_with_json_string_kds_list(self, mock_create_update):
+        """kds_list arriving as a JSON string (legacy shape) is decoded before validation."""
+        import json
+        mock_create_update.return_value = {"id": 2}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = {"kds_list": json.dumps(["kbA", "kbB"])}
+        tool_info.version_no = 0
+
+        mock_perm = MagicMock()
+        mock_perm.require_permission = MagicMock()
+        with patch.dict(
+            sys.modules,
+            {"ext_components.aidp.services": MagicMock(
+                aidp_permission_service=mock_perm,
+            )},
+        ):
+            from backend.services.tool_configuration_service import update_tool_info_impl
+            result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 2}
+        assert mock_perm.require_permission.call_count == 2
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_with_invalid_json_kds_list(self, mock_create_update):
+        """An invalid JSON kds_list is treated as empty and skipped silently."""
+        mock_create_update.return_value = {"id": 3}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = {"kds_list": "{not valid json"}
+        tool_info.version_no = 0
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 3}
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_permission_denied_raises_validation_error(self, mock_create_update):
+        """When require_permission raises for any KB, a ValidationError is surfaced."""
+        from consts.exceptions import ValidationError
+        mock_create_update.return_value = {"id": 4}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = {"kds_list": ["kb_forbidden"]}
+        tool_info.version_no = 0
+
+        mock_perm = MagicMock()
+        mock_perm.require_permission.side_effect = PermissionError("no read access")
+        with patch.dict(
+            sys.modules,
+            {"ext_components.aidp.services": MagicMock(
+                aidp_permission_service=mock_perm,
+            )},
+        ):
+            from backend.services.tool_configuration_service import update_tool_info_impl
+            with pytest.raises(ValidationError, match="aidp_search kds_list"):
+                update_tool_info_impl(tool_info, "tenant1", "user1")
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_non_aidp_tool_skips_permission_check(self, mock_create_update):
+        """Tools other than aidp_search must not trigger AIDP permission logic."""
+        mock_create_update.return_value = {"id": 5}
+        tool_info = Mock()
+        tool_info.name = "knowledge_base_search"
+        tool_info.params = {"kds_list": ["kb1"]}
+        tool_info.version_no = 0
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 5}
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_with_empty_params(self, mock_create_update):
+        """aidp_search with None/empty params must skip the kds_list block."""
+        mock_create_update.return_value = {"id": 6}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = None
+        tool_info.version_no = 0
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 6}
+
+    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
+    def test_aidp_search_empty_kds_list(self, mock_create_update):
+        """aidp_search with empty kds_list must skip permission checks."""
+        mock_create_update.return_value = {"id": 7}
+        tool_info = Mock()
+        tool_info.name = "aidp_search"
+        tool_info.params = {"kds_list": []}
+        tool_info.version_no = 0
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert result["tool_instance"] == {"id": 7}
+
+
+class TestValidateLocalToolAidpSearch:
+    """Coverage for lines 879-901: AIDP search tool credential injection in _validate_local_tool."""
+
+    @patch("backend.services.tool_configuration_service.set_monitoring_operation")
+    @patch("backend.services.tool_configuration_service.set_monitoring_context")
+    @patch("backend.services.tool_configuration_service._get_tool_class_by_name")
+    @patch("backend.services.tool_configuration_service.inspect.signature")
+    @patch("backend.services.tool_configuration_service.AIDP_SERVER_URL", "")
+    def test_aidp_search_missing_server_url(self, mock_sig, mock_get_class, mock_ctx, mock_op):
+        """Empty AIDP_SERVER_URL must raise ToolExecutionException."""
+        mock_tool_class = Mock()
+        mock_get_class.return_value = mock_tool_class
+        mock_sig.return_value = Mock(parameters={})
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        with pytest.raises(ToolExecutionException, match="AIDP_SERVER_URL"):
+            _validate_local_tool("aidp_search", {"q": "test"}, {}, "tid", "uid")
+
+    @patch("backend.services.tool_configuration_service.set_monitoring_operation")
+    @patch("backend.services.tool_configuration_service.set_monitoring_context")
+    @patch("backend.services.tool_configuration_service._get_tool_class_by_name")
+    @patch("backend.services.tool_configuration_service.inspect.signature")
+    @patch("backend.services.tool_configuration_service.AIDP_SERVER_URL", "https://aidp.example.com")
+    @patch("backend.services.tool_configuration_service.AIDP_API_KEY", "")
+    def test_aidp_search_missing_api_key(self, mock_sig, mock_get_class, mock_ctx, mock_op):
+        """Empty AIDP_API_KEY must raise ToolExecutionException."""
+        mock_tool_class = Mock()
+        mock_get_class.return_value = mock_tool_class
+        mock_sig.return_value = Mock(parameters={})
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        with pytest.raises(ToolExecutionException, match="AIDP_API_KEY"):
+            _validate_local_tool("aidp_search", {"q": "test"}, {}, "tid", "uid")
+
+    @patch("backend.services.tool_configuration_service.set_monitoring_operation")
+    @patch("backend.services.tool_configuration_service.set_monitoring_context")
+    @patch("backend.services.tool_configuration_service._get_tool_class_by_name")
+    @patch("backend.services.tool_configuration_service.inspect.signature")
+    @patch("backend.services.tool_configuration_service.AIDP_SERVER_URL", "https://aidp.example.com")
+    @patch("backend.services.tool_configuration_service.AIDP_API_KEY", "secret-key")
+    @patch("backend.services.tool_configuration_service.AIDP_TENANT_ID", "aidp-tenant")
+    def test_aidp_search_valid_credentials(self, mock_sig, mock_get_class, mock_ctx, mock_op):
+        """With valid credentials, the tool class is instantiated with injected AIDP params."""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "search result"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_sig.return_value = Mock(parameters={})
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+        result = _validate_local_tool("aidp_search", {"q": "test"}, {"top_k": 5}, "tid", "uid")
+
+        assert result == "search result"
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["server_url"] == "https://aidp.example.com"
+        assert call_kwargs["api_key"] == "secret-key"
+        assert call_kwargs["tenant_id"] == "aidp-tenant"
+        assert call_kwargs["observer"] is None
+
+
+class TestUpdateToolListMcpErrorExplicit:
+    """Explicit coverage for lines 521-526: mcp_tools=[] fallback on MCP error."""
+
+    @patch("backend.services.tool_configuration_service._refresh_openapi_services_in_mcp")
+    @patch("backend.services.tool_configuration_service.get_local_tools", return_value=[])
+    @patch("backend.services.tool_configuration_service.get_langchain_tools", return_value=[])
+    @patch("backend.services.tool_configuration_service.get_all_mcp_tools",
+           new_callable=AsyncMock, side_effect=ConnectionError("MCP down"))
+    @patch("backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list")
+    @patch("backend.services.tool_configuration_service.get_mcp_records_by_tenant", return_value=[])
+    async def test_mcp_error_sets_empty_tools_and_continues(
+        self, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
+    ):
+        """MCP failure must set mcp_tools=[] and still call update_tool_table_from_scan_tool_list."""
+        from backend.services.tool_configuration_service import update_tool_list
+        await update_tool_list("tenant1", "user1")
+
+        # update_tool_table called with only local + langchain (mcp_tools is [])
+        mock_update.assert_called_once_with(
+            tenant_id="tenant1", user_id="user1", tool_list=[],
+            enabled_mcp_names=set(),
+        )
 
 
 if __name__ == "__main__":

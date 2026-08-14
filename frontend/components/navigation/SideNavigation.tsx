@@ -16,6 +16,7 @@ import {
   Building2,
   Zap,
   CalendarClock,
+  LineChart,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -39,6 +40,7 @@ interface RouteConfig {
   labelKey: string;
   order: number;
   parentKey?: string | null;
+  navigationPath?: string;
 }
 
 /**
@@ -66,6 +68,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     labelKey: "sidebar.startChat",
     order: 1,
     parentKey: null,
+    navigationPath: "/newchat",
   },
   {
     path: "/agent-tasks",
@@ -110,33 +113,40 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 7,
     parentKey: "/agent-dev",
   },
+  {
+    path: "/space/evaluation",
+    Icon: LineChart,
+    labelKey: "sidebar.agentEvaluation",
+    order: 8,
+    parentKey: "/agent-dev",
+  },
   // Resource Space submenu
   {
     path: "/resource-space",
     Icon: Globe,
     labelKey: "sidebar.resourceSpace",
-    order: 8,
+    order: 9,
     parentKey: null,
   },
   {
     path: "/agent-space",
     Icon: Bot,
     labelKey: "sidebar.agentSpace",
-    order: 9,
+    order: 10,
     parentKey: "/resource-space",
   },
   {
     path: "/mcp-space",
     Icon: Puzzle,
     labelKey: "sidebar.mcpSpace",
-    order: 10,
+    order: 11,
     parentKey: "/resource-space",
   },
   {
     path: "/skill-space",
     Icon: Zap,
     labelKey: "sidebar.skillSpace",
-    order: 11,
+    order: 12,
     parentKey: "/resource-space",
   },
   // Management menus
@@ -144,14 +154,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/resource-manage",
     Icon: Building2,
     labelKey: "sidebar.resourceManage",
-    order: 12,
+    order: 13,
     parentKey: null,
   },
   {
     path: "/owner-manage",
     Icon: Building2,
     labelKey: "sidebar.ownerManage",
-    order: 13,
+    order: 14,
     parentKey: null,
   },
 ];
@@ -238,9 +248,9 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) =>
-      accessibleRoutes.includes(route.path)
-    );
+    const filtered = ROUTE_CONFIG.filter((route) => {
+      return accessibleRoutes.includes(route.path);
+    });
 
     // Separate root items and children
     const rootItems = filtered
@@ -276,56 +286,21 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     return {
       key: route.path,
       icon: <route.Icon className="w-4 h-4" />,
-      label: createRouteLabel(route),
+      label: t(route.labelKey),
       onClick: () => {
+        const navigationPath = route.navigationPath || route.path;
         setSelectedKey(route.path);
 
         // Pre-check authentication - show auth prompt if user is not authenticated
         if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
-          setPendingNavigationPath(route.path);
-          openAuthPromptModal(route.path);
+          setPendingNavigationPath(navigationPath);
+          openAuthPromptModal(navigationPath);
           return; // Prevent navigation
         }
 
-        router.push(route.path);
+        router.push(navigationPath);
       },
     };
-  };
-
-  const navigateToNewChat = () => {
-    setSelectedKey("/chat");
-
-    if (!isAuthenticated && !isSpeedMode) {
-      setPendingNavigationPath("/newchat");
-      openAuthPromptModal("/newchat");
-      return;
-    }
-
-    router.push("/newchat");
-  };
-
-  const createRouteLabel = (route: RouteConfig) => {
-    if (route.path !== "/chat") {
-      return t(route.labelKey);
-    }
-
-    return (
-      <div className="flex w-full items-center justify-between gap-2">
-        <span>{t(route.labelKey)}</span>
-        <button
-          type="button"
-          aria-label={t("sidebar.openNewChat")}
-          title={t("sidebar.openNewChat")}
-          className="flex h-5 w-8 shrink-0 items-center justify-center rounded-sm text-current/70 transition-colors hover:bg-black/10 hover:text-current"
-          onClick={(event) => {
-            event.stopPropagation();
-            navigateToNewChat();
-          }}
-        >
-          <span className="text-[10px] font-semibold uppercase leading-none tracking-wide">new</span>
-        </button>
-      </div>
-    );
   };
 
   // Build menu items from accessible routes with nested submenus

@@ -39,10 +39,14 @@ def mock_tenant_config_db():
 def mock_knowledge_db():
     """Mock knowledge base persistence used by QuotaService."""
     with patch("services.quota_service.get_knowledge_info_by_tenant_id") as mock_list, \
-         patch("services.quota_service.update_knowledge_record") as mock_update:
+         patch("services.quota_service.update_knowledge_record") as mock_update, \
+         patch("services.quota_service.get_committed_bytes_by_kb", return_value={}) as mock_kb_bytes, \
+         patch("services.quota_service.get_tenant_committed_source_bytes", return_value=0) as mock_tenant_bytes:
         yield {
             "get_knowledge_info_by_tenant_id": mock_list,
             "update_knowledge_record": mock_update,
+            "get_committed_bytes_by_kb": mock_kb_bytes,
+            "get_tenant_committed_source_bytes": mock_tenant_bytes,
         }
 
 
@@ -590,6 +594,22 @@ class TestPlatformQuota:
 
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
+    def test_allocation_state_excludes_virtual_tenants(self):
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+        with patch(
+            "database.tenant_config_db.get_all_tenant_ids",
+            return_value=["tenant-1", DEFAULT_TENANT_ID, "", ASSET_OWNER_TENANT_ID],
+        ), patch(
+            "database.tenant_config_db.get_single_config_info",
+            return_value={"config_value": str(20 * GB)},
+        ) as mock_get_config:
+            result = QuotaService._get_allocation_state(ASSET_OWNER_TENANT_ID)
+
+        assert result["tenant_ids"] == ["tenant-1"]
+        assert result["total_allocated_bytes"] == 20 * GB
+        mock_get_config.assert_called_once_with("tenant-1", "KB_QUOTA_TENANT_HARD_LIMIT_BYTES")
+
     def test_platform_overview_marks_legacy_unmanaged_tenants(self):
         with patch.object(
             QuotaService,
@@ -836,3 +856,135 @@ class TestUsageTracking:
             "visible-kb",
             "hidden-kb",
         }
+
+    @pytest.mark.parametrize(
+        ("es_size", "kb_source_bytes", "expected_bytes"),
+        [
+            ("200 MB", 300 * 1024 * 1024, 500 * 1024 * 1024),
+            ("0 B", 300 * 1024 * 1024, 300 * 1024 * 1024),
+            ("200 MB", 0, 200 * 1024 * 1024),
+        ],
+    )
+    def test_compute_usage_combines_es_and_source_bytes(
+        self,
+        quota_service,
+        mock_knowledge_db,
+        es_size,
+        kb_source_bytes,
+        expected_bytes,
+    ):
+        mock_knowledge_db["get_knowledge_info_by_tenant_id"].return_value = [{
+            "knowledge_id": 7,
+            "knowledge_name": "Composite KB",
+            "index_name": "composite-kb",
+            "quota_limit_bytes": 1024 * 1024 * 1024,
+        }]
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {
+            7: kb_source_bytes,
+        }
+        mock_knowledge_db["get_tenant_committed_source_bytes"].return_value = kb_source_bytes
+        mock_vdb = MagicMock()
+        mock_vdb.get_indices_detail.return_value = {
+            "composite-kb": {
+                "base_info": {"store_size": es_size, "doc_count": 4},
+            },
+        }
+
+        with patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={
+                "hard_limit_bytes": 1024 * 1024 * 1024,
+                "hard_limit_readable": "1.0 GB",
+            },
+        ), patch.object(
+            quota_service,
+            "get_warning_config",
+            return_value={
+                "warning_enabled": True,
+                "warning_threshold_pct": 80,
+                "critical_threshold_pct": 95,
+            },
+        ), patch.object(
+            quota_service,
+            "get_quota_summary",
+            return_value={
+                "soft_allocated_total_bytes": 1024 * 1024 * 1024,
+                "soft_allocated_readable": "1.0 GB",
+                "oversubscription_ratio": 1,
+                "kb_count": 1,
+                "kbs_with_quota": 1,
+            },
+        ), patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ):
+            result = quota_service._compute_usage()
+
+        assert result["total_bytes"] == expected_bytes
+        assert result["breakdown"][0]["actual_bytes"] == expected_bytes
+        assert result["file_count"] == 4
+        assert result["breakdown"][0]["file_count"] == 4
+
+    def test_tenant_total_includes_all_active_ledger_rows(
+        self,
+        quota_service,
+        mock_knowledge_db,
+    ):
+        mock_knowledge_db["get_knowledge_info_by_tenant_id"].return_value = [{
+            "knowledge_id": 7,
+            "knowledge_name": "Active KB",
+            "index_name": "active-kb",
+            "quota_limit_bytes": None,
+        }]
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {7: 300}
+        mock_knowledge_db["get_tenant_committed_source_bytes"].return_value = 350
+        mock_vdb = MagicMock()
+        mock_vdb.get_indices_detail.return_value = {
+            "active-kb": {"base_info": {"store_size": 200, "doc_count": 2}},
+        }
+
+        with patch.object(
+            quota_service,
+            "get_hard_limit",
+            return_value={"hard_limit_bytes": None, "hard_limit_readable": None},
+        ), patch.object(
+            quota_service,
+            "get_warning_config",
+            return_value={
+                "warning_enabled": True,
+                "warning_threshold_pct": 80,
+                "critical_threshold_pct": 95,
+            },
+        ), patch.object(
+            quota_service,
+            "get_quota_summary",
+            return_value={
+                "soft_allocated_total_bytes": 0,
+                "soft_allocated_readable": "0 B",
+                "oversubscription_ratio": None,
+                "kb_count": 1,
+                "kbs_with_quota": 0,
+            },
+        ), patch(
+            "services.vectordatabase_service.get_vector_db_core",
+            return_value=mock_vdb,
+        ):
+            result = quota_service._compute_usage()
+
+        assert result["total_bytes"] == 550
+        assert result["breakdown"][0]["actual_bytes"] == 500
+        assert result["breakdown"][0]["usage_pct"] is None
+        assert result["breakdown"][0]["kb_warning_level"] == "normal"
+
+    def test_invalidate_usage_cache_is_tenant_scoped(self):
+        _usage_cache.clear()
+        _usage_cache["tenant-a"] = (0, {"total_bytes": 1})
+        _usage_cache["tenant-b"] = (0, {"total_bytes": 2})
+
+        QuotaService.invalidate_usage_cache("tenant-a")
+
+        assert "tenant-a" not in _usage_cache
+        assert "tenant-b" in _usage_cache
+        QuotaService.invalidate_usage_cache()
+        assert _usage_cache == {}

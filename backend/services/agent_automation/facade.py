@@ -114,8 +114,36 @@ def _enrich_task_with_agent_name(task: Dict[str, Any], tenant_id: str, user_id: 
     return _enrich_tasks_with_agent_names([task], tenant_id, user_id)[0]
 
 
+def _paginate(items: List[Dict[str, Any]], page: int, page_size: int) -> Dict[str, Any]:
+    start = (page - 1) * page_size
+    return {
+        "items": items[start:start + page_size],
+        "total": len(items),
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 def _parse_trigger(raw: Dict[str, Any] | ScheduleTrigger) -> ScheduleTrigger:
     return raw if isinstance(raw, ScheduleTrigger) else ScheduleTrigger.model_validate(raw)
+
+
+def _proposal_response_from_row(proposal: Dict[str, Any]) -> Dict[str, Any]:
+    proposed_task = proposal.get("proposed_task") or {}
+    public_task = {
+        key: value for key, value in proposed_task.items() if not key.startswith("_")
+    }
+    resolution = proposal.get("capability_resolution") or {}
+    return {
+        "proposal_id": proposal["proposal_id"],
+        "conversation_id": proposal["conversation_id"],
+        "confidence": 1.0,
+        "executable": bool(resolution.get("executable", True)),
+        "task": public_task,
+        "capability_resolution": resolution,
+        "intent_analysis_source": "existing",
+        "task_content_source": "existing",
+    }
 
 
 def _validate_schedule_policy(trigger: ScheduleTrigger) -> None:
@@ -149,13 +177,26 @@ class AgentAutomationFacade:
         request: AutomationProposalCreateRequest,
         tenant_id: str,
         user_id: str,
+        *,
+        persist_conversation_exchange: bool = True,
+        source_message_id: Optional[int] = None,
+        force_llm: bool = False,
     ) -> Dict[str, Any]:
+        if source_message_id is not None:
+            existing = agent_automation_db.get_proposal_by_source_message(
+                source_message_id,
+                tenant_id,
+                user_id,
+            )
+            if existing:
+                return _proposal_response_from_row(existing)
         try:
             parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
                 tenant_id=tenant_id,
                 message=request.message,
                 timezone=request.timezone,
                 model_id=request.model_id,
+                force_llm=force_llm,
             ))
         except ValueError as exc:
             raise AutomationScheduleInvalidError(
@@ -176,7 +217,12 @@ class AgentAutomationFacade:
         if parsed.get("schedule_error") or not parsed.get("schedule_trigger"):
             raise AutomationScheduleInvalidError(
                 parsed.get("schedule_error") or "Unable to determine the automation schedule.",
-                details={"input": request.message, "timezone": request.timezone},
+                details={
+                    "input": request.message,
+                    "timezone": request.timezone,
+                    "missing_fields": parsed.get("missing_fields") or [],
+                    "clarification_question": parsed.get("clarification_question"),
+                },
             )
         _validate_schedule_policy(parsed["schedule_trigger"])
 
@@ -236,16 +282,29 @@ class AgentAutomationFacade:
             "tool_params": request.tool_params,
             "schedule_trigger": parsed["schedule_trigger"].model_dump(mode="json"),
         }
-        proposal = agent_automation_db.create_proposal({
+        proposal_values = {
             "tenant_id": tenant_id,
             "user_id": user_id,
             "conversation_id": conversation_id,
             "agent_id": request.agent_id,
+            "source_message_id": source_message_id,
             "proposed_task": proposed_task,
             "capability_resolution": resolution.model_dump(mode="json"),
             "status": AutomationProposalStatus.PENDING.value,
             "expires_at": _utcnow() + timedelta(hours=24),
-        }, user_id)
+        }
+        try:
+            proposal = agent_automation_db.create_proposal(proposal_values, user_id)
+        except IntegrityError:
+            if source_message_id is not None:
+                existing = agent_automation_db.get_proposal_by_source_message(
+                    source_message_id,
+                    tenant_id,
+                    user_id,
+                )
+                if existing:
+                    return _proposal_response_from_row(existing)
+            raise
         response = {
             "proposal_id": proposal["proposal_id"],
             "conversation_id": conversation_id,
@@ -256,27 +315,28 @@ class AgentAutomationFacade:
             "intent_analysis_source": parsed.get("analysis_source", "rule"),
             "task_content_source": parsed.get("task_content_source", "rule"),
         }
-        try:
-            message_refs = automation_conversation_adapter.append_proposal_exchange(
-                conversation_id,
-                request.message,
-                response,
-                user_id,
-                tenant_id,
-            )
-            stored_task = {
-                **proposed_task,
-                "_conversation_message_id": message_refs["message_id"],
-                "_conversation_unit_id": message_refs["unit_id"],
-            }
-            agent_automation_db.update_proposal_task(
-                proposal["proposal_id"],
-                tenant_id,
-                user_id,
-                stored_task,
-            )
-        except Exception as exc:
-            logger.warning("Failed to persist automation proposal card: %s", exc, exc_info=True)
+        if persist_conversation_exchange:
+            try:
+                message_refs = automation_conversation_adapter.append_proposal_exchange(
+                    conversation_id,
+                    request.message,
+                    response,
+                    user_id,
+                    tenant_id,
+                )
+                stored_task = {
+                    **proposed_task,
+                    "_conversation_message_id": message_refs["message_id"],
+                    "_conversation_unit_id": message_refs["unit_id"],
+                }
+                agent_automation_db.update_proposal_task(
+                    proposal["proposal_id"],
+                    tenant_id,
+                    user_id,
+                    stored_task,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist automation proposal card: %s", exc, exc_info=True)
         return response
 
     async def update_proposal(
@@ -556,13 +616,30 @@ class AgentAutomationFacade:
         status: Optional[str] = None,
         search: Optional[str] = None,
         agent_name: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
         if status == "ENABLED":
             db_status = "ACTIVE"
         elif status == "RUNNING":
             db_status = None
         else:
             db_status = status
+        needs_post_filter = status in {"ENABLED", "RUNNING"} or bool((agent_name or "").strip())
+        if page is not None and page_size is not None and not needs_post_filter:
+            paged = agent_automation_db.list_tasks_paginated(
+                tenant_id,
+                user_id,
+                db_status,
+                search,
+                page,
+                page_size,
+            )
+            return {
+                **paged,
+                "items": _enrich_tasks_with_agent_names(paged["items"], tenant_id, user_id),
+            }
+
         tasks = agent_automation_db.list_tasks(tenant_id, user_id, db_status, search)
         enriched_tasks = _enrich_tasks_with_agent_names(tasks, tenant_id, user_id)
         if status == "ENABLED":
@@ -575,6 +652,8 @@ class AgentAutomationFacade:
                 task for task in enriched_tasks
                 if normalized_agent_name in str(task.get("agent_name") or "").casefold()
             ]
+        if page is not None and page_size is not None:
+            return _paginate(enriched_tasks, page, page_size)
         return enriched_tasks
 
     def get_task(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
@@ -686,8 +765,17 @@ class AgentAutomationFacade:
             raise AutomationNotFoundError("Automation task not found.")
         return True
 
-    def list_runs(self, task_id: int, tenant_id: str, user_id: str) -> List[Dict[str, Any]]:
+    def list_runs(
+        self,
+        task_id: int,
+        tenant_id: str,
+        user_id: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
         self.get_task(task_id, tenant_id, user_id)
+        if page is not None and page_size is not None:
+            return agent_automation_db.list_runs_paginated(task_id, tenant_id, user_id, page, page_size)
         return agent_automation_db.list_runs(task_id, tenant_id, user_id)
 
     async def run_task_now(self, task_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:

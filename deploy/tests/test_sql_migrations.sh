@@ -96,6 +96,20 @@ fi
 if grep -Eq '^COMMENT ON COLUMN nexent\.model_record_t\.is_deep_thinking ' "$DEPLOY_ROOT/sql/init.sql"; then
   fail "init SQL should not comment model_record_t.is_deep_thinking because a later migration drops that column"
 fi
+if grep -Eq '^[[:space:]]*"step_index"[[:space:]]' "$DEPLOY_ROOT/sql/init.sql"; then
+  fail "init SQL should leave conversation_message_unit_t.step_index to its migration"
+fi
+if grep -Eq '^COMMENT ON COLUMN .*conversation_message_unit_t.*step_index' "$DEPLOY_ROOT/sql/init.sql"; then
+  fail "init SQL should not comment conversation_message_unit_t.step_index before its migration adds the column"
+fi
+
+HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3_merged_migrations.sql"
+assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "ADD COLUMN IF NOT EXISTS step_index INTEGER DEFAULT NULL;" \
+  "history projection migration should add conversation_message_unit_t.step_index"
+assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "COMMENT ON COLUMN nexent.conversation_message_unit_t.step_index" \
+  "history projection migration should comment conversation_message_unit_t.step_index"
 
 PLAN_FILE="$TMP_DIR/plan.sql"
 PATH="$BIN_DIR:$PATH" \

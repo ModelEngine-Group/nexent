@@ -42,8 +42,17 @@ class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
     password: str = Field(..., min_length=8)
-    invite_code: Optional[str] = None
+    invite_code: str = Field(..., min_length=1)
     auto_login: Optional[bool] = True  # Whether to return session after signup
+
+    @field_validator("invite_code")
+    @classmethod
+    def validate_invite_code(cls, value: str) -> str:
+        """Reject empty or whitespace-only invitation codes."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Invitation code is required")
+        return normalized
 
 
 class UserSignInRequest(BaseModel):
@@ -69,7 +78,7 @@ class UserUpdateRequest(BaseModel):
     """User update request model"""
     username: Optional[str] = Field(None, min_length=1, max_length=50)
     email: Optional[EmailStr] = None
-    role: Optional[str] = Field(None, pattern="^(SUPER_ADMIN|ADMIN|DEV|USER)$")
+    role: Optional[str] = Field(None, pattern="^(ADMIN|DEV|USER)$")
 
 
 class UserDeleteRequest(BaseModel):
@@ -339,11 +348,38 @@ class AgentRequest(BaseModel):
         default=False,
         description="Whether to enable the planning phase before execution"
     )
+    enable_automation_tool: bool = Field(
+        default=True,
+        description="Whether the root interactive Agent may create scheduled-task proposals",
+    )
+
+
+class NL2AgentRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Agent turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
+
+
+class NL2SkillRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Skill conversation turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    draft_snapshot: Optional[Dict[str, Any]] = None
+    complexity: Literal["simple", "complicated"] = "complicated"
+    language: Optional[Literal["zh", "en"]] = None
+    model_id: Optional[int] = Field(
+        default=None,
+        description="Optional model ID override. When not specified, uses the tenant's configured LLM model.",
+    )
 
 
 class MessageUnit(BaseModel):
     type: str
     content: str
+    tool_call_id: Optional[str] = None
 
 
 class MessageRequest(BaseModel):
@@ -368,7 +404,6 @@ class ConversationResponse(BaseModel):
 class RenameRequest(BaseModel):
     conversation_id: int
     name: str
-
 
 # Pydantic models for API
 class TaskRequest(BaseModel):
@@ -561,7 +596,21 @@ class GenerateTitleRequest(BaseModel):
     question: str
 
 
+class AgentSkillInstanceRequest(BaseModel):
+    """Skill selection and per-agent configuration saved with an agent."""
+
+    skill_id: int
+    enabled: bool = True
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
 # used in agent/search agent/update for save agent info
+class RelatedAgentInfo(BaseModel):
+    """Related agent info with pinned version."""
+    agent_id: int
+    version_no: Optional[int] = None
+
+
 class AgentInfoRequest(BaseModel):
     agent_id: Optional[int] = None
     name: Optional[str] = None
@@ -584,7 +633,9 @@ class AgentInfoRequest(BaseModel):
     prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
+    skill_instances: Optional[List[AgentSkillInstanceRequest]] = None
     related_agent_ids: Optional[List[int]] = None
+    related_agents: Optional[List[RelatedAgentInfo]] = None  # Related agents with pinned versions
     related_external_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
@@ -787,11 +838,18 @@ class SkillRepositoryListingCreateRequest(BaseModel):
     downloads: int = Field(0, ge=0, description="Initial download count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+    content: Optional[str] = Field(
+        None, description="Listing note when submitting for review"
+    )
 
 
 class SkillRepositoryInstallRequest(BaseModel):
     """Request body for installing a repository skill into current tenant."""
-    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+    target_name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Target skill name in current tenant",
+    )
 
 
 class SkillRepositoryListingDetailResponse(BaseModel):
@@ -1393,14 +1451,6 @@ class SkillResponse(BaseModel):
     update_time: Optional[str] = None
 
 
-class SkillCreateInteractiveRequest(BaseModel):
-    """Request model for interactive skill creation via LLM agent."""
-    user_request: str
-    existing_skill: Optional[Dict[str, Any]] = None
-    complexity: Optional[str] = "simple"
-    language: Optional[str] = "zh"
-
-
 # ---------------------------------------------------------------------------
 # MCP Management Data Models
 # ---------------------------------------------------------------------------
@@ -1422,6 +1472,7 @@ class AddMcpServiceRequest(BaseModel):
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
+    container_port: Optional[int] = Field(None, ge=1, le=65535, description="Container host port")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
@@ -1429,6 +1480,7 @@ class AddMcpServiceRequest(BaseModel):
     group_ids: Optional[str] = Field(None, description="Comma-separated group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    skip_health_check: Optional[bool] = Field(None, description="Skip MCP protocol health check (for community URL fallback)")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
@@ -1466,7 +1518,7 @@ class UpdateMcpServiceRequest(BaseModel):
     mcp_id: int = Field(..., gt=0, description="MCP record ID")
     name: str = Field(..., min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
-    server_url: str = Field(..., min_length=1, description="New MCP server URL")
+    server_url: Optional[str] = Field(None, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
@@ -1477,7 +1529,7 @@ class UpdateMcpServiceRequest(BaseModel):
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
 
-    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
+    @field_validator("name", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1581,6 +1633,15 @@ class CommunityReviewListRequest(CommunityListRequest):
 class CommunityReviewActionRequest(BaseModel):
     """Request model for approving or rejecting an MCP community submission"""
     review_id: int = Field(..., gt=0, description="Review record ID")
+    content: Optional[str] = Field(None, description="Review opinion on approve/reject")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _strip_review_content(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class CommunityPublishRequest(BaseModel):
@@ -1595,8 +1656,9 @@ class CommunityPublishRequest(BaseModel):
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    content: Optional[str] = Field(None, description="Listing note on submit")
 
-    @field_validator("name", "description", "mcp_server", mode="before")
+    @field_validator("name", "description", "mcp_server", "content", mode="before")
     @classmethod
     def _strip_publish_optional_text(cls, value: Any):
         if isinstance(value, str):
@@ -1621,8 +1683,9 @@ class CommunityUpdateRequest(BaseModel):
     group_ids: Optional[List[int]] = Field(None, description="Group IDs that can access this MCP")
     ingroup_permission: Optional[str] = Field(None, description="Permission level: EDIT, READ_ONLY, PRIVATE")
     shared_fields: Optional[Dict[str, Any]] = Field(None, description="JSON object of field-level sharing flags")
+    content: Optional[str] = Field(None, description="Listing note on resubmit")
 
-    @field_validator("name", "description", "mcp_server", "transport_type", mode="before")
+    @field_validator("name", "description", "mcp_server", "transport_type", "content", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1634,6 +1697,15 @@ class CommunityUpdateRequest(BaseModel):
 class CommunityStatusUpdateRequest(BaseModel):
     """Request model for changing MCP market listing status (PATCH)."""
     status: str = Field(..., description="New status: shared / rejected / not_shared / pending_review")
+    content: Optional[str] = Field(None, description="Review opinion or resubmit listing note")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _strip_status_content(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 
 class DeleteMcpServiceRequest(BaseModel):

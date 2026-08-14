@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGlobalConfigStore } from "@/stores/global";
 
 /**
  * Homepage main content component
@@ -26,7 +27,7 @@ export default function Homepage() {
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
-
+  const { config } = useGlobalConfigStore();
   /**
  * Navigate to a route with permission pre-check
  * Returns true if navigation is allowed, false if permission is denied
@@ -52,6 +53,8 @@ export default function Homepage() {
   const navigateToChat = () => navigateWithPermissionCheck("/chat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
   const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
+  const canShowQuickAction = (route: string) =>
+    !isAuthenticated || canAccessRoute(route);
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -86,35 +89,45 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <Row gutter={[16, 16]} justify="center">
-            <Col xs={24} sm={24} md={8}>
-              <Button type="primary" size="large"
-                onClick={navigateToChat}
-              >
-                <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.startChat")}
-              </Button>
-            </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button type="primary" size="large"
-                onClick={navigateToAgent}
-              >
-                <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.quickConfig")}
-              </Button>
-            </Col>
-            <Col xs={24} sm={24} md={8}>
-              <Button type="primary" size="large"
-                onClick={navigateToRepository}
-              >
-                <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("sidebar.agentRepository")}
-              </Button>
-            </Col>
+            {canShowQuickAction("/chat") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button type="primary" size="large" onClick={navigateToChat}>
+                    <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("page.startChat")}
+                  </Button>
+                </div>
+              </Col>
+            )}
+            {canShowQuickAction("/agents") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button type="primary" size="large" onClick={navigateToAgent}>
+                    <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("page.quickConfig")}
+                  </Button>
+                </div>
+              </Col>
+            )}
+            {canShowQuickAction("/agent-space") && (
+              <Col xs={24} sm={24} md={8}>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    onClick={navigateToRepository}
+                  >
+                    <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                    {t("sidebar.agentRepository")}
+                  </Button>
+                </div>
+              </Col>
+            )}
           </Row>
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
-        {!isSpeedMode && (
+        {!isSpeedMode && config.aboutConfig === 'open' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

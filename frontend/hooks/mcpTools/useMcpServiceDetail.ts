@@ -19,6 +19,7 @@ import { McpHealthStatus, McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import type { McpTool } from "@/types/agentConfig";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 
 interface ToolsModalState {
   visible: boolean;
@@ -69,6 +70,7 @@ export function useMcpServiceDetail({
 
   const invalidateServices = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
+    queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
   }, [queryClient]);
 
   const updateTagsToServer = useCallback(async (newTags: string[]) => {
@@ -80,7 +82,7 @@ export function useMcpServiceDetail({
         mcp_id: currentDraft.mcpId,
         name: currentDraft.name.trim(),
         description: currentDraft.description,
-        server_url: currentDraft.serverUrl.trim(),
+        server_url: (currentDraft.serverUrl || "").trim(),
         tags: newTags,
         version: currentDraft.version,
         authorization_token: (currentDraft.authorizationToken ?? "").trim() || undefined,
@@ -191,23 +193,23 @@ export function useMcpServiceDetail({
     );
   }, [draft, selectedService]);
 
-  const save = useCallback(async (draftOverride?: McpServiceItem | null) => {
+  const save = useCallback(async (draftOverride?: McpServiceItem | null): Promise<boolean> => {
     const currentDraft = draftOverride ?? draftRef.current;
     const currentSelected = selectedService;
-    if (!currentDraft || !currentSelected) return;
+    if (!currentDraft || !currentSelected) return false;
     const nextName = currentDraft.name.trim();
-    const nextUrl = currentDraft.serverUrl.trim();
+    const nextUrl = (currentDraft.serverUrl || "").trim();
     const nextToken = (currentDraft.authorizationToken ?? "").trim();
     const nextTags = currentDraft.tags;
 
     if (!nextName) {
       message.warning(t("mcpTools.add.validate.nameRequired"));
-      return;
+      return false;
     }
     if (currentDraft.transportType === McpTransportType.URL && !isHttpUrl(nextUrl)
     ) {
       message.warning(t("mcpTools.add.validate.httpUrlFormat"));
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -228,9 +230,17 @@ export function useMcpServiceDetail({
       });
       message.success(t("mcpTools.service.saveSuccess"));
       invalidateServices();
+      return true;
     } catch (error) {
       log.error("[useMcpServiceDetail] Failed to save service", { error });
-      message.error(t("mcpTools.service.saveFailed"));
+      // Show user-friendly message for known errors
+      const msg = error instanceof Error ? error.message : "";
+      if (msg.includes("MCP name already exists")) {
+        message.error(t("mcpTools.add.error.nameExists"));
+      } else {
+        message.error(msg || t("mcpTools.service.saveFailed"));
+      }
+      return false;
     } finally {
       setSaving(false);
     }

@@ -13,7 +13,7 @@
 - **应用配置**：设置应用图标、名称和描述
 - **模型配置**：接入大语言模型、向量化模型和视觉语言模型
 
-详细内容请参考：[模型管理](./model-management)
+详细内容请参考：[模型管理](./agent-development/model-configuration.md)
 
 ### 第二步：知识库配置
 
@@ -23,7 +23,7 @@
 - **上传文件**：支持多种文件格式
 - **生成总结**：为知识库生成内容总结
 
-详细内容请参考：[知识库](./knowledge-base)
+详细内容请参考：[知识库](./agent-development/knowledge-configuration.md)
 
 ### 第三步：智能体开发
 
@@ -38,7 +38,7 @@
 - **发布智能体**：已发布的智能体将在选中的用户组内可见，并列于智能体空间与开始问答选择框中
 - **版本管理**：跟踪智能体的迭代历史，支持查看、回滚至历史版本及创建新版本
 
-详细内容请参考：[智能体开发](./agent-development)
+详细内容请参考：[智能体开发](./agent-development.md)
 
 ## 🎯 使用建议
 
@@ -51,8 +51,8 @@
 
 完成快速配置后，您可以：
 
-1. 进入 **[智能体空间](./agent-space)** 查看和管理所有智能体
+1. 进入 **[智能体空间](./agent-development.md.md)** 查看和管理所有智能体
 2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
-3. 配置 **[记忆管理](./memory-management)** 以提升智能体的记忆能力
+3. 配置 **[记忆管理](./agent-development/memory-configuration.md.md)** 以提升智能体的记忆能力
 
-如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq.md)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

@@ -12,7 +12,10 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+)
 from consts.exceptions import PlatformQuotaConflictError, QuotaExceededError
 from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
@@ -24,6 +27,10 @@ from database.tenant_config_db import (
     insert_config,
     update_config_by_tenant_config_id,
 )
+from services.knowledge_storage_service import (
+    get_committed_bytes_by_kb,
+    get_tenant_committed_source_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +41,16 @@ KEY_WARNING_THRESHOLD_PCT = "KB_QUOTA_WARNING_THRESHOLD_PCT"
 KEY_CRITICAL_THRESHOLD_PCT = "KB_QUOTA_CRITICAL_THRESHOLD_PCT"
 KEY_HARD_LIMIT_EDITABLE = "KB_QUOTA_HARD_LIMIT_EDITABLE"
 KEY_PLATFORM_CAPACITY_BYTES = "PLATFORM_KB_STORAGE_CAPACITY_BYTES"
+
+
+def _is_displayable_tenant_id(
+    tenant_id: Optional[str],
+    asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
+) -> bool:
+    """Return whether a tenant id should appear in platform quota views."""
+    normalized_tenant_id = (tenant_id or "").strip()
+    return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, asset_owner_tenant_id}
+
 
 # Constants
 GB = 1024 * 1024 * 1024
@@ -81,6 +98,14 @@ class QuotaService:
     def __init__(self, tenant_id: str, user_id: Optional[str] = None):
         self.tenant_id = tenant_id
         self.user_id = user_id or "system"
+
+    @staticmethod
+    def invalidate_usage_cache(tenant_id: Optional[str] = None) -> None:
+        """Invalidate cached tenant usage used by tenant and platform quota views."""
+        if tenant_id is None:
+            _usage_cache.clear()
+            return
+        _usage_cache.pop(tenant_id, None)
 
     # ── Tenant Config Helpers ──────────────────────────────────────────
 
@@ -402,8 +427,19 @@ class QuotaService:
             doc_count = base_info.get("doc_count", 0) or 0
             stats_lookup[name] = {"bytes": store_bytes, "file_count": doc_count}
 
+        knowledge_ids = [
+            kb.get("knowledge_id")
+            for kb in kb_list
+            if kb.get("knowledge_id") is not None
+        ]
+        minio_bytes_by_kb = get_committed_bytes_by_kb(
+            tenant_id=self.tenant_id,
+            knowledge_ids=knowledge_ids,
+        )
+        tenant_minio_bytes = get_tenant_committed_source_bytes(self.tenant_id)
+
         breakdown = []
-        total_bytes = 0
+        total_es_bytes = 0
         total_files = 0
 
         for kb in kb_list:
@@ -413,10 +449,12 @@ class QuotaService:
             soft_quota_bytes = kb.get("quota_limit_bytes")
 
             kb_stats = stats_lookup.get(index_name, {})
-            kb_actual_bytes = kb_stats.get("bytes", 0)
+            kb_es_bytes = kb_stats.get("bytes", 0)
+            kb_minio_bytes = minio_bytes_by_kb.get(int(kb_id), 0) if kb_id is not None else 0
+            kb_actual_bytes = kb_es_bytes + kb_minio_bytes
             kb_file_count = kb_stats.get("file_count", 0)
 
-            total_bytes += kb_actual_bytes
+            total_es_bytes += kb_es_bytes
             total_files += kb_file_count
 
             # Compute KB-level warning
@@ -441,6 +479,11 @@ class QuotaService:
                 "file_count": kb_file_count,
                 "kb_warning_level": kb_warning_level,
             })
+
+        # Tenant totals include all active tenant ledger rows, including rows whose
+        # KB is no longer returned in the active KB list. This avoids silently
+        # dropping retained source objects from the tenant hard-limit calculation.
+        total_bytes = total_es_bytes + tenant_minio_bytes
 
         # Compute tenant-level warning
         hard_limit_bytes = hard_limit_info.get("hard_limit_bytes")
@@ -630,7 +673,7 @@ class QuotaService:
         tenant_ids = [
             tenant_id
             for tenant_id in get_all_tenant_ids()
-            if tenant_id != asset_owner_tenant_id
+            if _is_displayable_tenant_id(tenant_id, asset_owner_tenant_id)
         ]
         hard_limits: Dict[str, Optional[int]] = {}
         total_allocated_bytes = 0

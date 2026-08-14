@@ -27,14 +27,11 @@ import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
-  configuredEmbeddingModels?: Array<{
-    displayName: string;
-    type: string;
-  }>;
   isLoading?: boolean;
   syncLoading?: boolean;
   onClick: (kb: KnowledgeBase) => void;
@@ -59,7 +56,6 @@ interface KnowledgeBaseListProps {
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
-  configuredEmbeddingModels = [],
   isLoading = false,
   syncLoading = false,
   onClick,
@@ -130,30 +126,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
   };
 
-  const configuredModelTypesByName = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    configuredEmbeddingModels.forEach((model) => {
-      const modelName = (model.displayName || "").trim();
-      const modelType = (model.type || "").trim().toLowerCase();
-      if (!modelName) return;
-      if (modelType !== "embedding" && modelType !== "multi_embedding") return;
-      if (!map.has(modelName)) {
-        map.set(modelName, new Set<string>());
-      }
-      map.get(modelName)!.add(modelType);
-    });
-    return map;
-  }, [configuredEmbeddingModels]);
-
-  const isModelMismatch = (kb: KnowledgeBase) => {
-    if (kb.embeddingModel === "unknown") return false;
-    if (kb.source === "datamate") return false;
-    const modelTypes = configuredModelTypesByName.get(
-      (kb.embeddingModel || "").trim()
-    );
-    return !modelTypes;
-  };
-
   const hasIndexedDocumentsAndChunks = (kb: KnowledgeBase) => {
     return (kb.documentCount || 0) > 0 && (kb.chunkCount || 0) > 0;
   };
@@ -214,21 +186,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const handleModelsChange = (values: string[]) => {
     if (onModelFilterChange) onModelFilterChange(values);
     else setSelectedModels(values);
-  };
-
-  // Format date function, only keep date part
-  const formatDate = (dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
-    } catch (e) {
-      return String(dateValue ?? ""); // If parsing fails, return original string
-    }
   };
 
   // Helper to safely extract timestamp for sorting
@@ -589,7 +546,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                             >
                               {t("knowledgeBase.tag.createdAt", {
-                                date: formatDate(kb.createdAt),
+                                date: formatDateOrFallback(kb.createdAt),
                               })}
                             </span>
 
@@ -616,13 +573,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 multimodal
                               </span>
                             )}
-                            {isModelMismatch(kb) && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
-                              >
-                                {t("knowledgeBase.tag.modelMismatch")}
-                              </span>
-                            )}
+
+                            {/* Model mismatch is shown in the knowledge-base detail header only. */}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">

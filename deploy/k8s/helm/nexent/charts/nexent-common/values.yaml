@@ -92,7 +92,7 @@ config:
     supabaseUrl: "http://nexent-supabase-kong:8000"
     apiExternalUrl: "http://nexent-supabase-kong:8000"
     disableSignup: "false"
-    jwtExpiry: "3600"
+    jwtExpiry: "7200"
     debugJwtExpireSeconds: "0"
     enableEmailSignup: "true"
     enableEmailAutoconfirm: "true"

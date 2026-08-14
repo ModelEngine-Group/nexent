@@ -1,6 +1,8 @@
-import { API_ENDPOINTS } from "./api";
+import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
+import { withBasePath } from "@/lib/basePath";
+import log from "@/lib/logger";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -26,12 +28,14 @@ export function extractObjectNameFromUrl(url: string): string | null {
       const parts = withoutProtocol.split("/").filter(Boolean);
 
       // Find attachments in path
-      const attachmentsIndex = parts.indexOf("attachments");
-      if (attachmentsIndex >= 0) {
-        return parts.slice(attachmentsIndex).join("/");
+      const storageIndex = parts.findIndex(
+        (part) => part === "attachments" || part === "knowledge_base",
+      );
+      if (storageIndex >= 0) {
+        return parts.slice(storageIndex).join("/");
       }
 
-      // If no attachments found but has bucket and path, return the path after bucket
+      // If no storage prefix was found but has bucket and path, return the path after bucket
       if (parts.length > 1) {
         return parts.slice(1).join("/");
       }
@@ -53,12 +57,18 @@ export function extractObjectNameFromUrl(url: string): string | null {
         return null;
       }
 
-      const attachmentsIndex = normalized.indexOf("attachments/");
-      if (attachmentsIndex >= 0) {
-        return normalized.slice(attachmentsIndex);
+      const storageIndex = ["attachments/", "knowledge_base/"].reduce(
+        (firstIndex, prefix) => {
+          const index = normalized.indexOf(prefix);
+          return index >= 0 && (firstIndex < 0 || index < firstIndex) ? index : firstIndex;
+        },
+        -1,
+      );
+      if (storageIndex >= 0) {
+        return normalized.slice(storageIndex);
       }
 
-      // If there is no "attachments" segment but this is a plain path,
+      // If there is no storage prefix but this is a plain path,
       // treat the whole normalized path as object_name
       return normalized;
     }
@@ -67,11 +77,13 @@ export function extractObjectNameFromUrl(url: string): string | null {
     if (url.startsWith("/")) {
       // Remove leading slash and extract path after /nexent/ or /attachments/
       const parts = url.split("/").filter(Boolean);
-      const attachmentsIndex = parts.indexOf("attachments");
-      if (attachmentsIndex >= 0) {
-        return parts.slice(attachmentsIndex).join("/");
+      const storageIndex = parts.findIndex(
+        (part) => part === "attachments" || part === "knowledge_base",
+      );
+      if (storageIndex >= 0) {
+        return parts.slice(storageIndex).join("/");
       }
-      // If no attachments found, try to find the last part
+      // If no storage prefix was found, try to find the last part
       if (parts.length > 0) {
         return parts.join("/");
       }
@@ -82,13 +94,14 @@ export function extractObjectNameFromUrl(url: string): string | null {
     const pathname = urlObj.pathname;
     const parts = pathname.split("/").filter(Boolean);
 
-    // Find attachments in path
-    const attachmentsIndex = parts.indexOf("attachments");
-    if (attachmentsIndex >= 0) {
-      return parts.slice(attachmentsIndex).join("/");
+    const storageIndex = parts.findIndex(
+      (part) => part === "attachments" || part === "knowledge_base",
+    );
+    if (storageIndex >= 0) {
+      return parts.slice(storageIndex).join("/");
     }
 
-    // If no attachments found, return the last meaningful part
+    // If no storage prefix was found, return the last meaningful part
     if (parts.length > 0) {
       return parts.join("/");
     }
@@ -99,16 +112,73 @@ export function extractObjectNameFromUrl(url: string): string | null {
   }
 }
 
+export function isLocalStorageObjectUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  if (url.startsWith("s3://")) return true;
+
+  const objectName = extractObjectNameFromUrl(url);
+  return Boolean(objectName && /(^|\/)(knowledge_base|attachments)\//.test(objectName));
+}
+
+export function getLocalFilePreviewUrl(
+  url: string | undefined,
+  filename?: string,
+  objectName?: string,
+): string | undefined {
+  const resolvedObjectName = objectName || (url ? extractObjectNameFromUrl(url) : null);
+  if (!resolvedObjectName || !isLocalStorageObjectUrl(url ?? resolvedObjectName)) {
+    return undefined;
+  }
+
+  return API_ENDPOINTS.storage.preview(resolvedObjectName, filename);
+}
+
 /**
  * Convert image URL to backend API URL
  * @param url Original image URL (can be MinIO URL or local path)
  * @returns Backend API URL for the image
  */
+export async function fetchImageBlob(url: string): Promise<Blob> {
+  const apiUrl = convertImageUrlToApiUrl(url);
+  log.info(`[fetchImageBlob] input=${url}, apiUrl=${apiUrl}`);
+  const response = await fetch(apiUrl);
+  log.info(`[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch image: ${response.status} ${response.statusText}`
+    );
+  }
+  const contentType = response.headers.get("content-type") || "";
+  // Image service returns JSON error body with HTTP 200 on proxy failure;
+  // must detect this or FileReader will try to render JSON as an image.
+  if (contentType.startsWith("application/json")) {
+    const body = await response.text();
+    log.error(`[fetchImageBlob] got JSON instead of image: ${body.slice(0, 300)}`);
+    try {
+      const json = JSON.parse(body);
+      throw new Error(
+        json?.error || `Image proxy returned JSON: ${body.slice(0, 200)}`
+      );
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        throw new Error(`Image proxy returned non-image JSON: ${body.slice(0, 200)}`);
+      }
+      throw e;
+    }
+  }
+  return response.blob();
+}
+
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
 
-  if (url.startsWith("/api/share/")) {
+  if (url.startsWith(`${API_BASE_URL}/share/`)) {
     return url;
+  }
+
+  // Backend share URLs do not include the frontend base path.
+  if (url.startsWith("/api/share/")) {
+    return withBasePath(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues
@@ -119,8 +189,8 @@ export function convertImageUrlToApiUrl(url: string): string {
   // For external http/https URLs, use proxy to avoid CORS issues
   if (
     isHttpUrl &&
-    !url.includes("/api/file/download/") &&
-    !url.includes("/api/image")
+    !url.includes(`${API_BASE_URL}/file/download/`) &&
+    !url.includes(`${API_BASE_URL}/image`)
   ) {
     return API_ENDPOINTS.proxy.image(url);
   }
@@ -262,30 +332,46 @@ export const storageService = {
    */
   async downloadFile(objectName: string, filename?: string): Promise<void> {
     try {
-      // Use direct link download for better performance
-      // Browser will handle the download stream directly
-      // Pass filename to backend so it can set the correct Content-Disposition header
       const downloadUrl = API_ENDPOINTS.storage.file(
         objectName,
         "stream",
         filename
       );
-
-      // Create download link and trigger download
-      // Using direct link allows browser to handle download stream efficiently
       const link = document.createElement("a");
       link.href = downloadUrl;
-      // Set download attribute as fallback (browser will use Content-Disposition header if available)
       link.download = filename || objectName.split("/").pop() || "download";
       link.style.display = "none";
       document.body.appendChild(link);
-
-      // Trigger download
       link.click();
-
-      // Clean up after a short delay to ensure download starts
       setTimeout(() => {
         document.body.removeChild(link);
+      }, 100);
+    } catch (error) {
+      throw new Error(
+        `Failed to download file: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  },
+
+  async downloadFileWithAuth(objectName: string, filename?: string): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.storage.file(objectName, "stream", filename)
+      );
+      if (!response.ok) {
+        throw new Error(`File download failed: ${response.status}`);
+      }
+
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename || objectName.split("/").pop() || "download";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
       }, 100);
     } catch (error) {
       throw new Error(

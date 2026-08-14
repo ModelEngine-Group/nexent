@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, Select, Tabs } from "antd";
-import { BlocksIcon, Info, Search, Settings, Tag } from "lucide-react";
+import { BlocksIcon, Eye, Pencil, Search, Settings, Tag } from "lucide-react";
 
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import log from "@/lib/logger";
 import { fetchSkillInstances } from "@/services/agentConfigService";
@@ -14,11 +13,17 @@ import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../SkillDetailModal";
 import SkillConfigModal from "./SkillConfigModal";
 import SkillRowContent from "./SkillRowContent";
+import {
+  hasMissingRequiredSkillConfig,
+  requiresSkillConfigOnSelection,
+  withEffectiveSkillConfig,
+} from "./utils";
 
 interface SelectSkillsDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onOpenManageTags: () => void;
+  readonly onEditSkill?: (skill: Skill) => void;
   readonly isCreatingMode?: boolean;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
@@ -44,18 +49,16 @@ const matchesSkillFilters = (
   return matchesText && matchesTags;
 };
 
-const skillTagManagementEnabled = false;
-
 export default function SelectSkillsDialog({
   open,
   onClose,
   onOpenManageTags,
+  onEditSkill,
   isCreatingMode,
   currentAgentId,
   isReadOnly,
 }: SelectSkillsDialogProps) {
   const { t } = useTranslation("common");
-  const { user } = useAuthorizationContext();
   const { groupedSkills, availableSkills } = useSkillList({ enabled: open });
   const [search, setSearch] = useState("");
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -108,13 +111,32 @@ export default function SelectSkillsDialog({
     () => filteredGroups.find((group) => group.key === activeTab),
     [activeTab, filteredGroups]
   );
+  const selectableSkillsInActiveGroup = useMemo(
+    () =>
+      activeGroup?.skills.filter((skill) => {
+        const configuredSkill = withEffectiveSkillConfig(
+          skill,
+          skillInstanceMap[skill.skill_id]
+        );
+        return (
+          !requiresSkillConfigOnSelection(configuredSkill) &&
+          !hasMissingRequiredSkillConfig(configuredSkill)
+        );
+      }) || [],
+    [activeGroup, skillInstanceMap]
+  );
+  const allVisibleSkillsSelected = useMemo(
+    () =>
+      selectableSkillsInActiveGroup.length > 0 &&
+      selectableSkillsInActiveGroup.every((skill) =>
+        selectedSkillIds.has(Number(skill.skill_id))
+      ),
+    [selectableSkillsInActiveGroup, selectedSkillIds]
+  );
 
   const skillMetadataModifiable = useMemo(
-    () =>
-      availableSkills.some((skill: Skill) =>
-        Boolean(user?.id && skill.created_by === user.id)
-      ),
-    [availableSkills, user?.id]
+    () => availableSkills.some((skill: Skill) => skill.permission === "EDIT"),
+    [availableSkills]
   );
 
   useEffect(() => {
@@ -184,34 +206,79 @@ export default function SelectSkillsDialog({
         return;
       }
 
-      updateSkills([
-        ...currentSkills,
-        {
-          ...skill,
-          config_values:
-            skillInstanceMap[skill.skill_id] || skill.config_values || {},
-        },
-      ]);
+      const configuredSkill = withEffectiveSkillConfig(
+        skill,
+        skillInstanceMap[skill.skill_id]
+      );
+
+      if (
+        requiresSkillConfigOnSelection(configuredSkill) ||
+        hasMissingRequiredSkillConfig(configuredSkill)
+      ) {
+        setConfigSkill(configuredSkill);
+        return;
+      }
+
+      updateSkills([...currentSkills, configuredSkill]);
     },
     [isReadOnly, skillInstanceMap, updateSkills]
   );
 
-  const openSkillInfo = useCallback(
+  const selectAllVisibleSkills = useCallback(() => {
+    if (isReadOnly || selectableSkillsInActiveGroup.length === 0) return;
+
+    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkillIds = new Set(
+      currentSkills.map((skill) => Number(skill.skill_id))
+    );
+    const skillsToAdd = selectableSkillsInActiveGroup
+      .filter((skill) => !currentSkillIds.has(Number(skill.skill_id)))
+      .map((skill) =>
+        withEffectiveSkillConfig(skill, skillInstanceMap[skill.skill_id])
+      );
+
+    if (skillsToAdd.length > 0) {
+      updateSkills([...currentSkills, ...skillsToAdd]);
+    }
+  }, [
+    isReadOnly,
+    selectableSkillsInActiveGroup,
+    skillInstanceMap,
+    updateSkills,
+  ]);
+
+  const deselectAllVisibleSkills = useCallback(() => {
+    if (isReadOnly || !activeGroup) return;
+
+    const visibleSkillIds = new Set(
+      activeGroup.skills.map((skill) => Number(skill.skill_id))
+    );
+    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    updateSkills(
+      currentSkills.filter(
+        (skill) => !visibleSkillIds.has(Number(skill.skill_id))
+      )
+    );
+  }, [activeGroup, isReadOnly, updateSkills]);
+
+  const openSkillAction = useCallback(
     (skill: Skill, event: React.MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
+      if (!isReadOnly && skill.permission === "EDIT" && onEditSkill) {
+        onEditSkill(skill);
+        return;
+      }
       setDetailSkill(skill);
     },
-    []
+    [isReadOnly, onEditSkill]
   );
 
   const openSkillConfig = useCallback(
     (skill: Skill, event: React.MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
-      setConfigSkill({
-        ...skill,
-        config_values:
-          skillInstanceMap[skill.skill_id] || skill.config_values || {},
-      });
+      setConfigSkill(
+        withEffectiveSkillConfig(skill, skillInstanceMap[skill.skill_id])
+      );
     },
     [skillInstanceMap]
   );
@@ -262,7 +329,7 @@ export default function SelectSkillsDialog({
             type="text"
             size="small"
             icon={<Tag size={13} />}
-            disabled={!skillTagManagementEnabled || !skillMetadataModifiable}
+            disabled={!skillMetadataModifiable}
             onClick={onOpenManageTags}
             className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
           >
@@ -311,12 +378,28 @@ export default function SelectSkillsDialog({
             allTags.length === 0 ? t("skillPool.noTagsAssigned") : undefined
           }
         />
+        <Button
+          onClick={
+            allVisibleSkillsSelected
+              ? deselectAllVisibleSkills
+              : selectAllVisibleSkills
+          }
+          disabled={isReadOnly || selectableSkillsInActiveGroup.length === 0}
+        >
+          {t(
+            allVisibleSkillsSelected ? "common.deselectAll" : "common.selectAll"
+          )}
+        </Button>
       </div>
       <div className="flex h-[55vh] min-h-[340px] max-h-[55vh] gap-3 overflow-hidden">
         {activeGroup ? (
           <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
             {activeGroup.skills.map((skill) => {
               const isSelected = selectedSkillIds.has(Number(skill.skill_id));
+              const canEditSkill =
+                !isReadOnly &&
+                skill.permission === "EDIT" &&
+                Boolean(onEditSkill);
               const hasConfigurableParams =
                 Array.isArray(skill.config_schemas) &&
                 skill.config_schemas.length > 0;
@@ -348,17 +431,29 @@ export default function SelectSkillsDialog({
                       isReadOnly={Boolean(isReadOnly)}
                     />
                     <div
-                      className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="flex shrink-0 items-center gap-1"
                       data-testid={`skill-picker-actions-${skill.skill_id}`}
                     >
                       <button
                         type="button"
-                        onClick={(event) => openSkillInfo(skill, event)}
-                        aria-label={t("skillPool.viewDetails")}
-                        title={t("skillPool.viewDetails")}
+                        onClick={(event) => openSkillAction(skill, event)}
+                        aria-label={t(
+                          canEditSkill
+                            ? "skillManagement.edit.title"
+                            : "skillPool.viewDetails"
+                        )}
+                        title={t(
+                          canEditSkill
+                            ? "skillManagement.edit.title"
+                            : "skillPool.viewDetails"
+                        )}
                         className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
                       >
-                        <Info className="size-4" />
+                        {canEditSkill ? (
+                          <Pencil className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
                       </button>
                       {hasConfigurableParams ? (
                         <button

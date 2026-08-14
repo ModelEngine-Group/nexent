@@ -3,6 +3,65 @@
 from typing import Any, Dict, List, Optional
 
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.agents.context_input import ContextInput
+
+from consts.const import MESSAGE_ROLE
+
+
+def build_authorized_context_input(
+    agent_run_info,
+    historical_context=None,
+) -> ContextInput:
+    """Freeze configured context and authorized history into one item snapshot."""
+    if historical_context is None:
+        fallback_turns = []
+        pending_user = None
+        for index, entry in enumerate(agent_run_info.history or ()):
+            if entry.role == MESSAGE_ROLE["USER"]:
+                pending_user = (index, entry)
+            elif (
+                entry.role == MESSAGE_ROLE["ASSISTANT"]
+                and pending_user is not None
+            ):
+                user_index, user_entry = pending_user
+                fallback_turns.append({
+                    "user_message": user_entry.content,
+                    "assistant_final_answer": entry.content,
+                    "attachments": [],
+                    "user_message_id": -(user_index + 1),
+                    "assistant_message_id": -(index + 1),
+                })
+                pending_user = None
+        historical_context = {"conversation_turns": fallback_turns}
+
+    history_items = []
+    summary = historical_context.get("history_summary")
+    if summary:
+        history_items.append(ContextItemInput(
+            id=f"history_summary:{summary['unit_id']}",
+            type="history_summary",
+            content=summary,
+            source=("conversation_history",),
+        ))
+    for order, turn in enumerate(
+        historical_context.get("conversation_turns", ())
+    ):
+        history_items.append(ContextItemInput(
+            id=(
+                f"conversation_turn:{turn['user_message_id']}:"
+                f"{turn['assistant_message_id']}"
+            ),
+            type="conversation_turn",
+            content=turn,
+            source=("conversation_history",),
+            metadata={"layout_order": order},
+        ))
+    return ContextInput(
+        items=(
+            tuple(agent_run_info.agent_config.context_items or ())
+            + tuple(history_items)
+        ),
+    )
 
 # =============================================================================
 # SECTION 1: Long-text format functions (expanded from Jinja2 templates)
@@ -31,9 +90,9 @@ def _build_header_text(
     current time is injected on the user-message side instead (see CoreAgent.run).
     """
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}"
+        content = f"### Basic Information\nYou are {app_name}, {app_description}\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
 
     return content
 
@@ -278,6 +337,36 @@ def _build_code_norms_text(
     return content
 
 
+def _build_restricted_python_execution_policy_text(
+    authorized_imports: List[str],
+    language: str = "zh",
+) -> str:
+    """Build pre-execution guidance for the restricted local interpreter."""
+    normalized_imports = sorted({
+        name.strip()
+        for name in authorized_imports
+        if isinstance(name, str) and name.strip()
+    })
+    imports = ", ".join(f"`{name}`" for name in normalized_imports)
+    if language == "zh":
+        lines = ["### Python 代码执行边界"]
+        lines.append("当前代码执行器是受限解释器。写入可执行代码前，必须遵守以下规则：")
+        lines.append(f"1. 仅允许导入这些模块：{imports}。")
+        lines.append("2. 不要导入、安装、探测或依次尝试列表以外的库；`requests`、`urllib`、`pandas`、`numpy`、`openpyxl` 等均不可假定可用。")
+        lines.append("3. Python 包不是工具。只能调用“可用资源”中实际列出的工具或助手；不要把未定义的包函数（例如 `requests.get`）传给 `parallel_executor`。")
+        lines.append("4. 受限 Python 没有通用网络、Shell 或包安装能力。若任务需要这些能力而可用资源中没有对应工具，应直接如实说明限制。")
+        lines.append("5. 本规则优先于“不要放弃”等一般性要求：能力不存在时不要继续猜测替代库或重复失败的执行。")
+    else:
+        lines = ["### Python Code Execution Boundary"]
+        lines.append("The current code executor is a restricted interpreter. Before writing executable code, follow these rules:")
+        lines.append(f"1. You may import only: {imports}.")
+        lines.append("2. Do not import, install, probe, or try alternate libraries outside this list; do not assume `requests`, `urllib`, `pandas`, `numpy`, or `openpyxl` is available.")
+        lines.append("3. A Python package is not a tool. Call only tools or agents actually listed in Available Resources; never pass an undefined package function such as `requests.get` to `parallel_executor`.")
+        lines.append("4. Restricted Python has no general network, shell, or package-install capability. If a task needs one and no listed tool provides it, state the limitation directly.")
+        lines.append("5. This policy takes precedence over general instructions to keep trying: do not guess alternate libraries or repeat failed executions when the capability is unavailable.")
+    return "\n".join(lines)
+
+
 def _build_footer_text(
     few_shots: str,
     language: str = "zh",
@@ -336,8 +425,12 @@ def build_context_inputs(
     external_a2a_agents: Optional[Dict[str, Any]] = None,
     memory_list: Optional[List[Any]] = None,
     memory_search_query: Optional[str] = None,
+    memory_tool_policy: Optional[str] = None,
+    automation_tool_policy: Optional[str] = None,
+    long_term_memory_prompt: Optional[str] = None,
     knowledge_base_summary: Optional[str] = None,
     kb_ids: Optional[List[str]] = None,
+    restricted_python_authorized_imports: Optional[List[str]] = None,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
@@ -369,6 +462,20 @@ def build_context_inputs(
         add_system("header", _build_header_text(
             app_name, app_description, user_id, language
         ), 100, "tenant")
+
+    if memory_tool_policy:
+        add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
+
+    if automation_tool_policy:
+        add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
+
+    if include_memory and long_term_memory_prompt:
+        add_system(
+            "long_term_memory",
+            long_term_memory_prompt,
+            90,
+            "retrieved",
+        )
 
     if include_memory and memory_list:
         for index, memory in enumerate(memory_list):
@@ -478,6 +585,16 @@ def build_context_inputs(
         ))
     if constraint:
         add_system("constraint", _build_constraint_text(constraint, language), 30)
+    if restricted_python_authorized_imports:
+        add_system(
+            "restricted_python_execution",
+            _build_restricted_python_execution_policy_text(
+                restricted_python_authorized_imports,
+                language,
+            ),
+            25,
+            "platform",
+        )
     add_system("code_norms", _build_code_norms_text(language, is_manager), 20, "platform")
     if few_shots:
         add_system("footer", _build_footer_text(few_shots, language), 10)

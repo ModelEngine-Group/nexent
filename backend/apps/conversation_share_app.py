@@ -28,6 +28,7 @@ class CreateConversationShareRequest(BaseModel):
     mode: str = "selected"
     selected_user_message_ids: Optional[List[int]] = None
     expire_time: Optional[datetime] = None
+    render_version: str = "legacy"
 
 
 def _parse_range_header(range_header: Optional[str], total_size: int) -> Optional[Tuple[int, int]]:
@@ -74,6 +75,7 @@ async def create_conversation_share_endpoint(
             mode=request.mode,
             selected_user_message_ids=request.selected_user_message_ids,
             expire_time=request.expire_time,
+            render_version=request.render_version,
         )
         result["url"] = f"/share/{result['share_id']}"
         return {"code": 0, "message": "success", "data": result}

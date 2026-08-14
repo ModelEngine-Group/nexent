@@ -126,6 +126,10 @@ ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/..
 assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
 assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
 
+LANGFUSE_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,monitoring --monitoring-provider langfuse --image-source general --target docker --dry-run)"
+assert_contains "$LANGFUSE_OFFLINE_DRY_RUN" "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" "offline Langfuse package should use the Quay MinIO image"
+assert_not_contains "$LANGFUSE_OFFLINE_DRY_RUN" "docker.io/minio/minio" "offline Langfuse package should not use the Docker Hub MinIO image"
+
 if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
   echo "FAIL: unknown image build option should fail"
   exit 1
@@ -670,6 +674,8 @@ assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'quay.io/minio/minio:${LANGFUSE_MINIO_VERSION:-RELEASE.2023-12-20T01-00-02Z}' "docker compose Langfuse should use the Quay MinIO image"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "repository: quay.io/minio/minio" "k8s Langfuse should use the Quay MinIO image"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
@@ -735,6 +741,12 @@ assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_versio
 assert_eq "v-test" "$(deployment_read_version "v-test")" "explicit deployment version should win"
 
 assert_success "password validation should accept frontend-compatible passwords" deployment_validate_password "Nexent123"
+if NEXENT_DEPLOYMENT_OFFLINE=true NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_should_prompt_root_dir; then
+  echo "FAIL: default offline deployment should not prompt for ROOT_DIR"
+  exit 1
+fi
+assert_success "offline --config should prompt for ROOT_DIR on first deployment" env NEXENT_DEPLOYMENT_OFFLINE=true NEXENT_DEPLOY_CONFIG_MODE=tui bash -c 'source deploy/common/common.sh; deployment_should_prompt_root_dir'
+assert_success "online deployment should retain the ROOT_DIR prompt" env NEXENT_DEPLOYMENT_OFFLINE=false NEXENT_DEPLOY_CONFIG_MODE=defaults bash -c 'source deploy/common/common.sh; deployment_should_prompt_root_dir'
 if deployment_validate_password "nexent123"; then
   echo "FAIL: password without uppercase letters should be rejected"
   exit 1
@@ -752,6 +764,51 @@ if deployment_validate_password "Nex123"; then
   exit 1
 fi
 
+unset NEXENT_SUPER_ADMIN_PASSWORD NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
+assert_eq "Nexent@123" "$(deployment_super_admin_password)" "super admin password should use the built-in default"
+NEXENT_SUPER_ADMIN_PASSWORD="CustomAdmin123"
+assert_eq "CustomAdmin123" "$(deployment_super_admin_password)" "configured super admin password should override the default"
+unset NEXENT_SUPER_ADMIN_PASSWORD
+
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: online deployments should not prompt for the super admin password"
+  exit 1
+fi
+NEXENT_DEPLOY_CONFIG_MODE="tui"
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: online --config deployments should not prompt for the super admin password"
+  exit 1
+fi
+NEXENT_DEPLOYMENT_OFFLINE="true"
+assert_success "offline --config deployments should prompt for the super admin password" deployment_should_prompt_super_admin_password
+NEXENT_DEPLOY_CONFIG_MODE="defaults"
+if deployment_should_prompt_super_admin_password; then
+  echo "FAIL: offline defaults deployments should not prompt for the super admin password"
+  exit 1
+fi
+unset NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
+
+DOCKER_SUPER_ADMIN_BLOCK="$(awk '/^create_default_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../docker/deploy.sh")"
+K8S_SUPER_ADMIN_BLOCK="$(awk '/^create_supabase_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "Docker super admin creation should use the shared prompt policy"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "Docker super admin creation should use the shared default password"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$display_password"' "Docker super admin creation should pass the password display policy"
+assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'if bash "$script_path"; then' "Docker should reuse the normal creation path for an existing super admin"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "K8s super admin creation should use the shared prompt policy"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "K8s super admin creation should use the shared default password"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: ${password}"' "K8s should display non-interactive super admin passwords"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: [hidden]"' "K8s should hide interactively entered super admin passwords"
+DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
+K8S_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: ${password}"' "Docker should display non-interactive super admin passwords"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: [hidden]"' "Docker should hide interactively entered super admin passwords"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "Docker should wait for the complete user_tenant_t schema contract"
+assert_contains "$K8S_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "K8s should wait for the complete user_tenant_t schema contract"
+assert_contains "$DOCKER_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "Docker super admin writes should stop on SQL errors"
+assert_contains "$K8S_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "K8s super admin writes should stop on SQL errors"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" 'Error: Super admin user creation failed. Deployment aborted.' "K8s deployment should stop when super admin initialization fails"
+assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
+
 ENV_TEST_ROOT="$TMP_DIR/env-root"
 mkdir -p "$ENV_TEST_ROOT/docker" "$ENV_TEST_ROOT/deploy/env"
 printf 'FROM_ROOT_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env"
@@ -760,6 +817,7 @@ printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"
 printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env.example"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_DOCKER=yes" "deploy/env/.env should migrate from docker/.env first"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_EXAMPLE=yes" "docker/.env migration should merge current template variables"
 if grep -q "FROM_ROOT_SHOULD_NOT_COPY" "$ENV_TEST_ROOT/deploy/env/.env"; then
   echo "FAIL: deploy/env/.env should not migrate from root .env"
   exit 1
@@ -780,6 +838,84 @@ fi
 printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "ROOT_ONLY=yes" "existing deploy/env/.env should not be overwritten"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_EXAMPLE=yes" "existing deploy/env/.env should receive variables missing from the current template"
+
+MERGE_ENV_ROOT="$TMP_DIR/merge-env-root"
+mkdir -p "$MERGE_ENV_ROOT/docker" "$MERGE_ENV_ROOT/deploy/env"
+cat > "$MERGE_ENV_ROOT/deploy/env/.env" <<'EOF'
+# Existing comment remains in place
+PASSWORD=custom
+OLD_OPTION=true
+# COMMENTED_ONLY=old-commented-value
+EMPTY_VALUE=
+DUPLICATE=first
+DUPLICATE=second
+export EXPORTED_VALUE=custom
+  LEADING_SPACE_VALUE=custom
+SPECIAL_EXISTING='literal $EXISTING # value \\ path'
+EOF
+MERGE_SIDE_EFFECT="$TMP_DIR/merge-side-effect"
+{
+  printf '%s\n' 'PASSWORD=default'
+  printf '%s\n' 'EMPTY_VALUE=template-default'
+  printf '%s\n' 'DUPLICATE=template-default'
+  printf '%s\n' 'EXPORTED_VALUE=template-default'
+  printf '%s\n' 'LEADING_SPACE_VALUE=template-default'
+  printf '%s\n' 'COMMENTED_ONLY=active-default'
+  printf '%s\n' 'NEW_FIRST="  literal $NEW_VALUE # hash \\ path  "'
+  printf '%s\n' "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\""
+  printf '%s\n' 'NEW_DUPLICATE=first-default'
+  printf '%s\n' 'NEW_DUPLICATE=second-default'
+  printf '%s\n' 'NEW_EMPTY='
+} > "$MERGE_ENV_ROOT/deploy/env/.env.example"
+cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/original.env"
+MERGE_OUTPUT="$(deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker")"
+original_size="$(wc -c < "$MERGE_ENV_ROOT/original.env" | tr -d '[:space:]')"
+head -c "$original_size" "$MERGE_ENV_ROOT/deploy/env/.env" > "$MERGE_ENV_ROOT/preserved-prefix.env"
+cmp -s "$MERGE_ENV_ROOT/original.env" "$MERGE_ENV_ROOT/preserved-prefix.env" || {
+  echo "FAIL: .env merge should preserve all existing bytes before appended variables"
+  exit 1
+}
+MERGED_ENV_CONTENT="$(cat "$MERGE_ENV_ROOT/deploy/env/.env")"
+assert_not_contains "$MERGED_ENV_CONTENT" "PASSWORD=default" "existing values should override template defaults"
+assert_not_contains "$MERGED_ENV_CONTENT" "EMPTY_VALUE=template-default" "an existing empty value should count as configured"
+assert_not_contains "$MERGED_ENV_CONTENT" "DUPLICATE=template-default" "existing duplicate assignments should prevent template defaults from being appended"
+assert_not_contains "$MERGED_ENV_CONTENT" "EXPORTED_VALUE=template-default" "export assignments should count as existing variables"
+assert_not_contains "$MERGED_ENV_CONTENT" "LEADING_SPACE_VALUE=template-default" "indented active assignments should count as existing variables"
+assert_contains "$MERGED_ENV_CONTENT" "# COMMENTED_ONLY=old-commented-value" "commented assignments should remain unchanged"
+assert_contains "$MERGED_ENV_CONTENT" "COMMENTED_ONLY=active-default" "commented assignments should not count as existing variables"
+assert_contains "$MERGED_ENV_CONTENT" '# Added automatically from the current deploy/env/.env.example' "new variables should follow the English merge separator"
+assert_contains "$MERGED_ENV_CONTENT" 'NEW_FIRST="  literal $NEW_VALUE # hash \\ path  "' "special characters should remain unexpanded and byte-preserved"
+assert_contains "$MERGED_ENV_CONTENT" "NEW_COMMAND=\"\$(touch $MERGE_SIDE_EFFECT)\"" "command substitutions should be appended without execution"
+assert_contains "$MERGED_ENV_CONTENT" $'NEW_DUPLICATE=first-default\nNEW_DUPLICATE=second-default\nNEW_EMPTY=' "new template assignments should retain template order and duplicates"
+assert_not_contains "$MERGE_OUTPUT" "custom" "merge logs should not expose environment values"
+[ ! -e "$MERGE_SIDE_EFFECT" ] || {
+  echo "FAIL: .env merge should never execute template values"
+  exit 1
+}
+
+cp "$MERGE_ENV_ROOT/deploy/env/.env" "$MERGE_ENV_ROOT/merged-snapshot.env"
+deployment_ensure_root_env "$MERGE_ENV_ROOT" "$MERGE_ENV_ROOT/docker" >/dev/null
+cmp -s "$MERGE_ENV_ROOT/merged-snapshot.env" "$MERGE_ENV_ROOT/deploy/env/.env" || {
+  echo "FAIL: .env merge should not rewrite files when no variables are missing"
+  exit 1
+}
+
+EMPTY_ENV_ROOT="$TMP_DIR/empty-env-root"
+mkdir -p "$EMPTY_ENV_ROOT/deploy/env"
+: > "$EMPTY_ENV_ROOT/deploy/env/.env"
+printf 'ADDED_TO_EMPTY=yes\n' > "$EMPTY_ENV_ROOT/deploy/env/.env.example"
+deployment_ensure_root_env "$EMPTY_ENV_ROOT" "$EMPTY_ENV_ROOT/docker" >/dev/null
+assert_eq $'# Added automatically from the current deploy/env/.env.example\nADDED_TO_EMPTY=yes' "$(cat "$EMPTY_ENV_ROOT/deploy/env/.env")" "an empty .env should receive current template variables"
+
+MISSING_TEMPLATE_ROOT="$TMP_DIR/missing-template-root"
+mkdir -p "$MISSING_TEMPLATE_ROOT/deploy/env"
+printf 'EXISTING_VALUE=preserved\n' > "$MISSING_TEMPLATE_ROOT/deploy/env/.env"
+if deployment_ensure_root_env "$MISSING_TEMPLATE_ROOT" "$MISSING_TEMPLATE_ROOT/docker" >"$TMP_DIR/missing-template.log" 2>&1; then
+  echo "FAIL: environment initialization should require deploy/env/.env.example"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/missing-template.log")" "deploy/env/.env.example" "missing template errors should identify the required file"
 
 deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" 'ROOT_ONLY="updated"' "env updater should update deploy env values"

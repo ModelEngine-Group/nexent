@@ -59,12 +59,28 @@ export const resolveDeploymentType = (item: {
   deploymentType?: McpDeploymentType;
   configJson?: Record<string, unknown>;
   serverUrl?: string;
+  source?: McpSource;
 }): McpDeploymentType => {
   if (item.deploymentType) return item.deploymentType;
   if (item.configJson && typeof item.configJson === "object" && "openapi" in item.configJson) {
     return McpDeploymentType.API;
   }
-  if (item.transportType === McpTransportType.CONTAINER || item.configJson) {
+  // An empty configJson (e.g. `{}`) is not a container configuration, so it
+  // should not force a container classification (same rule as the backend).
+  const hasContainerConfig =
+    !!item.configJson &&
+    typeof item.configJson === "object" &&
+    Object.keys(item.configJson).length > 0;
+  if (item.transportType === McpTransportType.CONTAINER || hasContainerConfig) {
+    // Local image uploads have container_id/container_port but no configJson.
+    // Community URL-fallback records have source=community and should stay as CONTAINER.
+    if (
+      item.transportType === McpTransportType.CONTAINER &&
+      !hasContainerConfig &&
+      item.source === McpSource.LOCAL
+    ) {
+      return McpDeploymentType.LOCAL_IMAGE;
+    }
     return McpDeploymentType.CONTAINER;
   }
   return McpDeploymentType.REMOTE_LINK;

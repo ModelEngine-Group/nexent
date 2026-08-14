@@ -1319,17 +1319,19 @@ apply() {
                 fi
             else
                 if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                    echo "警告：超级管理员创建失败，但部署将继续。"
+                    echo "错误：超级管理员创建失败，部署已终止。"
                 else
-                    echo "Warning: Super admin user creation failed, but continuing deployment."
+                    echo "Error: Super admin user creation failed. Deployment aborted."
                 fi
+                exit 1
             fi
         else
             if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                echo "警告：未找到 create-suadmin.sh：$CREATE_SUADMIN_SCRIPT"
+                echo "错误：未找到 create-suadmin.sh：$CREATE_SUADMIN_SCRIPT"
             else
-                echo "Warning: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
+                echo "Error: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
             fi
+            exit 1
         fi
     fi
 

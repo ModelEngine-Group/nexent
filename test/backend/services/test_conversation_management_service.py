@@ -214,6 +214,7 @@ from backend.services.conversation_management_service import (
         get_sources_service,
         generate_conversation_title_service,
         update_conversation_agent_id_service,
+        update_conversation_chat_mode_service,
         update_message_opinion_service,
         get_message_id_by_index_impl
     )
@@ -315,6 +316,7 @@ class TestConversationManagementService(unittest.TestCase):
             unit_content="print('hi')",
             user_id=self.user_id,
             unit_status="streaming",
+            invocation_id="subagent-invocation-1",
         )
         self.assertEqual(unit_id, 555)
         mock_create_message_unit.assert_called_once_with(
@@ -325,6 +327,8 @@ class TestConversationManagementService(unittest.TestCase):
             unit_content="print('hi')",
             user_id=self.user_id,
             unit_status="streaming",
+            tool_call_id=None,
+            invocation_id="subagent-invocation-1",
         )
 
     @patch('backend.services.conversation_management_service.create_source_image')
@@ -388,6 +392,74 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_strips_current_time_prefix(self, mock_save_message):
+        """When query has [Current time: ...] prefix, it should be stripped before persisting."""
+        mock_save_message.return_value = 1001
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="[Current time: 2026-01-01 20:00:00]\n\nWhat is the weather?",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "What is the weather?")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
+        """When query has no [Current time: ...] prefix, it should be persisted as-is."""
+        mock_save_message.return_value = 1002
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="What is machine learning?",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "What is machine learning?")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_empty_query(self, mock_save_message):
+        """When query is empty, it should be persisted as-is without errors."""
+        mock_save_message.return_value = 1003
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "")
+
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
+        """When query has [Current time: prefix but no closing bracket, persist as-is."""
+        mock_save_message.return_value = 1004
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="[Current time: no closing bracket here",
+            minio_files=[],
+            history=[]
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        mock_save_message.assert_called_once()
+        request_arg = mock_save_message.call_args[0][0]
+        self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
+
     @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
@@ -447,7 +519,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["title"], "New Chat")
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id, agent_id=None)
+            "New Chat", self.user_id, agent_id=None, chat_mode=None)
 
     @patch('backend.services.conversation_management_service.create_conversation')
     def test_create_new_conversation_with_agent_id(self, mock_create_conversation):
@@ -466,7 +538,24 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["agent_id"], 7)
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id, agent_id=7)
+            "New Chat", self.user_id, agent_id=7, chat_mode=None)
+
+    @patch('backend.services.conversation_management_service.create_conversation')
+    def test_create_new_conversation_with_chat_mode(self, mock_create_conversation):
+        mock_create_conversation.return_value = {
+            "conversation_id": 123,
+            "title": "New Chat",
+            "chat_mode": "planning",
+        }
+
+        result = create_new_conversation(
+            "New Chat", self.user_id, agent_id=7, chat_mode="planning"
+        )
+
+        self.assertEqual(result["chat_mode"], "planning")
+        mock_create_conversation.assert_called_once_with(
+            "New Chat", self.user_id, agent_id=7, chat_mode="planning"
+        )
 
     @patch('backend.services.conversation_management_service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_success(self, mock_update_conversation_agent_id):
@@ -506,6 +595,66 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(str(context.exception), "database down")
         mock_update_conversation_agent_id.assert_called_once_with(
             123, 7, self.user_id)
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_success(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.return_value = True
+
+        result = update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        self.assertTrue(result)
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_not_found(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.return_value = False
+
+        with self.assertRaises(Exception) as context:
+            update_conversation_chat_mode_service(123, "execution", self.user_id)
+
+        self.assertIn("Conversation 123 does not exist", str(context.exception))
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="execution",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_database_error(self, mock_update_conversation_chat_mode):
+        mock_update_conversation_chat_mode.side_effect = Exception("database down")
+
+        with self.assertRaises(Exception) as context:
+            update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        self.assertEqual(str(context.exception), "database down")
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    def test_update_conversation_chat_mode_service_propagates_value_error(
+        self, mock_update_conversation_chat_mode
+    ):
+        mock_update_conversation_chat_mode.side_effect = ValueError("invalid database value")
+
+        with self.assertRaisesRegex(ValueError, "invalid database value"):
+            update_conversation_chat_mode_service(123, "planning", self.user_id)
+
+        mock_update_conversation_chat_mode.assert_called_once_with(
+            conversation_id=123,
+            chat_mode="planning",
+            user_id=self.user_id,
+        )
+
+    def test_update_conversation_chat_mode_service_rejects_invalid_mode(self):
+        with self.assertRaisesRegex(ValueError, "Invalid chat_mode 'invalid'"):
+            update_conversation_chat_mode_service(123, "invalid", self.user_id)
 
     @patch('backend.services.conversation_management_service.get_conversation_list')
     def test_get_conversation_list_service(self, mock_get_conversation_list):
@@ -571,6 +720,7 @@ class TestConversationManagementService(unittest.TestCase):
             "message_records": [
                 {
                     "message_id": 1,
+                    "message_index": 0,
                     "role": "user",
                     "message_content": "What is AI?",
                     "minio_files": [],
@@ -578,6 +728,7 @@ class TestConversationManagementService(unittest.TestCase):
                 },
                 {
                     "message_id": 2,
+                    "message_index": 1,
                     "role": "assistant",
                     "message_content": "AI stands for Artificial Intelligence.",
                     "units": [],
@@ -602,9 +753,11 @@ class TestConversationManagementService(unittest.TestCase):
         user_message = result[0]["message"][0]
         self.assertEqual(user_message["role"], "user")
         self.assertEqual(user_message["message"], "What is AI?")
+        self.assertEqual(user_message["message_index"], 0)
 
         assistant_message = result[0]["message"][1]
         self.assertEqual(assistant_message["role"], "assistant")
+        self.assertEqual(assistant_message["message_index"], 1)
         # Contains final_answer unit
         self.assertEqual(len(assistant_message["message"]), 1)
         self.assertEqual(
@@ -659,7 +812,7 @@ class TestConversationManagementService(unittest.TestCase):
                 "units": [{
                     "unit_id": 1001, "unit_type": "history_summary",
                     "unit_content": summary_content, "unit_index": 2,
-                    "unit_status": "completed",
+                    "unit_status": "completed", "invocation_id": None,
                 }],
                 "opinion_flag": None,
             }],
@@ -673,7 +826,8 @@ class TestConversationManagementService(unittest.TestCase):
             if unit["type"] == "history_summary"]
         self.assertEqual(summary_units, [{
             "type": "history_summary", "content": summary_content,
-            "unit_index": 2, "unit_status": "completed",
+            "unit_index": 2, "unit_status": "completed", "tool_call_id": None,
+            "invocation_id": None,
         }])
 
     @patch('backend.services.conversation_management_service.get_conversation_history')

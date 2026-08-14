@@ -12,6 +12,7 @@ import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 // @ts-ignore
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
 import { resolveS3UrlToDataUrl } from "@/services/storageService";
@@ -23,6 +24,13 @@ import {
 } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
+import { DirectiveChip } from "../../app/[locale]/newchat/ui/directive-text";
+import {
+  escapeSkillDirectivesForMarkdown,
+  remarkSkillXmlDirectives,
+  skillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../../app/[locale]/newchat/ui/skill-directives";
 
 interface MarkdownRendererProps {
   content: string;
@@ -37,6 +45,16 @@ interface MarkdownRendererProps {
    * the original S3 URL is not directly accessible by the browser.
    */
   resolveS3Media?: boolean;
+  /**
+   * Verified image URLs delivered by the backend (for example through a
+   * PICTURE_WEB event). When present, markdown images are ignored because the
+   * verified images are rendered separately.
+   */
+  trustedImageUrls?: string[];
+  /** Render registered skill XML tags as assistant-ui directive chips. */
+  enableSkillDirectives?: boolean;
+  /** Navigate to the skill file referenced by a directive chip. */
+  onSkillDirectiveClick?: (path: string) => void;
 }
 
 export interface MarkdownHeading {
@@ -168,11 +186,12 @@ const extractFallbackMarkdownHeadings = (
   return headings;
 };
 
-const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[] => {
+const extractParsedMarkdownHeadings = (
+  content: string
+): ParsedMarkdownHeading[] => {
   try {
     const createId = createHeadingIdGenerator();
     const headings: ParsedMarkdownHeading[] = [];
-    const { unified } = require("unified") as { unified: () => any };
     const tree = unified()
       .use(remarkParse)
       .use(remarkGfm)
@@ -180,13 +199,18 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
       .parse(content);
 
     visit(tree, "heading", (node: any) => {
-      const rawText = normalizeMarkdownHeadingText(extractTextFromMarkdownNode(node));
+      const rawText = normalizeMarkdownHeadingText(
+        extractTextFromMarkdownNode(node)
+      );
       if (!rawText) {
         return;
       }
 
       headings.push({
-        offset: typeof node.position?.start?.offset === "number" ? node.position.start.offset : headings.length,
+        offset:
+          typeof node.position?.start?.offset === "number"
+            ? node.position.start.offset
+            : headings.length,
         id: createId(rawText),
         level: typeof node.depth === "number" ? node.depth : 1,
         text: rawText,
@@ -200,7 +224,11 @@ const extractParsedMarkdownHeadings = (content: string): ParsedMarkdownHeading[]
 };
 
 export const extractMarkdownHeadings = (content: string): MarkdownHeading[] => {
-  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({ id, level, text }));
+  return extractParsedMarkdownHeadings(content).map(({ id, level, text }) => ({
+    id,
+    level,
+    text,
+  }));
 };
 
 const getSessionCachedValue = (key: string): string | null => {
@@ -313,13 +341,13 @@ const usePrefetchedMediaSource = (
   const shouldPrefetch =
     Boolean(
       options?.enable &&
-        src &&
-        typeof src === "string" &&
-        !src.startsWith("blob:") &&
-        (src.startsWith("s3://") ||
-          src.startsWith("http://") ||
-          src.startsWith("https://") ||
-          src.startsWith("/"))
+      src &&
+      typeof src === "string" &&
+      !src.startsWith("blob:") &&
+      (src.startsWith("s3://") ||
+        src.startsWith("http://") ||
+        src.startsWith("https://") ||
+        src.startsWith("/"))
     ) || false;
 
   const [resolvedSrc, setResolvedSrc] = React.useState<string | null>(() => {
@@ -654,10 +682,17 @@ const HoverableText = ({
       const { x: mouseX, y: mouseY } = mousePositionRef.current;
 
       // Find any visible tooltip popups (antd uses role="tooltip")
-      const tooltipEls = Array.from(document.querySelectorAll('[role="tooltip"]')) as HTMLElement[];
+      const tooltipEls = Array.from(
+        document.querySelectorAll('[role="tooltip"]')
+      ) as HTMLElement[];
       const isMouseOverTooltip = tooltipEls.some((el) => {
         const rect = el.getBoundingClientRect();
-        return mouseX >= rect.left && mouseX <= rect.right && mouseY >= rect.top && mouseY <= rect.bottom;
+        return (
+          mouseX >= rect.left &&
+          mouseX <= rect.right &&
+          mouseY >= rect.top &&
+          mouseY <= rect.bottom
+        );
       });
 
       if (!linkElement && !isMouseOverTooltip) {
@@ -667,7 +702,12 @@ const HoverableText = ({
 
       const linkRect = linkElement?.getBoundingClientRect();
 
-      const isMouseOverLink = !!linkRect && mouseX >= linkRect.left && mouseX <= linkRect.right && mouseY >= linkRect.top && mouseY <= linkRect.bottom;
+      const isMouseOverLink =
+        !!linkRect &&
+        mouseX >= linkRect.left &&
+        mouseX <= linkRect.right &&
+        mouseY >= linkRect.top &&
+        mouseY <= linkRect.bottom;
 
       // Close tooltip if mouse is neither over tooltip nor link icon
       if (!isMouseOverTooltip && !isMouseOverLink) {
@@ -823,7 +863,7 @@ const HoverableText = ({
  */
 const convertLatexDelimiters = (content: string): string => {
   // Quick check: only process if LaTeX delimiters are present
-  if (!content.includes('\\(') && !content.includes('\\[')) {
+  if (!content.includes("\\(") && !content.includes("\\[")) {
     return content;
   }
 
@@ -846,9 +886,12 @@ const convertLatexDelimiters = (content: string): string => {
  */
 const convertCustomCodeTags = (content: string): string => {
   // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
-  content = content.replace(/<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g, (_match, language, code) => {
-    return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
-  });
+  content = content.replace(
+    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    (_match, language, code) => {
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    }
+  );
 
   // Step 2: Handle complete <code>...</code> blocks
   content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
@@ -857,9 +900,12 @@ const convertCustomCodeTags = (content: string): string => {
 
   // Step 3: Handle incomplete tags during streaming
   // <DISPLAY:language> without closing </DISPLAY> → ```language\n
-  content = content.replace(/<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g, (_match, language) => {
-    return `\`\`\`${language}\n`;
-  });
+  content = content.replace(
+    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    (_match, language) => {
+      return `\`\`\`${language}\n`;
+    }
+  );
 
   // <code> without closing </code> → ```python\n
   content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
@@ -876,51 +922,53 @@ interface VideoWithErrorHandlingProps {
   props?: React.VideoHTMLAttributes<HTMLVideoElement>;
 }
 
-const VideoWithErrorHandling: React.FC<VideoWithErrorHandlingProps> = React.memo(({ src, alt, props = {} }) => {
-  const { t } = useTranslation("common");
-  const [hasError, setHasError] = React.useState(false);
+const VideoWithErrorHandling: React.FC<VideoWithErrorHandlingProps> =
+  React.memo(
+    ({ src, alt, props = {} }) => {
+      const { t } = useTranslation("common");
+      const [hasError, setHasError] = React.useState(false);
 
-  if (hasError) {
-    return (
-      <div className="markdown-media-error">
-        <div className="markdown-media-error-message">
-          {t("chatStreamMessage.videoLinkUnavailable", {
-            defaultValue: "This video link is unavailable",
-          })}
-        </div>
-        {alt && (
-          <div className="markdown-media-error-caption">{alt}</div>
-        )}
-      </div>
-    );
-  }
+      if (hasError) {
+        return (
+          <div className="markdown-media-error">
+            <div className="markdown-media-error-message">
+              {t("chatStreamMessage.videoLinkUnavailable", {
+                defaultValue: "This video link is unavailable",
+              })}
+            </div>
+            {alt && <div className="markdown-media-error-caption">{alt}</div>}
+          </div>
+        );
+      }
 
-  return (
-    <figure className="markdown-video-wrapper">
-      <video
-        className="markdown-video"
-        controls
-        preload="metadata"
-        playsInline
-        src={src}
-        onError={() => setHasError(true)}
-        {...props}
-      >
-        {t("chatStreamMessage.videoNotSupported", {
-          defaultValue: "Sorry, your browser does not support embedded videos.",
-        })}
-      </video>
-      {alt ? (
-        <figcaption className="markdown-video-caption">{alt}</figcaption>
-      ) : null}
-    </figure>
+      return (
+        <figure className="markdown-video-wrapper">
+          <video
+            className="markdown-video"
+            controls
+            preload="metadata"
+            playsInline
+            src={src}
+            onError={() => setHasError(true)}
+            {...props}
+          >
+            {t("chatStreamMessage.videoNotSupported", {
+              defaultValue:
+                "Sorry, your browser does not support embedded videos.",
+            })}
+          </video>
+          {alt ? (
+            <figcaption className="markdown-video-caption">{alt}</figcaption>
+          ) : null}
+        </figure>
+      );
+    },
+    (prevProps, nextProps) => {
+      // Custom comparison function to prevent unnecessary re-renders
+      // Only compare src and alt, props object reference may change but content is the same
+      return prevProps.src === nextProps.src && prevProps.alt === nextProps.alt;
+    }
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
-  // Only compare src and alt, props object reference may change but content is the same
-  return prevProps.src === nextProps.src &&
-         prevProps.alt === nextProps.alt;
-});
 
 VideoWithErrorHandling.displayName = "VideoWithErrorHandling";
 
@@ -930,38 +978,39 @@ interface ImageWithErrorHandlingProps {
   alt?: string | null;
 }
 
-const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> = React.memo(({ src, alt }) => {
-  const { t } = useTranslation("common");
-  const [hasError, setHasError] = React.useState(false);
+const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> =
+  React.memo(
+    ({ src, alt }) => {
+      const { t } = useTranslation("common");
+      const [hasError, setHasError] = React.useState(false);
 
-  if (hasError) {
-    return (
-      <div className="markdown-media-error">
-        <div className="markdown-media-error-message">
-          {t("chatStreamMessage.imageLinkUnavailable", {
-            defaultValue: "This image link is unavailable",
-          })}
-        </div>
-        {alt && (
-          <div className="markdown-media-error-caption">{alt}</div>
-        )}
-      </div>
-    );
-  }
+      if (hasError) {
+        return (
+          <div className="markdown-media-error">
+            <div className="markdown-media-error-message">
+              {t("chatStreamMessage.imageLinkUnavailable", {
+                defaultValue: "This image link is unavailable",
+              })}
+            </div>
+            {alt && <div className="markdown-media-error-caption">{alt}</div>}
+          </div>
+        );
+      }
 
-  return (
-    <img
-      src={src}
-      alt={alt ?? undefined}
-      className="markdown-img"
-      onError={() => setHasError(true)}
-    />
+      return (
+        <img
+          src={src}
+          alt={alt ?? undefined}
+          className="markdown-img"
+          onError={() => setHasError(true)}
+        />
+      );
+    },
+    (prevProps, nextProps) => {
+      // Custom comparison function to prevent unnecessary re-renders
+      return prevProps.src === nextProps.src && prevProps.alt === nextProps.alt;
+    }
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
-  return prevProps.src === nextProps.src &&
-         prevProps.alt === nextProps.alt;
-});
 
 ImageWithErrorHandling.displayName = "ImageWithErrorHandling";
 
@@ -975,7 +1024,7 @@ export const CodeBlock: React.FC<{
 }> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
 
-const customStyle = {
+  const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
       ...oneLight['pre[class*="language-"]'],
@@ -1045,12 +1094,23 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   onCitationHover,
   enableMultimodal = true,
   resolveS3Media = false,
+  trustedImageUrls = [],
+  enableSkillDirectives = false,
+  onSkillDirectiveClick,
 }) => {
   const { t } = useTranslation("common");
 
   // Preprocess content: convert LaTeX delimiters and custom code tags
-  const processedContent = convertCustomCodeTags(convertLatexDelimiters(content));
-  const extractedHeadings = React.useMemo(() => extractParsedMarkdownHeadings(content), [content]);
+  const convertedContent = convertCustomCodeTags(
+    convertLatexDelimiters(content)
+  );
+  const processedContent = enableSkillDirectives
+    ? escapeSkillDirectivesForMarkdown(convertedContent)
+    : convertedContent;
+  const extractedHeadings = React.useMemo(
+    () => extractParsedMarkdownHeadings(content),
+    [content]
+  );
   let renderedHeadingIndex = 0;
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
@@ -1097,7 +1157,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       return renderMediaFallback(src, alt);
     }
 
-    return <VideoWithErrorHandling key={src} src={src} alt={alt} props={props} />;
+    return (
+      <VideoWithErrorHandling key={src} src={src} alt={alt} props={props} />
+    );
   };
 
   const ImageResolver: React.FC<{ src?: string; alt?: string | null }> = ({
@@ -1108,6 +1170,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       typeof src === "string" ? src : undefined,
       resolveS3Media
     );
+
+    if (trustedImageUrls.length > 0) {
+      return null;
+    }
 
     if (!enableMultimodal) {
       return renderMediaFallback(src, alt);
@@ -1121,7 +1187,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       return renderVideoElement({ src: resolvedSrc, alt });
     }
 
-    return <ImageWithErrorHandling key={resolvedSrc} src={resolvedSrc} alt={alt} />;
+    return (
+      <ImageWithErrorHandling key={resolvedSrc} src={resolvedSrc} alt={alt} />
+    );
   };
 
   // Modified processText function logic
@@ -1165,14 +1233,16 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             if (!enableMultimodal) {
               return renderCodeFallback(code, `mmd-placeholder-${index}`);
             }
-            return <Diagram key={`mmd-${index}`} code={code} className="my-4" />;
+            return (
+              <Diagram key={`mmd-${index}`} code={code} className="my-4" />
+            );
           }
           // Handle line breaks in text content
-          if (part.includes('\n')) {
-            return part.split('\n').map((line, lineIndex) => (
+          if (part.includes("\n")) {
+            return part.split("\n").map((line, lineIndex) => (
               <React.Fragment key={`${index}-${lineIndex}`}>
                 {line}
-                {lineIndex < part.split('\n').length - 1 && <br />}
+                {lineIndex < part.split("\n").length - 1 && <br />}
               </React.Fragment>
             ));
           }
@@ -1182,10 +1252,36 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
   };
 
+  const processTextWithDirectives = (text: string) => {
+    if (!enableSkillDirectives) return processText(text);
+    const segments = skillDirectiveFormatter.parse(text);
+    if (segments.length === 1 && segments[0]?.kind === "text") {
+      return processText(text);
+    }
+    return segments.map((segment, index) =>
+      segment.kind === "text" ? (
+        <React.Fragment key={`text-${index}`}>
+          {processText(segment.text)}
+        </React.Fragment>
+      ) : (
+        <DirectiveChip
+          key={`${segment.type}-${segment.id}-${index}`}
+          segment={segment}
+          iconMap={skillDirectiveIconMap}
+          onClick={
+            onSkillDirectiveClick
+              ? (clickedSegment) => onSkillDirectiveClick(clickedSegment.id)
+              : undefined
+          }
+        />
+      )
+    );
+  };
+
   // Create wrapper component to handle different types of child elements
   const TextWrapper = ({ children }: { children: any }) => {
     if (typeof children === "string") {
-      return processText(children);
+      return processTextWithDirectives(children);
     }
     if (Array.isArray(children)) {
       return (
@@ -1194,7 +1290,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             if (typeof child === "string") {
               return (
                 <React.Fragment key={index}>
-                  {processText(child)}
+                  {processTextWithDirectives(child)}
                 </React.Fragment>
               );
             }
@@ -1206,13 +1302,22 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     return children;
   };
 
-  const renderHeading = (level: 1 | 2 | 3 | 4 | 5 | 6, children: React.ReactNode, node?: any) => {
+  const renderHeading = (
+    level: 1 | 2 | 3 | 4 | 5 | 6,
+    children: React.ReactNode,
+    node?: any
+  ) => {
     const headingIndex = renderedHeadingIndex;
-    const headingText = normalizeMarkdownHeadingText(flattenTextContent(children));
-    const headingOffset = typeof node?.position?.start?.offset === "number"
-      ? node.position.start.offset
-      : extractedHeadings[headingIndex]?.offset ?? headingIndex;
-    const matchedHeading = extractedHeadings.find((heading) => heading.offset === headingOffset);
+    const headingText = normalizeMarkdownHeadingText(
+      flattenTextContent(children)
+    );
+    const headingOffset =
+      typeof node?.position?.start?.offset === "number"
+        ? node.position.start.offset
+        : (extractedHeadings[headingIndex]?.offset ?? headingIndex);
+    const matchedHeading = extractedHeadings.find(
+      (heading) => heading.offset === headingOffset
+    );
     const headingId = matchedHeading?.id ?? slugifyHeadingText(headingText);
     renderedHeadingIndex += 1;
     const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
@@ -1259,7 +1364,13 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       <div className={`markdown-body ${className || ""}`}>
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath] as any}
+            remarkPlugins={
+              [
+                remarkGfm,
+                remarkMath,
+                ...(enableSkillDirectives ? [remarkSkillXmlDirectives] : []),
+              ] as any
+            }
             rehypePlugins={
               [
                 rehypeUnwrapMedia,
@@ -1290,20 +1401,14 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 </p>
               ),
               // Horizontal rule
-              hr: () => (
-                <hr className="markdown-hr" />
-              ),
+              hr: () => <hr className="markdown-hr" />,
               // Ordered list
               ol: ({ children }: any) => (
-                <ol className="markdown-ol">
-                  {children}
-                </ol>
+                <ol className="markdown-ol">{children}</ol>
               ),
               // Unordered list
               ul: ({ children }: any) => (
-                <ul className="markdown-ul">
-                  {children}
-                </ul>
+                <ul className="markdown-ul">{children}</ul>
               ),
               // List item
               li: ({ children }: any) => (
@@ -1360,32 +1465,45 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                   const match = /language-([\w-]+)/.exec(className || "");
                   const raw = Array.isArray(children)
                     ? children.join("")
-                    : children ?? "";
+                    : (children ?? "");
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
-                  const isCodeBlock = node?.position?.start?.line !== node?.position?.end?.line;
+                  const isCodeBlock =
+                    node?.position?.start?.line !== node?.position?.end?.line;
 
                   if (match?.[1] && isCodeBlock) {
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
                         return renderCodeFallback(codeContent);
                       }
-                      return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
+                      return (
+                        <Diagram
+                          code={codeContent}
+                          className="my-4"
+                          showToggle={showDiagramToggle}
+                        />
+                      );
                     }
-                    return <CodeBlock codeContent={codeContent} language={match[1]} />;
+                    return (
+                      <CodeBlock
+                        codeContent={codeContent}
+                        language={match[1]}
+                      />
+                    );
                   }
                 } catch {
                   // Fall back to the default code renderer.
                 }
                 return (
-                  <code className={`markdown-code ${className || ""}`} {...props}>
-                    <TextWrapper>{children}</TextWrapper>
+                  <code
+                    className={`markdown-code ${className || ""}`}
+                    {...props}
+                  >
+                    {children}
                   </code>
                 );
               },
               // Image
-              img: ({ src, alt }: any) => (
-                <ImageResolver src={src} alt={alt} />
-              ),
+              img: ({ src, alt }: any) => <ImageResolver src={src} alt={alt} />,
               // Video
               video: ({ children, ...props }: any) => {
                 const directSrc = props?.src;

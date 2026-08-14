@@ -226,7 +226,7 @@ export default function PublishConfirmModal({
                   patch({ sharedFields: next });
                 }}
               />
-              共享
+              {t("mcpTools.detail.share")}
             </label>
           </div>
         ) : null}
@@ -260,7 +260,7 @@ export default function PublishConfirmModal({
                   patch({ sharedFields: next });
                 }}
               />
-              共享
+              {t("mcpTools.detail.share")}
             </label>
           </div>
         ) : null}

@@ -1,18 +1,26 @@
 """LLM call orchestration for summary generation with retry and error handling."""
 
-import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 from smolagents.models import ChatMessage, MessageRole
 
 from ..summary_cache import CompressionCallRecord
-from .budget import _is_context_length_error, format_summary_output
+from .budget import _is_context_length_error
 from .config import ContextManagerConfig
 
 
 logger = logging.getLogger("agent_context.llm_summary")
+
+
+def _strip_code_fences(text: str) -> Optional[str]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:markdown|md)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    return cleaned or None
 
 
 @dataclass
@@ -86,17 +94,18 @@ class LLMSummary:
         else:
             system_prompt = self.config.summary_system_prompt
 
-        schema_desc = json.dumps(
-            self.config.summary_json_schema, ensure_ascii=False, indent=2
+        sections_desc = "\n\n".join(
+            f"## {key.replace('_', ' ').title()}\n{desc}"
+            for key, desc in self.config.summary_json_schema.items()
         )
         if prompt_type == "incremental":
             user_prompt = (
-                f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                f"Update the summary keeping these sections:\n{sections_desc}\n\n"
                 f"{text}"
             )
         else:
             user_prompt = (
-                f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
+                f"Produce a structured summary with these sections:\n{sections_desc}\n\n"
                 f"Conversation content to summarize:\n{text}"
             )
         messages = [
@@ -117,7 +126,7 @@ class LLMSummary:
         if not isinstance(raw_output, str):
             raw_output = str(raw_output)
 
-        summary = format_summary_output(raw_output)
+        summary = _strip_code_fences(raw_output)
         record = self._record_llm_call_token(
             input_len=self._msg_char_count(messages),
             output_len=len(raw_output),

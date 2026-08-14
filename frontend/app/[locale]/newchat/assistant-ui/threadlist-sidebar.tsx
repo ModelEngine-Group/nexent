@@ -1,5 +1,6 @@
 import type * as React from "react";
-import { PanelLeftIcon, PlusIcon, MessageSquareIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { PanelLeftIcon, PlusIcon, Repeat2Icon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,18 +19,25 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  onPrepareNewConversation?: () => void;
+  onNewConversation?: () => void | Promise<void>;
 }
 
 export function ThreadListSidebar({
   generatedTitles,
+  onPrepareNewConversation,
+  onNewConversation,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
+  const { t } = useTranslation();
+  const router = useRouter();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
 
@@ -45,7 +53,7 @@ export function ThreadListSidebar({
           <SidebarHeader>
             <div className="flex flex-col items-center gap-2 p-1.5">
               <TooltipIconButton
-                tooltip="展开"
+                tooltip={t("chat.sidebar.expand")}
                 side="right"
                 variant="ghost"
                 size="icon"
@@ -55,18 +63,30 @@ export function ThreadListSidebar({
                 <PanelLeftIcon className="size-4" />
               </TooltipIconButton>
               <TooltipIconButton
-                tooltip="新对话"
+                tooltip={t("chat.sidebar.newConversation")}
                 side="right"
                 variant="ghost"
                 size="icon"
                 className="size-8"
+                onClick={onNewConversation}
               >
                 <PlusIcon className="size-4" />
               </TooltipIconButton>
             </div>
           </SidebarHeader>
           <SidebarContent />
-          <SidebarFooter />
+          <SidebarFooter>
+            <TooltipIconButton
+              tooltip={t("chat.sidebar.switchToLegacy")}
+              side="right"
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={() => router.push("/chat")}
+            >
+              <Repeat2Icon className="size-4" />
+            </TooltipIconButton>
+          </SidebarFooter>
         </Sidebar>
       </div>
     );
@@ -87,9 +107,12 @@ export function ThreadListSidebar({
         >
           <SidebarHeader>
             <div className="flex items-center gap-2 px-1">
-              <ThreadListPrimitive.New className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate">
+              <ThreadListPrimitive.New
+                className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate"
+                onClick={onPrepareNewConversation}
+              >
                 <PlusIcon className="size-4 shrink-0" />
-                新对话
+                {t("chat.sidebar.newConversation")}
               </ThreadListPrimitive.New>
               <SidebarTrigger className="size-8 shrink-0" />
             </div>
@@ -97,7 +120,16 @@ export function ThreadListSidebar({
           <SidebarContent>
             <ThreadList generatedTitles={generatedTitles} />
           </SidebarContent>
-          <SidebarFooter />
+          <SidebarFooter>
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted"
+              onClick={() => router.push("/chat")}
+            >
+              <Repeat2Icon className="size-4 shrink-0" />
+              <span>{t("chat.sidebar.switchToLegacy")}</span>
+            </button>
+          </SidebarFooter>
         </Sidebar>
       </div>
     </ThreadListPrimitive.Root>

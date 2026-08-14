@@ -1184,7 +1184,7 @@ configure_root_dir_from_env() {
     echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
   else
     local default_root_dir="$HOME/nexent-data"
-    if [ -t 0 ]; then
+    if deployment_should_prompt_root_dir && [ -t 0 ]; then
       local user_root_dir
       read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
       ROOT_DIR="${user_root_dir:-$default_root_dir}"
@@ -1533,6 +1533,14 @@ create_default_super_admin_user() {
   # Make sure the script is executable
   chmod +x "$script_path"
 
+  # Export the database configuration before either the create or repair path.
+  export SUPABASE_KEY
+  export POSTGRES_USER
+  export POSTGRES_DB
+  export DEPLOYMENT_VERSION
+  export SUPABASE_POSTGRES_DB
+  export DEPLOYMENT_MODE
+
   # Check if super admin user already exists
   echo ""
   echo "🔍 Checking if super admin user exists..."
@@ -1542,34 +1550,31 @@ create_default_super_admin_user() {
 
   if [ $check_result -eq 0 ]; then
     echo "   ✅ Super admin user (${email}) already exists."
-    echo "   💡 Skipping user creation. If you need to reset the password, please do so manually."
-    return 0
+    echo "   🔧 Ensuring the tenant relationship exists."
+    if bash "$script_path"; then
+      return 0
+    fi
+    return 1
   elif [ $check_result -eq 1 ]; then
     echo "   ℹ️  Super admin user (${email}) does not exist. Proceeding with creation..."
   else
     echo "   ⚠️  Warning: Could not determine if user exists. Proceeding with creation..."
   fi
 
-  # Prompt for password
   local password
-  password="$(prompt_super_admin_password)"
-  local prompt_result=$?
-
-  if [ $prompt_result -ne 0 ] || [ -z "$password" ]; then
-    echo "   ❌ Failed to get password from user."
-    return 1
+  local display_password="true"
+  if deployment_should_prompt_super_admin_password; then
+    password="$(prompt_super_admin_password)" || {
+      echo "   ❌ Failed to get password from user."
+      return 1
+    }
+    display_password="false"
+  else
+    password="$(deployment_super_admin_password)"
   fi
 
-  # Export necessary environment variables for the script
-  export SUPABASE_KEY
-  export POSTGRES_USER
-  export POSTGRES_DB
-  export DEPLOYMENT_VERSION
-  export SUPABASE_POSTGRES_DB
-  export DEPLOYMENT_MODE
-
   # Execute the script with password as argument
-  if bash "$script_path" "$password"; then
+  if bash "$script_path" "$password" "$display_password"; then
     unset password
     return 0
   else

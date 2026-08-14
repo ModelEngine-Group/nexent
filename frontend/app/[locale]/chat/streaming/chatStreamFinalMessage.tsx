@@ -42,6 +42,7 @@ import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
+import { AuthenticatedImage } from "../../newchat/ui/authenticated-image";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -56,6 +57,7 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  shareSelected?: boolean;
 }
 
 // TTS playback status
@@ -75,6 +77,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  shareSelected = false,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
 
@@ -317,7 +320,7 @@ function ChatStreamFinalMessageInner({
         {/* Assistant message part - show final answer or content */}
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
-            <div className="bg-white rounded-lg w-full mt-2">
+            <div className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}>
               {/* Max steps warning - show when message is complete and has maxStepsInfo */}
               {message.isComplete &&
                 message.steps &&
@@ -354,7 +357,24 @@ function ChatStreamFinalMessageInner({
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
+                trustedImageUrls={message.images}
               />
+
+              {message.images && message.images.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {message.images.map((imageUrl, imageIndex) => (
+                    <AuthenticatedImage
+                      key={imageUrl}
+                      src={imageUrl}
+                      alt={t("chatRightPanel.imageAlt", {
+                        index: imageIndex + 1,
+                      })}
+                      loading="lazy"
+                      className="max-h-80 max-w-full rounded-md border object-contain"
+                    />
+                  ))}
+                </div>
+              )}
 
               {message.automationProposal && (
                 <div className="mt-3">
@@ -530,7 +550,8 @@ function areEqualFinalMessage(
     prev.hideButtons === next.hideButtons &&
     prev.readOnly === next.readOnly &&
     prev.index === next.index &&
-    prev.currentConversationId === next.currentConversationId
+    prev.currentConversationId === next.currentConversationId &&
+    prev.shareSelected === next.shareSelected
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally
     // excluded: they do not affect rendered output and will be stabilized with useCallback (Phase 1.2).
   );

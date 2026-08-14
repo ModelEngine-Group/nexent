@@ -5,11 +5,33 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
-from consts.exceptions import ForbiddenError, SkillDuplicateError, AppException
+from consts.model import (
+    AgentRequest,
+    AgentInfoRequest,
+    AgentIDRequest,
+    ConversationResponse,
+    AgentImportRequest,
+    AgentNameBatchCheckRequest,
+    AgentNameBatchRegenerateRequest,
+    VersionPublishRequest,
+    VersionListResponse,
+    VersionDetailResponse,
+    VersionRollbackRequest,
+    VersionStatusRequest,
+    CurrentVersionResponse,
+    VersionCompareRequest,
+    VersionUpdateRequest,
+    NL2AgentRunRequest,
+)
+from consts.exceptions import (
+    ForbiddenError,
+    SkillDuplicateError,
+    AppException,
+    UnauthorizedError,
+)
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -31,6 +53,7 @@ from services.agent_service import (
     import_agent_with_skills_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
+from services.nl2agent_service import create_nl2agent_stream
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -80,6 +103,38 @@ async def agent_run_api(
         error_detail = str(e) if agent_request.is_debug else "Agent run error."
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
+
+
+@agent_runtime_router.post("/nl2agent/run")
+async def nl2agent_run_api(
+    nl2agent_request: NL2AgentRunRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Run one non-persistent NL2Agent turn."""
+
+    try:
+        _, tenant_id, language = get_current_user_info(
+            authorization, http_request
+        )
+        stream = await create_nl2agent_stream(
+            request=nl2agent_request,
+            tenant_id=tenant_id,
+            language=language,
+            authorization=authorization,
+        )
+        return StreamingResponse(stream, media_type="text/event-stream")
+    except UnauthorizedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("NL2Agent run error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="NL2Agent run error.",
+        ) from exc
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")
@@ -355,18 +410,22 @@ async def list_all_agent_info_api(
     list all agent info
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(
+        user_id, auth_tenant_id, _ = get_current_user_info(
             authorization, request)
 
-        agent_list = await list_all_agent_info_impl(
+        if tenant_id is None:
+            agent_list = await list_all_agent_info_impl(
+                tenant_id=auth_tenant_id, user_id=user_id
+            )
+            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                asset_agent_list = await list_all_agent_info_impl(
+                    tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+                )
+                return agent_list + asset_agent_list
+            return agent_list
+        return await list_all_agent_info_impl(
             tenant_id=tenant_id, user_id=user_id
         )
-        if tenant_id != ASSET_OWNER_TENANT_ID:
-            asset_agent_list = await list_all_agent_info_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
-            )
-            return agent_list + asset_agent_list
-        return agent_list
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
@@ -681,4 +740,3 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-

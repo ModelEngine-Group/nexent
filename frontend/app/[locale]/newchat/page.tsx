@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FC, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   useAuiState,
@@ -9,10 +9,15 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { Chat } from "./assistant-ui/chat";
+import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
 import {
+  cacheHistoricalChatMode,
   conversationThreadListAdapter,
   generateConversationTitle,
+  restoreHistoricalChatMode,
+  restoreHistoricalPlan,
+  setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
@@ -25,21 +30,55 @@ import { Layout } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useConfig } from "@/hooks/useConfig";
+import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
+import type { STTModelConfig } from "@/types/modelConfig";
 
-function useLocalChatRuntime(): AssistantRuntime {
+function useLocalChatRuntime(
+  dictationAdapter: ServerDictationAdapter,
+): AssistantRuntime {
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
       attachments: compositeAttachmentAdapter,
+      dictation: dictationAdapter,
     },
   });
 }
 
+const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
+  if (!config?.modelName) return false;
+  if (config.modelFactory === "volcengine") {
+    return Boolean(config.modelAppid && config.accessToken);
+  }
+  return Boolean(config.apiConfig?.apiKey);
+};
+
 export default function Home() {
+  return <PersistentChatHome />;
+}
+
+const PersistentChatHome: FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [requestedThreadId, setRequestedThreadId] = useState<
+    string | undefined
+  >(undefined);
+  const { modelConfig } = useConfig();
+  const dictationAdapter = useMemo(
+    () => new ServerDictationAdapter(() => modelConfig?.stt),
+    [modelConfig?.stt],
+  );
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const threadId =
+      searchParams.get("thread_id") ?? searchParams.get("conversation_id");
+    setRequestedThreadId(threadId || undefined);
+  }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
-    runtimeHook: () => useLocalChatRuntime(),
+    runtimeHook: () => useLocalChatRuntime(dictationAdapter),
     adapter: conversationThreadListAdapter,
+    threadId: requestedThreadId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -68,11 +107,12 @@ export default function Home() {
           agents={agents}
           onAgentSelected={handleAgentSelected}
           onBack={handleBack}
+          isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
         />
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-}
+};
 
 /**
  * Inner component that has access to the AuiState via useAuiState hook.
@@ -86,6 +126,7 @@ const HomeContent: FC<{
   agents: Agent[];
   onAgentSelected: (agent: Agent) => void;
   onBack: () => void;
+  isDictationConfigured: boolean;
 }> = ({
   runtime,
   selectedAgent,
@@ -94,8 +135,9 @@ const HomeContent: FC<{
   agents,
   onAgentSelected,
   onBack,
+  isDictationConfigured,
 }) => {
-
+  const [chatMode, setChatMode] = useState<ChatMode>("execution");
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -137,11 +179,13 @@ const HomeContent: FC<{
       const numericId = String(Number(serverId));
       if (previous !== numericId) {
         map.set(threadId, numericId);
+        cacheHistoricalChatMode(numericId, chatMode);
         // Trigger a re-render so the `setRunConfig` effect below picks up the
         // new id. We don't store the map in state because we never need to
         // diff/render it directly — only react when an entry changes.
         forceServerIdTick((tick) => tick + 1);
       }
+
 
       if (initialQuestion && previous !== numericId) {
         void generateConversationTitle(numericId, initialQuestion)
@@ -157,7 +201,7 @@ const HomeContent: FC<{
           });
       }
     },
-    [],
+    [chatMode],
   );
 
   const activeThread = (threadItems as ReadonlyArray<{
@@ -179,6 +223,10 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+
+  const handleChatModeChange = useCallback((mode: ChatMode) => {
+    setChatMode(mode);
+  }, []);
 
   const shouldRestoreAgentRef = useRef(true);
   const previousActiveThreadIdRef = useRef(activeThreadId);
@@ -216,6 +264,7 @@ const HomeContent: FC<{
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
+        enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
               onServerConversationId: (
@@ -236,8 +285,27 @@ const HomeContent: FC<{
     selectedAgent,
     activeConversationId,
     activeThreadId,
+    chatMode,
     handleServerConversationId,
   ]);
+
+  // Restore historical plan and chat mode from the same conversation detail
+  // response that the history adapter uses to load messages.
+  useEffect(() => {
+    setHistoricalChatModeListener((mode) => {
+      setChatMode(mode);
+    });
+    return () => setHistoricalChatModeListener(undefined);
+  }, [activeThreadId]);
+
+  useEffect(() => {
+    const conversationId = activeConversationId
+      ? String(activeConversationId)
+      : undefined;
+    restoreHistoricalPlan(conversationId);
+
+    restoreHistoricalChatMode(conversationId);
+  }, [activeConversationId, activeThreadId]);
 
   // Publish the server conversation id registry to the thread-list adapter so
   // `generateTitle` can wait for the real backend id before issuing its
@@ -258,12 +326,24 @@ const HomeContent: FC<{
     onBack();
   }, [onBack]);
 
+  const handlePrepareNewConversation = useCallback(() => {
+    // Do not restore the agent from the thread that is being left.
+    shouldRestoreAgentRef.current = false;
+    onBack();
+  }, [onBack]);
+
+  const handleNewConversation = useCallback(async () => {
+    handlePrepareNewConversation();
+    await runtime.threads.switchToNewThread();
+  }, [handlePrepareNewConversation, runtime]);
+
   const handleAgentSelectedFromLanding = useCallback(
-    (agent: Agent) => {
+    async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
+      await runtime.threads.switchToNewThread();
       onAgentSelected(agent);
     },
-    [onAgentSelected],
+    [runtime, onAgentSelected],
   );
 
   // Conditional rendering must happen after all hooks
@@ -279,17 +359,29 @@ const HomeContent: FC<{
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
-          <ThreadListSidebar generatedTitles={generatedTitles} />
+          <ThreadListSidebar
+            generatedTitles={generatedTitles}
+            onPrepareNewConversation={handlePrepareNewConversation}
+            onNewConversation={handleNewConversation}
+          />
         </SidebarProvider>
       </div>
 
       <div className="flex-1 min-w-0">
         <Chat
           generatedTitle={activeThreadId ? generatedTitles.get(activeThreadId) : undefined}
+          conversationId={
+            activeConversationId && Number(activeConversationId) > 0
+              ? Number(activeConversationId)
+              : undefined
+          }
           isLoadingAgents={isLoadingAgents}
           selectedAgent={selectedAgent}
           onAgentSelected={handleAgentSelectedFromLanding}
           onBack={handleThreadBack}
+          chatMode={chatMode}
+          onChatModeChange={handleChatModeChange}
+          isDictationConfigured={isDictationConfigured}
         />
       </div>
     </div>

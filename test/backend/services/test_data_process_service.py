@@ -47,6 +47,30 @@ mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
 sys.modules['consts.const'] = mock_const
 
+# Stub torch (data_process_service.py imports it unconditionally).
+_torch_mod = types.ModuleType('torch')
+_torch_mod.Tensor = type('Tensor', (), {})
+_torch_mod.float16 = 'float16'
+_torch_mod.no_grad = lambda: (_ for _ in ()).throw(StopIteration)  # callable that acts as context manager decorator
+sys.modules.setdefault('torch', _torch_mod)
+
+# Stub consts.model — data_process_service.py imports BatchTaskRequest from it.
+_model_mod = types.ModuleType('consts.model')
+
+
+class _BatchTaskRequest:
+    """Lightweight stand-in for consts.model.BatchTaskRequest.
+
+    Implements just enough to support `request.sources` iteration that
+    production code uses inside `create_batch_tasks_impl`.
+    """
+
+    def __init__(self, sources=None):
+        self.sources = sources or []
+
+_model_mod.BatchTaskRequest = _BatchTaskRequest
+sys.modules.setdefault('consts.model', _model_mod)
+
 # Stub consts.exceptions with a *real* exception class so assertRaises works correctly
 _exceptions_mod = types.ModuleType('consts.exceptions')
 
@@ -64,6 +88,39 @@ if 'utils.file_management_utils' not in sys.modules:
     _utils_mod = _types.ModuleType('utils.file_management_utils')
     _utils_mod.convert_office_to_pdf = AsyncMock()
     sys.modules['utils.file_management_utils'] = _utils_mod
+
+# Mock data_process.utils as a top-level module so patch('data_process.utils.get_task_info')
+# resolves to a real module (otherwise it falls through to `from data_process.utils import ...`
+# which would try to import the heavy .tasks chain).
+_data_process_pkg = types.ModuleType('data_process')
+_data_process_pkg.__path__ = []
+sys.modules.setdefault('data_process', _data_process_pkg)
+_data_process_utils = types.ModuleType('data_process.utils')
+_data_process_utils.get_task_info = AsyncMock()
+_data_process_utils.get_task_details = AsyncMock()
+_data_process_utils.get_all_task_ids_from_redis = MagicMock()
+sys.modules.setdefault('data_process.utils', _data_process_utils)
+
+# Ensure `backend.services` is in sys.modules as a package so the dotted-path
+# patch below resolves. Python's normal import system will resolve the submodule
+# from `backend/services/` once the package is registered.
+import os as _os
+_backend_services_dir = _os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)),
+    '..', '..', '..', 'backend', 'services'
+)
+_backend_services_dir = _os.path.normpath(_backend_services_dir)
+if 'backend.services' not in sys.modules:
+    _bs_mod = types.ModuleType('backend.services')
+    _bs_mod.__path__ = [_backend_services_dir]
+    sys.modules['backend.services'] = _bs_mod
+
+# Import the service module first. By this point the mocks for `data_process.*`,
+# `nexent.data_process.core`, `transformers`, `torch`, etc. are already in
+# sys.modules so the heavy import chain succeeds. This also installs the module
+# under sys.modules, so the subsequent patch(...) call resolves correctly.
+import backend.services.data_process_service as _dps  # noqa: E402,F401
+del _dps
 
 # from backend.services.data_process_service import DataProcessService, get_data_process_service
 with patch('data_process.utils.get_task_info') as mock_get_task_info, \
@@ -576,11 +633,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_task())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.celery_app')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
         Async implementation of get_all_tasks testing.
 
@@ -592,7 +649,7 @@ class TestDataProcessService(unittest.TestCase):
         4. Tasks can be filtered based on their properties
         5. The combined task list is returned with all task details
         """
-        # Setup mocks
+        # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
             'worker1': [{'id': 'task1'}, {'id': 'task2'}]
@@ -600,7 +657,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
         }
-        mock_get_inspector.return_value = mock_inspector
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
 
         mock_get_redis_task_ids.return_value = ['task2', 'task4', 'task5']
 
@@ -620,15 +679,14 @@ class TestDataProcessService(unittest.TestCase):
         # Get all tasks with filtering (excludes task5 which has no index_name and task_name)
         result = await self.service.get_all_tasks(filter=True)
 
-        # Verify result (task5 has no index_name and task_name, so it's filtered out)
-        # Only task1 and task2 have valid index_name + task_name
-        self.assertEqual(len(result), 2)
+        # task1-task4 have index_name + task_name; task5 is filtered out
+        self.assertEqual(len(result), 4)
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
 
-        # Verify result should include all 3 unique tasks
-        self.assertEqual(len(result), 3)
+        # All unique task IDs from Celery + Redis
+        self.assertEqual(len(result), 5)
 
     def test_get_all_tasks(self):
         """
@@ -640,11 +698,11 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_all_tasks())
 
-    @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
+    @patch('backend.services.data_process_service.celery_app')
     @patch('backend.services.data_process_service.get_task_info')
     @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
-    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
+    async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
         Test get_all_tasks when Redis query fails.
 
@@ -659,7 +717,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
         }
-        mock_get_inspector.return_value = mock_inspector
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
 
         # Mock Redis to raise an exception
         mock_get_redis_task_ids.side_effect = Exception(
@@ -2437,28 +2497,244 @@ class TestDataProcessService(unittest.TestCase):
                 )
             )
 
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=['task-1'])
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
     @patch('backend.services.data_process_service.get_task_info')
-    def test_get_all_tasks_handles_string_kwargs_and_bad_json(self, mock_get_task_info, _mock_ids):
+    def test_get_all_tasks_handles_string_kwargs_and_bad_json(
+        self, mock_get_task_info, _mock_ids, mock_celery_app
+    ):
         """Cover runtime kwargs normalization fallback branches."""
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {
+            "w1": [{
+                "id": "task-1",
+                "name": "data_process.tasks.process",
+                "kwargs": "{bad-json"
+            }]
+        }
+        mock_inspector.reserved.return_value = {
+            "w1": [{
+                "id": "task-2",
+                "name": "data_process.tasks.forward",
+                "kwargs": ["not-a-dict"],
+            }]
+        }
+        mock_celery_app.control.inspect.return_value = mock_inspector
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+
         async def _run():
-            mock_inspector = MagicMock()
-            mock_inspector.active.return_value = {
-                "w1": [{
-                    "id": "task-1",
-                    "name": "data_process.tasks.process",
-                    "kwargs": "{bad-json"
-                }]
-            }
-            mock_inspector.reserved.return_value = {}
-            self.service._inspector = mock_inspector
-            self.service._inspector_last_time = time.time()
-            # get_task_info returns empty task_name, but runtime meta should backfill it
-            mock_get_task_info.return_value = {"id": "task-1", "task_name": "", "index_name": ""}
+            async def _task_info(task_id):
+                return {
+                    "id": task_id,
+                    "task_name": "",
+                    "index_name": "",
+                    "path_or_url": "",
+                    "original_filename": "",
+                }
+
+            mock_get_task_info.side_effect = _task_info
             rows = await self.service.get_all_tasks(filter=False)
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), 2)
+            by_id = {row["id"]: row for row in rows}
+            self.assertEqual(by_id["task-1"]["task_name"], "process")
+            self.assertEqual(by_id["task-2"]["task_name"], "forward")
 
         asyncio.run(_run())
+
+
+    # ---- Additional coverage tests ----
+
+    def test_init_redis_client_no_url(self):
+        """If REDIS_BACKEND_URL is empty, the warning branch fires."""
+        with patch('backend.services.data_process_service.REDIS_BACKEND_URL', ''):
+            service = DataProcessService()
+        self.assertIsNone(service.redis_pool)
+        self.assertIsNone(service.redis_client)
+
+    def test_init_redis_client_raises(self):
+        """If redis.Redis raises, the except branch logs and leaves pool/client None."""
+        from backend.services import data_process_service as _dps
+        original = _dps.redis
+        fake_redis = MagicMock()
+        fake_redis.ConnectionPool.from_url.side_effect = RuntimeError('boom')
+        _dps.redis = fake_redis
+        try:
+            service = DataProcessService()
+            self.assertIsNone(service.redis_pool)
+            self.assertIsNone(service.redis_client)
+        finally:
+            _dps.redis = original
+
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_task_info')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
+    def test_get_all_tasks_inspector_raises(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
+        """If inspector raises, get_all_tasks returns empty tasks (with logged warning)."""
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+        mock_celery_app.control.inspect.return_value = MagicMock(
+            active=MagicMock(side_effect=RuntimeError('inspect failed'))
+        )
+
+        async def _run():
+            rows = await self.service.get_all_tasks(filter=False)
+            self.assertEqual(rows, [])
+
+        asyncio.run(_run())
+
+    @patch('backend.services.data_process_service.celery_app')
+    @patch('backend.services.data_process_service.get_task_info')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
+    def test_get_all_tasks_outer_exception(self, _mock_ids, mock_get_task_info, mock_celery_app):
+        """If get_all_tasks raises during processing, empty list is returned."""
+        mock_celery_app.conf.broker_url = "redis://mock:6379/0"
+        mock_celery_app.conf.result_backend = "redis://mock:6379/0"
+
+        # Make asyncio.gather raise by making get_task_info raise uncaught
+        async def _raise(task_id):
+            raise ValueError('simulated downstream failure')
+
+        mock_get_task_info.side_effect = _raise
+
+        mock_inspector = MagicMock()
+        mock_inspector.active.return_value = {'w1': [{'id': 't1', 'name': 'process', 'kwargs': {}}]}
+        mock_inspector.reserved.return_value = {}
+        mock_celery_app.control.inspect.return_value = mock_inspector
+
+        async def _run():
+            # asyncio.gather with return_exceptions=True swallows per-task errors,
+            # so we need to trigger the outer except instead.
+            with patch('asyncio.gather', side_effect=RuntimeError('gather failed')):
+                rows = await self.service.get_all_tasks(filter=False)
+                self.assertEqual(rows, [])
+
+        asyncio.run(_run())
+
+    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    def test_load_image_s3_returns_none(self, _mock_get_stream):
+        """If s3:// path resolves to None from MinIO, _load_image raises FileNotFoundError → caught → None."""
+        result = asyncio.run(self.service.load_image('s3://bucket/missing.jpg'))
+        self.assertIsNone(result)
+
+    def test_filter_important_image_clip_success(self):
+        """When CLIP is available, returns probabilities based on model output."""
+        service = DataProcessService()
+        service.clip_available = True
+
+        img = Image.new('RGB', (256, 256), color='green')
+
+        class _Row:
+            def __init__(self, values):
+                self._values = values
+
+            def tolist(self):
+                return list(self._values)
+
+        class _Probs:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def __getitem__(self, idx):
+                return self._rows[idx]
+
+        # production code: probs[0].tolist() → [neg_prob, pos_prob]
+        fake_probs = _Probs([_Row([0.1, 0.9])])
+        fake_logits = MagicMock()
+        fake_logits.softmax.return_value = fake_probs
+        fake_model = MagicMock(return_value=MagicMock(logits_per_image=fake_logits))
+
+        service.processor = MagicMock(return_value={'input_ids': 'ids'})
+        service.model = fake_model
+
+        from backend.services import data_process_service as _dps
+        torch_mod = MagicMock()
+        torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
+        torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
+
+        async def _fake_load_image(url):
+            return img
+
+        with patch.object(_dps, 'IMAGE_FILTER', True), \
+             patch.object(_dps, 'torch', torch_mod), \
+             patch.object(service, 'check_image_size', return_value=True), \
+             patch.object(service, 'load_image', side_effect=_fake_load_image):
+            result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
+
+        self.assertTrue(result['is_important'])
+        self.assertEqual(result['probabilities']['positive'], 0.9)
+
+    def test_filter_important_image_clip_exception_falls_back_to_size(self):
+        """When CLIP raises during inference, fall back to size-based check."""
+        service = DataProcessService()
+        service.clip_available = True
+
+        img = Image.new('RGB', (256, 256), color='green')
+
+        fake_processor = MagicMock(side_effect=RuntimeError('CLIP boom'))
+        service.processor = fake_processor
+        service.model = MagicMock()
+
+        from backend.services import data_process_service as _dps
+        torch_mod = MagicMock()
+        torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
+        torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
+
+        async def _fake_load_image(url):
+            return img
+
+        with patch.object(_dps, 'IMAGE_FILTER', True), \
+             patch.object(_dps, 'torch', torch_mod), \
+             patch.object(service, 'check_image_size', return_value=False), \
+             patch.object(service, 'load_image', side_effect=_fake_load_image):
+            result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
+
+        self.assertFalse(result['is_important'])
+
+    def test_filter_important_image_rgba_conversion(self):
+        """RGBA images are converted to RGB before CLIP inference."""
+        service = DataProcessService()
+        service.clip_available = True
+
+        img = Image.new('RGBA', (256, 256), color=(255, 0, 0, 128))
+
+        class _Row:
+            def __init__(self, values):
+                self._values = values
+
+            def tolist(self):
+                return list(self._values)
+
+        class _Probs:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def __getitem__(self, idx):
+                return self._rows[idx]
+
+        fake_probs = _Probs([_Row([0.7, 0.3])])
+        fake_logits = MagicMock()
+        fake_logits.softmax.return_value = fake_probs
+        fake_model = MagicMock(return_value=MagicMock(logits_per_image=fake_logits))
+
+        service.processor = MagicMock(return_value={'input_ids': 'ids'})
+        service.model = fake_model
+
+        from backend.services import data_process_service as _dps
+        torch_mod = MagicMock()
+        torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
+        torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
+
+        async def _fake_load_image(url):
+            return img
+
+        with patch.object(_dps, 'IMAGE_FILTER', True), \
+             patch.object(_dps, 'torch', torch_mod), \
+             patch.object(service, 'check_image_size', return_value=True), \
+             patch.object(service, 'load_image', side_effect=_fake_load_image):
+            result = asyncio.run(service.filter_important_image('http://x', 'good', 'bad'))
+
+        self.assertFalse(result['is_important'])
 
 
 if __name__ == '__main__':

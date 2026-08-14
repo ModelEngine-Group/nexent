@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
-from consts.const import DATA_PROCESS_SERVICE
+from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
 from consts.const import MODEL_CONFIG_MAPPING
 from database.model_management_db import get_model_by_model_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -17,6 +17,147 @@ from nexent import MessageObserver
 from nexent.core.models import OpenAIVLModel
 
 logger = logging.getLogger("image_service")
+
+
+# ---------------------------------------------------------------------------
+# AIDP image proxying
+# ---------------------------------------------------------------------------
+# AIDP serves images behind GET endpoints that require ``Authorization:
+# Bearer <AIDP_API_KEY>``. The chunk-level URLs built by AidpSearchTool
+# look like ``{AIDP_SERVER_URL}/KnowledgeBase/Tenants/{tenant}/KnowledgeBases/...``.
+# When the image proxy sees such a URL, we short-circuit the generic
+# data-processing proxy (which would not know how to authenticate) and
+# fetch the image ourselves with the configured API key.
+#
+# The host and path checks prevent the proxy from forwarding the credential to
+# an unrelated URL.
+_AIDP_ALLOWED_PATH_PREFIX = "/KnowledgeBase/Tenants/"
+
+
+def _validate_and_reconstruct_aidp_url(decoded_url: str) -> Optional[str]:
+    """Validate and reconstruct an AIDP image URL, returning a fresh string.
+
+    The target authority is always taken from ``AIDP_SERVER_URL``. Only a
+    validated AIDP image path is retained from the supplied URL, so a client
+    can never cause the proxy to send the Bearer token to another host.
+
+    Returns ``None`` if any check fails. The returned string is a
+    freshly reconstructed URL via ``urlunparse``, which static
+    analyzers (CodeQL) recognise as an SSRF sanitizer — breaking the
+    dataflow link from the input parameter to the subsequent
+    ``aiohttp.ClientSession.get`` sink.
+    """
+    aidp_base = AIDP_SERVER_URL.rstrip("/")
+    if not aidp_base:
+        return None
+
+    try:
+        parsed = urlparse(decoded_url)
+        base_parsed = urlparse(aidp_base)
+    except Exception:
+        return None
+
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    if base_parsed.scheme not in ("http", "https") or not base_parsed.netloc:
+        return None
+
+    # Only permit the AIDP knowledge-base image API path. Reject traversal
+    # and non-image endpoints.
+    path = parsed.path
+    if not path.startswith(_AIDP_ALLOWED_PATH_PREFIX):
+        return None
+    if "/../" in path or path.endswith("/.."):
+        return None
+
+    # Reject query/fragment to block redirect-based SSRF.
+    if parsed.query or parsed.fragment:
+        return None
+
+    # Re-serialize the URL from its validated components. The round-trip
+    # through ``urlunparse`` produces a new string that is not
+    # alias-equivalent to the input in CodeQL's dataflow graph.
+    return urlunparse((
+        base_parsed.scheme,
+        base_parsed.netloc,
+        path,
+        "",   # params — dropped; validated above implicitly by being empty
+        "",   # query — rejected above
+        "",   # fragment — rejected above
+    ))
+
+
+def _is_aidp_url(decoded_url: str) -> bool:
+    """Return True when ``decoded_url`` has an allowed AIDP image path.
+
+    The final request URL is rebuilt with the configured AIDP authority, so
+    a host alias in the input never receives the AIDP Bearer token.
+    """
+    return _validate_and_reconstruct_aidp_url(decoded_url) is not None
+
+
+def _get_aidp_api_key() -> str:
+    return AIDP_API_KEY
+
+
+async def _fetch_aidp_image(url: str):
+    """Fetch an AIDP image using the env-supplied Bearer token.
+
+    Mirrors :func:`_fetch_image_directly` in shape but (a) adds the
+    ``Authorization`` header and (b) disables redirects to prevent the
+    Bearer token from leaking if AIDP responds with a 30x to another
+    host. ``trust_env`` is off so proxy environment variables do not
+    re-route the internal request.
+
+    Security: this function performs its own defensive URL validation via
+    :func:`_validate_and_reconstruct_aidp_url`, which enforces the allowed
+    path + query/fragment rules, replaces the input authority with the
+    configured AIDP authority, and **re-serializes** the URL from its parsed
+    components. That re-serialization is what CodeQL recognises
+    as an SSRF sanitizer — a plain bool check (``not _is_aidp_url(url)``)
+    is not enough because the dataflow graph still considers ``url``
+    user-controlled up to the ``session.get`` sink.
+    """
+    # Defensive SSRF guard: reconstruct at the point of use. The caller
+    # (proxy_image_impl) already gates on _is_aidp_url, but duplicating
+    # the reconstruction here means even a future caller cannot
+    # accidentally send the Bearer token to an arbitrary host. The fresh
+    # ``safe_url`` value breaks the dataflow link from the input
+    # parameter to the session.get sink.
+    safe_url = _validate_and_reconstruct_aidp_url(url)
+    if safe_url is None:
+        logger.error("Rejecting non-AIDP URL in AIDP image fetch: %r", url)
+        return {"success": False, "error": "URL does not match configured AIDP host or KB path"}
+
+    api_key = _get_aidp_api_key()
+    if not api_key:
+        logger.error("AIDP_API_KEY is not configured; cannot fetch AIDP image")
+        return {"success": False, "error": "AIDP API key not configured"}
+
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+        async with session.get(
+            safe_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            allow_redirects=False,
+            ssl=False,  # Disable SSL verification because AIDP servers use self-signed certificates
+        ) as response:
+            if response.status != HTTPStatus.OK:
+                error_text = await response.text()
+                logger.error(
+                    "Failed to fetch AIDP image (status=%s): %s",
+                    response.status,
+                    error_text[:200],
+                )
+                return {"success": False, "error": "Failed to fetch AIDP image"}
+
+            content = await response.read()
+            content_type = response.headers.get("Content-Type", "image/jpeg")
+            return {
+                "success": True,
+                "base64": base64.b64encode(content).decode("utf-8"),
+                "content_type": content_type,
+            }
 
 
 def _validate_loopback_url(decoded_url: str) -> str | None:
@@ -123,11 +264,19 @@ async def _fetch_image_directly(safe_url: str):
 
 
 async def proxy_image_impl(decoded_url: str):
-    # Fast path: only for loopback URLs, fetch directly. This avoids an
-    # extra hop through the data-processing service for local images. For
-    # any other URL (including all external/knowledge-base images such as
-    # AIDP), fall back to the data-processing service proxy, which is the
-    # existing safe path that CodeQL does not flag.
+    # Fast path #1: AIDP image URLs need a Bearer token. Short-circuit here
+    # before the loopback check because the AIDP host may happen to resolve
+    # to a loopback address in dev, and we'd skip the auth header if that
+    # branch matched first.
+    if _is_aidp_url(decoded_url):
+        return await _fetch_aidp_image(decoded_url)
+
+    # Fast path #2: loopback URLs (in-process / local dev), fetch directly.
+    # This avoids an extra hop through the data-processing service for
+    # local images. For any other URL (including all external / knowledge-
+    # base images such as AIDP from a different deployment), fall back to
+    # the data-process service proxy, which is the existing safe path
+    # that CodeQL does not flag.
     safe_url = _validate_loopback_url(decoded_url)
     if safe_url is not None:
         return await _fetch_image_directly(safe_url)
